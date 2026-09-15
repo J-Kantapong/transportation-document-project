@@ -1,0 +1,153 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+enum DocumentType {
+  NEW_REGISTRATION // จดทะเบียนรถใหม่
+  PLATE_SWAP // สลับเลขทะเบียน
+  TRANSFER // โอนรถ
+  ADDRESS_CHANGE // แจ้งย้าย
+  OTHER // งานทะเบียนอื่นๆ
+}
+
+enum CaseStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(STAFF)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedCases Case[] @relation("AssignedStaff")
+}
+
+model Customer {
+  id           String   @id @default(cuid())
+  idCardNumber String   @unique // เลขบัตรประชาชน
+  fullName     String
+  address      String
+  phone        String?
+  email        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedVehicles  Vehicle[]
+  requestedCases Case[]
+}
+
+model Vehicle {
+  id             String   @id @default(cuid())
+  plateNumber    String   @unique // เลขทะเบียน
+  province       String // จังหวัดที่จดทะเบียน
+  chassisNumber  String   @unique // เลขตัวถัง
+  engineNumber   String // เลขเครื่องยนต์
+  brand          String
+  model          String
+  color          String
+  vehicleType    String // ประเภทรถ
+  registeredAt   DateTime // วันจดทะเบียนครั้งแรก
+  currentOwnerId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  currentOwner Customer @relation(fields: [currentOwnerId], references: [id])
+  cases        Case[]
+
+  @@index([currentOwnerId])
+}
+
+model Case {
+  id           String       @id @default(cuid())
+  caseNumber   String       @unique // เลขที่เรื่อง
+  documentType DocumentType
+  status       CaseStatus   @default(PENDING)
+  notes        String?
+  submittedAt  DateTime     @default(now())
+  completedAt  DateTime?
+
+  vehicleId          String
+  requesterId        String
+  assignedStaffId    String?
+
+  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id])
+  requester     Customer @relation(fields: [requesterId], references: [id])
+  assignedStaff User?    @relation("AssignedStaff", fields: [assignedStaffId], references: [id])
+
+  transferDetail      TransferDetail?
+  plateSwapDetail     PlateSwapDetail?
+  addressChangeDetail AddressChangeDetail?
+  documents           CaseDocument[]
+
+  @@index([vehicleId])
+  @@index([requesterId])
+  @@index([assignedStaffId])
+  @@index([status])
+}
+
+model TransferDetail {
+  id           String    @id @default(cuid())
+  caseId       String    @unique
+  fromOwnerId  String
+  toOwnerId    String
+  transferDate DateTime
+  price        Decimal?  @db.Decimal(12, 2)
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+}
+
+model PlateSwapDetail {
+  id             String   @id @default(cuid())
+  caseId         String   @unique
+  oldPlateNumber String
+  newPlateNumber String
+  swapDate       DateTime
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+}
+
+model AddressChangeDetail {
+  id            String   @id @default(cuid())
+  caseId        String   @unique
+  oldAddress    String
+  newAddress    String
+  effectiveDate DateTime
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+}
+
+model CaseDocument {
+  id         String   @id @default(cuid())
+  caseId     String
+  fileName   String
+  filePath   String
+  fileType   String
+  uploadedAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
