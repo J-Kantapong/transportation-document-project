@@ -1,0 +1,1 @@
+{"name":"transport-workspace","private":true,"type":"module","scripts":{"build":"node build.mjs"},"devDependencies":{"drizzle-kit":"0.31.4","drizzle-orm":"0.44.5"},"dependencies":{"exceljs":"4.4.0"}}

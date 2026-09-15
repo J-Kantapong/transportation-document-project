@@ -1,0 +1,6 @@
+node_modules/
+work/
+outputs/
+.sites-runtime/
+dist/server/
+dist/.openai/

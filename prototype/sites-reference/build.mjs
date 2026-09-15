@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+fs.mkdirSync('dist/server',{recursive:true});
+const html=fs.readFileSync('dist/index.html','utf8');
+new Function(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+const shared=fs.readFileSync('shared/vehicle-data.js','utf8').replaceAll('export ','');
+const vehicleClient=fs.readFileSync('client/vehicles.js','utf8');
+new Function(vehicleClient);
+const assets={'/assets/vehicle-data.js':shared,'/assets/vehicles.js':vehicleClient,'/assets/exceljs.min.js':fs.readFileSync('node_modules/exceljs/dist/exceljs.min.js','utf8')};
+const backend=fs.readFileSync('server/vehicles.js','utf8').replace(/^import .*;\r?\n/m,'').replace('export async function','async function');
+const worker=fs.readFileSync('server/worker.js','utf8').replace(/^import .*;\r?\n/m,'');
+fs.writeFileSync('dist/server/index.js','const HTML='+JSON.stringify(html)+';\nconst SITE_ASSETS='+JSON.stringify(assets)+';\n'+shared+'\n'+backend+'\n'+worker);
+fs.mkdirSync('dist/.openai',{recursive:true});
+fs.copyFileSync('.openai/hosting.json','dist/.openai/hosting.json');
+fs.cpSync('drizzle','dist/.openai/drizzle',{recursive:true});
+console.log('Worker, UI, and migrations built.');
