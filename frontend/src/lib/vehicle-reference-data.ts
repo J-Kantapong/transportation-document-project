@@ -47,3 +47,10 @@ export const VEHICLE_COLUMNS = [
 ] as const;
 
 export type VehicleColumnKey = (typeof VEHICLE_COLUMNS)[number][0];
+
+// Status is derived from จังหวัดที่จดทะเบียน, not stored — Bangkok registrations
+// go through ตัดบัญชี, every other province goes through แจ้งย้าย.
+export function getVehicleStatus(registrationProvince: string): string {
+  if (!registrationProvince) return "—";
+  return registrationProvince === "กรุงเทพมหานคร" ? "ตัดบัญชี" : "แจ้งย้าย";
+}

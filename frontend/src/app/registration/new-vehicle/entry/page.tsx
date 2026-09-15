@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError, type Brand, type Customer, type Vehicle } from "@/lib/api";
-import { PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
+import { PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 
 type Tab = "single" | "batch";
@@ -36,6 +36,7 @@ const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
   ["สี", (v) => v.color ?? ""],
   ["ประเภทรถ", (v) => v.body ?? ""],
   ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince ?? ""],
+  ["สถานะ", (v) => getVehicleStatus(v.registrationProvince ?? "")],
   ["จังหวัดเจ้าของรถ", (v) => v.ownerProvince ?? ""],
 ];
 
@@ -421,7 +422,12 @@ export default function VehicleEntryPage() {
       {tab === "single" && (
         <section role="tabpanel" className="panel">
           <div className="panel-head">
-            <h2>ข้อมูลรถจดใหม่</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <h2>ข้อมูลรถจดใหม่</h2>
+              <span className="status-badge" role="status">
+                สถานะ: {getVehicleStatus(single.registrationProvince)}
+              </span>
+            </div>
             <span className="muted">* จำเป็นต้องกรอก</span>
           </div>
           <form className="customer-form" onSubmit={handleSingleSubmit}>
@@ -644,6 +650,7 @@ export default function VehicleEntryPage() {
                   <th>เลขตัวถัง</th>
                   <th>ยี่ห้อ</th>
                   <th>จังหวัดที่จดทะเบียน</th>
+                  <th>สถานะ</th>
                   <th></th>
                 </tr>
               </thead>
@@ -655,6 +662,7 @@ export default function VehicleEntryPage() {
                     <td>{v.chassis}</td>
                     <td>{v.brandName}</td>
                     <td>{v.registrationProvince || "—"}</td>
+                    <td>{getVehicleStatus(v.registrationProvince ?? "")}</td>
                     <td>
                       <button className="text-button" onClick={() => openDetail(v)}>
                         ดูข้อมูล
