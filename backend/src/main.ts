@@ -3,7 +3,10 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 
-process.loadEnvFile('.env');
+try {
+  // No .env file in production (Render injects env vars directly); .env is dev-only.
+  process.loadEnvFile('.env');
+} catch {}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
