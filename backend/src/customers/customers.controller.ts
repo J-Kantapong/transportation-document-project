@@ -15,4 +15,6 @@ export class CustomersController {
   create(@Body() body: CreateCustomerDto) {
     return this.customersService.create(body);
   }
+
+  // test for auto deploy
 }
