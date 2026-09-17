@@ -321,3 +321,30 @@ model GovernmentTaxMotorcycleFlat {
   amount    Decimal?        @db.Decimal(10, 2)
   note      String?
 }
+
+// --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------
+// Standalone log - not linked to Customer/Vehicle. One row = one day's notice batch for
+// one size (size splits the two UI pages รถเล็ก/รถใหญ่). count is the number of vehicles
+// that day; every vehicle carries both a Bill portion and a No bill portion of the fee
+// (not an either/or choice per vehicle), so billFee/noBillFee are both derived from the
+// same count. Fees are snapshotted at creation time from the fixed rates in
+// src/yamaha-relocation/yamaha-relocation-fee.ts, so a future rate change never rewrites
+// history: รถเล็ก Bill 5 บาท/คัน, No bill 10 บาท/คัน — รถใหญ่ Bill 5 บาท/คัน, No bill 20 บาท/คัน.
+// The fee split is bookkeeping only - not shown in the UI, per the user's instruction.
+
+enum YamahaRelocationSize {
+  SMALL // รถเล็ก
+  LARGE // รถใหญ่
+}
+
+model YamahaRelocationEntry {
+  id        String               @id @default(cuid())
+  date      DateTime // วันที่แจ้งย้าย
+  size      YamahaRelocationSize
+  count     Int // จำนวนคันในวันนั้น
+  billFee   Decimal              @db.Decimal(10, 2) // count x อัตรา Bill ณ ตอนบันทึก
+  noBillFee Decimal              @db.Decimal(10, 2) // count x อัตรา No bill ณ ตอนบันทึก
+  createdAt DateTime             @default(now())
+
+  @@index([size, date])
+}

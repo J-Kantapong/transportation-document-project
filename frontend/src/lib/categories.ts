@@ -29,3 +29,9 @@ export const NEW_VEHICLE_SUBTASKS: RegistrationSubtask[] = [
   { title: "ตรวจรถ", href: "/registration/new-vehicle/inspection" },
   { title: "ยื่นเอกสารจดทะเบียนรถใหม่", href: "/registration/new-vehicle/submit-documents" },
 ];
+
+// The two subtask headings under "งานแจ้งย้ายยามาฮ่า".
+export const YAMAHA_RELOCATION_SUBTASKS: RegistrationSubtask[] = [
+  { title: "แจ้งย้ายรถเล็ก", href: "/registration/yamaha-relocation/small" },
+  { title: "แจ้งย้ายรถใหญ่", href: "/registration/yamaha-relocation/large" },
+];

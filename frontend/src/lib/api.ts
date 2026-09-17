@@ -108,6 +108,25 @@ export interface InspectionVehicle {
   inspectionCost: string | null;
 }
 
+export type YamahaRelocationSize = 'SMALL' | 'LARGE';
+
+export interface YamahaRelocationEntry {
+  id: string;
+  date: string;
+  size: YamahaRelocationSize;
+  count: number;
+  billFee: string;
+  noBillFee: string;
+  createdAt: string;
+}
+
+export interface YamahaRelocationSummary {
+  totalCount: number;
+  billFee: number;
+  noBillFee: number;
+  totalFee: number;
+}
+
 export interface NewCustomerInput {
   name: string;
   company: string;
@@ -147,4 +166,14 @@ export const api = {
       `/api/vehicles/${id}/inspection`,
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
+
+  listYamahaRelocation: (size: YamahaRelocationSize, month: string) =>
+    request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(
+      `/api/yamaha-relocation?size=${size}&month=${month}`,
+    ),
+  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number }) =>
+    request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
