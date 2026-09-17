@@ -79,6 +79,21 @@ export interface Vehicle {
   brandName: string;
 }
 
+export interface TransferNoticeVehicle {
+  id: string;
+  date: string;
+  customerName: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  registrationProvince: string | null;
+  status: 'ตัดบัญชี' | 'แจ้งย้าย' | null;
+  suggestedCost: string | null;
+  transferDone: boolean;
+  transferCompletedDate: string | null;
+  transferCost: string | null;
+}
+
 export interface NewCustomerInput {
   name: string;
   company: string;
@@ -101,4 +116,12 @@ export const api = {
   listVehicles: () => request<{ vehicles: Vehicle[] }>('/api/vehicles'),
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
+
+  listTransferNotice: (date: string) =>
+    request<{ vehicles: TransferNoticeVehicle[] }>(`/api/vehicles/transfer-notice?date=${date}`),
+  updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
+    request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
+      `/api/vehicles/${id}/transfer-notice`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
 };

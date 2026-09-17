@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError, type Brand, type Customer, type Vehicle } from "@/lib/api";
-import { PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
+import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
+import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -39,36 +40,6 @@ const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
   ["สถานะ", (v) => getVehicleStatus(v.registrationProvince ?? "")],
   ["จังหวัดเจ้าของรถ", (v) => v.ownerProvince ?? ""],
 ];
-
-function todayIso(): string {
-  const now = new Date();
-  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join(
-    "-",
-  );
-}
-
-// Native <input type="date"> renders in the browser/OS locale format (often mm/dd/yyyy),
-// which cannot be overridden via the lang attribute. Use a text input formatted as
-// dd/mm/yyyy instead, converting to/from the ISO string that the rest of the form expects.
-function isoToDisplayDate(iso: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
-}
-
-function formatDateDigits(digits: string): string {
-  const d = digits.slice(0, 2);
-  const m = digits.slice(2, 4);
-  const y = digits.slice(4, 8);
-  return [d, m, y].filter(Boolean).join("/");
-}
-
-function displayDateToIso(digits: string): string {
-  if (digits.length !== 8) return "";
-  const iso = `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-  const year = Number(digits.slice(4, 8));
-  if (year < 1900 || year > 2100) return "";
-  return new Date(iso).toISOString().slice(0, 10) === iso ? iso : "";
-}
 
 function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
@@ -511,7 +482,14 @@ export default function VehicleEntryPage() {
               </label>
               <label className="field">
                 ประเภทเชื้อเพลิง
-                <input maxLength={250} value={single.fuel} onChange={(e) => updateSingle("fuel", e.target.value)} />
+                <select value={single.fuel} onChange={(e) => updateSingle("fuel", e.target.value)}>
+                  <option value="">เลือกประเภทเชื้อเพลิง</option>
+                  {FUEL_TYPES.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 ขนาด CC

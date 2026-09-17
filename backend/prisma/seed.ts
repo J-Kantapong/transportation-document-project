@@ -56,6 +56,20 @@ const PROVINCES = [
   "พัทลุง", "ปัตตานี", "ยะลา", "นราธิวาส",
 ];
 
+// Display order for the ยี่ห้อ dropdown, user-specified. Benz/BMW/Lexus/Volvo also have
+// their own fee row in the pricing spec (ตัดบัญชี/แจ้งย้าย/ตรวจรถ กทม. for รย.1-เก๋ง 2 ตอน),
+// matched by name in vehicles.service.ts's fee lookup; the rest fall back to the "อื่นๆ"
+// fee row. Brand.sortOrder defaults to 1000, so any brand added later via "+ เพิ่มยี่ห้อ"
+// always lands after this curated list.
+const ORDERED_BRANDS = ["Toyota", "Deepal", "Lexus", "Honda", "Yamaha", "Zontes", "Benz", "BMW", "Volvo"];
+
+async function seedBrands() {
+  for (const [index, name] of ORDERED_BRANDS.entries()) {
+    const sortOrder = index + 1;
+    await prisma.brand.upsert({ where: { name }, create: { name, sortOrder }, update: { sortOrder } });
+  }
+}
+
 async function seedDeregistration() {
   const amounts = [12, 12, 12, 12, 20, 20, 20, 20, 20, 20, 20, 50, 50, 20, 20, 20, 20, 20];
   for (let i = 0; i < TYPE_BRAND_ROWS.length; i++) {
@@ -117,6 +131,7 @@ async function seedParamTable(
 }
 
 async function main() {
+  await seedBrands();
   await seedDeregistration();
   await seedRelocate();
   await seedInspectionBangkok();
@@ -169,7 +184,7 @@ async function main() {
     ["ลงขันด่วนเพิ่ม (ต่อคัน)", 50, null],
   ]);
 
-  console.log("Fee master tables seeded.");
+  console.log("Brands and fee master tables seeded.");
 }
 
 main()

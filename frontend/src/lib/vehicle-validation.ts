@@ -1,7 +1,7 @@
 // Mirrors backend/src/vehicles/vehicle-validation.ts — client-side validation gives the
 // user immediate feedback; the backend re-validates everything as the final authority.
 
-import { PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey } from './vehicle-reference-data';
+import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey } from './vehicle-reference-data';
 
 export type NormalizedVehicleRow = Record<VehicleColumnKey, string>;
 
@@ -30,6 +30,9 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
 
   if (row.body && !(VEHICLE_TYPES as readonly string[]).includes(row.body)) {
     errors.push('กรุณาเลือกประเภทรถจากรายการที่กำหนด');
+  }
+  if (row.fuel && !(FUEL_TYPES as readonly string[]).includes(row.fuel)) {
+    errors.push('กรุณาเลือกประเภทเชื้อเพลิงจากรายการที่กำหนด');
   }
   if (!isValidDate(row.date)) {
     errors.push('วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง');

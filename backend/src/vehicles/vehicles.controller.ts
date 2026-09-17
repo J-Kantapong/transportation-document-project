@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
+import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
 @Controller('api/vehicles')
@@ -14,5 +15,15 @@ export class VehiclesController {
   @Post()
   create(@Body() body: CreateVehiclesDto) {
     return this.vehiclesService.createBatch(body);
+  }
+
+  @Get('transfer-notice')
+  async findForTransferNotice(@Query('date') date: string) {
+    return { vehicles: await this.vehiclesService.findForTransferNotice(date) };
+  }
+
+  @Patch(':id/transfer-notice')
+  async updateTransferNotice(@Param('id') id: string, @Body() body: UpdateTransferNoticeDto) {
+    return { vehicle: await this.vehiclesService.updateTransferNotice(id, body) };
   }
 }

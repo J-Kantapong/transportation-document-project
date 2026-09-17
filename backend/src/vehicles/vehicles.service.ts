@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
+import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 
 interface VehicleRowError {
@@ -9,6 +10,20 @@ interface VehicleRowError {
 }
 
 const MAX_BATCH_SIZE = 100;
+
+type TransferStatus = 'ตัดบัญชี' | 'แจ้งย้าย';
+
+// Status is derived from จังหวัดที่จดทะเบียน, not stored — Bangkok registrations
+// go through ตัดบัญชี, every other province goes through แจ้งย้าย. Mirrors
+// frontend/src/lib/vehicle-reference-data.ts#getVehicleStatus.
+function getTransferStatus(registrationProvince: string | null): TransferStatus | null {
+  if (!registrationProvince) return null;
+  return registrationProvince === 'กรุงเทพมหานคร' ? 'ตัดบัญชี' : 'แจ้งย้าย';
+}
+
+function isValidDateParam(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value));
+}
 
 @Injectable()
 export class VehiclesService {
@@ -96,6 +111,97 @@ export class VehiclesService {
     await this.prisma.$transaction(rows.map((row) => this.prisma.vehicle.create({ data: this.toCreateData(row) })));
 
     return { count: rows.length };
+  }
+
+  async findForTransferNotice(dateParam: string) {
+    if (!isValidDateParam(dateParam)) {
+      throw new BadRequestException({ error: 'พารามิเตอร์ date ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+
+    const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { date: new Date(`${dateParam}T00:00:00.000Z`) },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: {
+          customer: { select: { name: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.feeDeregistration.findMany(),
+      this.prisma.feeRelocate.findMany(),
+    ]);
+
+    return vehicles.map((vehicle) => {
+      const status = getTransferStatus(vehicle.registrationProvince);
+      const suggestedCost = this.suggestTransferCost(status, vehicle.body, vehicle.brand.name, deregistrationFees, relocateFees);
+
+      return {
+        id: vehicle.id,
+        date: vehicle.date.toISOString().slice(0, 10),
+        customerName: vehicle.customer.name,
+        chassis: vehicle.chassis,
+        brandName: vehicle.brand.name,
+        body: vehicle.body,
+        registrationProvince: vehicle.registrationProvince,
+        status,
+        suggestedCost,
+        transferDone: vehicle.transferDone,
+        transferCompletedDate: vehicle.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
+        transferCost: vehicle.transferCost,
+      };
+    });
+  }
+
+  private suggestTransferCost(
+    status: TransferStatus | null,
+    body: string | null,
+    brandName: string,
+    deregistrationFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
+    relocateFees: Array<{ vehicleType: string; brand: string; noBillAmount: unknown; billAmount: unknown }>,
+  ): string | null {
+    if (!status || !body) return null;
+
+    if (status === 'ตัดบัญชี') {
+      const row = deregistrationFees.find((f) => f.vehicleType === body && f.brand === brandName)
+        ?? deregistrationFees.find((f) => f.vehicleType === body && f.brand === 'อื่นๆ');
+      return row ? String(row.amount) : null;
+    }
+
+    const row = relocateFees.find((f) => f.vehicleType === body && f.brand === brandName)
+      ?? relocateFees.find((f) => f.vehicleType === body && f.brand === 'อื่นๆ');
+    return row ? String(Number(row.noBillAmount) + Number(row.billAmount)) : null;
+  }
+
+  async updateTransferNotice(id: string, dto: UpdateTransferNoticeDto) {
+    const done = Boolean(dto?.done);
+    const completedDateRaw = typeof dto?.completedDate === 'string' ? dto.completedDate.trim() : '';
+    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
+
+    if (completedDateRaw && !isValidDateParam(completedDateRaw)) {
+      throw new BadRequestException({ error: 'วันที่เสร็จต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
+      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
+    }
+
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+    const updated = await this.prisma.vehicle.update({
+      where: { id },
+      data: {
+        transferDone: done,
+        transferCompletedDate: completedDateRaw ? new Date(`${completedDateRaw}T00:00:00.000Z`) : null,
+        transferCost: costRaw ? costRaw : null,
+      },
+    });
+
+    return {
+      id: updated.id,
+      transferDone: updated.transferDone,
+      transferCompletedDate: updated.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
+      transferCost: updated.transferCost,
+    };
   }
 
   private toCreateData(row: NormalizedVehicleRow) {

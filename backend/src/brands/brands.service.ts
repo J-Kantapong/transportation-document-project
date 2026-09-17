@@ -8,7 +8,7 @@ export class BrandsService {
 
   findAll() {
     return this.prisma.brand.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       select: { id: true, name: true },
     });
   }

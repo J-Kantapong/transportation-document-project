@@ -62,8 +62,10 @@ model Customer {
 }
 
 model Brand {
-  id   String @id @default(cuid())
-  name String @unique
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(1000) // ลำดับแสดงผลที่กำหนดเอง ยี่ห้อที่เพิ่มทีหลังผ่าน "+ เพิ่มยี่ห้อ" จะได้ค่าเริ่มต้นนี้ (ไปท้ายรายการ)
+  createdAt DateTime @default(now()) // ใช้ตัดสินลำดับระหว่างยี่ห้อที่ sortOrder เท่ากัน
 
   vehicles Vehicle[]
 }
@@ -82,8 +84,14 @@ model Vehicle {
   body                 String? // ประเภทรถ (13 ตัวเลือกที่กำหนด ตรวจสอบระดับ application)
   registrationProvince String? // จังหวัดที่จดทะเบียน
   ownerProvince        String? // จังหวัดเจ้าของรถ
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+
+  // Step 2: แจ้งย้าย/ตัดบัญชี confirmation (สถานะคำนวณจาก registrationProvince เอง ไม่ต้องเก็บ)
+  transferDone          Boolean   @default(false) // ลูกน้องติ๊กว่าดำเนินการแจ้งย้าย/ตัดบัญชีเรียบร้อยแล้ว
+  transferCompletedDate DateTime? // วันที่ดำเนินการเสร็จ
+  transferCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id])
   brand    Brand    @relation(fields: [brandId], references: [id])
