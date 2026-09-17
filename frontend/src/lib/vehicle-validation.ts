@@ -35,7 +35,7 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
     errors.push('กรุณาเลือกประเภทเชื้อเพลิงจากรายการที่กำหนด');
   }
   if (!isValidDate(row.date)) {
-    errors.push('วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง');
+    errors.push('วันที่ต้องเป็น DD-MM-YYYY ที่ถูกต้อง');
   }
   if (!row.customerId) errors.push('กรุณาเลือกลูกค้า');
   if (!row.chassis) errors.push('กรุณากรอกเลขตัวถัง');

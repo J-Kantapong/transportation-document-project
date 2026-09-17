@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { api, ApiError, type Brand, type Customer, type Vehicle } from "@/lib/api";
 import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigits, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -282,6 +282,7 @@ export default function VehicleEntryPage() {
           rawObj[key] = raw[indexes[i]] ?? "";
         });
         const values = normalizeVehicleRow(rawObj);
+        values.date = parseBatchDate(values.date);
         const issues: string[] = [];
         try {
           values.customerId = lookupId(values.customerId, customers, "ลูกค้า");
@@ -572,7 +573,7 @@ export default function VehicleEntryPage() {
             <p style={{ lineHeight: 1.9 }}>
               รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 100 คันต่อไฟล์ · ไม่เกิน 5 MB
               <br />
-              ใช้ 12 คอลัมน์ตามแบบฟอร์ม วันที่เป็น ค.ศ. YYYY-MM-DD และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
+              ใช้ 12 คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
               <br />
               คอลัมน์ลูกค้าและยี่ห้อใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
             </p>
