@@ -9,6 +9,17 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_PORT=3000
 FRONTEND_PORT=3001
 
+# A delay that can't steal terminal foreground control and can't hang on stdin.
+# Under `set -m`, a synchronous foreground command (e.g. plain `sleep 1`) gets
+# its own process group and briefly becomes the terminal's foreground group,
+# which would steal Ctrl+C's SIGINT away from this script's trap. Backgrounding
+# it instead keeps this script's own group in the foreground, and `wait` (a
+# builtin, no fork) is interruptible by a trapped signal immediately.
+nap() {
+  sleep "$1" &
+  wait $!
+}
+
 # Retries because a process that was still starting up (e.g. mid TypeScript
 # compile) at the moment of the process-group kill may bind to its port
 # a moment later, after the group kill below already ran.
@@ -23,7 +34,7 @@ kill_port() {
     fi
     echo "$pids" | xargs kill -9 2>/dev/null || true
     tries=$((tries + 1))
-    sleep 1
+    nap 1
   done
 }
 
@@ -34,7 +45,7 @@ cleanup() {
   # children) since a plain `kill $PID` only stops the top-level npm process and
   # can leave its children running as orphans.
   kill -TERM -- "-$BACKEND_PID" "-$FRONTEND_PID" 2>/dev/null || true
-  sleep 1
+  nap 1
   kill -KILL -- "-$BACKEND_PID" "-$FRONTEND_PID" 2>/dev/null || true
   kill_port "$BACKEND_PORT"
   kill_port "$FRONTEND_PORT"
@@ -52,6 +63,6 @@ BACKEND_PID=$!
 FRONTEND_PID=$!
 
 while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do
-  sleep 1
+  nap 1
 done
 cleanup
