@@ -29,7 +29,9 @@ export default function CustomersPage() {
   const [listError, setListError] = useState("");
   const [form, setForm] = useState<NewCustomerInput>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useState<{ text: string; error?: boolean }>({
+    text: "",
+  });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<Customer | null>(null);
 
@@ -40,7 +42,11 @@ export default function CustomersPage() {
       const data = await api.listCustomers();
       setCustomers(data.customers);
     } catch (error) {
-      setListError(error instanceof ApiError ? error.message : "โหลดข้อมูลไม่สำเร็จ กรุณากดโหลดรายการใหม่");
+      setListError(
+        error instanceof ApiError
+          ? error.message
+          : "โหลดข้อมูลไม่สำเร็จ กรุณากดโหลดรายการใหม่",
+      );
     } finally {
       setLoading(false);
     }
@@ -62,7 +68,10 @@ export default function CustomersPage() {
       setMessage({ text: "บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว" });
       await loadCustomers();
     } catch (error) {
-      setMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+      setMessage({
+        text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ",
+        error: true,
+      });
     } finally {
       setSaving(false);
     }
@@ -73,7 +82,10 @@ export default function CustomersPage() {
     dialogRef.current?.showModal();
   }
 
-  function updateField<K extends keyof NewCustomerInput>(key: K, value: string) {
+  function updateField<K extends keyof NewCustomerInput>(
+    key: K,
+    value: string,
+  ) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -82,12 +94,15 @@ export default function CustomersPage() {
       <div className="heading">
         <div>
           <h1>ฐานข้อมูลลูกค้า</h1>
-          <p>จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ</p>
+          <p>จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ test auto deploy</p>
         </div>
       </div>
 
       <section className="panel">
-        <div className="panel-head" style={{ borderBottom: "1px solid #edf0f5" }}>
+        <div
+          className="panel-head"
+          style={{ borderBottom: "1px solid #edf0f5" }}
+        >
           <h2>เพิ่มลูกค้า</h2>
           <span className="muted">* จำเป็นต้องกรอก</span>
         </div>
@@ -182,7 +197,10 @@ export default function CustomersPage() {
       <section className="panel customer-list">
         <div className="panel-head">
           <h2>
-            รายชื่อลูกค้า <span className="muted">{customers.length ? `(${customers.length} รายการ)` : ""}</span>
+            รายชื่อลูกค้า{" "}
+            <span className="muted">
+              {customers.length ? `(${customers.length} รายการ)` : ""}
+            </span>
           </h2>
           <button className="text-button" onClick={loadCustomers}>
             โหลดรายการใหม่
@@ -223,7 +241,10 @@ export default function CustomersPage() {
                     <td>{customer.phone || "—"}</td>
                     <td>{customer.email || "—"}</td>
                     <td>
-                      <button className="text-button" onClick={() => openDetail(customer)}>
+                      <button
+                        className="text-button"
+                        onClick={() => openDetail(customer)}
+                      >
                         ดูข้อมูล
                       </button>
                     </td>
@@ -241,7 +262,11 @@ export default function CustomersPage() {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <button
+          className="close"
+          aria-label="ปิด"
+          onClick={() => dialogRef.current?.close()}
+        >
           ×
         </button>
         {detail && (
