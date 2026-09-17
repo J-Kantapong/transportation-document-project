@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
+import { UpdateInspectionDto } from './dto/update-inspection.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 
 interface VehicleRowError {
@@ -201,6 +202,100 @@ export class VehiclesService {
       transferDone: updated.transferDone,
       transferCompletedDate: updated.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
       transferCost: updated.transferCost,
+    };
+  }
+
+  async findForInspection(dateParam: string) {
+    if (!isValidDateParam(dateParam)) {
+      throw new BadRequestException({ error: 'พารามิเตอร์ date ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+
+    const [vehicles, bangkokFees, provinceFees] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { date: new Date(`${dateParam}T00:00:00.000Z`), transferDone: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: {
+          customer: { select: { name: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.feeInspectionBangkok.findMany(),
+      this.prisma.feeInspectionProvince.findMany(),
+    ]);
+
+    return vehicles.map((vehicle) => {
+      const suggestedCost = this.suggestInspectionCost(
+        vehicle.registrationProvince,
+        vehicle.body,
+        vehicle.brand.name,
+        bangkokFees,
+        provinceFees,
+      );
+
+      return {
+        id: vehicle.id,
+        date: vehicle.date.toISOString().slice(0, 10),
+        customerName: vehicle.customer.name,
+        chassis: vehicle.chassis,
+        brandName: vehicle.brand.name,
+        body: vehicle.body,
+        registrationProvince: vehicle.registrationProvince,
+        suggestedCost,
+        inspectionDone: vehicle.inspectionDone,
+        inspectionCompletedDate: vehicle.inspectionCompletedDate?.toISOString().slice(0, 10) ?? null,
+        inspectionCost: vehicle.inspectionCost,
+      };
+    });
+  }
+
+  private suggestInspectionCost(
+    registrationProvince: string | null,
+    body: string | null,
+    brandName: string,
+    bangkokFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
+    provinceFees: Array<{ province: string; vehicleType: string; amount: unknown }>,
+  ): string | null {
+    if (!registrationProvince || !body) return null;
+
+    if (registrationProvince === 'กรุงเทพมหานคร') {
+      const row = bangkokFees.find((f) => f.vehicleType === body && f.brand === brandName)
+        ?? bangkokFees.find((f) => f.vehicleType === body && f.brand === 'อื่นๆ');
+      return row ? String(row.amount) : null;
+    }
+
+    const row = provinceFees.find((f) => f.province === registrationProvince && f.vehicleType === body);
+    return row?.amount != null ? String(row.amount) : null;
+  }
+
+  async updateInspection(id: string, dto: UpdateInspectionDto) {
+    const done = Boolean(dto?.done);
+    const completedDateRaw = typeof dto?.completedDate === 'string' ? dto.completedDate.trim() : '';
+    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
+
+    if (completedDateRaw && !isValidDateParam(completedDateRaw)) {
+      throw new BadRequestException({ error: 'วันที่เสร็จต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
+      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
+    }
+
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+    const updated = await this.prisma.vehicle.update({
+      where: { id },
+      data: {
+        inspectionDone: done,
+        inspectionCompletedDate: completedDateRaw ? new Date(`${completedDateRaw}T00:00:00.000Z`) : null,
+        inspectionCost: costRaw ? costRaw : null,
+      },
+    });
+
+    return {
+      id: updated.id,
+      inspectionDone: updated.inspectionDone,
+      inspectionCompletedDate: updated.inspectionCompletedDate?.toISOString().slice(0, 10) ?? null,
+      inspectionCost: updated.inspectionCost,
     };
   }
 

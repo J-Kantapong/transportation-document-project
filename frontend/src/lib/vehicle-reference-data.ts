@@ -2,7 +2,7 @@
 // prototype/sites-reference/shared/vehicle-data.js. Frontend and backend are separate
 // deployables here, so this list is intentionally duplicated — keep both in sync.
 
-export const FUEL_TYPES = ['เบนซิน', 'ดีเซล', 'LPG', 'NGV', 'ไฮบริด', 'ไฟฟ้า'] as const;
+export const FUEL_TYPES = ['เบนซิน', 'ดีเซล', 'LPG', 'NGV', 'ไฮบริด (HEV)', 'ปลั๊กอินไฮบริด (PHEV)', 'ไฟฟ้า (BEV)'] as const;
 
 export const VEHICLE_TYPES = [
   'รย.12-น้อยกว่า 300cc',

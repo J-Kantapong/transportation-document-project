@@ -90,6 +90,11 @@ model Vehicle {
   transferCompletedDate DateTime? // วันที่ดำเนินการเสร็จ
   transferCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate)
 
+  // Step 3: ตรวจรถ (เข้าคิวหลังจากทำ Step 2 เสร็จแล้วเท่านั้น - transferDone = true)
+  inspectionDone          Boolean   @default(false) // ลูกน้องติ๊กว่าตรวจรถเรียบร้อยแล้ว
+  inspectionCompletedDate DateTime? // วันที่ตรวจเสร็จ
+  inspectionCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeInspectionBangkok/FeeInspectionProvince)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

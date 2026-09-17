@@ -94,6 +94,20 @@ export interface TransferNoticeVehicle {
   transferCost: string | null;
 }
 
+export interface InspectionVehicle {
+  id: string;
+  date: string;
+  customerName: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  registrationProvince: string | null;
+  suggestedCost: string | null;
+  inspectionDone: boolean;
+  inspectionCompletedDate: string | null;
+  inspectionCost: string | null;
+}
+
 export interface NewCustomerInput {
   name: string;
   company: string;
@@ -122,6 +136,14 @@ export const api = {
   updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
     request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
       `/api/vehicles/${id}/transfer-notice`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
+
+  listInspection: (date: string) =>
+    request<{ vehicles: InspectionVehicle[] }>(`/api/vehicles/inspection?date=${date}`),
+  updateInspection: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
+    request<{ vehicle: Pick<InspectionVehicle, 'id' | 'inspectionDone' | 'inspectionCompletedDate' | 'inspectionCost'> }>(
+      `/api/vehicles/${id}/inspection`,
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
 };
