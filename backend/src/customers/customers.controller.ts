@@ -16,5 +16,5 @@ export class CustomersController {
     return this.customersService.create(body);
   }
 
-  // test for auto deploy
+  // test for auto deploy (attempt 2, after fixing Render's GitHub App install)
 }
