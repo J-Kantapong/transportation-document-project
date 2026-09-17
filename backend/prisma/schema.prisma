@@ -95,6 +95,9 @@ model Vehicle {
   inspectionCompletedDate DateTime? // วันที่ตรวจเสร็จ
   inspectionCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeInspectionBangkok/FeeInspectionProvince)
 
+  // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax* ด้านล่าง)
+  firstRegistrationDate DateTime? // วันจดทะเบียนครั้งแรก - ใช้คำนวณอายุรถและตรวจสอบมาตรการลดภาษี EV ตามช่วงเวลา
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -251,4 +254,70 @@ model FeeMotorcycleNoBillParam {
   key    String   @unique
   amount Decimal? @db.Decimal(10, 2)
   note   String?
+}
+
+// --- Government annual vehicle tax (ภาษีรถประจำปี, กรมการขนส่งทางบก) -------------------
+// Per the user's Step 4 spec: never combine these with the Fee*/company service-fee
+// tables above - this is government tax only. vehicleFamily groups Vehicle.body by its
+// รย. prefix (RY1/RY2/RY3/RY12), which is coarser than the vehicleType strings the Fee*
+// tables use above; in particular the รย.12-<cc range> VEHICLE_TYPES entries are cc
+// brackets for company service-fee pricing only and must NOT be reused to look up this
+// government tax (ICE motorcycle tax is a flat rate regardless of cc). fuelGroup buckets
+// Vehicle.fuel: ICE = เบนซิน/ดีเซล/LPG/NGV, HEV = ไฮบริด (HEV), PHEV = ปลั๊กอินไฮบริด (PHEV),
+// BEV = ไฟฟ้า (BEV). See src/tax/government-tax-reference-data.ts for the classifier that
+// derives vehicleFamily/fuelGroup from a Vehicle row.
+
+enum GovTaxVehicleFamily {
+  RY1 // รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน
+  RY2 // รถยนต์นั่งส่วนบุคคลเกิน 7 คน
+  RY3 // รถยนต์บรรทุกส่วนบุคคล
+  RY12 // รถจักรยานยนต์
+}
+
+enum GovTaxFuelGroup {
+  ICE
+  HEV
+  PHEV
+  BEV
+}
+
+model GovernmentTaxCcBracket {
+  id            String              @id @default(cuid())
+  vehicleFamily GovTaxVehicleFamily // ปัจจุบันใช้กับ RY1 เท่านั้น (ICE/HEV/PHEV คำนวณแบบ progressive ตาม CC)
+  fuelGroup     GovTaxFuelGroup
+  ccFrom        Decimal             @db.Decimal(10, 2) // cc เริ่มต้นของขั้นนี้ (รวม)
+  ccTo          Decimal?            @db.Decimal(10, 2) // cc สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด (ขั้นบนสุด)
+  ratePerCc     Decimal             @db.Decimal(10, 4) // บาท/cc เฉพาะส่วนที่อยู่ในขั้นนี้ (ไม่ใช่สะสมทั้งคัน)
+  sortOrder     Int                 @default(0)
+
+  @@unique([vehicleFamily, fuelGroup, ccFrom])
+}
+
+model GovernmentTaxWeightBracket {
+  id            String              @id @default(cuid())
+  vehicleFamily GovTaxVehicleFamily // RY1 (เฉพาะ fuelGroup = BEV), RY2, RY3
+  fuelGroup     GovTaxFuelGroup? // null = ใช้ได้ทุกเชื้อเพลิงในกลุ่มนี้ (RY2/RY3 ไม่แยกตามเชื้อเพลิง); RY1 ต้องระบุ BEV
+  weightFrom    Decimal             @db.Decimal(10, 2) // น้ำหนัก (กก.) เริ่มต้นของขั้นนี้ (รวม)
+  weightTo      Decimal?            @db.Decimal(10, 2) // น้ำหนัก (กก.) สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด
+  amount        Decimal?            @db.Decimal(10, 2) // ภาษี/ปี (บาท) - ยังไม่มีข้อมูล รอผู้ใช้ให้ตาราง EV_WEIGHT_TAX_TABLE / RY2_WEIGHT_TAX_TABLE / RY3_WEIGHT_TAX_TABLE
+  sortOrder     Int                 @default(0)
+
+  @@unique([vehicleFamily, fuelGroup, weightFrom])
+}
+
+model GovernmentTaxEvIncentive {
+  id              String              @id @default(cuid())
+  vehicleFamily   GovTaxVehicleFamily // เช่น RY1 (รถยนต์ไฟฟ้า)
+  label           String // ชื่อมาตรการ เช่น "มาตรการลดภาษีรถ EV ปีงบประมาณ 2569"
+  effectiveFrom   DateTime // เทียบกับ Vehicle.firstRegistrationDate
+  effectiveTo     DateTime?
+  discountPercent Decimal?            @db.Decimal(5, 2) // % ที่ลดจากภาษีที่คำนวณได้จาก GovernmentTaxWeightBracket - ยังไม่มีข้อมูล ห้าม hard-code
+  note            String?
+}
+
+model GovernmentTaxMotorcycleFlat {
+  id        String          @id @default(cuid())
+  fuelGroup GovTaxFuelGroup @unique // ICE = 100 บาท/ปีทุก cc (ตามกฎ); BEV = กฎรถจักรยานยนต์ไฟฟ้าแยกต่างหาก ยังไม่มีข้อมูล
+  amount    Decimal?        @db.Decimal(10, 2)
+  note      String?
 }

@@ -4,6 +4,7 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
+import { GovTaxFuelGroup, GovTaxVehicleFamily } from "../src/generated/prisma/enums.js";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
@@ -117,6 +118,45 @@ async function seedInspectionProvince() {
   await prisma.feeInspectionProvince.createMany({ data, skipDuplicates: true });
 }
 
+// Government annual tax (ภาษีรถประจำปี) - only seed the rule sets the user has given exact
+// figures for. RY2/RY3 weight brackets, the RY1-BEV weight table, and the EV tax-incentive
+// schedule are still missing (see memory project_fee_pricing_workflow); leave those empty
+// rather than guessing.
+async function seedGovernmentTaxCcBrackets() {
+  // RY1 (รย.1) ICE/HEV/PHEV: progressive บาท/cc, ใช้สูตรเดียวกันทั้ง 3 เชื้อเพลิงตามที่ให้มา
+  // ccFrom/ccTo คือเกณฑ์ต่อเนื่อง (0/600/1800) ไม่ใช่ช่วงจำนวนเต็มแบบ "601-1800" - อัตราส่วนเกินคิดจาก
+  // ส่วนที่เกินเกณฑ์พอดี (เช่น cc=600 เสียแค่ 300 บาท ไม่ใช่ 601 * 0.5) ดู government-tax-calculator.ts
+  const brackets: Array<[ccFrom: number, ccTo: number | null, ratePerCc: number, sortOrder: number]> = [
+    [0, 600, 0.5, 0],
+    [600, 1800, 1.5, 1],
+    [1800, null, 4, 2],
+  ];
+  for (const fuelGroup of [GovTaxFuelGroup.ICE, GovTaxFuelGroup.HEV, GovTaxFuelGroup.PHEV]) {
+    for (const [ccFrom, ccTo, ratePerCc, sortOrder] of brackets) {
+      await prisma.governmentTaxCcBracket.upsert({
+        where: { vehicleFamily_fuelGroup_ccFrom: { vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup, ccFrom } },
+        create: { vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup, ccFrom, ccTo, ratePerCc, sortOrder },
+        update: { ccTo, ratePerCc, sortOrder },
+      });
+    }
+  }
+}
+
+async function seedGovernmentTaxMotorcycleFlat() {
+  // RY12 (รย.12) ICE: 100 บาท/ปี คงที่ทุก cc ตามกฎ ไม่ผูกกับช่วง cc ที่ใช้ตั้งราคาบริการบริษัท
+  await prisma.governmentTaxMotorcycleFlat.upsert({
+    where: { fuelGroup: GovTaxFuelGroup.ICE },
+    create: { fuelGroup: GovTaxFuelGroup.ICE, amount: 100 },
+    update: { amount: 100 },
+  });
+  // RY12 BEV: กฎแยกต่างหาก ยังไม่มีข้อมูล - เตรียมแถวไว้เฉยๆ รอผู้ใช้ให้เงื่อนไข
+  await prisma.governmentTaxMotorcycleFlat.upsert({
+    where: { fuelGroup: GovTaxFuelGroup.BEV },
+    create: { fuelGroup: GovTaxFuelGroup.BEV, amount: null, note: "รอกฎภาษีรถจักรยานยนต์ไฟฟ้าแยกต่างหาก" },
+    update: {},
+  });
+}
+
 async function seedParamTable(
   model: "feeCarBillParam" | "feeCarNoBillParam" | "feeMotorcycleBillParam" | "feeMotorcycleNoBillParam",
   rows: Array<[string, number | null, string?]>,
@@ -136,6 +176,12 @@ async function main() {
   await seedRelocate();
   await seedInspectionBangkok();
   await seedInspectionProvince();
+  await seedGovernmentTaxCcBrackets();
+  await seedGovernmentTaxMotorcycleFlat();
+  // ค่าภาษีรถยนต์/รถจักรยานยนต์ เดิมเคยเป็นแถว param เดี่ยวๆ ด้านล่าง (กรอกเอง) - ย้ายไปคำนวณจาก
+  // GovernmentTaxCcBracket/WeightBracket/MotorcycleFlat แทนแล้ว ลบแถวเก่าทิ้งกันข้อมูลซ้ำซ้อน/ขัดแย้งกัน
+  await prisma.feeCarBillParam.deleteMany({ where: { key: "ค่าภาษีรถยนต์" } });
+  await prisma.feeMotorcycleBillParam.deleteMany({ where: { key: "ค่าภาษีรถจักรยานยนต์" } });
 
   await seedParamTable("feeCarBillParam", [
     ["ค่าคำขอ (ปกติ)", 5, "ใช้เมื่อจดในจังหวัดภูมิลำเนาของเจ้าของรถ"],
@@ -144,7 +190,6 @@ async function main() {
     ["ค่าตรวจสภาพรถ (Step4)", 50, null],
     ["ค่าแผ่นป้ายทะเบียนรถ", 200, null],
     ["ค่าใบคู่มือการจดทะเบียน", 100, null],
-    ["ค่าภาษีรถยนต์", 0, "ยังไม่ได้กำหนดสูตร (อิง CC/น้ำหนัก/ประเภทเชื้อเพลิง) - กรอกเองต่อคันจนกว่าจะได้เงื่อนไข"],
     ["ค่าขอใช้เลขทะเบียน - เลขประมูล", 1500, null],
     ["ค่าขอใช้เลขทะเบียน - ไม่ใช่เลขประมูล", 500, null],
     ["ค่าทำแผ่นป้ายทะเบียนใหม่ - ป้ายขาวดำ", 200, null],
@@ -174,7 +219,6 @@ async function main() {
     ["ค่าตรวจสภาพรถ (จยย.)", 100, null],
     ["ค่าแผ่นป้ายทะเบียน", 100, null],
     ["ค่าใบคู่มือจดทะเบียน", 100, null],
-    ["ค่าภาษีรถจักรยานยนต์", 100, null],
   ]);
 
   await seedParamTable("feeMotorcycleNoBillParam", [
