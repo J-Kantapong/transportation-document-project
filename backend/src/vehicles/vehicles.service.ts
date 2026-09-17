@@ -10,7 +10,7 @@ interface VehicleRowError {
   errors: string[];
 }
 
-const MAX_BATCH_SIZE = 100;
+const MAX_BATCH_SIZE = 1000;
 
 type TransferStatus = 'ตัดบัญชี' | 'แจ้งย้าย';
 
@@ -63,7 +63,7 @@ export class VehiclesService {
   async createBatch(body: CreateVehiclesDto): Promise<{ count: number }> {
     const input = Array.isArray(body?.vehicles) ? (body.vehicles as Record<string, unknown>[]) : null;
     if (!input || input.length < 1 || input.length > MAX_BATCH_SIZE) {
-      throw new BadRequestException({ error: 'รองรับ 1–100 รายการต่อครั้ง' });
+      throw new BadRequestException({ error: 'รองรับ 1–1,000 รายการต่อครั้ง' });
     }
 
     const [customers, brands] = await Promise.all([

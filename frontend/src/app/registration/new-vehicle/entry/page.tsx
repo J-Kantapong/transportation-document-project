@@ -240,7 +240,7 @@ export default function VehicleEntryPage() {
         await workbook.xlsx.load(await file.arrayBuffer());
         const sheet = workbook.worksheets[0];
         if (!sheet) throw new Error("ไม่พบชีตข้อมูล");
-        if (sheet.rowCount > 101) throw new Error("รองรับไม่เกิน 100 แถวต่อไฟล์");
+        if (sheet.rowCount > 1001) throw new Error("รองรับไม่เกิน 1,000 แถวต่อไฟล์");
         cells = [];
         sheet.eachRow({ includeEmpty: true }, (row) => {
           const values: string[] = [];
@@ -262,7 +262,7 @@ export default function VehicleEntryPage() {
         .map((row, i) => ({ cells: row, sourceRow: i + 1 }))
         .filter((r) => r.cells.some((c) => String(c ?? "").trim()));
       if (withIndex.length < 2) throw new Error("ไฟล์ยังไม่มีข้อมูลรถ");
-      if (withIndex.length > 101) throw new Error("รองรับไม่เกิน 100 แถวต่อไฟล์");
+      if (withIndex.length > 1001) throw new Error("รองรับไม่เกิน 1,000 แถวต่อไฟล์");
 
       const headerRow = withIndex[0].cells.map((c) => (String(c).trim() === "ลักษณะรถ" ? "ประเภทรถ" : String(c).trim()));
       const dataRows = withIndex.slice(1);
@@ -571,7 +571,7 @@ export default function VehicleEntryPage() {
           </div>
           <div className="customer-form">
             <p style={{ lineHeight: 1.9 }}>
-              รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 100 คันต่อไฟล์ · ไม่เกิน 5 MB
+              รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 1,000 คันต่อไฟล์ · ไม่เกิน 5 MB
               <br />
               ใช้ 12 คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
               <br />
