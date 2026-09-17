@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
@@ -23,6 +23,18 @@ function toRowState(vehicle: TransferNoticeVehicle): RowState {
   };
 }
 
+const COMPLETED_DETAIL_FIELDS: Array<[string, (v: TransferNoticeVehicle) => string]> = [
+  ["วันที่รับงาน", (v) => isoToDisplayDate(v.date) || v.date],
+  ["ชื่อลูกค้า", (v) => v.customerName],
+  ["เลขตัวถัง", (v) => v.chassis],
+  ["ยี่ห้อ", (v) => v.brandName],
+  ["ประเภทรถ", (v) => v.body ?? ""],
+  ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince ?? ""],
+  ["สถานะ", (v) => v.status ?? ""],
+  ["วันที่เสร็จ", (v) => (v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "")],
+  ["ค่าใช้จ่าย", (v) => (v.transferCost ? `${v.transferCost} บาท` : "")],
+];
+
 export default function TransferNoticePage() {
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const dateIso = useMemo(() => displayDateToIso(dateText.replace(/\D/g, "")), [dateText]);
@@ -31,6 +43,9 @@ export default function TransferNoticePage() {
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [detail, setDetail] = useState<TransferNoticeVehicle | null>(null);
 
   async function load(forDate: string) {
     if (!forDate) return;
@@ -92,7 +107,8 @@ export default function TransferNoticePage() {
         completedDate: completedDateIso || null,
         cost: row.costText || null,
       });
-      patchRow(id, { saving: false, message: { text: "บันทึกแล้ว" } });
+      // Reload so a completed row moves out of "ต้องดำเนินการ" into "ตัดบัญชีแล้ว" below.
+      await load(dateIso);
     } catch (err) {
       patchRow(id, {
         saving: false,
@@ -101,6 +117,14 @@ export default function TransferNoticePage() {
     }
   }
 
+  function openDetail(vehicle: TransferNoticeVehicle) {
+    setDetail(vehicle);
+    dialogRef.current?.showModal();
+  }
+
+  const pendingVehicles = vehicles.filter((v) => !v.transferDone);
+  const completedVehicles = vehicles.filter((v) => v.transferDone);
+
   return (
     <section className="content">
       <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
@@ -108,7 +132,7 @@ export default function TransferNoticePage() {
       </Link>
       <h1 tabIndex={-1}>แจ้งย้าย/ตัดบัญชี</h1>
 
-      <div className="panel">
+      <div className="panel" style={{ marginBottom: 24 }}>
         <div className="panel-head">
           <h2>รายการรถที่ต้องดำเนินการ</h2>
           <label className="field" style={{ margin: 0 }}>
@@ -130,8 +154,10 @@ export default function TransferNoticePage() {
           <div className="empty-customers" role="alert">
             {error}
           </div>
-        ) : !vehicles.length ? (
-          <div className="empty-customers">ไม่มีรถที่รับงานในวันที่เลือก</div>
+        ) : !pendingVehicles.length ? (
+          <div className="empty-customers">
+            {vehicles.length ? "ดำเนินการครบทุกคันแล้ว" : "ไม่มีรถที่รับงานในวันที่เลือก"}
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -150,7 +176,7 @@ export default function TransferNoticePage() {
                 </tr>
               </thead>
               <tbody>
-                {vehicles.map((v) => {
+                {pendingVehicles.map((v) => {
                   const row = rows[v.id];
                   if (!row) return null;
                   return (
@@ -216,6 +242,84 @@ export default function TransferNoticePage() {
           </div>
         )}
       </div>
+
+      <section className="panel customer-list">
+        <div className="panel-head">
+          <h2>รายการที่ตัดบัญชีแล้ว</h2>
+          <button className="text-button" onClick={() => load(dateIso)}>
+            โหลดรายการใหม่
+          </button>
+        </div>
+        {!loading && !error && (
+          <p style={{ padding: "0 24px 12px", fontSize: 12 }}>ในวันที่เลือก แสดง {completedVehicles.length} รายการ</p>
+        )}
+        {loading ? (
+          <div className="empty-customers">กำลังโหลดรายการ…</div>
+        ) : error ? (
+          <div className="empty-customers" role="alert">
+            {error}
+          </div>
+        ) : !completedVehicles.length ? (
+          <div className="empty-customers">ยังไม่มีรายการที่ดำเนินการเสร็จในวันที่เลือก</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ชื่อลูกค้า</th>
+                  <th>เลขตัวถัง</th>
+                  <th>ยี่ห้อ</th>
+                  <th>สถานะ</th>
+                  <th>วันที่เสร็จ</th>
+                  <th>ค่าใช้จ่าย</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {completedVehicles.map((v) => (
+                  <tr key={v.id}>
+                    <td>{v.customerName}</td>
+                    <td>{v.chassis}</td>
+                    <td>{v.brandName}</td>
+                    <td>{v.status || "—"}</td>
+                    <td>{v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "—"}</td>
+                    <td>{v.transferCost ? `${v.transferCost} บาท` : "—"}</td>
+                    <td>
+                      <button className="text-button" onClick={() => openDetail(v)}>
+                        ดูข้อมูล
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <dialog
+        ref={dialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) dialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          ×
+        </button>
+        {detail && (
+          <>
+            <h2>รายการที่ตัดบัญชีแล้ว</h2>
+            <dl className="customer-detail">
+              {COMPLETED_DETAIL_FIELDS.map(([label, getValue]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{getValue(detail) || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        )}
+      </dialog>
     </section>
   );
 }
