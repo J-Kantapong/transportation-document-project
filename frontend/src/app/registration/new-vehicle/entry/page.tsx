@@ -21,7 +21,7 @@ const EMPTY_SINGLE: NormalizedVehicleRow = {
   weight: "",
   color: "",
   body: "",
-  registrationProvince: "",
+  registrationProvince: "กรุงเทพมหานคร",
   ownerProvince: "",
 };
 
