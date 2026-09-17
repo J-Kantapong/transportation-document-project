@@ -35,10 +35,18 @@ Repo root has `render.yaml` — a Render Blueprint. In the Render dashboard:
    - `DIRECT_URL` — the Neon **direct** connection string.
    - `FRONTEND_ORIGIN` — leave as a placeholder (e.g. `https://placeholder.vercel.app`) for now;
      you'll come back and set it to the real Vercel URL after step 3.
-3. Deploy. The blueprint's `buildCommand` runs `prisma generate` + `nest build`, and
-   `preDeployCommand` runs `prisma migrate deploy` against `DIRECT_URL` before the new
-   instance takes traffic.
+3. Deploy. The blueprint's `buildCommand` runs `prisma generate`, then `prisma migrate deploy`
+   against `DIRECT_URL`, then `nest build` — all in one step. (Render's separate
+   `preDeployCommand` hook needs a paid plan, so on the free tier migrations run as part of the
+   build instead; if you're on a paid plan you can split `prisma migrate deploy` out into
+   `preDeployCommand` so it only runs once per deploy instead of once per build.)
 4. Note the resulting service URL, e.g. `https://transportation-document-backend.onrender.com`.
+
+If you set this service up by hand instead of via the Blueprint, double check in
+**Settings → Build & Deploy**: Root Directory `backend`, Build Command as above, and
+**Start Command** `npm run start:prod` (not `npm run start` / `npm start`, which runs
+unbuilt TypeScript directly via `nest start` and will fail with "property does not exist on
+type PrismaService" errors since the Prisma client and compiled output were never produced).
 
 Free-tier Render web services spin down after ~15 minutes idle; the first request after that
 takes a few seconds (cold start). Fine for a prototype, worth upgrading the plan before real use.
