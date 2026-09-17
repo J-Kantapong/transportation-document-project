@@ -1,0 +1,7 @@
+{
+  "name": "transportation-document-project",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/dev.sh"
+  }
+}
