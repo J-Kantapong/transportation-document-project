@@ -131,8 +131,9 @@ export const api = {
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
 
-  listTransferNotice: (date: string) =>
-    request<{ vehicles: TransferNoticeVehicle[] }>(`/api/vehicles/transfer-notice?date=${date}`),
+  listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
+  listRecentlyCompletedTransferNotice: () =>
+    request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/completed'),
   updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
     request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
       `/api/vehicles/${id}/transfer-notice`,

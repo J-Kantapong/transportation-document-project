@@ -109,20 +109,20 @@ export class VehiclesService {
       });
     }
 
-    await this.prisma.$transaction(rows.map((row) => this.prisma.vehicle.create({ data: this.toCreateData(row) })));
+    // createMany is one SQL statement instead of one round trip per row - a $transaction of up
+    // to MAX_BATCH_SIZE individual .create() calls was blowing past Prisma's 5s default
+    // transaction timeout on batches above ~80 rows against the remote DB.
+    await this.prisma.vehicle.createMany({ data: rows.map((row) => this.toCreateData(row)) });
 
     return { count: rows.length };
   }
 
-  async findForTransferNotice(dateParam: string) {
-    if (!isValidDateParam(dateParam)) {
-      throw new BadRequestException({ error: 'พารามิเตอร์ date ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
-    }
-
+  // ทุกคันที่ transferDone = false ไม่จำกัดวันที่รับงาน - ใช้แสดงคิวงานที่ต้องดำเนินการทั้งหมด
+  async findPendingTransferNotice() {
     const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { date: new Date(`${dateParam}T00:00:00.000Z`) },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        where: { transferDone: false },
+        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
@@ -132,25 +132,61 @@ export class VehiclesService {
       this.prisma.feeRelocate.findMany(),
     ]);
 
-    return vehicles.map((vehicle) => {
-      const status = getTransferStatus(vehicle.registrationProvince);
-      const suggestedCost = this.suggestTransferCost(status, vehicle.body, vehicle.brand.name, deregistrationFees, relocateFees);
+    return vehicles.map((vehicle) => this.mapTransferNoticeVehicle(vehicle, deregistrationFees, relocateFees));
+  }
 
-      return {
-        id: vehicle.id,
-        date: vehicle.date.toISOString().slice(0, 10),
-        customerName: vehicle.customer.name,
-        chassis: vehicle.chassis,
-        brandName: vehicle.brand.name,
-        body: vehicle.body,
-        registrationProvince: vehicle.registrationProvince,
-        status,
-        suggestedCost,
-        transferDone: vehicle.transferDone,
-        transferCompletedDate: vehicle.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
-        transferCost: vehicle.transferCost,
-      };
-    });
+  // ทุกคันที่ transferDone = true เรียงจากทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน
+  async findRecentlyCompletedTransferNotice() {
+    const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { transferDone: true },
+        orderBy: [{ transferCompletedDate: 'desc' }, { updatedAt: 'desc' }],
+        take: 100,
+        include: {
+          customer: { select: { name: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.feeDeregistration.findMany(),
+      this.prisma.feeRelocate.findMany(),
+    ]);
+
+    return vehicles.map((vehicle) => this.mapTransferNoticeVehicle(vehicle, deregistrationFees, relocateFees));
+  }
+
+  private mapTransferNoticeVehicle(
+    vehicle: {
+      id: string;
+      date: Date;
+      chassis: string;
+      body: string | null;
+      registrationProvince: string | null;
+      transferDone: boolean;
+      transferCompletedDate: Date | null;
+      transferCost: unknown;
+      customer: { name: string };
+      brand: { name: string };
+    },
+    deregistrationFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
+    relocateFees: Array<{ vehicleType: string; brand: string; noBillAmount: unknown; billAmount: unknown }>,
+  ) {
+    const status = getTransferStatus(vehicle.registrationProvince);
+    const suggestedCost = this.suggestTransferCost(status, vehicle.body, vehicle.brand.name, deregistrationFees, relocateFees);
+
+    return {
+      id: vehicle.id,
+      date: vehicle.date.toISOString().slice(0, 10),
+      customerName: vehicle.customer.name,
+      chassis: vehicle.chassis,
+      brandName: vehicle.brand.name,
+      body: vehicle.body,
+      registrationProvince: vehicle.registrationProvince,
+      status,
+      suggestedCost,
+      transferDone: vehicle.transferDone,
+      transferCompletedDate: vehicle.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
+      transferCost: vehicle.transferCost,
+    };
   }
 
   private suggestTransferCost(

@@ -18,9 +18,14 @@ export class VehiclesController {
     return this.vehiclesService.createBatch(body);
   }
 
-  @Get('transfer-notice')
-  async findForTransferNotice(@Query('date') date: string) {
-    return { vehicles: await this.vehiclesService.findForTransferNotice(date) };
+  @Get('transfer-notice/pending')
+  async findPendingTransferNotice() {
+    return { vehicles: await this.vehiclesService.findPendingTransferNotice() };
+  }
+
+  @Get('transfer-notice/completed')
+  async findRecentlyCompletedTransferNotice() {
+    return { vehicles: await this.vehiclesService.findRecentlyCompletedTransferNotice() };
   }
 
   @Patch(':id/transfer-notice')
