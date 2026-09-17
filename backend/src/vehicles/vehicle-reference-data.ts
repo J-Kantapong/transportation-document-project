@@ -1,7 +1,7 @@
 // Ported from prototype/sites-reference/shared/vehicle-data.js — keep both in sync until the
 // Next.js frontend replaces the prototype as the source of truth for these lists.
 
-export const FUEL_TYPES = ['น้ำมัน', 'ดีเซล', 'LPG', 'NGV', 'ไฮบริด', 'ไฟฟ้า'] as const;
+export const FUEL_TYPES = ['เบนซิน', 'ดีเซล', 'LPG', 'NGV', 'ไฮบริด', 'ไฟฟ้า'] as const;
 
 export const VEHICLE_TYPES = [
   'รย.12-น้อยกว่า 300cc',
