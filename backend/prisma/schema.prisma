@@ -164,3 +164,78 @@ model CaseDocument {
 
   @@index([caseId])
 }
+
+// --- Fee master/reference tables -------------------------------------------------
+// Ported from the user's registration fee pricing spec (Excel workbook committed at
+// prototype/sites-reference/docs/vehicle_registration_pricing_db.xlsx). vehicleType/brand/
+// province are free-text keys validated at the application level against
+// src/vehicles/vehicle-reference-data.ts (VEHICLE_TYPES, PROVINCES), matching how
+// Vehicle.body/registrationProvince/ownerProvince already work — no new enum/FK needed.
+// Amounts are the No bill / Bill totals used at each step of the registration workflow
+// (ตัดบัญชี/แจ้งย้าย, ตรวจรถ, ยื่นเอกสารจดทะเบียน). Nullable amount = not yet provided by the
+// user; do not guess a value, leave it for them to fill in.
+
+model FeeDeregistration {
+  id          String  @id @default(cuid())
+  vehicleType String // ประเภทรถ (รวมรายการพิเศษ "นำรถมาตรวจ")
+  brand       String  @default("อื่นๆ") // ยี่ห้อ (แยกเฉพาะ รย.1-เก๋ง 2 ตอน)
+  amount      Decimal @db.Decimal(10, 2) // ค่าตัดบัญชี (บาท, No bill)
+
+  @@unique([vehicleType, brand])
+}
+
+model FeeRelocate {
+  id           String  @id @default(cuid())
+  vehicleType  String
+  brand        String  @default("อื่นๆ")
+  noBillAmount Decimal @db.Decimal(10, 2) // ค่าแจ้งย้าย (No bill)
+  billAmount   Decimal @default(5) @db.Decimal(10, 2) // ค่าแจ้งย้าย (Bill, คงที่ 5 บาท/คัน)
+
+  @@unique([vehicleType, brand])
+}
+
+model FeeInspectionBangkok {
+  id          String  @id @default(cuid())
+  vehicleType String
+  brand       String  @default("อื่นๆ")
+  amount      Decimal @db.Decimal(10, 2) // ค่าตรวจรถ กทม. (เฉพาะกรณีตัดบัญชี)
+
+  @@unique([vehicleType, brand])
+}
+
+model FeeInspectionProvince {
+  id          String   @id @default(cuid())
+  province    String
+  vehicleType String
+  amount      Decimal? @db.Decimal(10, 2) // ยังไม่มีข้อมูลครบทุกจังหวัด - null จนกว่าผู้ใช้จะให้ราคา
+
+  @@unique([province, vehicleType])
+}
+
+model FeeCarBillParam {
+  id     String   @id @default(cuid())
+  key    String   @unique // รายการ เช่น "ค่าคำขอ (ปกติ)"
+  amount Decimal? @db.Decimal(10, 2)
+  note   String?
+}
+
+model FeeCarNoBillParam {
+  id     String   @id @default(cuid())
+  key    String   @unique
+  amount Decimal? @db.Decimal(10, 2)
+  note   String?
+}
+
+model FeeMotorcycleBillParam {
+  id     String   @id @default(cuid())
+  key    String   @unique
+  amount Decimal? @db.Decimal(10, 2)
+  note   String?
+}
+
+model FeeMotorcycleNoBillParam {
+  id     String   @id @default(cuid())
+  key    String   @unique
+  amount Decimal? @db.Decimal(10, 2)
+  note   String?
+}

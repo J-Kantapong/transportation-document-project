@@ -25,7 +25,7 @@ const EMPTY_SINGLE: NormalizedVehicleRow = {
 };
 
 const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
-  ["วันที่", (v) => v.date],
+  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
   ["ชื่อลูกค้า", (v) => v.customerName],
   ["เลขตัวถัง", (v) => v.chassis],
   ["เลขเครื่อง", (v) => v.engine ?? ""],
@@ -45,6 +45,29 @@ function todayIso(): string {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join(
     "-",
   );
+}
+
+// Native <input type="date"> renders in the browser/OS locale format (often mm/dd/yyyy),
+// which cannot be overridden via the lang attribute. Use a text input formatted as
+// dd/mm/yyyy instead, converting to/from the ISO string that the rest of the form expects.
+function isoToDisplayDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+}
+
+function formatDateDigits(digits: string): string {
+  const d = digits.slice(0, 2);
+  const m = digits.slice(2, 4);
+  const y = digits.slice(4, 8);
+  return [d, m, y].filter(Boolean).join("/");
+}
+
+function displayDateToIso(digits: string): string {
+  if (digits.length !== 8) return "";
+  const iso = `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
+  const year = Number(digits.slice(4, 8));
+  if (year < 1900 || year > 2100) return "";
+  return new Date(iso).toISOString().slice(0, 10) === iso ? iso : "";
 }
 
 function parseCSV(text: string): string[][] {
@@ -115,6 +138,7 @@ export default function VehicleEntryPage() {
   const [brandMessage, setBrandMessage] = useState("");
 
   const [single, setSingle] = useState<NormalizedVehicleRow>({ ...EMPTY_SINGLE, date: todayIso() });
+  const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const [singleSaving, setSingleSaving] = useState(false);
   const [singleMessage, setSingleMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
@@ -178,6 +202,12 @@ export default function VehicleEntryPage() {
     setSingle((prev) => ({ ...prev, [key]: value }));
   }
 
+  function handleDateTextChange(raw: string) {
+    const digits = raw.replace(/\D/g, "").slice(0, 8);
+    setDateText(formatDateDigits(digits));
+    updateSingle("date", displayDateToIso(digits));
+  }
+
   async function handleAddBrand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBrandSaving(true);
@@ -209,6 +239,7 @@ export default function VehicleEntryPage() {
     try {
       await api.createVehicles([row]);
       setSingle({ ...EMPTY_SINGLE, date: todayIso() });
+      setDateText(isoToDisplayDate(todayIso()));
       setSingleMessage({ text: "บันทึกข้อมูลรถเรียบร้อยแล้ว" });
       await loadVehicles();
     } catch (error) {
@@ -435,10 +466,12 @@ export default function VehicleEntryPage() {
               <label className="field">
                 วันที่ *
                 <input
-                  type="date"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="วว/ดด/ปปปป"
                   required
-                  value={single.date}
-                  onChange={(e) => updateSingle("date", e.target.value)}
+                  value={dateText}
+                  onChange={(e) => handleDateTextChange(e.target.value)}
                 />
               </label>
               <label className="field">
@@ -657,7 +690,7 @@ export default function VehicleEntryPage() {
               <tbody>
                 {vehicles.map((v) => (
                   <tr key={v.id}>
-                    <td>{v.date}</td>
+                    <td>{isoToDisplayDate(v.date) || v.date}</td>
                     <td>{v.customerName}</td>
                     <td>{v.chassis}</td>
                     <td>{v.brandName}</td>
