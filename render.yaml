@@ -9,6 +9,8 @@ services:
     startCommand: npm run start:prod
     envVars:
       - key: DATABASE_URL
-        sync: false
+        sync: false # Neon pooled connection string (-pooler host) — used by the running app
+      - key: DIRECT_URL
+        sync: false # Neon direct connection string (no -pooler) — used by prisma migrate deploy
       - key: FRONTEND_ORIGIN
         sync: false

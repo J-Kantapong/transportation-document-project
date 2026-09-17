@@ -10,7 +10,15 @@ round of "come back and set this env var" after the backend has a real URL.
 Already provisioned. Current production database: Neon project
 `transportation-document-project` (`small-river-26857171`, `aws-ap-southeast-1`).
 
-- Connection string lives in `backend/.env` locally (`DATABASE_URL`, gitignored — never commit it).
+- Connection strings live in `backend/.env` locally (gitignored — never commit them). Two are needed:
+  - `DATABASE_URL` — the **pooled** connection string (host ends in `-pooler`). Used by the running
+    app (`backend/src/prisma/prisma.service.ts`), which is a long-running server, not a serverless
+    function — the pooler just adds headroom against exhausting Neon's connection limit.
+  - `DIRECT_URL` — the **direct** (non-pooled) connection string. Used only by Prisma CLI commands
+    (`prisma migrate deploy`, etc. — see `backend/prisma7.config.ts`), because Neon's PgBouncer
+    pooler doesn't support the session-level features schema migrations rely on.
+  - Get both with `neon connection-string --project-id small-river-26857171` (direct) and
+    `--pooled` (pooled), or copy them from the Neon dashboard.
 - Migrations are applied with `npx prisma migrate deploy` (Render runs this automatically, see below).
 - If you want separate dev/staging/prod databases, use a Neon branch per environment instead of a
   new project — same schema, isolated data. See the `neon-postgres` skill / Neon docs for branching.
@@ -21,13 +29,14 @@ Repo root has `render.yaml` — a Render Blueprint. In the Render dashboard:
 
 1. **New +** → **Blueprint** → connect this GitHub repo → Render reads `render.yaml` and
    proposes a web service named `transportation-document-backend` rooted at `backend/`.
-2. Before the first deploy, set the two env vars the blueprint leaves blank (`sync: false`
+2. Before the first deploy, set the three env vars the blueprint leaves blank (`sync: false`
    means "you fill this in", not "optional"):
-   - `DATABASE_URL` — the Neon connection string above.
+   - `DATABASE_URL` — the Neon **pooled** connection string.
+   - `DIRECT_URL` — the Neon **direct** connection string.
    - `FRONTEND_ORIGIN` — leave as a placeholder (e.g. `https://placeholder.vercel.app`) for now;
      you'll come back and set it to the real Vercel URL after step 3.
 3. Deploy. The blueprint's `buildCommand` runs `prisma generate` + `nest build`, and
-   `preDeployCommand` runs `prisma migrate deploy` against `DATABASE_URL` before the new
+   `preDeployCommand` runs `prisma migrate deploy` against `DIRECT_URL` before the new
    instance takes traffic.
 4. Note the resulting service URL, e.g. `https://transportation-document-backend.onrender.com`.
 
@@ -55,7 +64,8 @@ permissive local-dev default.
 
 | Var | Where | Value |
 |---|---|---|
-| `DATABASE_URL` | Render (backend) | Neon connection string |
+| `DATABASE_URL` | Render (backend) | Neon **pooled** connection string (`-pooler` host) |
+| `DIRECT_URL` | Render (backend) | Neon **direct** connection string (no `-pooler`) |
 | `FRONTEND_ORIGIN` | Render (backend) | the Vercel deployment URL |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel (frontend) | the Render deployment URL |
 
