@@ -270,6 +270,7 @@ function SendPanel({
                       min={0}
                       step="any"
                       value={row.costText}
+                      disabled={!row.selectedType}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                       style={{ width: 80 }}
                     />
@@ -380,6 +381,8 @@ function ResultPanel({
                           patchRow(v.id, {
                             selectedResult: isChecked ? panelResult : null,
                             dateText: isChecked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
+                            // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กกลับให้คืนราคาแนะนำถ้าช่องว่างอยู่
+                            costText: isChecked ? row.costText || v.inspectionSentCost || v.suggestedCost || "" : "",
                           });
                         }}
                       />
@@ -406,6 +409,7 @@ function ResultPanel({
                       min={0}
                       step="any"
                       value={row.costText}
+                      disabled={!checked}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                       style={{ width: 80 }}
                     />
@@ -554,6 +558,7 @@ function Round2Panel({
                       min={0}
                       step="any"
                       value={row.costText}
+                      disabled={!row.selected}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                       style={{ width: 80 }}
                     />
@@ -828,7 +833,8 @@ export default function InspectionPage() {
       selectedType: checked ? type : null,
       // Default = วันถัดไปของวันที่รับงาน (ไม่ใช่วันนี้) - งานส่งตรวจปกติจะทำวันรุ่งขึ้น
       dateText: checked && !row.dateText && vehicle ? isoToDisplayDate(addDaysIso(vehicle.date, 1)) : row.dateText,
-      costText: checked ? costForSentType(type, vehicle?.suggestedCost ?? null) : row.costText,
+      // เอาติ๊กออก = เอาราคาออกด้วย (ช่องราคาจะถูก disable ต่อเมื่อไม่ได้ติ๊กอยู่แล้ว)
+      costText: checked ? costForSentType(type, vehicle?.suggestedCost ?? null) : "",
     });
   }
 
@@ -848,7 +854,7 @@ export default function InspectionPage() {
             costText: costForSentType(type, v.suggestedCost),
           };
         } else if (row.selectedType === type) {
-          next[v.id] = { ...row, selectedType: null };
+          next[v.id] = { ...row, selectedType: null, costText: "" };
         }
       }
       return next;
@@ -921,9 +927,14 @@ export default function InspectionPage() {
         const row = next[v.id];
         if (!row) continue;
         if (checked) {
-          next[v.id] = { ...row, selectedResult: panelResult, dateText: row.dateText || today };
+          next[v.id] = {
+            ...row,
+            selectedResult: panelResult,
+            dateText: row.dateText || today,
+            costText: row.costText || v.inspectionSentCost || v.suggestedCost || "",
+          };
         } else if (row.selectedResult === panelResult) {
-          next[v.id] = { ...row, selectedResult: null };
+          next[v.id] = { ...row, selectedResult: null, costText: "" };
         }
       }
       return next;
@@ -1015,7 +1026,8 @@ export default function InspectionPage() {
     patchRound2Row(id, {
       selected: checked,
       dateText: checked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
-      costText: checked && !row.costText ? vehicle?.suggestedRound2Cost ?? "" : row.costText,
+      // เอาติ๊กออก = เอาราคาออกด้วย
+      costText: checked ? row.costText || vehicle?.suggestedRound2Cost || "" : "",
     });
   }
 
@@ -1030,10 +1042,10 @@ export default function InspectionPage() {
             ...row,
             selected: true,
             dateText: round2SelectAllDateText || isoToDisplayDate(todayIso()),
-            costText: v.suggestedRound2Cost ?? row.costText,
+            costText: row.costText || v.suggestedRound2Cost || "",
           };
         } else {
-          next[v.id] = { ...row, selected: false };
+          next[v.id] = { ...row, selected: false, costText: "" };
         }
       }
       return next;
