@@ -3,7 +3,29 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionDto } from './dto/update-inspection.dto.js';
+import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
+
+const EDITABLE_VEHICLE_FIELDS = [
+  ['date', 'วันที่'],
+  ['customerId', 'ลูกค้า'],
+  ['chassis', 'เลขตัวถัง'],
+  ['engine', 'เลขเครื่อง'],
+  ['brandId', 'ยี่ห้อ'],
+  ['fuel', 'ประเภทเชื้อเพลิง'],
+  ['cc', 'ขนาด CC'],
+  ['weight', 'น้ำหนักรถ'],
+  ['color', 'สี'],
+  ['body', 'ประเภทรถ'],
+  ['registrationProvince', 'จังหวัดที่จดทะเบียน'],
+  ['ownerProvince', 'จังหวัดเจ้าของรถ'],
+] as const;
+
+function diffField(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value);
+}
 
 interface VehicleRowError {
   row: number;
@@ -115,6 +137,48 @@ export class VehiclesService {
     await this.prisma.vehicle.createMany({ data: rows.map((row) => this.toCreateData(row)) });
 
     return { count: rows.length };
+  }
+
+  // แก้ไขรถที่บันทึกแล้ว - ต้องมี remark ทุกครั้ง ไม่งั้นห้ามแก้ไข บันทึกทุกครั้งลง VehicleEditLog
+  async updateVehicle(id: string, body: UpdateVehicleDto) {
+    const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไข (Remark)' });
+
+    const existing = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+    const row = normalizeVehicleRow(body as unknown as Record<string, unknown>);
+    const errors = getVehicleRowErrors(row);
+    if (errors.length) {
+      throw new BadRequestException({ error: 'กรุณาแก้ไขข้อมูลก่อนบันทึก', errors: [{ row: 1, errors }] });
+    }
+
+    const [customer, brand] = await Promise.all([
+      this.prisma.customer.findUnique({ where: { id: row.customerId } }),
+      this.prisma.brand.findUnique({ where: { id: row.brandId } }),
+    ]);
+    if (!customer) throw new BadRequestException({ error: 'ไม่พบลูกค้าในฐานข้อมูล' });
+    if (!brand) throw new BadRequestException({ error: 'ไม่พบยี่ห้อในฐานข้อมูล' });
+
+    if (row.chassis !== existing.chassis) {
+      const duplicate = await this.prisma.vehicle.findUnique({ where: { chassis: row.chassis } });
+      if (duplicate) throw new ConflictException({ error: 'เลขตัวถังนี้มีอยู่แล้ว' });
+    }
+
+    const data = this.toCreateData(row);
+    const changes: Record<string, { from: string | null; to: string | null }> = {};
+    for (const [key] of EDITABLE_VEHICLE_FIELDS) {
+      const from = diffField((existing as Record<string, unknown>)[key]);
+      const to = diffField((data as Record<string, unknown>)[key]);
+      if (from !== to) changes[key] = { from, to };
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.vehicle.update({ where: { id }, data }),
+      this.prisma.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes) } }),
+    ]);
+
+    return { id: updated.id };
   }
 
   // ทุกคันที่ transferDone = false ไม่จำกัดวันที่รับงาน - ใช้แสดงคิวงานที่ต้องดำเนินการทั้งหมด

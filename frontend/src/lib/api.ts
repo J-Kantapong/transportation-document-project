@@ -149,6 +149,8 @@ export const api = {
   listVehicles: () => request<{ vehicles: Vehicle[] }>('/api/vehicles'),
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
+  updateVehicle: (id: string, data: Record<string, string>) =>
+    request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
   listRecentlyCompletedTransferNotice: () =>

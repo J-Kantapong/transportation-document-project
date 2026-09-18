@@ -25,6 +25,127 @@ const EMPTY_SINGLE: NormalizedVehicleRow = {
   ownerProvince: "",
 };
 
+// Shared field grid for both the single-entry form and the edit dialog.
+function VehicleFieldsFieldset({
+  row,
+  dateText,
+  onDateTextChange,
+  onFieldChange,
+  customerOptions,
+  brands,
+}: {
+  row: NormalizedVehicleRow;
+  dateText: string;
+  onDateTextChange: (raw: string) => void;
+  onFieldChange: <K extends keyof NormalizedVehicleRow>(key: K, value: string) => void;
+  customerOptions: Array<{ id: string; label: string }>;
+  brands: Brand[];
+}) {
+  return (
+    <div className="vehicle-fields">
+      <label className="field">
+        วันที่ *
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="วว/ดด/ปปปป"
+          required
+          value={dateText}
+          onChange={(e) => onDateTextChange(e.target.value)}
+        />
+      </label>
+      <label className="field">
+        ชื่อลูกค้า *
+        <select required value={row.customerId} onChange={(e) => onFieldChange("customerId", e.target.value)}>
+          <option value="">เลือกลูกค้า</option>
+          {customerOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        เลขตัวถัง *
+        <input maxLength={250} required value={row.chassis} onChange={(e) => onFieldChange("chassis", e.target.value)} />
+      </label>
+      <label className="field">
+        เลขเครื่อง
+        <input maxLength={250} value={row.engine} onChange={(e) => onFieldChange("engine", e.target.value)} />
+      </label>
+      <label className="field">
+        ยี่ห้อ *
+        <select required value={row.brandId} onChange={(e) => onFieldChange("brandId", e.target.value)}>
+          <option value="">เลือกยี่ห้อ</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        ประเภทเชื้อเพลิง
+        <select value={row.fuel} onChange={(e) => onFieldChange("fuel", e.target.value)}>
+          <option value="">เลือกประเภทเชื้อเพลิง</option>
+          {FUEL_TYPES.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        ขนาด CC
+        <input type="number" min={0} step="any" value={row.cc} onChange={(e) => onFieldChange("cc", e.target.value)} />
+      </label>
+      <label className="field">
+        น้ำหนักรถ (กก.)
+        <input
+          type="number"
+          min={0}
+          step="any"
+          value={row.weight}
+          onChange={(e) => onFieldChange("weight", e.target.value)}
+        />
+      </label>
+      <label className="field">
+        สี
+        <input maxLength={250} value={row.color} onChange={(e) => onFieldChange("color", e.target.value)} />
+      </label>
+      <label className="field">
+        ประเภทรถ
+        <select value={row.body} onChange={(e) => onFieldChange("body", e.target.value)}>
+          <option value="">เลือกประเภทรถ</option>
+          {VEHICLE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        จังหวัดที่จดทะเบียน
+        <select value={row.registrationProvince} onChange={(e) => onFieldChange("registrationProvince", e.target.value)}>
+          <option value="">เลือกจังหวัด</option>
+          {PROVINCES.map((p) => (
+            <option key={p}>{p}</option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        จังหวัดเจ้าของรถ
+        <select value={row.ownerProvince} onChange={(e) => onFieldChange("ownerProvince", e.target.value)}>
+          <option value="">เลือกจังหวัด</option>
+          {PROVINCES.map((p) => (
+            <option key={p}>{p}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
   ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
   ["ชื่อลูกค้า", (v) => v.customerName],
@@ -123,6 +244,14 @@ export default function VehicleEntryPage() {
   const [vehiclesError, setVehiclesError] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<Vehicle | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editRow, setEditRow] = useState<NormalizedVehicleRow>(EMPTY_SINGLE);
+  const [editDateText, setEditDateText] = useState("");
+  const [editRemark, setEditRemark] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editMessage, setEditMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const editDialogRef = useRef<HTMLDialogElement>(null);
 
   async function loadLookups() {
     setLookupReady(false);
@@ -364,6 +493,66 @@ export default function VehicleEntryPage() {
     dialogRef.current?.showModal();
   }
 
+  function openEdit(vehicle: Vehicle) {
+    setEditingId(vehicle.id);
+    setEditRow({
+      date: vehicle.date,
+      customerId: vehicle.customerId,
+      chassis: vehicle.chassis,
+      engine: vehicle.engine ?? "",
+      brandId: vehicle.brandId,
+      fuel: vehicle.fuel ?? "",
+      cc: vehicle.cc ?? "",
+      weight: vehicle.weight ?? "",
+      color: vehicle.color ?? "",
+      body: vehicle.body ?? "",
+      registrationProvince: vehicle.registrationProvince ?? "",
+      ownerProvince: vehicle.ownerProvince ?? "",
+    });
+    setEditDateText(isoToDisplayDate(vehicle.date));
+    setEditRemark("");
+    setEditMessage({ text: "" });
+    editDialogRef.current?.showModal();
+  }
+
+  function updateEditRow<K extends keyof NormalizedVehicleRow>(key: K, value: string) {
+    setEditRow((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleEditDateTextChange(raw: string) {
+    const digits = raw.replace(/\D/g, "").slice(0, 8);
+    setEditDateText(formatDateDigits(digits));
+    updateEditRow("date", displayDateToIso(digits));
+  }
+
+  async function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingId) return;
+    const remark = editRemark.trim();
+    if (!remark) {
+      setEditMessage({ text: "กรุณาระบุเหตุผลที่แก้ไข (Remark) ก่อนบันทึก", error: true });
+      return;
+    }
+    const row = normalizeVehicleRow(editRow);
+    const errors = getVehicleRowErrors(row);
+    if (errors.length) {
+      setEditMessage({ text: errors.join(" · "), error: true });
+      return;
+    }
+    setEditSaving(true);
+    setEditMessage({ text: "กำลังบันทึก…" });
+    try {
+      await api.updateVehicle(editingId, { ...row, remark });
+      setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
+      await loadVehicles();
+      editDialogRef.current?.close();
+    } catch (error) {
+      setEditMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   const batchHasErrors = batchRows.some((r) => r.issues.length > 0);
 
   return (
@@ -434,121 +623,14 @@ export default function VehicleEntryPage() {
             <span className="muted">* จำเป็นต้องกรอก</span>
           </div>
           <form className="customer-form" onSubmit={handleSingleSubmit}>
-            <div className="vehicle-fields">
-              <label className="field">
-                วันที่ *
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
-                  required
-                  value={dateText}
-                  onChange={(e) => handleDateTextChange(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                ชื่อลูกค้า *
-                <select required value={single.customerId} onChange={(e) => updateSingle("customerId", e.target.value)}>
-                  <option value="">เลือกลูกค้า</option>
-                  {customerOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                เลขตัวถัง *
-                <input
-                  maxLength={250}
-                  required
-                  value={single.chassis}
-                  onChange={(e) => updateSingle("chassis", e.target.value)}
-                />
-              </label>
-              <label className="field">
-                เลขเครื่อง
-                <input maxLength={250} value={single.engine} onChange={(e) => updateSingle("engine", e.target.value)} />
-              </label>
-              <label className="field">
-                ยี่ห้อ *
-                <select required value={single.brandId} onChange={(e) => updateSingle("brandId", e.target.value)}>
-                  <option value="">เลือกยี่ห้อ</option>
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                ประเภทเชื้อเพลิง
-                <select value={single.fuel} onChange={(e) => updateSingle("fuel", e.target.value)}>
-                  <option value="">เลือกประเภทเชื้อเพลิง</option>
-                  {FUEL_TYPES.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                ขนาด CC
-                <input
-                  type="number"
-                  min={0}
-                  step="any"
-                  value={single.cc}
-                  onChange={(e) => updateSingle("cc", e.target.value)}
-                />
-              </label>
-              <label className="field">
-                น้ำหนักรถ (กก.)
-                <input
-                  type="number"
-                  min={0}
-                  step="any"
-                  value={single.weight}
-                  onChange={(e) => updateSingle("weight", e.target.value)}
-                />
-              </label>
-              <label className="field">
-                สี
-                <input maxLength={250} value={single.color} onChange={(e) => updateSingle("color", e.target.value)} />
-              </label>
-              <label className="field">
-                ประเภทรถ
-                <select value={single.body} onChange={(e) => updateSingle("body", e.target.value)}>
-                  <option value="">เลือกประเภทรถ</option>
-                  {VEHICLE_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                จังหวัดที่จดทะเบียน
-                <select
-                  value={single.registrationProvince}
-                  onChange={(e) => updateSingle("registrationProvince", e.target.value)}
-                >
-                  <option value="">เลือกจังหวัด</option>
-                  {PROVINCES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                จังหวัดเจ้าของรถ
-                <select value={single.ownerProvince} onChange={(e) => updateSingle("ownerProvince", e.target.value)}>
-                  <option value="">เลือกจังหวัด</option>
-                  {PROVINCES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <VehicleFieldsFieldset
+              row={single}
+              dateText={dateText}
+              onDateTextChange={handleDateTextChange}
+              onFieldChange={updateSingle}
+              customerOptions={customerOptions}
+              brands={brands}
+            />
             <div className="form-actions">
               <button type="submit" className="primary" disabled={singleSaving}>
                 บันทึกข้อมูลรถ
@@ -679,6 +761,10 @@ export default function VehicleEntryPage() {
                       <button className="text-button" onClick={() => openDetail(v)}>
                         ดูข้อมูล
                       </button>
+                      {" · "}
+                      <button className="text-button" onClick={() => openEdit(v)}>
+                        แก้ไข
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -710,6 +796,50 @@ export default function VehicleEntryPage() {
             </dl>
           </>
         )}
+      </dialog>
+
+      <dialog
+        ref={editDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) editDialogRef.current?.close();
+        }}
+        style={{ width: "min(760px, 92vw)" }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
+          ×
+        </button>
+        <h2>แก้ไขข้อมูลรถจดใหม่</h2>
+        <form onSubmit={handleEditSubmit}>
+          <VehicleFieldsFieldset
+            row={editRow}
+            dateText={editDateText}
+            onDateTextChange={handleEditDateTextChange}
+            onFieldChange={updateEditRow}
+            customerOptions={customerOptions}
+            brands={brands}
+          />
+          <label className="field" style={{ marginTop: 20 }}>
+            เหตุผลที่แก้ไข (Remark) *
+            <textarea
+              required
+              maxLength={500}
+              value={editRemark}
+              onChange={(e) => setEditRemark(e.target.value)}
+              placeholder="ระบุเหตุผลที่แก้ไขข้อมูลรถคันนี้ - จำเป็นต้องกรอกทุกครั้ง"
+            />
+          </label>
+          <div className="form-actions" style={{ marginTop: 16 }}>
+            <button type="submit" className="primary" disabled={editSaving || !editRemark.trim()}>
+              บันทึกการแก้ไข
+            </button>
+            <span
+              className={`customer-message${editMessage.error ? " error" : editMessage.text ? " success" : ""}`}
+              role="status"
+            >
+              {editMessage.text}
+            </span>
+          </div>
+        </form>
       </dialog>
     </section>
   );

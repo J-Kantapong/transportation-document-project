@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import type { UpdateInspectionDto } from './dto/update-inspection.dto.js';
+import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
 @Controller('api/vehicles')
@@ -16,6 +17,11 @@ export class VehiclesController {
   @Post()
   create(@Body() body: CreateVehiclesDto) {
     return this.vehiclesService.createBatch(body);
+  }
+
+  @Patch(':id')
+  updateVehicle(@Param('id') id: string, @Body() body: UpdateVehicleDto) {
+    return this.vehiclesService.updateVehicle(id, body);
   }
 
   @Get('transfer-notice/pending')
