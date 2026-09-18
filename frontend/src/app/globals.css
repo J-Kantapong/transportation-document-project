@@ -156,9 +156,11 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .inspect-select-all input[type=text]{border:1px solid #dce2ec;border-radius:8px;padding:6px 9px;font:inherit;font-size:13px;color:#18243c}
 .inspect-select-all input[type=text]:focus{outline:2px solid #9bb2fb;border-color:#2854d9}
 .inspect-rows{display:flex;flex-direction:column}
-.inspect-row{display:flex;gap:20px;padding:16px 22px;border-bottom:1px solid #f0f2f6;align-items:center;flex-wrap:wrap}
+.inspect-row{display:flex;gap:10px 20px;padding:16px 22px;border-bottom:1px solid #f0f2f6;align-items:center;flex-wrap:wrap}
 .inspect-row:last-child{border-bottom:0}
-.inspect-row-body{flex:1 1 220px;min-width:180px}
+/* บรรทัดข้อมูล (วันที่/เลขตัวถัง/ยี่ห้อ/...) ครองเต็มบรรทัดเสมอ - บังคับให้ checks/date/cost/save
+   ตกไปอยู่บรรทัดใหม่พร้อมกันทั้งกลุ่ม ไม่ใช่ไปแทรกข้างๆ ข้อความที่ตัดขึ้นบรรทัดใหม่กลางแถว */
+.inspect-row-body{flex:1 1 100%;min-width:0}
 .inspect-row-title{font-weight:600;color:#18243c;font-size:14px}
 .inspect-row-title span{font-weight:400;color:#576781}
 .inspect-row-checks{display:flex;gap:14px;flex-shrink:0;flex-wrap:wrap}

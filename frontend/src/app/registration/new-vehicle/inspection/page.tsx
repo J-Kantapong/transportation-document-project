@@ -97,11 +97,11 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
   );
 }
 
-function toResultRowState(vehicle: InspectionVehicle): ResultRowState {
+function toResultRowState(): ResultRowState {
   return {
     selectedResult: null,
     dateText: "",
-    costText: vehicle.inspectionSentCost ?? vehicle.suggestedCost ?? "",
+    costText: "",
     remarkText: "",
     saving: false,
     message: { text: "" },
@@ -432,7 +432,13 @@ function ResultPanel({
                           const isChecked = e.target.checked;
                           patchRow(v.id, {
                             selectedResult: isChecked ? panelResult : null,
-                            dateText: isChecked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
+                            // Default = วันที่ส่งตรวจ (ไม่ใช่วันนี้) - ทราบผลควรอ้างอิงวันที่ส่งไป
+                            dateText:
+                              isChecked && !row.dateText
+                                ? v.inspectionSentDate
+                                  ? isoToDisplayDate(v.inspectionSentDate)
+                                  : isoToDisplayDate(todayIso())
+                                : row.dateText,
                             // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กกลับให้คืนราคาแนะนำถ้าช่องว่างอยู่
                             costText: isChecked ? row.costText || v.inspectionSentCost || v.suggestedCost || "" : "",
                           });
@@ -833,7 +839,7 @@ export default function InspectionPage() {
     try {
       const data = await api.listPendingInspectionResult();
       setPendingResultVehicles(data.vehicles);
-      setResultRows(Object.fromEntries(data.vehicles.map((v) => [v.id, toResultRowState(v)])));
+      setResultRows(Object.fromEntries(data.vehicles.map((v) => [v.id, toResultRowState()])));
     } catch (err) {
       setResultError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
       setPendingResultVehicles([]);
@@ -1000,7 +1006,6 @@ export default function InspectionPage() {
   }
 
   function handleSelectAllResult(panelResult: ResultType, checked: boolean) {
-    const today = isoToDisplayDate(todayIso());
     setResultRows((prev) => {
       const next = { ...prev };
       for (const v of pendingResultVehicles) {
@@ -1010,7 +1015,8 @@ export default function InspectionPage() {
           next[v.id] = {
             ...row,
             selectedResult: panelResult,
-            dateText: row.dateText || today,
+            // Default = วันที่ส่งตรวจ (ไม่ใช่วันนี้) - ทราบผลควรอ้างอิงวันที่ส่งไป
+            dateText: row.dateText || (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : isoToDisplayDate(todayIso())),
             costText: row.costText || v.inspectionSentCost || v.suggestedCost || "",
           };
         } else if (row.selectedResult === panelResult) {
