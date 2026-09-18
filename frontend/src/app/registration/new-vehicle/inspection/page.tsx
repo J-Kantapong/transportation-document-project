@@ -1,9 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, type InspectionVehicle, type Round2Vehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
+
+// หัวกระดาษที่แก้ไขล่าสุดจำไว้ในเบราว์เซอร์นี้ - ถ้าอ่านไม่ได้ใช้ค่าเริ่มต้น
+const PRINT_HEADER_STORAGE_KEY = "inspection-print-header";
+
+function loadPrintHeader(): string {
+  try {
+    return localStorage.getItem(PRINT_HEADER_STORAGE_KEY) || DEFAULT_INSPECTION_PRINT_HEADER;
+  } catch {
+    return DEFAULT_INSPECTION_PRINT_HEADER;
+  }
+}
+
+function savePrintHeader(header: string) {
+  try {
+    if (header === DEFAULT_INSPECTION_PRINT_HEADER) localStorage.removeItem(PRINT_HEADER_STORAGE_KEY);
+    else localStorage.setItem(PRINT_HEADER_STORAGE_KEY, header);
+  } catch {
+    // ไม่มี storage ก็ยังพิมพ์ได้ตามปกติ
+  }
+}
 
 type SentType = "ส่งตรวจนอก" | "เอารถมาตรวจเอง";
 type ResultType = "ผ่าน" | "ไม่ผ่าน";
@@ -628,12 +649,14 @@ function ReferencePanel<T extends { id: string }>({
   vehicles,
   loading,
   error,
+  action,
 }: {
   title: string;
   columns: Array<[string, (v: T) => string]>;
   vehicles: T[];
   loading: boolean;
   error: string;
+  action?: ReactNode;
 }) {
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
@@ -641,6 +664,7 @@ function ReferencePanel<T extends { id: string }>({
     <section className="panel customer-list" style={{ marginBottom: 24 }}>
       <div className="panel-head">
         <h2>{title}</h2>
+        {action}
       </div>
       {loading ? (
         <div className="empty-customers">กำลังโหลดรายการ…</div>
@@ -827,6 +851,16 @@ export default function InspectionPage() {
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<InspectionVehicle | null>(null);
+
+  // พิมพ์ใบรายการรถส่งตรวจ (PDF) - อ้างอิงรถที่ส่งตรวจแล้วรอผล (pendingResultVehicles)
+  const printDialogRef = useRef<HTMLDialogElement>(null);
+  const [printHeader, setPrintHeader] = useState(DEFAULT_INSPECTION_PRINT_HEADER);
+  const [printSentDate, setPrintSentDate] = useState<string>("all");
+  const printSentDates = [...new Set(pendingResultVehicles.map((v) => v.inspectionSentDate).filter((d): d is string => !!d))].sort(
+    (a, b) => b.localeCompare(a),
+  );
+  const printVehicles =
+    printSentDate === "all" ? pendingResultVehicles : pendingResultVehicles.filter((v) => v.inspectionSentDate === printSentDate);
 
   async function loadPendingSend() {
     setSendLoading(true);
@@ -1212,6 +1246,26 @@ export default function InspectionPage() {
     dialogRef.current?.showModal();
   }
 
+  function openPrintDialog() {
+    setPrintHeader(loadPrintHeader());
+    // ค่าเริ่มต้น = วันที่ส่งตรวจล่าสุด (รายการที่เพิ่งส่งไป) - เลือก "ทั้งหมด" ได้
+    setPrintSentDate(printSentDates[0] ?? "all");
+    printDialogRef.current?.showModal();
+  }
+
+  function handlePrint() {
+    const header = printHeader.trim() || DEFAULT_INSPECTION_PRINT_HEADER;
+    savePrintHeader(header);
+    const dateLabel = printSentDate === "all" ? "" : isoToDisplayDate(printSentDate);
+    printInspectionSheet({
+      title: `ใบรายการส่งตรวจรถ${dateLabel ? ` ${dateLabel.replace(/\//g, "-")}` : ""}`,
+      header,
+      subtitle: dateLabel ? `วันที่ส่งตรวจ ${dateLabel}` : "",
+      vehicles: printVehicles,
+    });
+    printDialogRef.current?.close();
+  }
+
   return (
     <section className="content">
       <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
@@ -1290,6 +1344,11 @@ export default function InspectionPage() {
             vehicles={pendingResultVehicles}
             loading={resultLoading}
             error={resultError}
+            action={
+              <button className="primary" disabled={resultLoading || !pendingResultVehicles.length} onClick={openPrintDialog}>
+                พิมพ์รายการส่งตรวจ (PDF)
+              </button>
+            }
           />
         </>
       ) : activeTab === "result" ? (
@@ -1404,6 +1463,50 @@ export default function InspectionPage() {
             </dl>
           </>
         )}
+      </dialog>
+
+      <dialog
+        ref={printDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) printDialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => printDialogRef.current?.close()}>
+          ×
+        </button>
+        <h2>พิมพ์รายการส่งตรวจรถ</h2>
+        <div style={{ display: "grid", gap: 16 }}>
+          <label className="field">
+            หัวกระดาษ
+            <input type="text" value={printHeader} onChange={(e) => setPrintHeader(e.target.value)} />
+          </label>
+          <button
+            type="button"
+            className="text-button"
+            style={{ justifySelf: "start", marginTop: -8 }}
+            disabled={printHeader === DEFAULT_INSPECTION_PRINT_HEADER}
+            onClick={() => setPrintHeader(DEFAULT_INSPECTION_PRINT_HEADER)}
+          >
+            ใช้ค่าเริ่มต้น
+          </button>
+          <label className="field">
+            วันที่ส่งตรวจ
+            <select value={printSentDate} onChange={(e) => setPrintSentDate(e.target.value)}>
+              {printSentDates.map((d) => (
+                <option key={d} value={d}>
+                  {isoToDisplayDate(d)} ({pendingResultVehicles.filter((v) => v.inspectionSentDate === d).length} คัน)
+                </option>
+              ))}
+              <option value="all">ทั้งหมด ({pendingResultVehicles.length} คัน)</option>
+            </select>
+          </label>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            คอลัมน์: ลำดับที่ · ประเภทรถ · ยี่ห้อ · เลขตัวถัง · เลขเครื่อง · สี — เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์
+          </p>
+          <button className="primary" style={{ justifySelf: "end" }} disabled={!printVehicles.length} onClick={handlePrint}>
+            พิมพ์ {printVehicles.length} คัน
+          </button>
+        </div>
       </dialog>
     </section>
   );

@@ -150,6 +150,8 @@ export interface InspectionVehicle {
   date: string;
   customerName: string;
   chassis: string;
+  engine: string | null;
+  color: string | null;
   brandName: string;
   body: string | null;
   registrationProvince: string | null;

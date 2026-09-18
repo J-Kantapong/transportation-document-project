@@ -387,6 +387,8 @@ export class VehiclesService {
       id: string;
       date: Date;
       chassis: string;
+      engine: string | null;
+      color: string | null;
       body: string | null;
       registrationProvince: string | null;
       customer: { name: string };
@@ -415,6 +417,9 @@ export class VehiclesService {
       date: vehicle.date.toISOString().slice(0, 10),
       customerName: vehicle.customer.name,
       chassis: vehicle.chassis,
+      // เลขเครื่อง/สี ใช้ในใบพิมพ์รายการส่งตรวจรถ (PDF) หน้าตรวจรถ
+      engine: vehicle.engine,
+      color: vehicle.color,
       brandName: vehicle.brand.name,
       body: vehicle.body,
       registrationProvince: vehicle.registrationProvince,
