@@ -4,6 +4,7 @@ import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
+import { UpdateInspectionRound2Dto } from './dto/update-inspection-round2.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 
@@ -49,8 +50,12 @@ function isValidDateParam(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value));
 }
 
-const INSPECTION_SENT_TYPES = ['ตรวจนอก', 'เอารถมาตรวจเอง'] as const;
+const INSPECTION_SENT_TYPES = ['ส่งตรวจนอก', 'เอารถมาตรวจเอง'] as const;
 const INSPECTION_RESULTS = ['ผ่าน', 'ไม่ผ่าน'] as const;
+
+// ตรวจรถรอบ 2: ต้องตรวจใหม่หลังผ่านครั้งแรกแล้วครบ 90 วัน - ราคา = No bill ตามตารางเดิม + Bill 50 บาท
+const INSPECTION_ROUND2_WAIT_DAYS = 90;
+const INSPECTION_ROUND2_BILL_FEE = 50;
 
 @Injectable()
 export class VehiclesService {
@@ -430,7 +435,7 @@ export class VehiclesService {
     return row?.amount != null ? String(row.amount) : null;
   }
 
-  // Step 3a: บันทึกว่าส่งตรวจแบบไหน (ตรวจนอก/เอารถมาตรวจเอง) วันที่ส่ง และค่าใช้จ่าย
+  // Step 3a: บันทึกว่าส่งตรวจแบบไหน (ส่งตรวจนอก/เอารถมาตรวจเอง) วันที่ส่ง และค่าใช้จ่าย
   async updateInspectionSent(id: string, dto: UpdateInspectionSentDto) {
     const sentType = typeof dto?.sentType === 'string' ? dto.sentType.trim() : '';
     const sentDateRaw = typeof dto?.sentDate === 'string' ? dto.sentDate.trim() : '';
@@ -505,6 +510,120 @@ export class VehiclesService {
       inspectionResultDate: updated.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
       inspectionResultCost: updated.inspectionResultCost,
       inspectionFailRemark: updated.inspectionFailRemark,
+    };
+  }
+
+  // ผ่านตรวจครั้งแรกแล้ว (inspectionResult = 'ผ่าน') และครบ 90 วันจาก inspectionResultDate แล้ว แต่ยังไม่ตรวจรอบ 2
+  async findPendingInspectionRound2() {
+    const threshold = new Date();
+    threshold.setUTCDate(threshold.getUTCDate() - INSPECTION_ROUND2_WAIT_DAYS);
+
+    const [vehicles, bangkokFees, provinceFees] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { inspectionResult: 'ผ่าน', inspectionResultDate: { lte: threshold }, inspectionRound2Done: false },
+        orderBy: [{ inspectionResultDate: 'asc' }, { id: 'asc' }],
+        include: {
+          customer: { select: { name: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.feeInspectionBangkok.findMany(),
+      this.prisma.feeInspectionProvince.findMany(),
+    ]);
+
+    return vehicles.map((vehicle) => this.mapInspectionRound2Vehicle(vehicle, bangkokFees, provinceFees));
+  }
+
+  // ตรวจรอบ 2 เสร็จแล้ว เรียงจากทำเสร็จล่าสุด
+  async findRecentlyCompletedInspectionRound2() {
+    const [vehicles, bangkokFees, provinceFees] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { inspectionRound2Done: true },
+        orderBy: [{ inspectionRound2Date: 'desc' }, { updatedAt: 'desc' }],
+        take: 100,
+        include: {
+          customer: { select: { name: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.feeInspectionBangkok.findMany(),
+      this.prisma.feeInspectionProvince.findMany(),
+    ]);
+
+    return vehicles.map((vehicle) => this.mapInspectionRound2Vehicle(vehicle, bangkokFees, provinceFees));
+  }
+
+  private mapInspectionRound2Vehicle(
+    vehicle: {
+      id: string;
+      date: Date;
+      chassis: string;
+      body: string | null;
+      registrationProvince: string | null;
+      customer: { name: string };
+      brand: { name: string };
+      inspectionResultDate: Date | null;
+      inspectionRound2Done: boolean;
+      inspectionRound2Date: Date | null;
+      inspectionRound2Cost: unknown;
+    },
+    bangkokFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
+    provinceFees: Array<{ province: string; vehicleType: string; amount: unknown }>,
+  ) {
+    const noBillCost = this.suggestInspectionCost(
+      vehicle.registrationProvince,
+      vehicle.body,
+      vehicle.brand.name,
+      bangkokFees,
+      provinceFees,
+    );
+    const suggestedRound2Cost = noBillCost != null ? String(Number(noBillCost) + INSPECTION_ROUND2_BILL_FEE) : null;
+
+    return {
+      id: vehicle.id,
+      date: vehicle.date.toISOString().slice(0, 10),
+      customerName: vehicle.customer.name,
+      chassis: vehicle.chassis,
+      brandName: vehicle.brand.name,
+      body: vehicle.body,
+      registrationProvince: vehicle.registrationProvince,
+      inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
+      suggestedRound2Cost,
+      inspectionRound2Done: vehicle.inspectionRound2Done,
+      inspectionRound2Date: vehicle.inspectionRound2Date?.toISOString().slice(0, 10) ?? null,
+      inspectionRound2Cost: vehicle.inspectionRound2Cost,
+    };
+  }
+
+  async updateInspectionRound2(id: string, dto: UpdateInspectionRound2Dto) {
+    const done = Boolean(dto?.done);
+    const dateRaw = typeof dto?.date === 'string' ? dto.date.trim() : '';
+    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
+
+    if (dateRaw && !isValidDateParam(dateRaw)) {
+      throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
+      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
+    }
+
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+    const updated = await this.prisma.vehicle.update({
+      where: { id },
+      data: {
+        inspectionRound2Done: done,
+        inspectionRound2Date: dateRaw ? new Date(`${dateRaw}T00:00:00.000Z`) : null,
+        inspectionRound2Cost: costRaw ? costRaw : null,
+      },
+    });
+
+    return {
+      id: updated.id,
+      inspectionRound2Done: updated.inspectionRound2Done,
+      inspectionRound2Date: updated.inspectionRound2Date?.toISOString().slice(0, 10) ?? null,
+      inspectionRound2Cost: updated.inspectionRound2Cost,
     };
   }
 

@@ -159,7 +159,7 @@ async function seedGovernmentTaxMotorcycleFlat() {
 
 async function seedParamTable(
   model: "feeCarBillParam" | "feeCarNoBillParam" | "feeMotorcycleBillParam" | "feeMotorcycleNoBillParam",
-  rows: Array<[string, number | null, string?]>,
+  rows: Array<[string, number | null, (string | null)?]>,
 ) {
   for (const [key, amount, note] of rows) {
     await (prisma[model] as any).upsert({

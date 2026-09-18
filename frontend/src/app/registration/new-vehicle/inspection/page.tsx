@@ -2,11 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, type InspectionVehicle } from "@/lib/api";
+import { api, ApiError, type InspectionVehicle, type Round2Vehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
-type SentType = "ตรวจนอก" | "เอารถมาตรวจเอง";
+type SentType = "ส่งตรวจนอก" | "เอารถมาตรวจเอง";
 type ResultType = "ผ่าน" | "ไม่ผ่าน";
+type ProvinceFilter = "all" | "bangkok" | "other";
+
+// ค่าตรวจรถลิ้งกับจังหวัดที่จดทะเบียน (registrationProvince) ตามที่ suggestInspectionCost ฝั่ง backend
+// ใช้อยู่แล้ว: กทม. ใช้ตาราง FeeInspectionBangkok, จังหวัดอื่นๆ ใช้ FeeInspectionProvince (ยังไม่มีข้อมูลราคา
+// ครบทุกจังหวัด - แนะนำราคาจะเป็นค่าว่างจนกว่าจะมีคนกรอกตาราง)
+function matchesProvinceFilter(v: InspectionVehicle, filter: ProvinceFilter): boolean {
+  if (filter === "bangkok") return v.registrationProvince === "กรุงเทพมหานคร";
+  if (filter === "other") return v.registrationProvince !== "กรุงเทพมหานคร";
+  return true;
+}
 
 interface SendRowState {
   selectedType: SentType | null;
@@ -25,14 +35,33 @@ interface ResultRowState {
   message: { text: string; error?: boolean };
 }
 
-function toSendRowState(vehicle: InspectionVehicle): SendRowState {
+interface Round2RowState {
+  selected: boolean;
+  dateText: string;
+  costText: string;
+  saving: boolean;
+  message: { text: string; error?: boolean };
+}
+
+function toSendRowState(): SendRowState {
   return {
     selectedType: null,
     dateText: "",
-    costText: vehicle.suggestedCost ?? "",
+    costText: "",
     saving: false,
     message: { text: "" },
   };
+}
+
+// เอารถมาตรวจเอง = ไม่มีค่าใช้จ่าย (ตามข้อมูลรายการ "นำรถมาตรวจ" 0 บาทใน FeeInspectionBangkok) - ส่งตรวจนอกใช้ราคาแนะนำตามประเภทรถ/ยี่ห้อ
+function costForSentType(type: SentType, suggestedCost: string | null): string {
+  return type === "เอารถมาตรวจเอง" ? "0" : suggestedCost ?? "";
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function toResultRowState(vehicle: InspectionVehicle): ResultRowState {
@@ -44,6 +73,10 @@ function toResultRowState(vehicle: InspectionVehicle): ResultRowState {
     saving: false,
     message: { text: "" },
   };
+}
+
+function toRound2RowState(): Round2RowState {
+  return { selected: false, dateText: "", costText: "", saving: false, message: { text: "" } };
 }
 
 function validateSendRow(row: SendRowState): { dateIso: string } {
@@ -63,6 +96,14 @@ function validateResultRow(row: ResultRowState, panelResult: ResultType): { date
   return { dateIso };
 }
 
+function validateRound2Row(row: Round2RowState): { dateIso: string } {
+  const digits = row.dateText.replace(/\D/g, "");
+  const dateIso = digits ? displayDateToIso(digits) : "";
+  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
+  if (row.costText && !/^\d+(\.\d+)?$/.test(row.costText)) throw new Error("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
+  return { dateIso };
+}
+
 const COMPLETED_DETAIL_FIELDS: Array<[string, (v: InspectionVehicle) => string]> = [
   ["วันที่รับงาน", (v) => isoToDisplayDate(v.date) || v.date],
   ["ชื่อลูกค้า", (v) => v.customerName],
@@ -79,38 +120,45 @@ const COMPLETED_DETAIL_FIELDS: Array<[string, (v: InspectionVehicle) => string]>
   ["Remark (ตรวจไม่ผ่าน)", (v) => v.inspectionFailRemark ?? ""],
 ];
 
-// Tab 1 - ส่งตรวจ: ตรวจนอก/เอารถมาตรวจเอง แบ่งเป็น 2 panel ที่อ่าน pool เดียวกัน (pendingSendVehicles)
-// row.selectedType เป็น field เดียวที่ใช้ร่วมกันทั้ง 2 panel เพื่อไม่ให้คันเดียวถูกเลือกซ้ำ 2 ประเภท
+// Tab 1 - ส่งตรวจ: รายชื่อรถเดียว แต่ละแถวมี checkbox ส่งตรวจนอก/เอารถมาตรวจเอง วางข้างกัน (ไม่ใช่แยก panel)
+// selectedType เป็น field เดียวต่อแถว - ติ๊กอันหนึ่งจะยกเลิกอีกอันให้อัตโนมัติ
 function SendPanel({
-  title,
-  panelType,
   vehicles,
   rows,
   patchRow,
+  onCheck,
   onSelectAll,
   onSave,
   onSaveAll,
   bulkSaving,
   bulkMessage,
+  provinceFilter,
+  onProvinceFilterChange,
+  selectAllDateText,
+  onSelectAllDateTextChange,
 }: {
-  title: string;
-  panelType: SentType;
   vehicles: InspectionVehicle[];
   rows: Record<string, SendRowState>;
   patchRow: (id: string, patch: Partial<SendRowState>) => void;
-  onSelectAll: (checked: boolean) => void;
+  onCheck: (id: string, type: SentType, checked: boolean) => void;
+  onSelectAll: (type: SentType, checked: boolean) => void;
   onSave: (id: string) => void;
   onSaveAll: () => void;
   bulkSaving: boolean;
   bulkMessage: { text: string; error?: boolean };
+  provinceFilter: ProvinceFilter;
+  onProvinceFilterChange: (filter: ProvinceFilter) => void;
+  selectAllDateText: string;
+  onSelectAllDateTextChange: (text: string) => void;
 }) {
-  const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedType === panelType).length;
-  const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === panelType);
+  const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedType).length;
+  const allOut = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === "ส่งตรวจนอก");
+  const allSelf = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === "เอารถมาตรวจเอง");
 
   return (
     <div className="panel" style={{ marginBottom: 24 }}>
       <div className="panel-head">
-        <h2>{title}</h2>
+        <h2>รถที่ยังไม่ได้ตรวจ</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           {bulkMessage.text && (
             <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
@@ -123,96 +171,126 @@ function SendPanel({
         </div>
       </div>
 
+      <div className="inspect-filter">
+        <button className={`filter-chip${provinceFilter === "all" ? " selected" : ""}`} onClick={() => onProvinceFilterChange("all")}>
+          ทั้งหมด
+        </button>
+        <button className={`filter-chip${provinceFilter === "bangkok" ? " selected" : ""}`} onClick={() => onProvinceFilterChange("bangkok")}>
+          ตรวจรถ กทม.
+        </button>
+        <button className={`filter-chip${provinceFilter === "other" ? " selected" : ""}`} onClick={() => onProvinceFilterChange("other")}>
+          จังหวัดอื่นๆ
+        </button>
+      </div>
+
       {!vehicles.length ? (
-        <div className="empty-customers">ไม่มีรถที่ยังไม่ได้ตรวจ</div>
+        <div className="empty-customers">ไม่มีรถที่ยังไม่ได้ตรวจตามตัวกรองนี้</div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>วันที่รับงาน</th>
-                <th>ชื่อลูกค้า</th>
-                <th>เลขตัวถัง</th>
-                <th>ยี่ห้อ</th>
-                <th>ประเภทรถ</th>
-                <th>จังหวัดที่จดทะเบียน</th>
-                <th>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "inherit" }}>
-                    <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
-                    {panelType}
-                  </label>
-                </th>
-                <th>วันที่</th>
-                <th>ค่าใช้จ่าย</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {vehicles.map((v) => {
-                const row = rows[v.id];
-                if (!row) return null;
-                const checked = row.selectedType === panelType;
-                return (
-                  <tr key={v.id}>
-                    <td>{isoToDisplayDate(v.date) || v.date}</td>
-                    <td>{v.customerName}</td>
-                    <td>{v.chassis}</td>
-                    <td>{v.brandName}</td>
-                    <td>{v.body || "—"}</td>
-                    <td>{v.registrationProvince || "—"}</td>
-                    <td>
+        <>
+          <div className="inspect-select-all">
+            <div className="inspect-select-all-info">
+              <label>
+                วันที่ (ใช้กับที่เลือกทั้งหมด)
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="วว/ดด/ปปปป"
+                  value={selectAllDateText}
+                  onChange={(e) => onSelectAllDateTextChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                  style={{ width: 100 }}
+                />
+              </label>
+              <span className="muted">({vehicles.length} คัน)</span>
+            </div>
+            <div className="inspect-row-checks">
+              <label>
+                <input type="checkbox" checked={allOut} onChange={(e) => onSelectAll("ส่งตรวจนอก", e.target.checked)} />
+                เลือกทั้งหมดเป็นส่งตรวจนอก
+              </label>
+              <label>
+                <input type="checkbox" checked={allSelf} onChange={(e) => onSelectAll("เอารถมาตรวจเอง", e.target.checked)} />
+                เลือกทั้งหมดเป็นเอารถมาตรวจเอง
+              </label>
+            </div>
+          </div>
+          <div className="inspect-rows">
+            {vehicles.map((v) => {
+              const row = rows[v.id];
+              if (!row) return null;
+              return (
+                <div className="inspect-row" key={v.id}>
+                  <div className="inspect-row-body">
+                    <div className="inspect-row-title">
+                      {v.chassis} <span>· {v.customerName}</span>
+                    </div>
+                    <div className="inspect-row-sub">
+                      {v.brandName} · {v.body || "—"} · {v.registrationProvince || "—"} · รับงาน {isoToDisplayDate(v.date) || v.date}
+                    </div>
+                    {row.message.text && (
+                      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
+                        {row.message.text}
+                      </div>
+                    )}
+                  </div>
+                  <div className="inspect-row-checks">
+                    <label>
                       <input
                         type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          const isChecked = e.target.checked;
-                          patchRow(v.id, {
-                            selectedType: isChecked ? panelType : null,
-                            dateText: isChecked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
-                          });
-                        }}
-                        aria-label={panelType}
+                        checked={row.selectedType === "ส่งตรวจนอก"}
+                        onChange={(e) => onCheck(v.id, "ส่งตรวจนอก", e.target.checked)}
                       />
-                    </td>
-                    <td>
+                      ส่งตรวจนอก
+                    </label>
+                    <label>
                       <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="วว/ดด/ปปปป"
-                        value={row.dateText}
-                        onChange={(e) =>
-                          patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
-                        }
-                        style={{ width: 110 }}
+                        type="checkbox"
+                        checked={row.selectedType === "เอารถมาตรวจเอง"}
+                        onChange={(e) => onCheck(v.id, "เอารถมาตรวจเอง", e.target.checked)}
                       />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={row.costText}
-                        onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                        style={{ width: 90 }}
-                      />
-                      {v.suggestedCost && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {v.suggestedCost} บาท</div>}
-                    </td>
-                    <td>
-                      <button className="text-button" disabled={!checked || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                        บันทึก
-                      </button>
-                      {row.message.text && (
-                        <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
-                          {row.message.text}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      เอารถมาตรวจเอง
+                    </label>
+                  </div>
+                  <label className="inspect-row-field">
+                    วันที่
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="วว/ดด/ปปปป"
+                      value={row.dateText}
+                      onChange={(e) =>
+                        patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                      }
+                      style={{ width: 100 }}
+                    />
+                  </label>
+                  <label className="inspect-row-field">
+                    ค่าใช้จ่าย
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={row.costText}
+                      onChange={(e) => patchRow(v.id, { costText: e.target.value })}
+                      style={{ width: 80 }}
+                    />
+                  </label>
+                  {row.selectedType === "เอารถมาตรวจเอง" ? (
+                    <span className="inspect-row-hint">ไม่มีค่าใช้จ่าย</span>
+                  ) : (
+                    v.suggestedCost && <span className="inspect-row-hint">แนะนำ {v.suggestedCost} บาท</span>
+                  )}
+                  <button
+                    className="text-button"
+                    disabled={!row.selectedType || row.saving || bulkSaving}
+                    onClick={() => onSave(v.id)}
+                  >
+                    บันทึก
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -267,40 +345,33 @@ function ResultPanel({
       {!vehicles.length ? (
         <div className="empty-customers">ไม่มีรถที่ส่งตรวจรอผล</div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>วันที่รับงาน</th>
-                <th>ชื่อลูกค้า</th>
-                <th>เลขตัวถัง</th>
-                <th>ยี่ห้อ</th>
-                <th>ประเภทการตรวจ</th>
-                <th>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "inherit" }}>
-                    <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
-                    {panelResult}
-                  </label>
-                </th>
-                <th>วันที่</th>
-                <th>ค่าใช้จ่าย</th>
-                {showRemark && <th>Remark</th>}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {vehicles.map((v) => {
-                const row = rows[v.id];
-                if (!row) return null;
-                const checked = row.selectedResult === panelResult;
-                return (
-                  <tr key={v.id}>
-                    <td>{isoToDisplayDate(v.date) || v.date}</td>
-                    <td>{v.customerName}</td>
-                    <td>{v.chassis}</td>
-                    <td>{v.brandName}</td>
-                    <td>{v.inspectionSentType || "—"}</td>
-                    <td>
+        <>
+          <label className="inspect-select-all">
+            <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
+            เลือกทั้งหมดเป็น {panelResult} ({vehicles.length} คัน)
+          </label>
+          <div className="inspect-rows">
+            {vehicles.map((v) => {
+              const row = rows[v.id];
+              if (!row) return null;
+              const checked = row.selectedResult === panelResult;
+              return (
+                <div className="inspect-row" key={v.id}>
+                  <div className="inspect-row-body">
+                    <div className="inspect-row-title">
+                      {v.chassis} <span>· {v.customerName}</span>
+                    </div>
+                    <div className="inspect-row-sub">
+                      {v.brandName} · ส่งตรวจแบบ {v.inspectionSentType || "—"} · รับงาน {isoToDisplayDate(v.date) || v.date}
+                    </div>
+                    {row.message.text && (
+                      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
+                        {row.message.text}
+                      </div>
+                    )}
+                  </div>
+                  <div className="inspect-row-checks">
+                    <label>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -311,77 +382,215 @@ function ResultPanel({
                             dateText: isChecked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
                           });
                         }}
-                        aria-label={panelResult}
                       />
-                    </td>
-                    <td>
+                      {panelResult}
+                    </label>
+                  </div>
+                  <label className="inspect-row-field">
+                    วันที่
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="วว/ดด/ปปปป"
+                      value={row.dateText}
+                      onChange={(e) =>
+                        patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                      }
+                      style={{ width: 100 }}
+                    />
+                  </label>
+                  <label className="inspect-row-field">
+                    ค่าใช้จ่าย
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={row.costText}
+                      onChange={(e) => patchRow(v.id, { costText: e.target.value })}
+                      style={{ width: 80 }}
+                    />
+                  </label>
+                  {v.suggestedCost && <span className="inspect-row-hint">แนะนำ {v.suggestedCost} บาท</span>}
+                  {showRemark && (
+                    <label className="inspect-row-field">
+                      Remark
                       <input
                         type="text"
-                        inputMode="numeric"
-                        placeholder="วว/ดด/ปปปป"
-                        value={row.dateText}
-                        onChange={(e) =>
-                          patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
-                        }
-                        style={{ width: 110 }}
+                        placeholder="เหตุผลที่ตรวจไม่ผ่าน"
+                        value={row.remarkText}
+                        onChange={(e) => patchRow(v.id, { remarkText: e.target.value })}
+                        style={{ width: 180 }}
                       />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={row.costText}
-                        onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                        style={{ width: 90 }}
-                      />
-                      {v.suggestedCost && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {v.suggestedCost} บาท</div>}
-                    </td>
-                    {showRemark && (
-                      <td>
-                        <input
-                          type="text"
-                          placeholder="เหตุผลที่ตรวจไม่ผ่าน"
-                          value={row.remarkText}
-                          onChange={(e) => patchRow(v.id, { remarkText: e.target.value })}
-                          style={{ width: 160 }}
-                        />
-                      </td>
-                    )}
-                    <td>
-                      <button className="text-button" disabled={!checked || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                        บันทึก
-                      </button>
-                      {row.message.text && (
-                        <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
-                          {row.message.text}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </label>
+                  )}
+                  <button className="text-button" disabled={!checked || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                    บันทึก
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-// อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2 และ "รถที่เพิ่งส่งตรวจ" ใน Tab 1
-function ReferencePanel({
+// Tab 4 - ตรวจรถรอบ 2: ผ่านตรวจครั้งแรกแล้วครบ 90 วัน ต้องตรวจใหม่ - action เดียว (ไม่มีตรวจนอก/เอารถมาตรวจเองแยก)
+// ราคาแนะนำ = No bill ตามตารางเดิม + Bill 50 บาท (คำนวณจาก backend แล้วส่งมาเป็น suggestedRound2Cost)
+function Round2Panel({
+  vehicles,
+  rows,
+  patchRow,
+  onCheck,
+  onSelectAll,
+  onSave,
+  onSaveAll,
+  bulkSaving,
+  bulkMessage,
+  selectAllDateText,
+  onSelectAllDateTextChange,
+}: {
+  vehicles: Round2Vehicle[];
+  rows: Record<string, Round2RowState>;
+  patchRow: (id: string, patch: Partial<Round2RowState>) => void;
+  onCheck: (id: string, checked: boolean) => void;
+  onSelectAll: (checked: boolean) => void;
+  onSave: (id: string) => void;
+  onSaveAll: () => void;
+  bulkSaving: boolean;
+  bulkMessage: { text: string; error?: boolean };
+  selectAllDateText: string;
+  onSelectAllDateTextChange: (text: string) => void;
+}) {
+  const selectedCount = vehicles.filter((v) => rows[v.id]?.selected).length;
+  const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selected);
+
+  return (
+    <div className="panel" style={{ marginBottom: 24 }}>
+      <div className="panel-head">
+        <h2>รถที่ครบกำหนดตรวจรอบ 2 (90 วันหลังผ่านตรวจครั้งแรก)</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {bulkMessage.text && (
+            <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
+              {bulkMessage.text}
+            </span>
+          )}
+          <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
+            บันทึกทั้งหมด
+          </button>
+        </div>
+      </div>
+
+      {!vehicles.length ? (
+        <div className="empty-customers">ไม่มีรถที่ครบกำหนดตรวจรอบ 2</div>
+      ) : (
+        <>
+          <div className="inspect-select-all">
+            <div className="inspect-select-all-info">
+              <label>
+                วันที่ (ใช้กับที่เลือกทั้งหมด)
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="วว/ดด/ปปปป"
+                  value={selectAllDateText}
+                  onChange={(e) => onSelectAllDateTextChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                  style={{ width: 100 }}
+                />
+              </label>
+              <span className="muted">({vehicles.length} คัน)</span>
+            </div>
+            <div className="inspect-row-checks">
+              <label>
+                <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
+                เลือกทั้งหมด
+              </label>
+            </div>
+          </div>
+          <div className="inspect-rows">
+            {vehicles.map((v) => {
+              const row = rows[v.id];
+              if (!row) return null;
+              return (
+                <div className="inspect-row" key={v.id}>
+                  <div className="inspect-row-body">
+                    <div className="inspect-row-title">
+                      {v.chassis} <span>· {v.customerName}</span>
+                    </div>
+                    <div className="inspect-row-sub">
+                      {v.brandName} · {v.body || "—"} · {v.registrationProvince || "—"} · ผ่านตรวจครั้งแรก{" "}
+                      {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}
+                    </div>
+                    {row.message.text && (
+                      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
+                        {row.message.text}
+                      </div>
+                    )}
+                  </div>
+                  <div className="inspect-row-checks">
+                    <label>
+                      <input type="checkbox" checked={row.selected} onChange={(e) => onCheck(v.id, e.target.checked)} />
+                      ตรวจรอบ 2 เรียบร้อย
+                    </label>
+                  </div>
+                  <label className="inspect-row-field">
+                    วันที่
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="วว/ดด/ปปปป"
+                      value={row.dateText}
+                      onChange={(e) =>
+                        patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                      }
+                      style={{ width: 100 }}
+                    />
+                  </label>
+                  <label className="inspect-row-field">
+                    ค่าใช้จ่าย
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={row.costText}
+                      onChange={(e) => patchRow(v.id, { costText: e.target.value })}
+                      style={{ width: 80 }}
+                    />
+                  </label>
+                  {v.suggestedRound2Cost && <span className="inspect-row-hint">แนะนำ {v.suggestedRound2Cost} บาท (No bill + Bill 50)</span>}
+                  <button className="text-button" disabled={!row.selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                    บันทึก
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const renderRound2CompletedSub = (v: Round2Vehicle) =>
+  `${v.brandName} · ผ่านครั้งแรก ${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} · ตรวจรอบ 2 ${
+    v.inspectionRound2Date ? isoToDisplayDate(v.inspectionRound2Date) : "—"
+  } · ${v.inspectionRound2Cost ? `${v.inspectionRound2Cost} บาท` : "—"}`;
+
+// อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2, "รถที่เพิ่งส่งตรวจ" ใน Tab 1,
+// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - generic เพราะ InspectionVehicle/Round2Vehicle มีแค่ id/chassis/customerName ร่วมกัน
+function ReferencePanel<T extends { id: string; chassis: string; customerName: string }>({
   title,
   vehicles,
   loading,
   error,
-  columns,
+  renderSub,
 }: {
   title: string;
-  vehicles: InspectionVehicle[];
+  vehicles: T[];
   loading: boolean;
   error: string;
-  columns: Array<[string, (v: InspectionVehicle) => string]>;
+  renderSub: (v: T) => string;
 }) {
   return (
     <section className="panel customer-list" style={{ marginBottom: 24 }}>
@@ -397,49 +606,30 @@ function ReferencePanel({
       ) : !vehicles.length ? (
         <div className="empty-customers">ไม่มีรายการ</div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {columns.map(([label]) => (
-                  <th key={label}>{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id}>
-                  {columns.map(([label, getValue]) => (
-                    <td key={label}>{getValue(v) || "—"}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="inspect-rows">
+          {vehicles.map((v) => (
+            <div className="inspect-row" key={v.id}>
+              <div className="inspect-row-body">
+                <div className="inspect-row-title">
+                  {v.chassis} <span>· {v.customerName}</span>
+                </div>
+                <div className="inspect-row-sub">{renderSub(v)}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </section>
   );
 }
 
-const PENDING_SEND_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
-  ["วันที่รับงาน", (v) => isoToDisplayDate(v.date) || v.date],
-  ["ชื่อลูกค้า", (v) => v.customerName],
-  ["เลขตัวถัง", (v) => v.chassis],
-  ["ยี่ห้อ", (v) => v.brandName],
-  ["ประเภทรถ", (v) => v.body ?? ""],
-  ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince ?? ""],
-];
+const renderPendingSendSub = (v: InspectionVehicle) =>
+  `${v.brandName} · ${v.body || "—"} · ${v.registrationProvince || "—"} · รับงาน ${isoToDisplayDate(v.date) || v.date}`;
 
-const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
-  ["วันที่รับงาน", (v) => isoToDisplayDate(v.date) || v.date],
-  ["ชื่อลูกค้า", (v) => v.customerName],
-  ["เลขตัวถัง", (v) => v.chassis],
-  ["ยี่ห้อ", (v) => v.brandName],
-  ["ประเภทการตรวจ", (v) => v.inspectionSentType ?? ""],
-  ["วันที่ส่งตรวจ", (v) => (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "")],
-  ["ค่าใช้จ่าย", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "")],
-];
+const renderPendingResultSub = (v: InspectionVehicle) =>
+  `${v.brandName} · ส่งตรวจแบบ ${v.inspectionSentType || "—"} วันที่ ${
+    v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—"
+  } · ${v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—"}`;
 
 // ใช้ร่วมกันท้าย Tab 1 และ Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
 function CompletedInspectionPanel({
@@ -456,7 +646,7 @@ function CompletedInspectionPanel({
   return (
     <section className="panel customer-list">
       <div className="panel-head">
-        <h2>รายการที่ตรวจเสร็จล่าสุด</h2>
+        <h2>รายการรถที่ตรวจเสร็จเรียบร้อย</h2>
       </div>
       {!loading && !error && <p style={{ padding: "0 24px 12px", fontSize: 12 }}>แสดง {vehicles.length} รายการล่าสุด</p>}
       {loading ? (
@@ -468,39 +658,23 @@ function CompletedInspectionPanel({
       ) : !vehicles.length ? (
         <div className="empty-customers">ยังไม่มีรายการที่ตรวจเสร็จ</div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>วันที่รับงาน</th>
-                <th>ชื่อลูกค้า</th>
-                <th>เลขตัวถัง</th>
-                <th>ยี่ห้อ</th>
-                <th>ผลตรวจ</th>
-                <th>วันที่เสร็จ</th>
-                <th>ค่าใช้จ่าย</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id} className={v.inspectionResult === "ไม่ผ่าน" ? "row-failed" : undefined}>
-                  <td>{isoToDisplayDate(v.date) || v.date}</td>
-                  <td>{v.customerName}</td>
-                  <td>{v.chassis}</td>
-                  <td>{v.brandName}</td>
-                  <td>{v.inspectionResult || "—"}</td>
-                  <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
-                  <td>{v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}</td>
-                  <td>
-                    <button className="text-button" onClick={() => onOpenDetail(v)}>
-                      ดูข้อมูล
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="inspect-rows">
+          {vehicles.map((v) => (
+            <div className={`inspect-row${v.inspectionResult === "ไม่ผ่าน" ? " row-failed" : ""}`} key={v.id}>
+              <div className="inspect-row-body">
+                <div className="inspect-row-title">
+                  {v.chassis} <span>· {v.customerName} · {v.brandName}</span>
+                </div>
+                <div className="inspect-row-sub">
+                  ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
+                  {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
+                </div>
+              </div>
+              <button className="text-button" onClick={() => onOpenDetail(v)}>
+                ดูข้อมูล
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -508,17 +682,18 @@ function CompletedInspectionPanel({
 }
 
 export default function InspectionPage() {
-  const [activeTab, setActiveTab] = useState<"send" | "result">("send");
+  const [activeTab, setActiveTab] = useState<"send" | "result" | "round2" | "completed">("send");
 
   // Tab 1: ผ่าน Step 2 แล้ว แต่ยังไม่ได้ส่งตรวจ
   const [pendingSendVehicles, setPendingSendVehicles] = useState<InspectionVehicle[]>([]);
   const [sendRows, setSendRows] = useState<Record<string, SendRowState>>({});
   const [sendLoading, setSendLoading] = useState(true);
   const [sendError, setSendError] = useState("");
-  const [outSaving, setOutSaving] = useState(false);
-  const [outMessage, setOutMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
-  const [selfSaving, setSelfSaving] = useState(false);
-  const [selfMessage, setSelfMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [sendBulkSaving, setSendBulkSaving] = useState(false);
+  const [sendBulkMessage, setSendBulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [sendProvinceFilter, setSendProvinceFilter] = useState<ProvinceFilter>("all");
+  const filteredSendVehicles = pendingSendVehicles.filter((v) => matchesProvinceFilter(v, sendProvinceFilter));
+  const [sendSelectAllDateText, setSendSelectAllDateText] = useState("");
 
   // Tab 2: ส่งตรวจแล้ว รอผล
   const [pendingResultVehicles, setPendingResultVehicles] = useState<InspectionVehicle[]>([]);
@@ -535,6 +710,19 @@ export default function InspectionPage() {
   const [completedLoading, setCompletedLoading] = useState(true);
   const [completedError, setCompletedError] = useState("");
 
+  // Tab 4: ผ่านตรวจครั้งแรกแล้ว ครบ 90 วัน ต้องตรวจรอบ 2
+  const [pendingRound2Vehicles, setPendingRound2Vehicles] = useState<Round2Vehicle[]>([]);
+  const [round2Rows, setRound2Rows] = useState<Record<string, Round2RowState>>({});
+  const [round2Loading, setRound2Loading] = useState(true);
+  const [round2Error, setRound2Error] = useState("");
+  const [round2BulkSaving, setRound2BulkSaving] = useState(false);
+  const [round2BulkMessage, setRound2BulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [round2SelectAllDateText, setRound2SelectAllDateText] = useState("");
+
+  const [completedRound2Vehicles, setCompletedRound2Vehicles] = useState<Round2Vehicle[]>([]);
+  const [completedRound2Loading, setCompletedRound2Loading] = useState(true);
+  const [completedRound2Error, setCompletedRound2Error] = useState("");
+
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<InspectionVehicle | null>(null);
 
@@ -544,7 +732,7 @@ export default function InspectionPage() {
     try {
       const data = await api.listPendingInspectionSend();
       setPendingSendVehicles(data.vehicles);
-      setSendRows(Object.fromEntries(data.vehicles.map((v) => [v.id, toSendRowState(v)])));
+      setSendRows(Object.fromEntries(data.vehicles.map((v) => [v.id, toSendRowState()])));
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
       setPendingSendVehicles([]);
@@ -584,12 +772,44 @@ export default function InspectionPage() {
     }
   }
 
+  async function loadPendingRound2() {
+    setRound2Loading(true);
+    setRound2Error("");
+    try {
+      const data = await api.listPendingInspectionRound2();
+      setPendingRound2Vehicles(data.vehicles);
+      setRound2Rows(Object.fromEntries(data.vehicles.map((v) => [v.id, toRound2RowState()])));
+    } catch (err) {
+      setRound2Error(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
+      setPendingRound2Vehicles([]);
+      setRound2Rows({});
+    } finally {
+      setRound2Loading(false);
+    }
+  }
+
+  async function loadCompletedRound2() {
+    setCompletedRound2Loading(true);
+    setCompletedRound2Error("");
+    try {
+      const data = await api.listRecentlyCompletedInspectionRound2();
+      setCompletedRound2Vehicles(data.vehicles);
+    } catch (err) {
+      setCompletedRound2Error(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
+      setCompletedRound2Vehicles([]);
+    } finally {
+      setCompletedRound2Loading(false);
+    }
+  }
+
   useEffect(() => {
     // Standard fetch-on-mount; load*() set their own loading flag before the first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPendingSend();
     loadPendingResult();
     loadCompleted();
+    loadPendingRound2();
+    loadCompletedRound2();
   }, []);
 
   function patchSendRow(id: string, patch: Partial<SendRowState>) {
@@ -600,16 +820,34 @@ export default function InspectionPage() {
     setResultRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }
 
-  function handleSelectAllSend(panelType: SentType, checked: boolean) {
-    const today = isoToDisplayDate(todayIso());
+  function handleSendCheck(id: string, type: SentType, checked: boolean) {
+    const row = sendRows[id];
+    if (!row) return;
+    const vehicle = pendingSendVehicles.find((v) => v.id === id);
+    patchSendRow(id, {
+      selectedType: checked ? type : null,
+      // Default = วันถัดไปของวันที่รับงาน (ไม่ใช่วันนี้) - งานส่งตรวจปกติจะทำวันรุ่งขึ้น
+      dateText: checked && !row.dateText && vehicle ? isoToDisplayDate(addDaysIso(vehicle.date, 1)) : row.dateText,
+      costText: checked ? costForSentType(type, vehicle?.suggestedCost ?? null) : row.costText,
+    });
+  }
+
+  function handleSelectAllSend(type: SentType, checked: boolean) {
+    // ถ้ากรอกวันที่ในช่อง "เลือกทั้งหมด" ไว้ ใช้ค่านั้นกับทุกแถวเลย (เขียนทับของเดิม) -
+    // ถ้าไม่กรอก แต่ละคันจะได้วันถัดไปของวันที่รับงานตัวเอง
     setSendRows((prev) => {
       const next = { ...prev };
-      for (const v of pendingSendVehicles) {
+      for (const v of filteredSendVehicles) {
         const row = next[v.id];
         if (!row) continue;
         if (checked) {
-          next[v.id] = { ...row, selectedType: panelType, dateText: row.dateText || today };
-        } else if (row.selectedType === panelType) {
+          next[v.id] = {
+            ...row,
+            selectedType: type,
+            dateText: sendSelectAllDateText || isoToDisplayDate(addDaysIso(v.date, 1)),
+            costText: costForSentType(type, v.suggestedCost),
+          };
+        } else if (row.selectedType === type) {
           next[v.id] = { ...row, selectedType: null };
         }
       }
@@ -640,42 +878,38 @@ export default function InspectionPage() {
     }
   }
 
-  async function handleSaveAllSend(
-    panelType: SentType,
-    setSaving: (v: boolean) => void,
-    setMessage: (m: { text: string; error?: boolean }) => void,
-  ) {
-    const selected = pendingSendVehicles.filter((v) => sendRows[v.id]?.selectedType === panelType);
+  async function handleSaveAllSend() {
+    const selected = filteredSendVehicles.filter((v) => sendRows[v.id]?.selectedType);
     if (!selected.length) return;
 
-    const parsed: Array<{ id: string; chassis: string; dateIso: string; cost: string }> = [];
+    const parsed: Array<{ id: string; chassis: string; type: SentType; dateIso: string; cost: string }> = [];
     for (const v of selected) {
       const row = sendRows[v.id];
-      if (!row) continue;
+      if (!row || !row.selectedType) continue;
       try {
         const { dateIso } = validateSendRow(row);
-        parsed.push({ id: v.id, chassis: v.chassis, dateIso, cost: row.costText });
+        parsed.push({ id: v.id, chassis: v.chassis, type: row.selectedType, dateIso, cost: row.costText });
       } catch (err) {
-        setMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
+        setSendBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
       }
     }
 
-    setSaving(true);
-    setMessage({ text: "กำลังบันทึกทั้งหมด…" });
+    setSendBulkSaving(true);
+    setSendBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
     try {
       const results = await Promise.allSettled(
-        parsed.map((p) => api.updateInspectionSent(p.id, { sentType: panelType, sentDate: p.dateIso || null, cost: p.cost || null })),
+        parsed.map((p) => api.updateInspectionSent(p.id, { sentType: p.type, sentDate: p.dateIso || null, cost: p.cost || null })),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
-      setMessage(
+      setSendBulkMessage(
         failed
           ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
           : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
       );
       await Promise.all([loadPendingSend(), loadPendingResult()]);
     } finally {
-      setSaving(false);
+      setSendBulkSaving(false);
     }
   }
 
@@ -770,6 +1004,100 @@ export default function InspectionPage() {
     }
   }
 
+  function patchRound2Row(id: string, patch: Partial<Round2RowState>) {
+    setRound2Rows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
+
+  function handleRound2Check(id: string, checked: boolean) {
+    const row = round2Rows[id];
+    if (!row) return;
+    const vehicle = pendingRound2Vehicles.find((v) => v.id === id);
+    patchRound2Row(id, {
+      selected: checked,
+      dateText: checked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
+      costText: checked && !row.costText ? vehicle?.suggestedRound2Cost ?? "" : row.costText,
+    });
+  }
+
+  function handleSelectAllRound2(checked: boolean) {
+    setRound2Rows((prev) => {
+      const next = { ...prev };
+      for (const v of pendingRound2Vehicles) {
+        const row = next[v.id];
+        if (!row) continue;
+        if (checked) {
+          next[v.id] = {
+            ...row,
+            selected: true,
+            dateText: round2SelectAllDateText || isoToDisplayDate(todayIso()),
+            costText: v.suggestedRound2Cost ?? row.costText,
+          };
+        } else {
+          next[v.id] = { ...row, selected: false };
+        }
+      }
+      return next;
+    });
+  }
+
+  async function handleSaveRound2(id: string) {
+    const row = round2Rows[id];
+    if (!row || !row.selected) return;
+    let dateIso: string;
+    try {
+      ({ dateIso } = validateRound2Row(row));
+    } catch (err) {
+      patchRound2Row(id, { message: { text: (err as Error).message, error: true } });
+      return;
+    }
+
+    patchRound2Row(id, { saving: true, message: { text: "กำลังบันทึก…" } });
+    try {
+      await api.updateInspectionRound2(id, { done: true, date: dateIso || null, cost: row.costText || null });
+      await Promise.all([loadPendingRound2(), loadCompletedRound2()]);
+    } catch (err) {
+      patchRound2Row(id, {
+        saving: false,
+        message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true },
+      });
+    }
+  }
+
+  async function handleSaveAllRound2() {
+    const selected = pendingRound2Vehicles.filter((v) => round2Rows[v.id]?.selected);
+    if (!selected.length) return;
+
+    const parsed: Array<{ id: string; dateIso: string; cost: string }> = [];
+    for (const v of selected) {
+      const row = round2Rows[v.id];
+      if (!row) continue;
+      try {
+        const { dateIso } = validateRound2Row(row);
+        parsed.push({ id: v.id, dateIso, cost: row.costText });
+      } catch (err) {
+        setRound2BulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
+        return;
+      }
+    }
+
+    setRound2BulkSaving(true);
+    setRound2BulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
+    try {
+      const results = await Promise.allSettled(
+        parsed.map((p) => api.updateInspectionRound2(p.id, { done: true, date: p.dateIso || null, cost: p.cost || null })),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      setRound2BulkMessage(
+        failed
+          ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
+          : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
+      );
+      await Promise.all([loadPendingRound2(), loadCompletedRound2()]);
+    } finally {
+      setRound2BulkSaving(false);
+    }
+  }
+
   function openDetail(vehicle: InspectionVehicle) {
     setDetail(vehicle);
     dialogRef.current?.showModal();
@@ -799,6 +1127,22 @@ export default function InspectionPage() {
         >
           2. ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน
         </button>
+        <button
+          className={`vehicle-tab${activeTab === "completed" ? " selected" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "completed"}
+          onClick={() => setActiveTab("completed")}
+        >
+          3. รายการที่ตรวจเสร็จล่าสุด
+        </button>
+        <button
+          className={`vehicle-tab${activeTab === "round2" ? " selected" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "round2"}
+          onClick={() => setActiveTab("round2")}
+        >
+          4. ตรวจรถรอบ 2 (ครบ 90 วัน)
+        </button>
       </div>
 
       {activeTab === "send" ? (
@@ -814,32 +1158,21 @@ export default function InspectionPage() {
               </div>
             </div>
           ) : (
-            <>
-              <SendPanel
-                title="ตรวจนอก"
-                panelType="ตรวจนอก"
-                vehicles={pendingSendVehicles}
-                rows={sendRows}
-                patchRow={patchSendRow}
-                onSelectAll={(checked) => handleSelectAllSend("ตรวจนอก", checked)}
-                onSave={handleSaveSend}
-                onSaveAll={() => handleSaveAllSend("ตรวจนอก", setOutSaving, setOutMessage)}
-                bulkSaving={outSaving}
-                bulkMessage={outMessage}
-              />
-              <SendPanel
-                title="เอารถมาตรวจเอง"
-                panelType="เอารถมาตรวจเอง"
-                vehicles={pendingSendVehicles}
-                rows={sendRows}
-                patchRow={patchSendRow}
-                onSelectAll={(checked) => handleSelectAllSend("เอารถมาตรวจเอง", checked)}
-                onSave={handleSaveSend}
-                onSaveAll={() => handleSaveAllSend("เอารถมาตรวจเอง", setSelfSaving, setSelfMessage)}
-                bulkSaving={selfSaving}
-                bulkMessage={selfMessage}
-              />
-            </>
+            <SendPanel
+              vehicles={filteredSendVehicles}
+              rows={sendRows}
+              patchRow={patchSendRow}
+              onCheck={handleSendCheck}
+              onSelectAll={handleSelectAllSend}
+              onSave={handleSaveSend}
+              onSaveAll={handleSaveAllSend}
+              bulkSaving={sendBulkSaving}
+              bulkMessage={sendBulkMessage}
+              provinceFilter={sendProvinceFilter}
+              onProvinceFilterChange={setSendProvinceFilter}
+              selectAllDateText={sendSelectAllDateText}
+              onSelectAllDateTextChange={setSendSelectAllDateText}
+            />
           )}
 
           <ReferencePanel
@@ -847,19 +1180,17 @@ export default function InspectionPage() {
             vehicles={pendingResultVehicles}
             loading={resultLoading}
             error={resultError}
-            columns={PENDING_RESULT_COLUMNS}
+            renderSub={renderPendingResultSub}
           />
-
-          <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
         </>
-      ) : (
+      ) : activeTab === "result" ? (
         <>
           <ReferencePanel
             title="รถที่ยังไม่ได้ส่งตรวจ"
             vehicles={pendingSendVehicles}
             loading={sendLoading}
             error={sendError}
-            columns={PENDING_SEND_COLUMNS}
+            renderSub={renderPendingSendSub}
           />
 
           {resultLoading ? (
@@ -873,7 +1204,7 @@ export default function InspectionPage() {
               </div>
             </div>
           ) : (
-            <>
+            <div className="inspect-grid">
               <ResultPanel
                 title="ตรวจรถเรียบร้อย"
                 panelResult="ผ่าน"
@@ -900,10 +1231,45 @@ export default function InspectionPage() {
                 bulkSaving={failSaving}
                 bulkMessage={failMessage}
               />
-            </>
+            </div>
           )}
-
-          <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
+        </>
+      ) : activeTab === "completed" ? (
+        <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
+      ) : (
+        <>
+          {round2Loading ? (
+            <div className="panel" style={{ marginBottom: 24 }}>
+              <div className="empty-customers">กำลังโหลดรายการ…</div>
+            </div>
+          ) : round2Error ? (
+            <div className="panel" style={{ marginBottom: 24 }}>
+              <div className="empty-customers" role="alert">
+                {round2Error}
+              </div>
+            </div>
+          ) : (
+            <Round2Panel
+              vehicles={pendingRound2Vehicles}
+              rows={round2Rows}
+              patchRow={patchRound2Row}
+              onCheck={handleRound2Check}
+              onSelectAll={handleSelectAllRound2}
+              onSave={handleSaveRound2}
+              onSaveAll={handleSaveAllRound2}
+              bulkSaving={round2BulkSaving}
+              bulkMessage={round2BulkMessage}
+              selectAllDateText={round2SelectAllDateText}
+              onSelectAllDateTextChange={setRound2SelectAllDateText}
+            />
+          )}
+          <ReferencePanel
+            title="รายการที่ตรวจรอบ 2 เสร็จแล้ว"
+            vehicles={completedRound2Vehicles}
+            loading={completedRound2Loading}
+            error={completedRound2Error}
+            renderSub={renderRound2CompletedSub}
+          />
         </>
       )}
 

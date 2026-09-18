@@ -103,13 +103,28 @@ export interface InspectionVehicle {
   body: string | null;
   registrationProvince: string | null;
   suggestedCost: string | null;
-  inspectionSentType: 'ตรวจนอก' | 'เอารถมาตรวจเอง' | null;
+  inspectionSentType: 'ส่งตรวจนอก' | 'เอารถมาตรวจเอง' | null;
   inspectionSentDate: string | null;
   inspectionSentCost: string | null;
   inspectionResult: 'ผ่าน' | 'ไม่ผ่าน' | null;
   inspectionResultDate: string | null;
   inspectionResultCost: string | null;
   inspectionFailRemark: string | null;
+}
+
+export interface Round2Vehicle {
+  id: string;
+  date: string;
+  customerName: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  registrationProvince: string | null;
+  inspectionResultDate: string | null;
+  suggestedRound2Cost: string | null;
+  inspectionRound2Done: boolean;
+  inspectionRound2Date: string | null;
+  inspectionRound2Cost: string | null;
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -183,6 +198,15 @@ export const api = {
         'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionFailRemark'
       >;
     }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  listPendingInspectionRound2: () => request<{ vehicles: Round2Vehicle[] }>('/api/vehicles/inspection/round2-pending'),
+  listRecentlyCompletedInspectionRound2: () =>
+    request<{ vehicles: Round2Vehicle[] }>('/api/vehicles/inspection/round2-completed'),
+  updateInspectionRound2: (id: string, data: { done: boolean; date: string | null; cost: string | null }) =>
+    request<{ vehicle: Pick<Round2Vehicle, 'id' | 'inspectionRound2Done' | 'inspectionRound2Date' | 'inspectionRound2Cost'> }>(
+      `/api/vehicles/${id}/inspection-round2`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
 
   listYamahaRelocation: (size: YamahaRelocationSize, month: string) =>
     request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(

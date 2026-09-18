@@ -91,7 +91,7 @@ model Vehicle {
   transferCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate)
 
   // Step 3a: ส่งตรวจ (เข้าคิวหลังจากทำ Step 2 เสร็จแล้วเท่านั้น - transferDone = true)
-  inspectionSentType String? // 'ตรวจนอก' | 'เอารถมาตรวจเอง'
+  inspectionSentType String? // 'ส่งตรวจนอก' | 'เอารถมาตรวจเอง'
   inspectionSentDate DateTime? // วันที่ส่งตรวจ
   inspectionSentCost Decimal? @db.Decimal(10, 2) // ค่าใช้จ่ายส่งตรวจ (ค่าเริ่มต้นมาจากตาราง FeeInspectionBangkok/FeeInspectionProvince)
 
@@ -100,6 +100,12 @@ model Vehicle {
   inspectionResultDate  DateTime? // วันที่ทราบผลตรวจ
   inspectionResultCost  Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง ณ วันทราบผล
   inspectionFailRemark  String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
+
+  // Step 3c: ตรวจรถรอบ 2 - เข้าคิวเมื่อ inspectionResult = 'ผ่าน' และครบ 90 วันจาก inspectionResultDate
+  // ราคา = No bill ตามตาราง FeeInspectionBangkok/FeeInspectionProvince เดิม + ค่าตรวจรถ (Bill) 50 บาท
+  inspectionRound2Done Boolean   @default(false)
+  inspectionRound2Date DateTime?
+  inspectionRound2Cost Decimal?  @db.Decimal(10, 2)
 
   // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax* ด้านล่าง)
   firstRegistrationDate DateTime? // วันจดทะเบียนครั้งแรก - ใช้คำนวณอายุรถและตรวจสอบมาตรการลดภาษี EV ตามช่วงเวลา

@@ -140,3 +140,34 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .row-failed:hover{background:#fbdada}
 .empty-page{padding:60px 24px;text-align:center;color:#8290a5;font-size:14px;background:white;border:1px solid #e3e8f1;border-radius:12px}
 @media(max-width:600px){.vehicle-fields{grid-template-columns:1fr}.vehicle-tab{padding:13px 10px;font-size:14px}}
+
+/* Card-row layout for the ตรวจรถ page - avoids wide tables that need horizontal scrolling, while
+   still reading left-to-right like a table row: info (.inspect-row-body), checkboxes
+   (.inspect-row-checks), date/cost/remark (.inspect-row-field), then the save button last.
+   .inspect-row wraps onto multiple lines on narrow viewports instead of overflowing sideways.
+   .inspect-grid seats two panels side by side (e.g. ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน). */
+.inspect-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:900px){.inspect-grid{grid-template-columns:1fr}}
+/* ลำดับซ้าย-ขวาให้ตรงกับแถวข้อมูลด้านล่าง: วันที่/จำนวนคันอยู่หน้าสุด (ตรงตำแหน่ง .inspect-row-body)
+   ช่อง "เลือกทั้งหมด" อยู่ขวาสุด ใช้ .inspect-row-checks ซ้ำ ให้ตรงกับ checkbox ของแต่ละแถว */
+.inspect-select-all{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 22px;border-bottom:1px solid #f0f2f6;font-size:13px;color:#576781;flex-wrap:wrap}
+.inspect-select-all-info{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.inspect-select-all label{display:flex;align-items:center;gap:6px}
+.inspect-select-all input[type=text]{border:1px solid #dce2ec;border-radius:8px;padding:6px 9px;font:inherit;font-size:13px;color:#18243c}
+.inspect-select-all input[type=text]:focus{outline:2px solid #9bb2fb;border-color:#2854d9}
+.inspect-rows{display:flex;flex-direction:column}
+.inspect-row{display:flex;gap:20px;padding:16px 22px;border-bottom:1px solid #f0f2f6;align-items:center;flex-wrap:wrap}
+.inspect-row:last-child{border-bottom:0}
+.inspect-row-body{flex:1 1 220px;min-width:180px}
+.inspect-row-title{font-weight:600;color:#18243c;font-size:14px}
+.inspect-row-title span{font-weight:400;color:#576781}
+.inspect-row-sub{font-size:12px;color:#929bad;margin-top:4px}
+.inspect-row-checks{display:flex;gap:14px;flex-shrink:0;flex-wrap:wrap}
+.inspect-row-checks label{display:flex;align-items:center;gap:6px;font-size:12px;color:#576781;white-space:nowrap}
+.inspect-row-field{display:flex;align-items:center;gap:6px;font-size:12px;color:#8a94a6;white-space:nowrap;flex-shrink:0}
+.inspect-row-field input[type=text],.inspect-row-field input[type=number]{border:1px solid #dce2ec;border-radius:8px;padding:6px 9px;font:inherit;font-size:13px;color:#18243c}
+.inspect-row-field input:focus{outline:2px solid #9bb2fb;border-color:#2854d9}
+.inspect-row-hint{font-size:11px;color:#8a94a6;white-space:nowrap;flex-shrink:0}
+.inspect-filter{display:flex;gap:8px;padding:0 22px 16px;flex-wrap:wrap}
+.filter-chip{border:1px solid #dce2ec;background:white;border-radius:999px;padding:7px 16px;font-size:13px;color:#576781}
+.filter-chip.selected{background:#edf2ff;border-color:#2854d9;color:#2854d9;font-weight:600}
