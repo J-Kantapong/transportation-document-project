@@ -228,11 +228,16 @@ export default function SubmitDocumentsPage() {
 
   function handleSaveToBatch() {
     setFormError("");
+    if (!selectedVehicle) return;
+    if (batch.some((e) => e.vehicle.id === selectedVehicle.id)) {
+      setFormError("รถคันนี้อยู่ในรายการที่บันทึกไว้แล้ว - แก้ไข/ลบรายการเดิมได้จากหน้ารายการที่บันทึกไว้แทนการเพิ่มซ้ำ");
+      return;
+    }
     if (options.plateNumberOption !== "NONE" && (!plateCategory.trim() || !plateNumber.trim())) {
       setFormError("กรุณากรอกหมวดทะเบียนและเลขทะเบียนที่ขอก่อนบันทึก");
       return;
     }
-    if (!feePreview || !selectedVehicle) {
+    if (!feePreview) {
       setFormError("กำลังคำนวณค่าธรรมเนียม กรุณารอสักครู่แล้วลองใหม่");
       return;
     }
@@ -279,7 +284,11 @@ export default function SubmitDocumentsPage() {
     setBulkError("");
     setBulkNotice("");
     try {
-      const { found, notFound, pendingBlocked } = await api.lookupVehiclesByChassis(lines);
+      const { found: foundAll, notFound, pendingBlocked } = await api.lookupVehiclesByChassis(lines);
+      const batchVehicleIds = new Set(batch.map((e) => e.vehicle.id));
+      const found = foundAll.filter((v) => !batchVehicleIds.has(v.id));
+      const alreadyInBatch = foundAll.filter((v) => batchVehicleIds.has(v.id)).map((v) => v.chassis);
+
       const noticeParts: string[] = [];
       if (notFound.length > 0) {
         noticeParts.push(`ไม่พบรถ ${notFound.length} รายการในระบบ (ข้ามไป): ${notFound.slice(0, 10).join(", ")}${notFound.length > 10 ? " ..." : ""}`);
@@ -287,6 +296,11 @@ export default function SubmitDocumentsPage() {
       if (pendingBlocked.length > 0) {
         noticeParts.push(
           `ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ ${pendingBlocked.length} คัน (ข้ามไป): ${pendingBlocked.slice(0, 10).join(", ")}${pendingBlocked.length > 10 ? " ..." : ""}`,
+        );
+      }
+      if (alreadyInBatch.length > 0) {
+        noticeParts.push(
+          `อยู่ในรายการที่บันทึกไว้แล้ว ${alreadyInBatch.length} คัน (ข้ามไป): ${alreadyInBatch.slice(0, 10).join(", ")}${alreadyInBatch.length > 10 ? " ..." : ""}`,
         );
       }
       if (noticeParts.length > 0) {
@@ -643,6 +657,8 @@ export default function SubmitDocumentsPage() {
                       <td>
                         {v.pendingDocumentSubmission ? (
                           <span className="badge warn">ยื่นแล้ว รอใบเสร็จ</span>
+                        ) : batch.some((e) => e.vehicle.id === v.id) ? (
+                          <span className="badge">อยู่ในรายการแล้ว</span>
                         ) : (
                           <button className="text-button" onClick={() => pickVehicle(v)}>
                             เลือก
