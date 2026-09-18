@@ -337,7 +337,7 @@ export class VehiclesService {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
         where: { inspectionSentDate: { not: null }, inspectionResultDate: null },
-        orderBy: [{ inspectionSentDate: 'asc' }, { id: 'asc' }],
+        orderBy: [{ inspectionSentDate: 'desc' }, { id: 'desc' }],
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
