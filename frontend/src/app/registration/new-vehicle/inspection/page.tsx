@@ -249,14 +249,12 @@ function SendPanel({
           </div>
           <div className="inspect-row-header">
             <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · จังหวัดที่จดทะเบียน</div>
-            <div className="inspect-row-checks">ประเภทการส่งตรวจ</div>
-            <div className="inspect-row-field" style={{ width: 100 }}>
-              วันที่
+            <div className="inspect-row-controls inspect-row-controls--send">
+              <div>ประเภทการส่งตรวจ</div>
+              <div>วันที่</div>
+              <div>ค่าใช้จ่าย</div>
+              <div />
             </div>
-            <div className="inspect-row-field" style={{ width: 80 }}>
-              ค่าใช้จ่าย
-            </div>
-            <div style={{ width: 56 }} />
           </div>
           <div className="inspect-rows">
             {pageItems.map((v) => {
@@ -274,56 +272,52 @@ function SendPanel({
                       </div>
                     )}
                   </div>
-                  <div className="inspect-row-checks">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={row.selectedType === "ส่งตรวจนอก"}
-                        onChange={(e) => onCheck(v.id, "ส่งตรวจนอก", e.target.checked)}
-                      />
-                      ส่งตรวจนอก
-                    </label>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={row.selectedType === "เอารถมาตรวจเอง"}
-                        onChange={(e) => onCheck(v.id, "เอารถมาตรวจเอง", e.target.checked)}
-                      />
-                      เอารถมาตรวจเอง
-                    </label>
-                  </div>
-                  <label className="inspect-row-field">
-                    วันที่
+                  <div className="inspect-row-controls inspect-row-controls--send">
+                    <div className="inspect-row-checks">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={row.selectedType === "ส่งตรวจนอก"}
+                          onChange={(e) => onCheck(v.id, "ส่งตรวจนอก", e.target.checked)}
+                        />
+                        ส่งตรวจนอก
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={row.selectedType === "เอารถมาตรวจเอง"}
+                          onChange={(e) => onCheck(v.id, "เอารถมาตรวจเอง", e.target.checked)}
+                        />
+                        เอารถมาตรวจเอง
+                      </label>
+                    </div>
                     <input
                       type="text"
                       inputMode="numeric"
+                      aria-label="วันที่"
                       placeholder="วว/ดด/ปปปป"
                       value={row.dateText}
                       onChange={(e) =>
                         patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
                       }
-                      style={{ width: 100 }}
                     />
-                  </label>
-                  <label className="inspect-row-field">
-                    ค่าใช้จ่าย
                     <input
                       type="number"
                       min={0}
                       step="any"
+                      aria-label="ค่าใช้จ่าย"
                       value={row.costText}
                       disabled={!row.selectedType}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                      style={{ width: 80 }}
                     />
-                  </label>
-                  <button
-                    className="text-button"
-                    disabled={!row.selectedType || row.saving || bulkSaving}
-                    onClick={() => onSave(v.id)}
-                  >
-                    บันทึก
-                  </button>
+                    <button
+                      className="text-button"
+                      disabled={!row.selectedType || row.saving || bulkSaving}
+                      onClick={() => onSave(v.id)}
+                    >
+                      บันทึก
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -392,19 +386,13 @@ function ResultPanel({
           </label>
           <div className="inspect-row-header">
             <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · ประเภทการส่งตรวจ</div>
-            <div className="inspect-row-checks">{panelResult}</div>
-            <div className="inspect-row-field" style={{ width: 100 }}>
-              วันที่
+            <div className={`inspect-row-controls inspect-row-controls--${showRemark ? "result-remark" : "result"}`}>
+              <div>{panelResult}</div>
+              <div>วันที่</div>
+              <div>ค่าใช้จ่าย</div>
+              {showRemark && <div>Remark</div>}
+              <div />
             </div>
-            <div className="inspect-row-field" style={{ width: 80 }}>
-              ค่าใช้จ่าย
-            </div>
-            {showRemark && (
-              <div className="inspect-row-field" style={{ width: 180 }}>
-                Remark
-              </div>
-            )}
-            <div style={{ width: 56 }} />
           </div>
           <div className="inspect-rows">
             {pageItems.map((v) => {
@@ -423,70 +411,63 @@ function ResultPanel({
                       </div>
                     )}
                   </div>
-                  <div className="inspect-row-checks">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          const isChecked = e.target.checked;
-                          patchRow(v.id, {
-                            selectedResult: isChecked ? panelResult : null,
-                            // Default = วันที่ส่งตรวจ (ไม่ใช่วันนี้) - ทราบผลควรอ้างอิงวันที่ส่งไป
-                            dateText:
-                              isChecked && !row.dateText
-                                ? v.inspectionSentDate
-                                  ? isoToDisplayDate(v.inspectionSentDate)
-                                  : isoToDisplayDate(todayIso())
-                                : row.dateText,
-                            // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กกลับให้คืนราคาแนะนำถ้าช่องว่างอยู่
-                            costText: isChecked ? row.costText || v.inspectionSentCost || v.suggestedCost || "" : "",
-                          });
-                        }}
-                      />
-                      {panelResult}
-                    </label>
-                  </div>
-                  <label className="inspect-row-field">
-                    วันที่
+                  <div className={`inspect-row-controls inspect-row-controls--${showRemark ? "result-remark" : "result"}`}>
+                    <div className="inspect-row-checks">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            patchRow(v.id, {
+                              selectedResult: isChecked ? panelResult : null,
+                              // Default = วันที่ส่งตรวจ (ไม่ใช่วันนี้) - ทราบผลควรอ้างอิงวันที่ส่งไป
+                              dateText:
+                                isChecked && !row.dateText
+                                  ? v.inspectionSentDate
+                                    ? isoToDisplayDate(v.inspectionSentDate)
+                                    : isoToDisplayDate(todayIso())
+                                  : row.dateText,
+                              // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กกลับให้คืนราคาแนะนำถ้าช่องว่างอยู่
+                              costText: isChecked ? row.costText || v.inspectionSentCost || v.suggestedCost || "" : "",
+                            });
+                          }}
+                        />
+                        {panelResult}
+                      </label>
+                    </div>
                     <input
                       type="text"
                       inputMode="numeric"
+                      aria-label="วันที่"
                       placeholder="วว/ดด/ปปปป"
                       value={row.dateText}
                       onChange={(e) =>
                         patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
                       }
-                      style={{ width: 100 }}
                     />
-                  </label>
-                  <label className="inspect-row-field">
-                    ค่าใช้จ่าย
                     <input
                       type="number"
                       min={0}
                       step="any"
+                      aria-label="ค่าใช้จ่าย"
                       value={row.costText}
                       disabled={!checked}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                      style={{ width: 80 }}
                     />
-                  </label>
-                  {showRemark && (
-                    <label className="inspect-row-field">
-                      Remark
+                    {showRemark && (
                       <input
                         type="text"
+                        aria-label="Remark"
                         placeholder="เหตุผลที่ตรวจไม่ผ่าน"
                         value={row.remarkText}
                         onChange={(e) => patchRow(v.id, { remarkText: e.target.value })}
-                        style={{ width: 180 }}
                       />
-                    </label>
-                  )}
-                  <button className="text-button" disabled={!checked || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                    บันทึก
-                  </button>
+                    )}
+                    <button className="text-button" disabled={!checked || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                      บันทึก
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -573,14 +554,12 @@ function Round2Panel({
           </div>
           <div className="inspect-row-header">
             <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · วันที่ผ่านตรวจครั้งแรก</div>
-            <div className="inspect-row-checks">ตรวจรอบ 2</div>
-            <div className="inspect-row-field" style={{ width: 100 }}>
-              วันที่
+            <div className="inspect-row-controls inspect-row-controls--round2">
+              <div>ตรวจรอบ 2</div>
+              <div>วันที่</div>
+              <div>ค่าใช้จ่าย</div>
+              <div />
             </div>
-            <div className="inspect-row-field" style={{ width: 80 }}>
-              ค่าใช้จ่าย
-            </div>
-            <div style={{ width: 56 }} />
           </div>
           <div className="inspect-rows">
             {pageItems.map((v) => {
@@ -599,40 +578,36 @@ function Round2Panel({
                       </div>
                     )}
                   </div>
-                  <div className="inspect-row-checks">
-                    <label>
-                      <input type="checkbox" checked={row.selected} onChange={(e) => onCheck(v.id, e.target.checked)} />
-                      ตรวจรอบ 2 เรียบร้อย
-                    </label>
-                  </div>
-                  <label className="inspect-row-field">
-                    วันที่
+                  <div className="inspect-row-controls inspect-row-controls--round2">
+                    <div className="inspect-row-checks">
+                      <label>
+                        <input type="checkbox" checked={row.selected} onChange={(e) => onCheck(v.id, e.target.checked)} />
+                        ตรวจรอบ 2 เรียบร้อย
+                      </label>
+                    </div>
                     <input
                       type="text"
                       inputMode="numeric"
+                      aria-label="วันที่"
                       placeholder="วว/ดด/ปปปป"
                       value={row.dateText}
                       onChange={(e) =>
                         patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
                       }
-                      style={{ width: 100 }}
                     />
-                  </label>
-                  <label className="inspect-row-field">
-                    ค่าใช้จ่าย
                     <input
                       type="number"
                       min={0}
                       step="any"
+                      aria-label="ค่าใช้จ่าย"
                       value={row.costText}
                       disabled={!row.selected}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                      style={{ width: 80 }}
                     />
-                  </label>
-                  <button className="text-button" disabled={!row.selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                    บันทึก
-                  </button>
+                    <button className="text-button" disabled={!row.selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                      บันทึก
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -745,7 +720,6 @@ function CompletedInspectionPanel({
         <>
           <div className="inspect-row-header">
             <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · ผลตรวจ / วันที่เสร็จ / ค่าใช้จ่าย</div>
-            <div style={{ width: 56 }} />
           </div>
           <div className="inspect-rows">
             {pageItems.map((v) => (
