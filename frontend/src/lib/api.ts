@@ -85,6 +85,78 @@ export interface Vehicle {
   ownerId: string | null;
   ownerName: string | null;
   ownerType: OwnerType | null;
+  // Step 4: เลขทะเบียนที่ขอ/ได้รับ - mutable, กรอกทีหลังได้ตอนใบเสร็จกรมขนส่งออกเลขให้
+  plateCategory: string | null;
+  plateNumber: string | null;
+}
+
+// Step 4 (ยื่นเอกสารจดทะเบียนรถใหม่): ค่าธรรมเนียม Bill/No bill - ดู
+// backend/src/document-submission/document-fee-calculator.ts สำหรับ logic การคำนวณจริง
+export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION";
+export type NewPlateOption = "NONE" | "BLACKWHITE" | "AUCTION";
+
+export interface FeeItem {
+  label: string;
+  amount: number;
+}
+
+export interface FeePreview {
+  isMoto: boolean;
+  isOtherProvince: boolean;
+  hasExtraRequest: boolean;
+  billItems: FeeItem[];
+  noBillItems: FeeItem[];
+  billTotal: number;
+  noBillTotal: number;
+}
+
+export interface DocumentSubmissionOptionsInput {
+  plateNumberOption: PlateNumberOption;
+  includePlateFee: boolean;
+  newPlateOption: NewPlateOption | null; // รถยนต์เท่านั้น - null สำหรับมอเตอร์ไซค์
+  relocateAddon: boolean; // รถยนต์เท่านั้น
+  stopUseRelocateOut: boolean; // มอเตอร์ไซค์เท่านั้น
+  urgent: boolean;
+}
+
+export interface CreateDocumentSubmissionInput extends DocumentSubmissionOptionsInput {
+  submitDate: string; // ค.ศ. YYYY-MM-DD
+  plateCategory: string | null;
+  plateNumber: string | null;
+  // ประเภทเจ้าของรถ - backend find-or-create VehicleOwner แบบไม่ระบุชื่อให้เอง undefined = ไม่แก้ไข
+  // เจ้าของรถเดิม (ใช้ตอนนำเข้าหลายคันพร้อมกัน ซึ่งไม่ทราบเจ้าของรถ) - undefined ถูกตัดออกจาก JSON โดย
+  // JSON.stringify เอง จึง backend เห็นเป็น "ไม่ได้ส่งมา" พอดี
+  ownerType?: OwnerType;
+}
+
+export interface DocumentSubmission {
+  id: string;
+  vehicleId: string;
+  submitDate: string;
+  plateNumberOption: PlateNumberOption;
+  includePlateFee: boolean;
+  newPlateOption: NewPlateOption | null;
+  relocateAddon: boolean;
+  stopUseRelocateOut: boolean;
+  urgent: boolean;
+  billItems: FeeItem[];
+  noBillItems: FeeItem[];
+  billFeeTotal: string;
+  noBillTotal: string;
+  taxAmount: string | null;
+  createdAt: string;
+  vehicle: {
+    chassis: string;
+    body: string | null;
+    plateCategory: string | null;
+    plateNumber: string | null;
+    customer: { name: string };
+    owner: { name: string | null; ownerType: OwnerType } | null;
+  };
+}
+
+export interface BulkDocumentSubmissionEntry extends CreateDocumentSubmissionInput {
+  vehicleId: string;
 }
 
 export interface VehicleOwnerInput {
@@ -223,6 +295,32 @@ export const api = {
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
   updateVehicle: (id: string, data: Record<string, string>) =>
     request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  searchVehiclesByChassis: (chassis: string) =>
+    request<{ vehicles: Vehicle[] }>(`/api/vehicles/search?chassis=${encodeURIComponent(chassis)}`),
+  lookupVehiclesByChassis: (chassisList: string[]) =>
+    request<{ found: Vehicle[]; notFound: string[] }>('/api/vehicles/lookup-by-chassis', {
+      method: 'POST',
+      body: JSON.stringify({ chassisList }),
+    }),
+
+  previewDocumentSubmissionFee: (vehicleId: string, options: DocumentSubmissionOptionsInput) =>
+    request<FeePreview>(`/api/vehicles/${vehicleId}/document-submission/preview`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+  createDocumentSubmission: (vehicleId: string, input: CreateDocumentSubmissionInput) =>
+    request<{ submission: DocumentSubmission; taxCalculation: TaxCalculation }>(`/api/vehicles/${vehicleId}/document-submission`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  createDocumentSubmissionBulk: (entries: BulkDocumentSubmissionEntry[]) =>
+    request<{ succeeded: Array<{ vehicleId: string; submission: DocumentSubmission }>; failed: Array<{ vehicleId: string; error: string }> }>(
+      '/api/vehicles/document-submission/bulk',
+      { method: 'POST', body: JSON.stringify({ entries }) },
+    ),
+  listDocumentSubmissions: (date?: string) =>
+    request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${date ? `?date=${date}` : ''}`),
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
   listRecentlyCompletedTransferNotice: () =>

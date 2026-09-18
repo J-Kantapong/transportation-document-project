@@ -112,15 +112,22 @@ model Vehicle {
   isFactoryNew          Boolean? // รถใหม่จากโรงงานหรือไม่ - เงื่อนไขของสิทธิ EV บางมาตรการ
   ownerId               String? // เจ้าของรถตามทะเบียน - อาจไม่ใช่คนเดียวกับ customerId (ผู้ส่งงาน) ห้ามอนุมานจากกัน
 
+  // เลขทะเบียนที่ขอ/ได้รับ - แก้ไขได้ตลอด (mutable) ไม่ใช่ snapshot เพราะกรมขนส่งอาจรันเลขให้ทีหลังตอน
+  // ใบเสร็จออก (ไม่ทราบตอนยื่นเอกสาร) เก็บแยก 2 คอลัมน์ตามที่ใช้แสดงผล: หมวดทะเบียน (เช่น "4กข", สูงสุด
+  // 3 ตัวอักษร) และเลขท้าย (เช่น "4444", สูงสุด 4 หลัก)
+  plateCategory String?
+  plateNumber   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  customer        Customer         @relation(fields: [customerId], references: [id])
-  brand           Brand            @relation(fields: [brandId], references: [id])
-  owner           VehicleOwner?    @relation(fields: [ownerId], references: [id])
-  cases           Case[]
-  editLogs        VehicleEditLog[]
-  taxCalculations TaxCalculation[]
+  customer            Customer             @relation(fields: [customerId], references: [id])
+  brand               Brand                @relation(fields: [brandId], references: [id])
+  owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
+  cases               Case[]
+  editLogs            VehicleEditLog[]
+  taxCalculations     TaxCalculation[]
+  documentSubmissions DocumentSubmission[]
 
   @@index([customerId])
   @@index([brandId])
@@ -422,6 +429,35 @@ model TaxCalculation {
   vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
   @@index([vehicleId])
+}
+
+// --- ยื่นเอกสารจดทะเบียนรถใหม่ (Step 4) - snapshot ค่าธรรมเนียม Bill/No bill ------------
+// Immutable audit snapshot เหมือน TaxCalculation ข้างบน: การยื่นเอกสารแต่ละครั้งสร้างแถวใหม่เสมอ ไม่
+// update ของเดิม billItems/noBillItems เก็บ breakdown ที่คำนวณจริง ณ ตอนยื่น (จาก FeeCarBillParam/
+// FeeCarNoBillParam/FeeMotorcycleBillParam/FeeMotorcycleNoBillParam) กันไม่ให้ประวัติเปลี่ยนไปตามอัตรา
+// ที่อาจแก้ในอนาคต taxAmount คัดลอกมาจาก TaxCalculation.finalAmount ล่าสุด ณ ตอนยื่น (อาจ null ถ้ายัง
+// คำนวณภาษีไม่ได้) เพื่อให้หน้า records-by-date โชว์ยอดรวมได้โดยไม่ต้อง join ย้อนกลับไปหา TaxCalculation
+model DocumentSubmission {
+  id                 String   @id @default(cuid())
+  vehicleId          String
+  submitDate         DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
+  plateNumberOption  String // NONE | NORMAL | AUCTION
+  includePlateFee    Boolean  @default(true)
+  newPlateOption     String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์
+  relocateAddon      Boolean  @default(false) // แจ้งย้ายออกต่างจังหวัดพร้อมกัน - รถยนต์เท่านั้น
+  stopUseRelocateOut Boolean  @default(false) // จดใหม่ หยุดใช้ย้ายออก (ลงขัน 250 บาท) - มอเตอร์ไซค์เท่านั้น
+  urgent             Boolean  @default(false)
+  billItems          Json // snapshot [{label, amount}] ไม่รวมภาษี
+  noBillItems        Json
+  billFeeTotal       Decimal  @db.Decimal(12, 2)
+  noBillTotal        Decimal  @db.Decimal(12, 2)
+  taxAmount          Decimal? @db.Decimal(12, 2)
+  createdAt          DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([submitDate])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------

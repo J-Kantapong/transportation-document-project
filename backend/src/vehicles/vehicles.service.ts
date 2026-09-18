@@ -67,18 +67,37 @@ export class VehiclesService {
     private readonly taxService: TaxService,
   ) {}
 
-  async findAll() {
-    const vehicles = await this.prisma.vehicle.findMany({
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 100,
-      include: {
-        customer: { select: { name: true } },
-        brand: { select: { name: true } },
-        owner: { select: { id: true, name: true, ownerType: true } },
-      },
-    });
+  private readonly vehicleFullInclude = {
+    customer: { select: { name: true } },
+    brand: { select: { name: true } },
+    owner: { select: { id: true, name: true, ownerType: true } },
+  } as const;
 
-    return vehicles.map((vehicle) => ({
+  private mapVehicleFull(vehicle: {
+    id: string;
+    date: Date;
+    customerId: string;
+    chassis: string;
+    engine: string | null;
+    brandId: string;
+    fuel: string | null;
+    cc: unknown;
+    weight: unknown;
+    color: string | null;
+    body: string | null;
+    registrationProvince: string | null;
+    ownerProvince: string | null;
+    createdAt: Date;
+    customer: { name: string };
+    brand: { name: string };
+    firstRegistrationDate: Date | null;
+    isFactoryNew: boolean | null;
+    ownerId: string | null;
+    owner: { name: string | null; ownerType: string } | null;
+    plateCategory: string | null;
+    plateNumber: string | null;
+  }) {
+    return {
       id: vehicle.id,
       date: vehicle.date.toISOString().slice(0, 10),
       customerId: vehicle.customerId,
@@ -101,7 +120,49 @@ export class VehiclesService {
       ownerId: vehicle.ownerId,
       ownerName: vehicle.owner?.name ?? null,
       ownerType: vehicle.owner?.ownerType ?? null,
-    }));
+      plateCategory: vehicle.plateCategory,
+      plateNumber: vehicle.plateNumber,
+    };
+  }
+
+  async findAll() {
+    const vehicles = await this.prisma.vehicle.findMany({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+      include: this.vehicleFullInclude,
+    });
+    return vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+  }
+
+  // ค้นหารถด้วยเลขตัวถัง (บางส่วนก็ได้) สำหรับหน้ายื่นเอกสารจดทะเบียน (Step 4) - แยกจาก findAll() เพราะ
+  // findAll() จำกัดแค่ 100 คันล่าสุด รถเก่ากว่านั้นต้องค้นด้วย endpoint นี้ถึงจะเจอ
+  async searchByChassis(query: string) {
+    const trimmed = query.trim();
+    if (!trimmed) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { chassis: { contains: trimmed, mode: 'insensitive' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 20,
+      include: this.vehicleFullInclude,
+    });
+    return vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+  }
+
+  // นำเข้าหลายคันพร้อมกัน (bulk paste เลขตัวถัง สูงสุด 1,000 คัน) - จับคู่แบบ exact match
+  // (case-insensitive) กับรถที่มีอยู่แล้วในระบบ ไม่ใช่การสร้างรถใหม่ - รถที่ไม่พบคืนแยกไว้ให้ผู้ใช้แก้ไข
+  async lookupByChassis(chassisList: string[]) {
+    const trimmed = Array.from(new Set(chassisList.map((c) => c.trim()).filter(Boolean)));
+    if (trimmed.length === 0) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถังอย่างน้อย 1 รายการ' });
+    if (trimmed.length > MAX_BATCH_SIZE) throw new BadRequestException({ error: `รองรับไม่เกิน ${MAX_BATCH_SIZE} คันต่อครั้ง` });
+
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { chassis: { in: trimmed, mode: 'insensitive' } },
+      include: this.vehicleFullInclude,
+    });
+    const found = vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+    const foundChassisLower = new Set(found.map((v) => v.chassis.toLowerCase()));
+    const notFound = trimmed.filter((c) => !foundChassisLower.has(c.toLowerCase()));
+    return { found, notFound };
   }
 
   async createBatch(body: CreateVehiclesDto): Promise<{ count: number }> {

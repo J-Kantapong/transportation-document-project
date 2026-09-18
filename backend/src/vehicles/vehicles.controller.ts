@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
@@ -20,6 +20,18 @@ export class VehiclesController {
   @Post()
   create(@Body() body: CreateVehiclesDto) {
     return this.vehiclesService.createBatch(body);
+  }
+
+  // ยื่นเอกสารจดทะเบียน (Step 4): findAll() จำกัด 100 คันล่าสุด - ค้นหารถเก่ากว่านั้นด้วยเลขตัวถังที่นี่
+  @Get('search')
+  async search(@Query('chassis') chassis = '') {
+    return { vehicles: await this.vehiclesService.searchByChassis(chassis) };
+  }
+
+  @Post('lookup-by-chassis')
+  lookupByChassis(@Body() body: { chassisList?: unknown }) {
+    const chassisList = Array.isArray(body?.chassisList) ? body.chassisList.filter((c): c is string => typeof c === 'string') : [];
+    return this.vehiclesService.lookupByChassis(chassisList);
   }
 
   @Patch(':id')

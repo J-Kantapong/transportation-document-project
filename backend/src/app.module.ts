@@ -3,6 +3,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { BrandsModule } from './brands/brands.module.js';
 import { CustomersModule } from './customers/customers.module.js';
+import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { TaxModule } from './tax/tax.module.js';
 import { VehicleOwnersModule } from './vehicle-owners/vehicle-owners.module.js';
@@ -18,6 +19,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     VehicleOwnersModule,
     VehiclesModule,
     YamahaRelocationModule,
+    DocumentSubmissionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

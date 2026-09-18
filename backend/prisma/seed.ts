@@ -119,9 +119,8 @@ async function seedInspectionProvince() {
 }
 
 // Government annual tax (ภาษีรถประจำปี) - only seed the rule sets the user has given exact
-// figures for. RY2/RY3 weight brackets, the RY1-BEV weight table, and the EV tax-incentive
-// schedule are still missing (see memory project_fee_pricing_workflow); leave those empty
-// rather than guessing.
+// figures for. The EV tax-incentive schedule is still missing (see memory
+// project_fee_pricing_workflow); leave that empty rather than guessing.
 async function seedGovernmentTaxCcBrackets() {
   // RY1 (รย.1) ICE/HEV/PHEV: progressive บาท/cc, ใช้สูตรเดียวกันทั้ง 3 เชื้อเพลิงตามที่ให้มา
   // ccFrom/ccTo คือเกณฑ์ต่อเนื่อง (0/600/1800) ไม่ใช่ช่วงจำนวนเต็มแบบ "601-1800" - อัตราส่วนเกินคิดจาก
@@ -150,6 +149,49 @@ async function seedGovernmentTaxCcBrackets() {
         },
         update: { ccTo, ratePerCc, sortOrder, status: GovTaxRuleStatus.VERIFIED, active: true },
       });
+    }
+  }
+}
+
+// น้ำหนักรถ (กก.) -> ภาษีเหมาช่วง (บาท/ปี) สำหรับ รย.1-รถไฟฟ้า (BEV), รย.2 (ใช้ตาราง "passenger"
+// เดียวกับ รย.1-BEV) และ รย.3 (ใช้ตาราง "truck") มาจากเอกสาร ก.พ. ตาราง 2-3 หน้า PDF 20-21 อ้าง DLT
+// 2565 (https://www.ocsc.go.th/wp-content/uploads/2024/09/ISFE881.pdf) - ผู้ใช้ยืนยันให้ใช้เป็น
+// ข้อมูลจริง (VERIFIED) เมื่อ 2026-09-19 แม้ไฟล์ต้นฉบับ (thai-vehicle-tax-engine build.mjs) จะทำเครื่องหมาย
+// PENDING_REVIEW/disabled ไว้ก็ตาม - ตัวคูณเจ้าของรถ (นิติบุคคล x2) คูณทับตัวเลขนี้ต่อใน
+// government-tax-calculator.ts ตามเดิม ไม่เปลี่ยนแปลง
+async function seedGovernmentTaxWeightBrackets() {
+  const bounds: Array<number | null> = [500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, null];
+  const passenger = [150, 300, 450, 800, 1000, 1300, 1600, 1900, 2200, 2400, 2600, 2800, 3000, 3200, 3400, 3600];
+  const truck = [300, 450, 600, 750, 900, 1050, 1350, 1650, 1950, 2250, 2550, 2850, 3150, 3450, 3750, 4050];
+  const legalReference = "ก.พ. ตาราง 2-3 (อ้าง DLT 2565): https://www.ocsc.go.th/wp-content/uploads/2024/09/ISFE881.pdf";
+
+  const rows: Array<{
+    vehicleFamily: GovTaxVehicleFamily;
+    fuelGroup: GovTaxFuelGroup | null;
+    weightFrom: number;
+    weightTo: number | null;
+    amount: number;
+    sortOrder: number;
+  }> = [];
+  bounds.forEach((weightTo, i) => {
+    const weightFrom = i === 0 ? 0 : (bounds[i - 1] as number);
+    rows.push({ vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup: GovTaxFuelGroup.BEV, weightFrom, weightTo, amount: passenger[i], sortOrder: i });
+    rows.push({ vehicleFamily: GovTaxVehicleFamily.RY2, fuelGroup: null, weightFrom, weightTo, amount: passenger[i], sortOrder: i });
+    rows.push({ vehicleFamily: GovTaxVehicleFamily.RY3, fuelGroup: null, weightFrom, weightTo, amount: truck[i], sortOrder: i });
+  });
+
+  for (const row of rows) {
+    // upsert's compound-unique `where` rejects a literal null for the nullable fuelGroup column
+    // (Prisma client validation, not a DB limitation) - findFirst+create/update by hand instead
+    // for the RY2/RY3 rows (fuelGroup: null applies to every fuel, see schema.prisma comment).
+    const existing = await prisma.governmentTaxWeightBracket.findFirst({
+      where: { vehicleFamily: row.vehicleFamily, fuelGroup: row.fuelGroup, weightFrom: row.weightFrom },
+    });
+    const data = { weightTo: row.weightTo, amount: row.amount, sortOrder: row.sortOrder, status: GovTaxRuleStatus.VERIFIED, active: true, legalReference };
+    if (existing) {
+      await prisma.governmentTaxWeightBracket.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.governmentTaxWeightBracket.create({ data: { ...row, ...data } });
     }
   }
 }
@@ -190,6 +232,7 @@ async function main() {
   await seedInspectionBangkok();
   await seedInspectionProvince();
   await seedGovernmentTaxCcBrackets();
+  await seedGovernmentTaxWeightBrackets();
   await seedGovernmentTaxMotorcycleFlat();
   // ค่าภาษีรถยนต์/รถจักรยานยนต์ เดิมเคยเป็นแถว param เดี่ยวๆ ด้านล่าง (กรอกเอง) - ย้ายไปคำนวณจาก
   // GovernmentTaxCcBracket/WeightBracket/MotorcycleFlat แทนแล้ว ลบแถวเก่าทิ้งกันข้อมูลซ้ำซ้อน/ขัดแย้งกัน
@@ -213,15 +256,15 @@ async function main() {
   await seedParamTable("feeCarNoBillParam", [
     ["ค่าอากร (ปกติ)", 10, null],
     ["ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)", 30, null],
-    ["ลงขัน - รย.1-เก๋ง 2 ตอน", 50, null],
-    ["ลงขัน - รย.1-นั่ง 2 ตอน", 100, null],
-    ["ลงขัน - รย.1-นั่ง 3 ตอน", 50, null],
-    ["ลงขัน - รย.2-นั่ง 2 แถว", 50, null],
-    ["ลงขัน - รย.2-นั่ง 4 ตอน", 50, null],
-    ["ลงขัน - รย.3-กระบะบรรทุก", 50, null],
-    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคา", 50, null],
-    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคาแหนบ", 50, null],
-    ["ลงขัน - รย.3-ตู้บรรทุก", 50, null],
+    ["ลงขัน - รย.1-เก๋ง 2 ตอน", 40, null],
+    ["ลงขัน - รย.1-นั่ง 2 ตอน", 40, null],
+    ["ลงขัน - รย.1-นั่ง 3 ตอน", 40, null],
+    ["ลงขัน - รย.2-นั่ง 2 แถว", 40, null],
+    ["ลงขัน - รย.2-นั่ง 4 ตอน", 40, null],
+    ["ลงขัน - รย.3-กระบะบรรทุก", 40, null],
+    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคา", 40, null],
+    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคาแหนบ", 40, null],
+    ["ลงขัน - รย.3-ตู้บรรทุก", 40, null],
     ["งานด่วนเพิ่ม (ต่อคัน)", 100, null],
   ]);
 
@@ -232,6 +275,7 @@ async function main() {
     ["ค่าตรวจสภาพรถ (จยย.)", 10, null],
     ["ค่าแผ่นป้ายทะเบียน", 100, null],
     ["ค่าใบคู่มือจดทะเบียน", 100, null],
+    ["ค่าขอใช้เลขทะเบียน", 500, "มอเตอร์ไซค์มีราคาเดียว ไม่แยกเลขประมูล/ไม่ใช่เลขประมูลแบบรถยนต์"],
   ]);
 
   await seedParamTable("feeMotorcycleNoBillParam", [
@@ -239,6 +283,7 @@ async function main() {
     ["ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)", 30, null],
     ["ลงขัน - รย.12 ทุกประเภท (CC)", 40, "ข้อมูลต้นทางระบุ 40 บาทเท่ากันทุกช่วง CC"],
     ["ลงขันด่วนเพิ่ม (ต่อคัน)", 50, null],
+    ["ลงขัน - จดใหม่ หยุดใช้ย้ายออก", 250, "เฉพาะมอเตอร์ไซค์ - แทนที่ลงขันปกติเมื่อเลือกตัวเลือกนี้"],
   ]);
 
   console.log("Brands and fee master tables seeded.");
