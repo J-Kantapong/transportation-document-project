@@ -619,29 +619,21 @@ function Round2Panel({
   );
 }
 
-const renderRound2CompletedExtra = (v: Round2Vehicle) =>
-  `ผ่านครั้งแรก ${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} · ตรวจรอบ 2 ${
-    v.inspectionRound2Date ? isoToDisplayDate(v.inspectionRound2Date) : "—"
-  } · ${v.inspectionRound2Cost ? `${v.inspectionRound2Cost} บาท` : "—"}`;
-
 // อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2, "รถที่เพิ่งส่งตรวจ" ใน Tab 1,
-// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - generic เพราะ InspectionVehicle/Round2Vehicle มีฟิลด์ของ rowInfoLine ร่วมกัน
-function ReferencePanel<
-  T extends { id: string; date: string; chassis: string; brandName: string; body: string | null; customerName: string },
->({
+// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
+// (คอลัมน์จัดแนวกันเองโดยธรรมชาติของ <table>, ไม่มี action/input ต่อแถวจึงไม่มีปัญหาแถวกว้างเกินไป)
+function ReferencePanel<T extends { id: string }>({
   title,
-  extraLabel,
+  columns,
   vehicles,
   loading,
   error,
-  renderExtra,
 }: {
   title: string;
-  extraLabel: string;
+  columns: Array<[string, (v: T) => string]>;
   vehicles: T[];
   loading: boolean;
   error: string;
-  renderExtra: (v: T) => string;
 }) {
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
@@ -660,19 +652,25 @@ function ReferencePanel<
         <div className="empty-customers">ไม่มีรายการ</div>
       ) : (
         <>
-          <div className="inspect-row-header">
-            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · {extraLabel}</div>
-          </div>
-          <div className="inspect-rows">
-            {pageItems.map((v) => (
-              <div className="inspect-row" key={v.id}>
-                <div className="inspect-row-body">
-                  <div className="inspect-row-title">
-                    {rowInfoLine(v)} <span>· {renderExtra(v)}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {columns.map(([label]) => (
+                    <th key={label}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map((v) => (
+                  <tr key={v.id}>
+                    {columns.map(([label, getValue]) => (
+                      <td key={label}>{getValue(v)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
@@ -681,12 +679,36 @@ function ReferencePanel<
   );
 }
 
-const renderPendingSendExtra = (v: InspectionVehicle) => v.registrationProvince || "—";
+const PENDING_SEND_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
+  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
+  ["ชื่อลูกค้า", (v) => v.customerName],
+  ["เลขตัวถัง", (v) => v.chassis],
+  ["ยี่ห้อ", (v) => v.brandName],
+  ["ประเภทรถ", (v) => v.body || "—"],
+  ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince || "—"],
+];
 
-const renderPendingResultExtra = (v: InspectionVehicle) =>
-  `ส่งตรวจแบบ ${v.inspectionSentType || "—"} วันที่ ${
-    v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—"
-  } · ${v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—"}`;
+const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
+  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
+  ["ชื่อลูกค้า", (v) => v.customerName],
+  ["เลขตัวถัง", (v) => v.chassis],
+  ["ยี่ห้อ", (v) => v.brandName],
+  ["ประเภทรถ", (v) => v.body || "—"],
+  ["ประเภทการส่งตรวจ", (v) => v.inspectionSentType || "—"],
+  ["วันที่ส่งตรวจ", (v) => (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—")],
+  ["ค่าใช้จ่าย", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—")],
+];
+
+const ROUND2_COMPLETED_COLUMNS: Array<[string, (v: Round2Vehicle) => string]> = [
+  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
+  ["ชื่อลูกค้า", (v) => v.customerName],
+  ["เลขตัวถัง", (v) => v.chassis],
+  ["ยี่ห้อ", (v) => v.brandName],
+  ["ประเภทรถ", (v) => v.body || "—"],
+  ["วันที่ผ่านครั้งแรก", (v) => (v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—")],
+  ["วันที่ตรวจรอบ 2", (v) => (v.inspectionRound2Date ? isoToDisplayDate(v.inspectionRound2Date) : "—")],
+  ["ค่าใช้จ่าย", (v) => (v.inspectionRound2Cost ? `${v.inspectionRound2Cost} บาท` : "—")],
+];
 
 // ใช้ร่วมกันท้าย Tab 1 และ Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
 function CompletedInspectionPanel({
@@ -718,26 +740,41 @@ function CompletedInspectionPanel({
         <div className="empty-customers">ยังไม่มีรายการที่ตรวจเสร็จ</div>
       ) : (
         <>
-          <div className="inspect-row-header">
-            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · ผลตรวจ / วันที่เสร็จ / ค่าใช้จ่าย</div>
-          </div>
-          <div className="inspect-rows">
-            {pageItems.map((v) => (
-              <div className={`inspect-row${v.inspectionResult === "ไม่ผ่าน" ? " row-failed" : ""}`} key={v.id}>
-                <div className="inspect-row-body">
-                  <div className="inspect-row-title">
-                    {rowInfoLine(v)}{" "}
-                    <span>
-                      · ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
-                      {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
-                    </span>
-                  </div>
-                </div>
-                <button className="text-button" onClick={() => onOpenDetail(v)}>
-                  ดูข้อมูล
-                </button>
-              </div>
-            ))}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>วันที่</th>
+                  <th>ชื่อลูกค้า</th>
+                  <th>เลขตัวถัง</th>
+                  <th>ยี่ห้อ</th>
+                  <th>ประเภทรถ</th>
+                  <th>ผลตรวจ</th>
+                  <th>วันที่เสร็จ</th>
+                  <th>ค่าใช้จ่าย</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map((v) => (
+                  <tr key={v.id} className={v.inspectionResult === "ไม่ผ่าน" ? "row-failed" : undefined}>
+                    <td>{isoToDisplayDate(v.date) || v.date}</td>
+                    <td>{v.customerName}</td>
+                    <td>{v.chassis}</td>
+                    <td>{v.brandName}</td>
+                    <td>{v.body || "—"}</td>
+                    <td>{v.inspectionResult || "—"}</td>
+                    <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
+                    <td>{v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}</td>
+                    <td>
+                      <button className="text-button" onClick={() => onOpenDetail(v)}>
+                        ดูข้อมูล
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
@@ -1249,22 +1286,20 @@ export default function InspectionPage() {
 
           <ReferencePanel
             title="รถที่เพิ่งส่งตรวจ (รอผลตรวจ)"
-            extraLabel="ประเภทการส่งตรวจ / วันที่ส่ง / ค่าใช้จ่าย"
+            columns={PENDING_RESULT_COLUMNS}
             vehicles={pendingResultVehicles}
             loading={resultLoading}
             error={resultError}
-            renderExtra={renderPendingResultExtra}
           />
         </>
       ) : activeTab === "result" ? (
         <>
           <ReferencePanel
             title="รถที่ยังไม่ได้ส่งตรวจ"
-            extraLabel="จังหวัดที่จดทะเบียน"
+            columns={PENDING_SEND_COLUMNS}
             vehicles={pendingSendVehicles}
             loading={sendLoading}
             error={sendError}
-            renderExtra={renderPendingSendExtra}
           />
 
           {resultLoading ? (
@@ -1339,11 +1374,10 @@ export default function InspectionPage() {
           )}
           <ReferencePanel
             title="รายการที่ตรวจรอบ 2 เสร็จแล้ว"
-            extraLabel="วันที่ผ่านครั้งแรก / วันที่ตรวจรอบ 2 / ค่าใช้จ่าย"
+            columns={ROUND2_COMPLETED_COLUMNS}
             vehicles={completedRound2Vehicles}
             loading={completedRound2Loading}
             error={completedRound2Error}
-            renderExtra={renderRound2CompletedExtra}
           />
         </>
       )}
