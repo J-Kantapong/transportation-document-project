@@ -184,3 +184,35 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .filter-chip{border:1px solid #dce2ec;background:white;border-radius:999px;padding:7px 16px;font-size:13px;color:#576781}
 .filter-chip.selected{background:#edf2ff;border-color:#2854d9;color:#2854d9;font-weight:600}
 .inspect-pagination{display:flex;align-items:center;justify-content:center;gap:16px;padding:14px 22px;border-top:1px solid #f0f2f6;font-size:13px}
+/* ค่าใช้จ่ายรายวัน (/expenses) + แถบแจ้งเตือนบนหน้าภาพรวม */
+.expense-alert{display:flex;align-items:center;gap:14px;background:white;border:1px solid #e3e8f1;border-left:4px solid #2854d9;border-radius:12px;padding:14px 20px;margin-bottom:22px;text-decoration:none;color:#34415a;font-size:14px}
+.expense-alert:hover{border-color:#7b9af3}
+.expense-alert--error{border-left-color:#d94a4a;color:#b3261e}
+.expense-alert-text{flex:1;min-width:0}
+.expense-alert-text b{font-size:17px;color:#1f2a44}
+.expense-alert-link{font-size:13px;color:#2854d9;white-space:nowrap}
+.expense-date-controls{display:flex;align-items:center;gap:6px}
+.expense-date-controls input{width:120px;padding:9px 11px;border:1px solid #dce2ec;border-radius:8px;font:inherit;font-size:14px;text-align:center}
+.expense-date-controls input[aria-invalid="true"]{border-color:#d94a4a}
+.expense-step{width:36px;height:38px;border:1px solid #dce2ec;background:white;border-radius:8px;font-size:18px;color:#46526a}
+.expense-step:hover{border-color:#7b9af3}
+.expense-stats{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.expense-total{border-color:#c9d6fb;background:#f7f9ff}
+.expense-dot{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.expense-chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;color:var(--c);background:var(--bg)}
+.expense-amount{text-align:right;font-variant-numeric:tabular-nums}
+tfoot td{border-top:1px solid #e3e8f1;border-bottom:0;background:#fafbfd}
+.expense-side{display:flex;flex-direction:column;gap:22px}
+.expense-history{display:flex;flex-direction:column;gap:4px;padding:0 14px 16px}
+.expense-day{display:grid;grid-template-columns:82px 1fr auto;align-items:center;gap:10px;border:0;background:none;border-radius:8px;padding:8px 9px;font:inherit;font-size:13px;color:#576781;text-align:left}
+.expense-day:hover{background:#f5f7fb}
+.expense-day.active{background:#edf2ff;color:#2854d9}
+.expense-day b{font-weight:600;color:#34415a;font-variant-numeric:tabular-nums}
+.expense-day-track{height:6px;background:#eef1f6;border-radius:999px;overflow:hidden}
+.expense-day-fill{display:block;height:100%;background:#7b9af3;border-radius:999px}
+.expense-rules{display:flex;flex-direction:column;gap:12px;padding:0 23px 20px}
+.expense-rule{border:1px solid #f0e3bf;background:#fffbf1;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.expense-rule.inactive{opacity:.55}
+.expense-rule-head{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+.expense-rule-head b{color:#92702c;white-space:nowrap}
+@media(max-width:550px){.heading:has(.expense-date-controls){flex-direction:column;align-items:stretch}.expense-alert{flex-wrap:wrap}.expense-alert-link{width:100%}}

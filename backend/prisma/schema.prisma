@@ -450,3 +450,28 @@ model YamahaRelocationEntry {
 
   @@index([size, date])
 }
+
+// --- เงื่อนไขค่าใช้จ่ายรายวัน (Daily expense conditions) --------------------------------
+// ค่าใช้จ่ายที่ไม่ได้ผูกกับรถคันใดคันหนึ่ง แต่เกิดขึ้น "ต่อวัน" เมื่อวันนั้นเข้าเงื่อนไข (trigger)
+// เช่น ค่าคำขอตรวจรถ 25 บาท คิดครั้งเดียวต่อวันในทุกวันที่มีการตรวจรถ ไม่ว่าวันนั้นจะตรวจกี่คัน.
+// ไม่ได้บันทึกเป็นแถวรายวัน - หน้าสรุปค่าใช้จ่าย (src/expenses) คำนวณจากข้อมูลตรวจรถทุกครั้งที่เรียก
+// เปลี่ยนอัตราโดย "เพิ่มแถวใหม่" ที่ effectiveFrom ใหม่ (code เดิม) แทนการแก้แถวเดิม เพื่อไม่ให้
+// ยอดของวันที่ผ่านมาแล้วเปลี่ยนตาม - วันไหนใช้แถวที่ effectiveFrom ล่าสุดที่ไม่เกินวันนั้น.
+
+enum DailyExpenseTrigger {
+  INSPECTION_DAY // วันที่มีการตรวจรถอย่างน้อย 1 คัน (วันที่ส่งตรวจ หรือวันที่ตรวจรถรอบ 2)
+}
+
+model DailyExpenseRule {
+  id            String              @id @default(cuid())
+  code          String // รหัสเงื่อนไข เช่น INSPECTION_REQUEST_FEE (แถวอัตราเก่า/ใหม่ใช้ code เดียวกัน)
+  label         String // ชื่อที่แสดง เช่น "ค่าคำขอตรวจรถ"
+  trigger       DailyExpenseTrigger
+  amount        Decimal             @db.Decimal(10, 2) // บาทต่อวัน
+  effectiveFrom DateTime // ใช้ตั้งแต่วันนี้เป็นต้นไป (เก็บเที่ยงคืน UTC เหมือนฟิลด์วันที่อื่น)
+  active        Boolean             @default(true)
+  note          String?
+  createdAt     DateTime            @default(now())
+
+  @@unique([code, effectiveFrom])
+}

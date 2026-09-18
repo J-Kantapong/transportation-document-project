@@ -9,6 +9,7 @@ import { NEW_VEHICLE_SUBTASKS, REGISTRATION_CATEGORIES } from "@/lib/categories"
 function breadcrumbLabel(pathname: string): string {
   if (pathname === "/") return "ภาพรวม";
   if (pathname.startsWith("/customers")) return "ฐานข้อมูลลูกค้า";
+  if (pathname.startsWith("/expenses")) return "ค่าใช้จ่ายรายวัน";
   const subtask = NEW_VEHICLE_SUBTASKS.find((s) => pathname.startsWith(s.href));
   if (subtask) return `จดทะเบียนรถใหม่ / ${subtask.title}`;
   const category = REGISTRATION_CATEGORIES.find((c) => pathname.startsWith(c.href));
@@ -45,6 +46,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <Icon name="card" />
           ฐานข้อมูลลูกค้า
+        </Link>
+        <Link
+          href="/expenses"
+          className={`nav${pathname.startsWith("/expenses") ? " active" : ""}`}
+          onClick={() => setOpen(false)}
+        >
+          <Icon name="wallet" />
+          ค่าใช้จ่ายรายวัน
         </Link>
         <div className="label">ประเภทงานทะเบียน</div>
         {REGISTRATION_CATEGORIES.map((category) => (

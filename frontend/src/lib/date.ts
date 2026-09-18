@@ -9,6 +9,13 @@ export function todayIso(): string {
   );
 }
 
+// เลื่อนวันที่ ISO (YYYY-MM-DD) ไป ±n วัน - คำนวณแบบ UTC ล้วนกันเวลาออมแสง/timezone ทำให้วันเพี้ยน
+export function addDaysIso(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export function isoToDisplayDate(iso: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : "";

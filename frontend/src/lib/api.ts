@@ -197,6 +197,42 @@ export interface YamahaRelocationSummary {
   totalFee: number;
 }
 
+export type ExpenseCategory = 'DAILY_RULE' | 'TRANSFER_NOTICE' | 'INSPECTION' | 'INSPECTION_ROUND2' | 'YAMAHA_RELOCATION';
+
+// GET /api/expenses/daily - จำนวนเงินเป็นบาท (number) - ดู docs/DAILY-EXPENSES.md
+export interface DailyExpenseSummary {
+  date: string;
+  total: number;
+  count: number;
+  categories: Array<{ category: ExpenseCategory; label: string; count: number; total: number }>;
+  items: Array<{
+    id: string;
+    category: ExpenseCategory;
+    categoryLabel: string;
+    label: string;
+    detail: string;
+    amount: number;
+  }>;
+}
+
+export interface DailyExpenseTotal {
+  date: string;
+  total: number;
+  count: number;
+}
+
+export interface DailyExpenseRule {
+  id: string;
+  code: string;
+  label: string;
+  trigger: 'INSPECTION_DAY';
+  triggerLabel: string;
+  amount: string;
+  effectiveFrom: string;
+  active: boolean;
+  note: string | null;
+}
+
 export interface NewCustomerInput {
   name: string;
   company: string;
@@ -289,4 +325,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getDailyExpenses: (date: string) => request<DailyExpenseSummary>(`/api/expenses/daily?date=${date}`),
+  listDailyExpenseTotals: (from: string, to: string) =>
+    request<{ days: DailyExpenseTotal[] }>(`/api/expenses/daily-totals?from=${from}&to=${to}`),
+  listDailyExpenseRules: () => request<{ rules: DailyExpenseRule[] }>('/api/expenses/rules'),
 };

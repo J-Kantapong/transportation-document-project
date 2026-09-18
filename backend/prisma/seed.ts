@@ -4,7 +4,12 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
-import { GovTaxFuelGroup, GovTaxRuleStatus, GovTaxVehicleFamily } from "../src/generated/prisma/enums.js";
+import {
+  DailyExpenseTrigger,
+  GovTaxFuelGroup,
+  GovTaxRuleStatus,
+  GovTaxVehicleFamily,
+} from "../src/generated/prisma/enums.js";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
@@ -183,6 +188,36 @@ async function seedParamTable(
   }
 }
 
+// เงื่อนไขค่าใช้จ่ายรายวัน (ดู DailyExpenseRule ใน schema.prisma). เปลี่ยนอัตรา = เพิ่มแถวใหม่ที่ effectiveFrom
+// ใหม่ (code เดิม) อย่าแก้ amount ของแถวเดิม ไม่อย่างนั้นยอดของวันที่ผ่านมาแล้วจะเปลี่ยนตาม
+async function seedDailyExpenseRules() {
+  const rows: Array<{
+    code: string;
+    label: string;
+    trigger: DailyExpenseTrigger;
+    amount: number;
+    effectiveFrom: string;
+    note: string;
+  }> = [
+    {
+      code: "INSPECTION_REQUEST_FEE",
+      label: "ค่าคำขอตรวจรถ",
+      trigger: DailyExpenseTrigger.INSPECTION_DAY,
+      amount: 25,
+      effectiveFrom: "2000-01-01",
+      note: "คิดครั้งเดียวต่อวัน ในทุกวันที่มีการตรวจรถ ไม่ขึ้นกับจำนวนคัน",
+    },
+  ];
+  for (const row of rows) {
+    const effectiveFrom = new Date(`${row.effectiveFrom}T00:00:00.000Z`);
+    await prisma.dailyExpenseRule.upsert({
+      where: { code_effectiveFrom: { code: row.code, effectiveFrom } },
+      create: { ...row, effectiveFrom },
+      update: { label: row.label, trigger: row.trigger, amount: row.amount, note: row.note },
+    });
+  }
+}
+
 async function main() {
   await seedBrands();
   await seedDeregistration();
@@ -191,6 +226,7 @@ async function main() {
   await seedInspectionProvince();
   await seedGovernmentTaxCcBrackets();
   await seedGovernmentTaxMotorcycleFlat();
+  await seedDailyExpenseRules();
   // ค่าภาษีรถยนต์/รถจักรยานยนต์ เดิมเคยเป็นแถว param เดี่ยวๆ ด้านล่าง (กรอกเอง) - ย้ายไปคำนวณจาก
   // GovernmentTaxCcBracket/WeightBracket/MotorcycleFlat แทนแล้ว ลบแถวเก่าทิ้งกันข้อมูลซ้ำซ้อน/ขัดแย้งกัน
   await prisma.feeCarBillParam.deleteMany({ where: { key: "ค่าภาษีรถยนต์" } });

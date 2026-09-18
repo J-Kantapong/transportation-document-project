@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CreateCaseDialog } from "@/components/CreateCaseDialog";
 import { Icon, type IconName } from "@/components/Icon";
+import { TodayExpenseAlert } from "@/components/TodayExpenseAlert";
 import { REGISTRATION_CATEGORIES } from "@/lib/categories";
 import type { CSSVarStyle } from "@/lib/css-vars";
 
@@ -27,6 +28,8 @@ export default function DashboardPage() {
         </div>
         <CreateCaseDialog />
       </div>
+
+      <TodayExpenseAlert />
 
       <section className="stats" aria-label="สรุปสถานะงาน">
         {STATS.map((stat) => (
