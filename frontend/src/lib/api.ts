@@ -88,6 +88,9 @@ export interface Vehicle {
   // Step 4: เลขทะเบียนที่ขอ/ได้รับ - mutable, กรอกทีหลังได้ตอนใบเสร็จกรมขนส่งออกเลขให้
   plateCategory: string | null;
   plateNumber: string | null;
+  // true = ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ (DocumentSubmission ล่าสุดค้างสถานะ PENDING) - ยื่นซ้ำไม่ได้
+  // จนกว่าจะได้รับใบเสร็จหรือยื่นไม่สำเร็จ
+  pendingDocumentSubmission: boolean;
 }
 
 // Step 4 (ยื่นเอกสารจดทะเบียนรถใหม่): ค่าธรรมเนียม Bill/No bill - ดู
@@ -129,10 +132,13 @@ export interface CreateDocumentSubmissionInput extends DocumentSubmissionOptions
   ownerType?: OwnerType;
 }
 
+export type DocumentSubmissionStatus = "PENDING" | "RECEIPT_RECEIVED" | "FAILED";
+
 export interface DocumentSubmission {
   id: string;
   vehicleId: string;
   submitDate: string;
+  status: DocumentSubmissionStatus;
   plateNumberOption: PlateNumberOption;
   includePlateFee: boolean;
   newPlateOption: NewPlateOption | null;
@@ -145,6 +151,7 @@ export interface DocumentSubmission {
   noBillTotal: string;
   taxAmount: string | null;
   createdAt: string;
+  updatedAt: string;
   vehicle: {
     chassis: string;
     body: string | null;
@@ -299,7 +306,7 @@ export const api = {
   searchVehiclesByChassis: (chassis: string) =>
     request<{ vehicles: Vehicle[] }>(`/api/vehicles/search?chassis=${encodeURIComponent(chassis)}`),
   lookupVehiclesByChassis: (chassisList: string[]) =>
-    request<{ found: Vehicle[]; notFound: string[] }>('/api/vehicles/lookup-by-chassis', {
+    request<{ found: Vehicle[]; notFound: string[]; pendingBlocked: string[] }>('/api/vehicles/lookup-by-chassis', {
       method: 'POST',
       body: JSON.stringify({ chassisList }),
     }),
@@ -321,6 +328,11 @@ export const api = {
     ),
   listDocumentSubmissions: (date?: string) =>
     request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${date ? `?date=${date}` : ''}`),
+  updateDocumentSubmissionStatus: (submissionId: string, status: Exclude<DocumentSubmissionStatus, "PENDING">) =>
+    request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
   listRecentlyCompletedTransferNotice: () =>

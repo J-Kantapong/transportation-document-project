@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto } from './dto/bulk-create-document-submission.dto.js';
@@ -26,5 +26,10 @@ export class DocumentSubmissionController {
   @Get('document-submission')
   list(@Query('date') date?: string) {
     return this.documentSubmissionService.listByDate(date);
+  }
+
+  @Patch('document-submission/:id/status')
+  updateStatus(@Param('id') id: string, @Body() body: { status?: unknown }) {
+    return this.documentSubmissionService.updateStatus(id, body?.status);
   }
 }

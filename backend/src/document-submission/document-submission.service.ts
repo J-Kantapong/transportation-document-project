@@ -37,6 +37,16 @@ export class DocumentSubmissionService {
     return vehicle;
   }
 
+  // รถคันหนึ่งยื่นเอกสารซ้ำไม่ได้ตราบใดที่ยื่นครั้งล่าสุดยังค้างสถานะ PENDING (รอใบเสร็จจากกรมขนส่ง) อยู่ -
+  // ต้องได้รับใบเสร็จ (RECEIPT_RECEIVED) หรือยื่นไม่สำเร็จ (FAILED) ก่อนถึงจะยื่นใหม่ได้ ดู
+  // DocumentSubmission.status ใน schema.prisma
+  private async assertNotPending(vehicleId: string) {
+    const latest = await this.prisma.documentSubmission.findFirst({ where: { vehicleId }, orderBy: { createdAt: 'desc' } });
+    if (latest && latest.status === 'PENDING') {
+      throw new BadRequestException({ error: 'รถคันนี้ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ - ยื่นซ้ำไม่ได้จนกว่าจะได้รับใบเสร็จหรือยื่นไม่สำเร็จ' });
+    }
+  }
+
   async preview(vehicleId: string, dto: DocumentSubmissionOptionsDto) {
     const vehicle = await this.loadVehicle(vehicleId);
     const isMoto = isMotorcycle(vehicle.body);
@@ -54,6 +64,7 @@ export class DocumentSubmissionService {
   // plateCategory/plateNumber บน Vehicle ถ้าส่งมา (mutable, ไม่ใช่ส่วนหนึ่งของ snapshot)
   async submit(vehicleId: string, dto: CreateDocumentSubmissionDto) {
     const vehicle = await this.loadVehicle(vehicleId);
+    await this.assertNotPending(vehicleId);
     const isMoto = isMotorcycle(vehicle.body);
     const options = parseDocumentSubmissionOptions(dto, isMoto);
     const submitDate = parseSubmitDate(dto.submitDate);
@@ -180,5 +191,19 @@ export class DocumentSubmissionService {
       },
     });
     return { submissions };
+  }
+
+  // เปลี่ยนสถานะได้ครั้งเดียวจาก PENDING -> RECEIPT_RECEIVED หรือ FAILED เท่านั้น (ห้ามย้อนกลับ/เปลี่ยนซ้ำ)
+  // การอัปเดตนี้ปลด block การยื่นซ้ำของรถคันนั้นใน assertNotPending()
+  async updateStatus(submissionId: string, statusRaw: unknown) {
+    if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
+      throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
+    }
+    const submission = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId } });
+    if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    if (submission.status !== 'PENDING') {
+      throw new BadRequestException({ error: 'รายการนี้อัปเดตสถานะไปแล้ว' });
+    }
+    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: statusRaw } });
   }
 }

@@ -432,15 +432,22 @@ model TaxCalculation {
 }
 
 // --- ยื่นเอกสารจดทะเบียนรถใหม่ (Step 4) - snapshot ค่าธรรมเนียม Bill/No bill ------------
-// Immutable audit snapshot เหมือน TaxCalculation ข้างบน: การยื่นเอกสารแต่ละครั้งสร้างแถวใหม่เสมอ ไม่
-// update ของเดิม billItems/noBillItems เก็บ breakdown ที่คำนวณจริง ณ ตอนยื่น (จาก FeeCarBillParam/
-// FeeCarNoBillParam/FeeMotorcycleBillParam/FeeMotorcycleNoBillParam) กันไม่ให้ประวัติเปลี่ยนไปตามอัตรา
-// ที่อาจแก้ในอนาคต taxAmount คัดลอกมาจาก TaxCalculation.finalAmount ล่าสุด ณ ตอนยื่น (อาจ null ถ้ายัง
-// คำนวณภาษีไม่ได้) เพื่อให้หน้า records-by-date โชว์ยอดรวมได้โดยไม่ต้อง join ย้อนกลับไปหา TaxCalculation
+// Audit snapshot เหมือน TaxCalculation ข้างบน: การยื่นเอกสารแต่ละครั้งสร้างแถวใหม่เสมอ ไม่ update ของเดิม
+// billItems/noBillItems เก็บ breakdown ที่คำนวณจริง ณ ตอนยื่น (จาก FeeCarBillParam/FeeCarNoBillParam/
+// FeeMotorcycleBillParam/FeeMotorcycleNoBillParam) กันไม่ให้ประวัติเปลี่ยนไปตามอัตราที่อาจแก้ในอนาคต
+// taxAmount คัดลอกมาจาก TaxCalculation.finalAmount ล่าสุด ณ ตอนยื่น (อาจ null ถ้ายังคำนวณภาษีไม่ได้) เพื่อให้
+// หน้า records-by-date โชว์ยอดรวมได้โดยไม่ต้อง join ย้อนกลับไปหา TaxCalculation
+//
+// status เป็นข้อยกเว้นเดียวที่ mutable (ทุกฟิลด์อื่นเป็น snapshot คงที่ตลอดไป): PENDING (ค่าเริ่มต้น - ยื่น
+// แล้ว รอใบเสร็จจากกรมขนส่ง) -> RECEIPT_RECEIVED (ได้รับใบเสร็จแล้ว) หรือ FAILED (ยื่นไม่สำเร็จ ต้องแก้ไข/
+// ยื่นใหม่) เปลี่ยนได้ครั้งเดียวจาก PENDING เท่านั้น (ดู DocumentSubmissionService.updateStatus) รถคันหนึ่ง
+// จะยื่นเอกสารซ้ำไม่ได้ตราบใดที่ยังมี DocumentSubmission ล่าสุดค้างสถานะ PENDING อยู่ (บังคับใน
+// DocumentSubmissionService.submit() กันยื่นซ้ำโดยไม่ได้ตั้งใจระหว่างรอกรมขนส่งดำเนินการ)
 model DocumentSubmission {
   id                 String   @id @default(cuid())
   vehicleId          String
   submitDate         DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
+  status             String   @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED
   plateNumberOption  String // NONE | NORMAL | AUCTION
   includePlateFee    Boolean  @default(true)
   newPlateOption     String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์
@@ -453,6 +460,7 @@ model DocumentSubmission {
   noBillTotal        Decimal  @db.Decimal(12, 2)
   taxAmount          Decimal? @db.Decimal(12, 2)
   createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 

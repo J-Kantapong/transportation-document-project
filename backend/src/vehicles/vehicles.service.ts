@@ -71,6 +71,9 @@ export class VehiclesService {
     customer: { select: { name: true } },
     brand: { select: { name: true } },
     owner: { select: { id: true, name: true, ownerType: true } },
+    // แค่แถวล่าสุด 1 แถวพอ - ใช้เช็คว่ารถคันนี้ยื่นเอกสารซ้ำได้ไหม (ดู DocumentSubmission.status
+    // ใน schema.prisma - ยื่นซ้ำไม่ได้ตราบใดที่แถวล่าสุดยังค้าง PENDING)
+    documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true } },
   } as const;
 
   private mapVehicleFull(vehicle: {
@@ -96,6 +99,7 @@ export class VehiclesService {
     owner: { name: string | null; ownerType: string } | null;
     plateCategory: string | null;
     plateNumber: string | null;
+    documentSubmissions: Array<{ status: string }>;
   }) {
     return {
       id: vehicle.id,
@@ -122,6 +126,7 @@ export class VehiclesService {
       ownerType: vehicle.owner?.ownerType ?? null,
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
+      pendingDocumentSubmission: vehicle.documentSubmissions[0]?.status === 'PENDING',
     };
   }
 
@@ -159,10 +164,14 @@ export class VehiclesService {
       where: { chassis: { in: trimmed, mode: 'insensitive' } },
       include: this.vehicleFullInclude,
     });
-    const found = vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
-    const foundChassisLower = new Set(found.map((v) => v.chassis.toLowerCase()));
+    const mapped = vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+    // คันที่ยังรอใบเสร็จ (ยื่นซ้ำไม่ได้) แยกออกจาก found กันไม่ให้ bulk import พยายามยื่นซ้ำโดยไม่ตั้งใจ
+    // - submit() ก็ปฏิเสธอยู่แล้วเช่นกัน (defense in depth) แต่แยกไว้ตั้งแต่ต้นทางให้ผู้ใช้เห็นชัดกว่า
+    const found = mapped.filter((v) => !v.pendingDocumentSubmission);
+    const pendingBlocked = mapped.filter((v) => v.pendingDocumentSubmission).map((v) => v.chassis);
+    const foundChassisLower = new Set(mapped.map((v) => v.chassis.toLowerCase()));
     const notFound = trimmed.filter((c) => !foundChassisLower.has(c.toLowerCase()));
-    return { found, notFound };
+    return { found, notFound, pendingBlocked };
   }
 
   async createBatch(body: CreateVehiclesDto): Promise<{ count: number }> {
