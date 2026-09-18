@@ -93,13 +93,13 @@ model Vehicle {
   // Step 3a: ส่งตรวจ (เข้าคิวหลังจากทำ Step 2 เสร็จแล้วเท่านั้น - transferDone = true)
   inspectionSentType String? // 'ส่งตรวจนอก' | 'เอารถมาตรวจเอง'
   inspectionSentDate DateTime? // วันที่ส่งตรวจ
-  inspectionSentCost Decimal? @db.Decimal(10, 2) // ค่าใช้จ่ายส่งตรวจ (ค่าเริ่มต้นมาจากตาราง FeeInspectionBangkok/FeeInspectionProvince)
+  inspectionSentCost Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายส่งตรวจ (ค่าเริ่มต้นมาจากตาราง FeeInspectionBangkok/FeeInspectionProvince)
 
   // Step 3b: ผลตรวจ (เข้าคิวหลังจาก inspectionSentDate ถูกกรอกแล้วเท่านั้น)
-  inspectionResult      String? // 'ผ่าน' | 'ไม่ผ่าน'
-  inspectionResultDate  DateTime? // วันที่ทราบผลตรวจ
-  inspectionResultCost  Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง ณ วันทราบผล
-  inspectionFailRemark  String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
+  inspectionResult     String? // 'ผ่าน' | 'ไม่ผ่าน'
+  inspectionResultDate DateTime? // วันที่ทราบผลตรวจ
+  inspectionResultCost Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง ณ วันทราบผล
+  inspectionFailRemark String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
 
   // Step 3c: ตรวจรถรอบ 2 - เข้าคิวเมื่อ inspectionResult = 'ผ่าน' และครบ 90 วันจาก inspectionResultDate
   // ราคา = No bill ตามตาราง FeeInspectionBangkok/FeeInspectionProvince เดิม + ค่าตรวจรถ (Bill) 50 บาท
@@ -107,19 +107,24 @@ model Vehicle {
   inspectionRound2Date DateTime?
   inspectionRound2Cost Decimal?  @db.Decimal(10, 2)
 
-  // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax* ด้านล่าง)
+  // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax*/VehicleOwner/TaxCalculation ด้านล่าง)
   firstRegistrationDate DateTime? // วันจดทะเบียนครั้งแรก - ใช้คำนวณอายุรถและตรวจสอบมาตรการลดภาษี EV ตามช่วงเวลา
+  isFactoryNew          Boolean? // รถใหม่จากโรงงานหรือไม่ - เงื่อนไขของสิทธิ EV บางมาตรการ
+  ownerId               String? // เจ้าของรถตามทะเบียน - อาจไม่ใช่คนเดียวกับ customerId (ผู้ส่งงาน) ห้ามอนุมานจากกัน
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  customer Customer @relation(fields: [customerId], references: [id])
-  brand    Brand    @relation(fields: [brandId], references: [id])
-  cases    Case[]
-  editLogs VehicleEditLog[]
+  customer        Customer         @relation(fields: [customerId], references: [id])
+  brand           Brand            @relation(fields: [brandId], references: [id])
+  owner           VehicleOwner?    @relation(fields: [ownerId], references: [id])
+  cases           Case[]
+  editLogs        VehicleEditLog[]
+  taxCalculations TaxCalculation[]
 
   @@index([customerId])
   @@index([brandId])
+  @@index([ownerId])
 }
 
 // แก้ไขข้อมูลรถจดใหม่หลังบันทึกแล้ว ต้องระบุเหตุผล (remark) ทุกครั้ง - บังคับที่ระดับ service
@@ -292,6 +297,16 @@ model FeeMotorcycleNoBillParam {
 // Vehicle.fuel: ICE = เบนซิน/ดีเซล/LPG/NGV, HEV = ไฮบริด (HEV), PHEV = ปลั๊กอินไฮบริด (PHEV),
 // BEV = ไฟฟ้า (BEV). See src/tax/government-tax-reference-data.ts for the classifier that
 // derives vehicleFamily/fuelGroup from a Vehicle row.
+//
+// Governance (status/active/legalReference): every rate row is DRAFT + inactive by default
+// so a row someone adds without review can never silently compute a real tax figure -
+// TaxService only loads rows where active=true AND status=VERIFIED. "VERIFIED" here means
+// the user has explicitly confirmed the figure in conversation with an agent (this repo's
+// working pattern - see memory/project_fee_pricing_workflow.md), NOT that a legal citation
+// URL has been attached; legalReference is free text for whoever wants to note a source
+// later, never required to flip status to VERIFIED. When the user gives a new/changed rate,
+// update the row AND its status/active explicitly - do not assume a prior VERIFIED row stays
+// correct forever, and do not mark a new row VERIFIED without the user confirming the number.
 
 enum GovTaxVehicleFamily {
   RY1 // รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน
@@ -307,26 +322,37 @@ enum GovTaxFuelGroup {
   BEV
 }
 
+enum GovTaxRuleStatus {
+  DRAFT // ยังไม่ได้ยืนยันกับผู้ใช้ - ห้ามใช้คำนวณยอดจริง
+  VERIFIED // ผู้ใช้ยืนยันตัวเลขนี้แล้ว (ผ่านแชต ไม่บังคับเอกสารกฎหมาย)
+}
+
 model GovernmentTaxCcBracket {
-  id            String              @id @default(cuid())
-  vehicleFamily GovTaxVehicleFamily // ปัจจุบันใช้กับ RY1 เท่านั้น (ICE/HEV/PHEV คำนวณแบบ progressive ตาม CC)
-  fuelGroup     GovTaxFuelGroup
-  ccFrom        Decimal             @db.Decimal(10, 2) // cc เริ่มต้นของขั้นนี้ (รวม)
-  ccTo          Decimal?            @db.Decimal(10, 2) // cc สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด (ขั้นบนสุด)
-  ratePerCc     Decimal             @db.Decimal(10, 4) // บาท/cc เฉพาะส่วนที่อยู่ในขั้นนี้ (ไม่ใช่สะสมทั้งคัน)
-  sortOrder     Int                 @default(0)
+  id             String              @id @default(cuid())
+  vehicleFamily  GovTaxVehicleFamily // ปัจจุบันใช้กับ RY1 เท่านั้น (ICE/HEV/PHEV คำนวณแบบ progressive ตาม CC)
+  fuelGroup      GovTaxFuelGroup
+  ccFrom         Decimal             @db.Decimal(10, 2) // cc เริ่มต้นของขั้นนี้ (รวม)
+  ccTo           Decimal?            @db.Decimal(10, 2) // cc สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด (ขั้นบนสุด)
+  ratePerCc      Decimal             @db.Decimal(10, 4) // บาท/cc เฉพาะส่วนที่อยู่ในขั้นนี้ (ไม่ใช่สะสมทั้งคัน)
+  sortOrder      Int                 @default(0)
+  status         GovTaxRuleStatus    @default(DRAFT)
+  active         Boolean             @default(false)
+  legalReference String?
 
   @@unique([vehicleFamily, fuelGroup, ccFrom])
 }
 
 model GovernmentTaxWeightBracket {
-  id            String              @id @default(cuid())
-  vehicleFamily GovTaxVehicleFamily // RY1 (เฉพาะ fuelGroup = BEV), RY2, RY3
-  fuelGroup     GovTaxFuelGroup? // null = ใช้ได้ทุกเชื้อเพลิงในกลุ่มนี้ (RY2/RY3 ไม่แยกตามเชื้อเพลิง); RY1 ต้องระบุ BEV
-  weightFrom    Decimal             @db.Decimal(10, 2) // น้ำหนัก (กก.) เริ่มต้นของขั้นนี้ (รวม)
-  weightTo      Decimal?            @db.Decimal(10, 2) // น้ำหนัก (กก.) สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด
-  amount        Decimal?            @db.Decimal(10, 2) // ภาษี/ปี (บาท) - ยังไม่มีข้อมูล รอผู้ใช้ให้ตาราง EV_WEIGHT_TAX_TABLE / RY2_WEIGHT_TAX_TABLE / RY3_WEIGHT_TAX_TABLE
-  sortOrder     Int                 @default(0)
+  id             String              @id @default(cuid())
+  vehicleFamily  GovTaxVehicleFamily // RY1 (เฉพาะ fuelGroup = BEV), RY2, RY3
+  fuelGroup      GovTaxFuelGroup? // null = ใช้ได้ทุกเชื้อเพลิงในกลุ่มนี้ (RY2/RY3 ไม่แยกตามเชื้อเพลิง); RY1 ต้องระบุ BEV
+  weightFrom     Decimal             @db.Decimal(10, 2) // น้ำหนัก (กก.) เริ่มต้นของขั้นนี้ (รวม)
+  weightTo       Decimal?            @db.Decimal(10, 2) // น้ำหนัก (กก.) สิ้นสุดของขั้นนี้ (รวม), null = ไม่จำกัด
+  amount         Decimal?            @db.Decimal(10, 2) // ภาษี/ปี (บาท) - ยังไม่มีข้อมูล รอผู้ใช้ให้ตาราง EV_WEIGHT_TAX_TABLE / RY2_WEIGHT_TAX_TABLE / RY3_WEIGHT_TAX_TABLE
+  sortOrder      Int                 @default(0)
+  status         GovTaxRuleStatus    @default(DRAFT)
+  active         Boolean             @default(false)
+  legalReference String?
 
   @@unique([vehicleFamily, fuelGroup, weightFrom])
 }
@@ -339,13 +365,63 @@ model GovernmentTaxEvIncentive {
   effectiveTo     DateTime?
   discountPercent Decimal?            @db.Decimal(5, 2) // % ที่ลดจากภาษีที่คำนวณได้จาก GovernmentTaxWeightBracket - ยังไม่มีข้อมูล ห้าม hard-code
   note            String?
+  status          GovTaxRuleStatus    @default(DRAFT)
+  active          Boolean             @default(false)
+  legalReference  String?
 }
 
 model GovernmentTaxMotorcycleFlat {
-  id        String          @id @default(cuid())
-  fuelGroup GovTaxFuelGroup @unique // ICE = 100 บาท/ปีทุก cc (ตามกฎ); BEV = กฎรถจักรยานยนต์ไฟฟ้าแยกต่างหาก ยังไม่มีข้อมูล
-  amount    Decimal?        @db.Decimal(10, 2)
-  note      String?
+  id             String           @id @default(cuid())
+  fuelGroup      GovTaxFuelGroup  @unique // ICE = 100 บาท/ปีทุก cc (ตามกฎ); BEV = กฎรถจักรยานยนต์ไฟฟ้าแยกต่างหาก ยังไม่มีข้อมูล
+  amount         Decimal?         @db.Decimal(10, 2)
+  note           String?
+  status         GovTaxRuleStatus @default(DRAFT)
+  active         Boolean          @default(false)
+  legalReference String?
+}
+
+// --- เจ้าของรถ (VehicleOwner) และ snapshot ผลคำนวณภาษี (TaxCalculation) ------------------
+// VehicleOwner is deliberately separate from Customer: the customer submitting the
+// paperwork (Vehicle.customerId) is not necessarily the vehicle's registered owner - never
+// infer one from the other. juristicMultiplier's hire-purchase exception depends on
+// isHirePurchaseBusiness/hirerType on THIS record, matching the vehicle at hand, not a
+// permanent trait of the customer.
+enum OwnerType {
+  INDIVIDUAL // บุคคลธรรมดา
+  JURISTIC // นิติบุคคล
+}
+
+model VehicleOwner {
+  id                     String     @id @default(cuid())
+  name                   String?
+  ownerType              OwnerType
+  isHirePurchaseBusiness Boolean    @default(false) // ประกอบธุรกิจเช่าซื้อหรือไม่ - ใช้เฉพาะเมื่อ ownerType = JURISTIC
+  hirerType              OwnerType? // ผู้เช่าซื้อรถคันนี้ - null เมื่อไม่ใช่กรณีเช่าซื้อ หรือบริษัทเช่าซื้อใช้รถเอง
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  vehicles Vehicle[]
+}
+
+// Immutable audit snapshot: การคำนวณใหม่สร้างแถวใหม่เสมอ ไม่ update ของเดิม (เหมือน VehicleEditLog)
+model TaxCalculation {
+  id                       String               @id @default(cuid())
+  vehicleId                String
+  status                   String // CALCULATED | MISSING_INPUT | MISSING_VERIFIED_RULE
+  vehicleFamily            GovTaxVehicleFamily?
+  fuelGroup                GovTaxFuelGroup?
+  baseAmount               Decimal?             @db.Decimal(12, 2)
+  incentiveDiscountPercent Decimal?             @db.Decimal(5, 2)
+  juristicMultiplier       Int                  @default(1)
+  finalAmount              Decimal?             @db.Decimal(12, 2) // null = ยังคำนวณภาษีไม่ได้ (ห้ามแสดง 0 บาทแทน)
+  reason                   String? // เหตุผลที่คำนวณไม่ได้ (ถ้ามี)
+  inputSnapshot            Json
+  breakdown                Json
+  createdAt                DateTime             @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------

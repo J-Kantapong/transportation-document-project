@@ -50,6 +50,13 @@ export const VEHICLE_COLUMNS = [
 
 export type VehicleColumnKey = (typeof VEHICLE_COLUMNS)[number][0];
 
+// Step 4 (ยื่นเอกสารจดทะเบียน): ประเภทเจ้าของรถ - แยกจาก customerId เสมอ (ลูกค้าที่ส่งงาน
+// อาจไม่ใช่เจ้าของรถตามทะเบียน) ตรงกับ backend/src/generated/prisma/enums.js OwnerType
+export const OWNER_TYPES = [
+  ['INDIVIDUAL', 'บุคคลธรรมดา'],
+  ['JURISTIC', 'นิติบุคคล'],
+] as const;
+
 // Status is derived from จังหวัดที่จดทะเบียน, not stored — Bangkok registrations
 // go through ตัดบัญชี, every other province goes through แจ้งย้าย.
 export function getVehicleStatus(registrationProvince: string): string {

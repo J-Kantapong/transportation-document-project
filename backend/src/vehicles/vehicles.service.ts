@@ -7,6 +7,9 @@ import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js
 import { UpdateInspectionRound2Dto } from './dto/update-inspection-round2.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
+import { TaxService } from '../tax/tax.service.js';
+import { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
+import { parseTaxDate } from '../tax/tax-validation.js';
 
 const EDITABLE_VEHICLE_FIELDS = [
   ['date', 'วันที่'],
@@ -59,7 +62,10 @@ const INSPECTION_ROUND2_BILL_FEE = 50;
 
 @Injectable()
 export class VehiclesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly taxService: TaxService,
+  ) {}
 
   async findAll() {
     const vehicles = await this.prisma.vehicle.findMany({
@@ -68,6 +74,7 @@ export class VehiclesService {
       include: {
         customer: { select: { name: true } },
         brand: { select: { name: true } },
+        owner: { select: { id: true, name: true, ownerType: true } },
       },
     });
 
@@ -88,6 +95,12 @@ export class VehiclesService {
       createdAt: vehicle.createdAt,
       customerName: vehicle.customer.name,
       brandName: vehicle.brand.name,
+      // Step 4: ยื่นเอกสารจดทะเบียน - ดู tax.controller.ts (preview/tax-input) สำหรับการคำนวณจริง
+      firstRegistrationDate: vehicle.firstRegistrationDate?.toISOString().slice(0, 10) ?? null,
+      isFactoryNew: vehicle.isFactoryNew,
+      ownerId: vehicle.ownerId,
+      ownerName: vehicle.owner?.name ?? null,
+      ownerType: vehicle.owner?.ownerType ?? null,
     }));
   }
 
@@ -625,6 +638,39 @@ export class VehiclesService {
       inspectionRound2Date: updated.inspectionRound2Date?.toISOString().slice(0, 10) ?? null,
       inspectionRound2Cost: updated.inspectionRound2Cost,
     };
+  }
+
+  // Step 4: ผูกเจ้าของรถ + วันจดทะเบียนครั้งแรก + รถใหม่จากโรงงานหรือไม่ แล้วคำนวณและบันทึก
+  // TaxCalculation snapshot ใหม่ทันที (immutable - ไม่ update ผลเดิม)
+  async updateTaxInput(id: string, dto: UpdateTaxInputDto) {
+    const ownerIdRaw = dto?.ownerId;
+    if (ownerIdRaw !== null && ownerIdRaw !== undefined && typeof ownerIdRaw !== 'string') {
+      throw new BadRequestException({ error: 'ownerId ต้องเป็นข้อความหรือ null' });
+    }
+    const isFactoryNewRaw = dto?.isFactoryNew;
+    if (isFactoryNewRaw !== null && isFactoryNewRaw !== undefined && typeof isFactoryNewRaw !== 'boolean') {
+      throw new BadRequestException({ error: 'isFactoryNew ต้องเป็น true/false หรือ null' });
+    }
+    const firstRegistrationDate = parseTaxDate(dto?.firstRegistrationDate, 'firstRegistrationDate');
+
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+    if (ownerIdRaw) {
+      const owner = await this.prisma.vehicleOwner.findUnique({ where: { id: ownerIdRaw } });
+      if (!owner) throw new BadRequestException({ error: 'ไม่พบเจ้าของรถในฐานข้อมูล' });
+    }
+
+    await this.prisma.vehicle.update({
+      where: { id },
+      data: {
+        ownerId: ownerIdRaw || null,
+        isFactoryNew: isFactoryNewRaw ?? null,
+        firstRegistrationDate,
+      },
+    });
+
+    return this.taxService.calculateAndSave(id);
   }
 
   private toCreateData(row: NormalizedVehicleRow) {

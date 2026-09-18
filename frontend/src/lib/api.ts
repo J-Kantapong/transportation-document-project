@@ -60,6 +60,8 @@ export interface Brand {
   name: string;
 }
 
+export type OwnerType = 'INDIVIDUAL' | 'JURISTIC';
+
 export interface Vehicle {
   id: string;
   date: string;
@@ -77,6 +79,55 @@ export interface Vehicle {
   createdAt: string;
   customerName: string;
   brandName: string;
+  // Step 4: ยื่นเอกสารจดทะเบียน (ภาษีรถประจำปี)
+  firstRegistrationDate: string | null;
+  isFactoryNew: boolean | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  ownerType: OwnerType | null;
+}
+
+export interface VehicleOwnerInput {
+  name?: string;
+  ownerType: OwnerType;
+  isHirePurchaseBusiness: boolean;
+  hirerType: OwnerType | null;
+}
+
+export interface VehicleOwner {
+  id: string;
+  name: string | null;
+  ownerType: OwnerType;
+  isHirePurchaseBusiness: boolean;
+  hirerType: OwnerType | null;
+  createdAt: string;
+}
+
+export interface TaxBreakdown {
+  vehicleFamily: 'RY1' | 'RY2' | 'RY3' | 'RY12' | null;
+  fuelGroup: 'ICE' | 'HEV' | 'PHEV' | 'BEV' | null;
+  baseAmount: number | null;
+  discountPercent: number | null;
+  juristicMultiplier: 1 | 2;
+  juristicReason: string;
+  amount: number | null;
+  amountSatang: number | null;
+  reason: string | null;
+  status: 'CALCULATED' | 'MISSING_INPUT' | 'MISSING_VERIFIED_RULE';
+}
+
+export interface TaxCalculation {
+  id: string;
+  vehicleId: string;
+  status: string;
+  vehicleFamily: string | null;
+  fuelGroup: string | null;
+  baseAmount: string | null;
+  incentiveDiscountPercent: string | null;
+  juristicMultiplier: number;
+  finalAmount: string | null;
+  reason: string | null;
+  createdAt: string;
 }
 
 export interface TransferNoticeVehicle {
@@ -207,6 +258,27 @@ export const api = {
       `/api/vehicles/${id}/inspection-round2`,
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
+
+  listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
+  createVehicleOwner: (data: VehicleOwnerInput) =>
+    request<{ id: string }>('/api/vehicle-owners', { method: 'POST', body: JSON.stringify(data) }),
+
+  previewTax: (data: {
+    body: string | null;
+    fuel: string | null;
+    cc: string | null;
+    weight: string | null;
+    firstRegistrationDate: string | null;
+    owner: VehicleOwnerInput | null;
+  }) => request<TaxBreakdown>('/api/tax-calculations/preview', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateVehicleTaxInput: (
+    id: string,
+    data: { ownerId: string | null; isFactoryNew: boolean | null; firstRegistrationDate: string | null },
+  ) => request<{ taxCalculation: TaxCalculation }>(`/api/vehicles/${id}/tax-input`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  listVehicleTaxCalculations: (id: string) =>
+    request<{ taxCalculations: TaxCalculation[] }>(`/api/vehicles/${id}/tax-calculations`),
 
   listYamahaRelocation: (size: YamahaRelocationSize, month: string) =>
     request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(

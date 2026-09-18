@@ -4,7 +4,7 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
-import { GovTaxFuelGroup, GovTaxVehicleFamily } from "../src/generated/prisma/enums.js";
+import { GovTaxFuelGroup, GovTaxRuleStatus, GovTaxVehicleFamily } from "../src/generated/prisma/enums.js";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
@@ -131,12 +131,24 @@ async function seedGovernmentTaxCcBrackets() {
     [600, 1800, 1.5, 1],
     [1800, null, 4, 2],
   ];
+  // status/active: VERIFIED+active because the user confirmed these figures in conversation
+  // (see memory/project_fee_pricing_workflow.md) - not because a legal citation is attached.
+  // See the governance comment above GovernmentTaxCcBracket in schema.prisma.
   for (const fuelGroup of [GovTaxFuelGroup.ICE, GovTaxFuelGroup.HEV, GovTaxFuelGroup.PHEV]) {
     for (const [ccFrom, ccTo, ratePerCc, sortOrder] of brackets) {
       await prisma.governmentTaxCcBracket.upsert({
         where: { vehicleFamily_fuelGroup_ccFrom: { vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup, ccFrom } },
-        create: { vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup, ccFrom, ccTo, ratePerCc, sortOrder },
-        update: { ccTo, ratePerCc, sortOrder },
+        create: {
+          vehicleFamily: GovTaxVehicleFamily.RY1,
+          fuelGroup,
+          ccFrom,
+          ccTo,
+          ratePerCc,
+          sortOrder,
+          status: GovTaxRuleStatus.VERIFIED,
+          active: true,
+        },
+        update: { ccTo, ratePerCc, sortOrder, status: GovTaxRuleStatus.VERIFIED, active: true },
       });
     }
   }
@@ -144,10 +156,11 @@ async function seedGovernmentTaxCcBrackets() {
 
 async function seedGovernmentTaxMotorcycleFlat() {
   // RY12 (รย.12) ICE: 100 บาท/ปี คงที่ทุก cc ตามกฎ ไม่ผูกกับช่วง cc ที่ใช้ตั้งราคาบริการบริษัท
+  // ยืนยันแล้วตามที่ผู้ใช้ให้มา - VERIFIED+active
   await prisma.governmentTaxMotorcycleFlat.upsert({
     where: { fuelGroup: GovTaxFuelGroup.ICE },
-    create: { fuelGroup: GovTaxFuelGroup.ICE, amount: 100 },
-    update: { amount: 100 },
+    create: { fuelGroup: GovTaxFuelGroup.ICE, amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true },
+    update: { amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true },
   });
   // RY12 BEV: กฎแยกต่างหาก ยังไม่มีข้อมูล - เตรียมแถวไว้เฉยๆ รอผู้ใช้ให้เงื่อนไข
   await prisma.governmentTaxMotorcycleFlat.upsert({
@@ -185,7 +198,7 @@ async function main() {
 
   await seedParamTable("feeCarBillParam", [
     ["ค่าคำขอ (ปกติ)", 5, "ใช้เมื่อจดในจังหวัดภูมิลำเนาของเจ้าของรถ"],
-    ["ค่าคำขอ (ขอใช้จังหวัดอื่น)", 10, "ใช้เมื่อจังหวัดที่จดทะเบียนต่างจากจังหวัดเจ้าของรถ"],
+    ["ค่าคำขอ (ขอใช้จังหวัดอื่น)", 10, "ใช้เมื่อมีรายการนอกเหนือจากการจดทะเบียนปกติ ซึ่งมีรายการเพิ่มเติมมากกว่าปกติ (ไม่จำกัดเฉพาะกรณีข้ามจังหวัด)"],
     ["ค่าธรรมเนียมอื่นๆ (ขอใช้จังหวัดอื่น)", 20, "เพิ่มเฉพาะกรณีขอใช้จังหวัดอื่น"],
     ["ค่าตรวจสภาพรถ (Step4)", 50, null],
     ["ค่าแผ่นป้ายทะเบียนรถ", 200, null],
@@ -207,16 +220,16 @@ async function main() {
     ["ลงขัน - รย.2-นั่ง 4 ตอน", 50, null],
     ["ลงขัน - รย.3-กระบะบรรทุก", 50, null],
     ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคา", 50, null],
-    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคาแหนบ", null, "ไม่มีราคาลงขันในข้อมูลที่ให้มา - กรอกเพิ่มเอง"],
+    ["ลงขัน - รย.3-กระบะบรรทุกมีหลังคาแหนบ", 50, null],
     ["ลงขัน - รย.3-ตู้บรรทุก", 50, null],
     ["งานด่วนเพิ่ม (ต่อคัน)", 100, null],
   ]);
 
   await seedParamTable("feeMotorcycleBillParam", [
     ["ค่าคำขอ (ปกติ)", 5, "ใช้เมื่อจดในจังหวัดภูมิลำเนาของเจ้าของรถ"],
-    ["ค่าคำขอ (ขอใช้จังหวัดอื่น)", 10, "ใช้เมื่อจังหวัดที่จดทะเบียนต่างจากจังหวัดเจ้าของรถ"],
+    ["ค่าคำขอ (ขอใช้จังหวัดอื่น)", 10, "ใช้เมื่อมีรายการนอกเหนือจากการจดทะเบียนปกติ ซึ่งมีรายการเพิ่มเติมมากกว่าปกติ (ไม่จำกัดเฉพาะกรณีข้ามจังหวัด)"],
     ["ค่าธรรมเนียมอื่นๆ (ขอใช้จังหวัดอื่น)", 20, "เพิ่มเฉพาะกรณีขอใช้จังหวัดอื่น"],
-    ["ค่าตรวจสภาพรถ (จยย.)", 100, null],
+    ["ค่าตรวจสภาพรถ (จยย.)", 10, null],
     ["ค่าแผ่นป้ายทะเบียน", 100, null],
     ["ค่าใบคู่มือจดทะเบียน", 100, null],
   ]);
