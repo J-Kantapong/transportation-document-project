@@ -69,6 +69,34 @@ function rowInfoLine(v: { date: string; chassis: string; brandName: string; body
   return `${isoToDisplayDate(v.date) || v.date} · ${v.chassis} · ${v.brandName} · ${v.body || "—"} · ${v.customerName}`;
 }
 
+// แบ่งหน้าละ 10 คัน ทุก panel ในหน้านี้ - select all/บันทึกทั้งหมด ยังทำงานกับทั้งลิสต์ ไม่ใช่แค่หน้าที่เห็น
+const PAGE_SIZE = 10;
+
+function usePagedList<T>(items: T[]): { pageItems: T[]; page: number; setPage: (p: number) => void; totalPages: number } {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageItems = items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  return { pageItems, page: safePage, setPage, totalPages };
+}
+
+function Pagination({ page, totalPages, onPageChange }: { page: number; totalPages: number; onPageChange: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="inspect-pagination">
+      <button className="text-button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
+        ← ก่อนหน้า
+      </button>
+      <span className="muted">
+        หน้า {page + 1} จาก {totalPages}
+      </span>
+      <button className="text-button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>
+        ถัดไป →
+      </button>
+    </div>
+  );
+}
+
 function toResultRowState(vehicle: InspectionVehicle): ResultRowState {
   return {
     selectedResult: null,
@@ -159,6 +187,7 @@ function SendPanel({
   const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedType).length;
   const allOut = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === "ส่งตรวจนอก");
   const allSelf = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === "เอารถมาตรวจเอง");
+  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
   return (
     <div className="panel" style={{ marginBottom: 24 }}>
@@ -218,8 +247,19 @@ function SendPanel({
               </label>
             </div>
           </div>
+          <div className="inspect-row-header">
+            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · จังหวัดที่จดทะเบียน</div>
+            <div className="inspect-row-checks">ประเภทการส่งตรวจ</div>
+            <div className="inspect-row-field" style={{ width: 100 }}>
+              วันที่
+            </div>
+            <div className="inspect-row-field" style={{ width: 80 }}>
+              ค่าใช้จ่าย
+            </div>
+            <div style={{ width: 56 }} />
+          </div>
           <div className="inspect-rows">
-            {vehicles.map((v) => {
+            {pageItems.map((v) => {
               const row = rows[v.id];
               if (!row) return null;
               return (
@@ -288,6 +328,7 @@ function SendPanel({
               );
             })}
           </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
     </div>
@@ -323,6 +364,7 @@ function ResultPanel({
 }) {
   const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedResult === panelResult).length;
   const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedResult === panelResult);
+  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
   return (
     <div className="panel" style={{ marginBottom: 24 }}>
@@ -348,8 +390,24 @@ function ResultPanel({
             <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
             เลือกทั้งหมดเป็น {panelResult} ({vehicles.length} คัน)
           </label>
+          <div className="inspect-row-header">
+            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · ประเภทการส่งตรวจ</div>
+            <div className="inspect-row-checks">{panelResult}</div>
+            <div className="inspect-row-field" style={{ width: 100 }}>
+              วันที่
+            </div>
+            <div className="inspect-row-field" style={{ width: 80 }}>
+              ค่าใช้จ่าย
+            </div>
+            {showRemark && (
+              <div className="inspect-row-field" style={{ width: 180 }}>
+                Remark
+              </div>
+            )}
+            <div style={{ width: 56 }} />
+          </div>
           <div className="inspect-rows">
-            {vehicles.map((v) => {
+            {pageItems.map((v) => {
               const row = rows[v.id];
               if (!row) return null;
               const checked = row.selectedResult === panelResult;
@@ -427,6 +485,7 @@ function ResultPanel({
               );
             })}
           </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
     </div>
@@ -462,6 +521,7 @@ function Round2Panel({
 }) {
   const selectedCount = vehicles.filter((v) => rows[v.id]?.selected).length;
   const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selected);
+  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
   return (
     <div className="panel" style={{ marginBottom: 24 }}>
@@ -505,8 +565,19 @@ function Round2Panel({
               </label>
             </div>
           </div>
+          <div className="inspect-row-header">
+            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · วันที่ผ่านตรวจครั้งแรก</div>
+            <div className="inspect-row-checks">ตรวจรอบ 2</div>
+            <div className="inspect-row-field" style={{ width: 100 }}>
+              วันที่
+            </div>
+            <div className="inspect-row-field" style={{ width: 80 }}>
+              ค่าใช้จ่าย
+            </div>
+            <div style={{ width: 56 }} />
+          </div>
           <div className="inspect-rows">
-            {vehicles.map((v) => {
+            {pageItems.map((v) => {
               const row = rows[v.id];
               if (!row) return null;
               return (
@@ -560,6 +631,7 @@ function Round2Panel({
               );
             })}
           </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
     </div>
@@ -577,17 +649,21 @@ function ReferencePanel<
   T extends { id: string; date: string; chassis: string; brandName: string; body: string | null; customerName: string },
 >({
   title,
+  extraLabel,
   vehicles,
   loading,
   error,
   renderExtra,
 }: {
   title: string;
+  extraLabel: string;
   vehicles: T[];
   loading: boolean;
   error: string;
   renderExtra: (v: T) => string;
 }) {
+  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
+
   return (
     <section className="panel customer-list" style={{ marginBottom: 24 }}>
       <div className="panel-head">
@@ -602,17 +678,23 @@ function ReferencePanel<
       ) : !vehicles.length ? (
         <div className="empty-customers">ไม่มีรายการ</div>
       ) : (
-        <div className="inspect-rows">
-          {vehicles.map((v) => (
-            <div className="inspect-row" key={v.id}>
-              <div className="inspect-row-body">
-                <div className="inspect-row-title">
-                  {rowInfoLine(v)} <span>· {renderExtra(v)}</span>
+        <>
+          <div className="inspect-row-header">
+            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · {extraLabel}</div>
+          </div>
+          <div className="inspect-rows">
+            {pageItems.map((v) => (
+              <div className="inspect-row" key={v.id}>
+                <div className="inspect-row-body">
+                  <div className="inspect-row-title">
+                    {rowInfoLine(v)} <span>· {renderExtra(v)}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+        </>
       )}
     </section>
   );
@@ -637,6 +719,8 @@ function CompletedInspectionPanel({
   error: string;
   onOpenDetail: (v: InspectionVehicle) => void;
 }) {
+  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
+
   return (
     <section className="panel customer-list">
       <div className="panel-head">
@@ -652,24 +736,31 @@ function CompletedInspectionPanel({
       ) : !vehicles.length ? (
         <div className="empty-customers">ยังไม่มีรายการที่ตรวจเสร็จ</div>
       ) : (
-        <div className="inspect-rows">
-          {vehicles.map((v) => (
-            <div className={`inspect-row${v.inspectionResult === "ไม่ผ่าน" ? " row-failed" : ""}`} key={v.id}>
-              <div className="inspect-row-body">
-                <div className="inspect-row-title">
-                  {rowInfoLine(v)}{" "}
-                  <span>
-                    · ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
-                    {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
-                  </span>
+        <>
+          <div className="inspect-row-header">
+            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · ผลตรวจ / วันที่เสร็จ / ค่าใช้จ่าย</div>
+            <div style={{ width: 56 }} />
+          </div>
+          <div className="inspect-rows">
+            {pageItems.map((v) => (
+              <div className={`inspect-row${v.inspectionResult === "ไม่ผ่าน" ? " row-failed" : ""}`} key={v.id}>
+                <div className="inspect-row-body">
+                  <div className="inspect-row-title">
+                    {rowInfoLine(v)}{" "}
+                    <span>
+                      · ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
+                      {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
+                    </span>
+                  </div>
                 </div>
+                <button className="text-button" onClick={() => onOpenDetail(v)}>
+                  ดูข้อมูล
+                </button>
               </div>
-              <button className="text-button" onClick={() => onOpenDetail(v)}>
-                ดูข้อมูล
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+        </>
       )}
     </section>
   );
@@ -1178,6 +1269,7 @@ export default function InspectionPage() {
 
           <ReferencePanel
             title="รถที่เพิ่งส่งตรวจ (รอผลตรวจ)"
+            extraLabel="ประเภทการส่งตรวจ / วันที่ส่ง / ค่าใช้จ่าย"
             vehicles={pendingResultVehicles}
             loading={resultLoading}
             error={resultError}
@@ -1188,6 +1280,7 @@ export default function InspectionPage() {
         <>
           <ReferencePanel
             title="รถที่ยังไม่ได้ส่งตรวจ"
+            extraLabel="จังหวัดที่จดทะเบียน"
             vehicles={pendingSendVehicles}
             loading={sendLoading}
             error={sendError}
@@ -1266,6 +1359,7 @@ export default function InspectionPage() {
           )}
           <ReferencePanel
             title="รายการที่ตรวจรอบ 2 เสร็จแล้ว"
+            extraLabel="วันที่ผ่านครั้งแรก / วันที่ตรวจรอบ 2 / ค่าใช้จ่าย"
             vehicles={completedRound2Vehicles}
             loading={completedRound2Loading}
             error={completedRound2Error}
