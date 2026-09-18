@@ -364,25 +364,29 @@ export default function VehicleEntryPage() {
         const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()).replace(/^﻿/, "");
         cells = parseCSV(text);
       } else if (/\.xlsx$/i.test(file.name)) {
-        const { Workbook } = await import("exceljs");
-        const workbook = new Workbook();
-        await workbook.xlsx.load(await file.arrayBuffer());
-        const sheet = workbook.worksheets[0];
-        if (!sheet) throw new Error("ไม่พบชีตข้อมูล");
-        if (sheet.rowCount > 1001) throw new Error("รองรับไม่เกิน 1,000 แถวต่อไฟล์");
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) throw new Error("ไม่พบชีตข้อมูล");
+        const sheet = workbook.Sheets[sheetName];
+        const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+        const rowCount = range ? range.e.r - range.s.r + 1 : 0;
+        if (rowCount > 1001) throw new Error("รองรับไม่เกิน 1,000 แถวต่อไฟล์");
+        const startRow = range ? range.s.r : 0;
+        const endRow = range ? range.e.r : -1;
+        const startCol = range ? range.s.c : 0;
+        const colCount = Math.max(12, range ? range.e.c - range.s.c + 1 : 0);
         cells = [];
-        sheet.eachRow({ includeEmpty: true }, (row) => {
+        for (let r = startRow; r <= endRow; r++) {
           const values: string[] = [];
-          for (let i = 1; i <= Math.max(12, row.cellCount); i++) {
-            const cell = row.getCell(i);
-            const value = cell.value;
-            if (value && typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
-              throw new Error("ไม่รองรับสูตร Excel กรุณาวางเป็นค่า");
-            }
-            values.push(value instanceof Date ? value.toISOString().slice(0, 10) : cell.text);
+          for (let ci = 0; ci < colCount; ci++) {
+            const cell = sheet[XLSX.utils.encode_cell({ r, c: startCol + ci })];
+            if (cell?.f) throw new Error("ไม่รองรับสูตร Excel กรุณาวางเป็นค่า");
+            const value = cell?.v;
+            values.push(value instanceof Date ? value.toISOString().slice(0, 10) : value == null ? "" : String(value));
           }
           cells.push(values);
-        });
+        }
       } else {
         throw new Error("เลือกไฟล์ .xlsx หรือ .csv เท่านั้น");
       }

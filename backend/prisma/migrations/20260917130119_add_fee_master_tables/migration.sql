@@ -1,22 +1,22 @@
 -- CreateTable
-CREATE TABLE "FeeDeregistration" (
+CREATE TABLE "FeeAccountCutoff" (
     "id" TEXT NOT NULL,
     "vehicleType" TEXT NOT NULL,
     "brand" TEXT NOT NULL DEFAULT 'อื่นๆ',
     "amount" DECIMAL(10,2) NOT NULL,
 
-    CONSTRAINT "FeeDeregistration_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "FeeAccountCutoff_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "FeeRelocate" (
+CREATE TABLE "FeeAddressChange" (
     "id" TEXT NOT NULL,
     "vehicleType" TEXT NOT NULL,
     "brand" TEXT NOT NULL DEFAULT 'อื่นๆ',
     "noBillAmount" DECIMAL(10,2) NOT NULL,
     "billAmount" DECIMAL(10,2) NOT NULL DEFAULT 5,
 
-    CONSTRAINT "FeeRelocate_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "FeeAddressChange_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -80,10 +80,10 @@ CREATE TABLE "FeeMotorcycleNoBillParam" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "FeeDeregistration_vehicleType_brand_key" ON "FeeDeregistration"("vehicleType", "brand");
+CREATE UNIQUE INDEX "FeeAccountCutoff_vehicleType_brand_key" ON "FeeAccountCutoff"("vehicleType", "brand");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "FeeRelocate_vehicleType_brand_key" ON "FeeRelocate"("vehicleType", "brand");
+CREATE UNIQUE INDEX "FeeAddressChange_vehicleType_brand_key" ON "FeeAddressChange"("vehicleType", "brand");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "FeeInspectionBangkok_vehicleType_brand_key" ON "FeeInspectionBangkok"("vehicleType", "brand");
