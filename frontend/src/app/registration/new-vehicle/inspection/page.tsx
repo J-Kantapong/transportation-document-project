@@ -64,6 +64,11 @@ function addDaysIso(iso: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+// ลำดับข้อมูลหลักที่ใช้ร่วมกันทุกแถวในหน้านี้ อยู่บรรทัดเดียว: วันที่ - เลขตัวถัง - ยี่ห้อ - ประเภทรถ - เจ้าของงาน
+function rowInfoLine(v: { date: string; chassis: string; brandName: string; body: string | null; customerName: string }): string {
+  return `${isoToDisplayDate(v.date) || v.date} · ${v.chassis} · ${v.brandName} · ${v.body || "—"} · ${v.customerName}`;
+}
+
 function toResultRowState(vehicle: InspectionVehicle): ResultRowState {
   return {
     selectedResult: null,
@@ -221,10 +226,7 @@ function SendPanel({
                 <div className="inspect-row" key={v.id}>
                   <div className="inspect-row-body">
                     <div className="inspect-row-title">
-                      {v.chassis} <span>· {v.customerName}</span>
-                    </div>
-                    <div className="inspect-row-sub">
-                      {v.brandName} · {v.body || "—"} · {v.registrationProvince || "—"} · รับงาน {isoToDisplayDate(v.date) || v.date}
+                      {rowInfoLine(v)} <span>· {v.registrationProvince || "—"}</span>
                     </div>
                     {row.message.text && (
                       <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
@@ -355,10 +357,7 @@ function ResultPanel({
                 <div className="inspect-row" key={v.id}>
                   <div className="inspect-row-body">
                     <div className="inspect-row-title">
-                      {v.chassis} <span>· {v.customerName}</span>
-                    </div>
-                    <div className="inspect-row-sub">
-                      {v.brandName} · ส่งตรวจแบบ {v.inspectionSentType || "—"} · รับงาน {isoToDisplayDate(v.date) || v.date}
+                      {rowInfoLine(v)} <span>· ส่งตรวจแบบ {v.inspectionSentType || "—"}</span>
                     </div>
                     {row.message.text && (
                       <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
@@ -514,11 +513,8 @@ function Round2Panel({
                 <div className="inspect-row" key={v.id}>
                   <div className="inspect-row-body">
                     <div className="inspect-row-title">
-                      {v.chassis} <span>· {v.customerName}</span>
-                    </div>
-                    <div className="inspect-row-sub">
-                      {v.brandName} · {v.body || "—"} · {v.registrationProvince || "—"} · ผ่านตรวจครั้งแรก{" "}
-                      {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}
+                      {rowInfoLine(v)}{" "}
+                      <span>· ผ่านตรวจครั้งแรก {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</span>
                     </div>
                     {row.message.text && (
                       <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
@@ -570,25 +566,27 @@ function Round2Panel({
   );
 }
 
-const renderRound2CompletedSub = (v: Round2Vehicle) =>
-  `${v.brandName} · ผ่านครั้งแรก ${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} · ตรวจรอบ 2 ${
+const renderRound2CompletedExtra = (v: Round2Vehicle) =>
+  `ผ่านครั้งแรก ${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} · ตรวจรอบ 2 ${
     v.inspectionRound2Date ? isoToDisplayDate(v.inspectionRound2Date) : "—"
   } · ${v.inspectionRound2Cost ? `${v.inspectionRound2Cost} บาท` : "—"}`;
 
 // อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2, "รถที่เพิ่งส่งตรวจ" ใน Tab 1,
-// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - generic เพราะ InspectionVehicle/Round2Vehicle มีแค่ id/chassis/customerName ร่วมกัน
-function ReferencePanel<T extends { id: string; chassis: string; customerName: string }>({
+// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - generic เพราะ InspectionVehicle/Round2Vehicle มีฟิลด์ของ rowInfoLine ร่วมกัน
+function ReferencePanel<
+  T extends { id: string; date: string; chassis: string; brandName: string; body: string | null; customerName: string },
+>({
   title,
   vehicles,
   loading,
   error,
-  renderSub,
+  renderExtra,
 }: {
   title: string;
   vehicles: T[];
   loading: boolean;
   error: string;
-  renderSub: (v: T) => string;
+  renderExtra: (v: T) => string;
 }) {
   return (
     <section className="panel customer-list" style={{ marginBottom: 24 }}>
@@ -609,9 +607,8 @@ function ReferencePanel<T extends { id: string; chassis: string; customerName: s
             <div className="inspect-row" key={v.id}>
               <div className="inspect-row-body">
                 <div className="inspect-row-title">
-                  {v.chassis} <span>· {v.customerName}</span>
+                  {rowInfoLine(v)} <span>· {renderExtra(v)}</span>
                 </div>
-                <div className="inspect-row-sub">{renderSub(v)}</div>
               </div>
             </div>
           ))}
@@ -621,11 +618,10 @@ function ReferencePanel<T extends { id: string; chassis: string; customerName: s
   );
 }
 
-const renderPendingSendSub = (v: InspectionVehicle) =>
-  `${v.brandName} · ${v.body || "—"} · ${v.registrationProvince || "—"} · รับงาน ${isoToDisplayDate(v.date) || v.date}`;
+const renderPendingSendExtra = (v: InspectionVehicle) => v.registrationProvince || "—";
 
-const renderPendingResultSub = (v: InspectionVehicle) =>
-  `${v.brandName} · ส่งตรวจแบบ ${v.inspectionSentType || "—"} วันที่ ${
+const renderPendingResultExtra = (v: InspectionVehicle) =>
+  `ส่งตรวจแบบ ${v.inspectionSentType || "—"} วันที่ ${
     v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—"
   } · ${v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—"}`;
 
@@ -661,11 +657,11 @@ function CompletedInspectionPanel({
             <div className={`inspect-row${v.inspectionResult === "ไม่ผ่าน" ? " row-failed" : ""}`} key={v.id}>
               <div className="inspect-row-body">
                 <div className="inspect-row-title">
-                  {v.chassis} <span>· {v.customerName} · {v.brandName}</span>
-                </div>
-                <div className="inspect-row-sub">
-                  ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
-                  {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
+                  {rowInfoLine(v)}{" "}
+                  <span>
+                    · ผล: {v.inspectionResult || "—"} · เสร็จ {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"} ·{" "}
+                    {v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}
+                  </span>
                 </div>
               </div>
               <button className="text-button" onClick={() => onOpenDetail(v)}>
@@ -1185,7 +1181,7 @@ export default function InspectionPage() {
             vehicles={pendingResultVehicles}
             loading={resultLoading}
             error={resultError}
-            renderSub={renderPendingResultSub}
+            renderExtra={renderPendingResultExtra}
           />
         </>
       ) : activeTab === "result" ? (
@@ -1195,7 +1191,7 @@ export default function InspectionPage() {
             vehicles={pendingSendVehicles}
             loading={sendLoading}
             error={sendError}
-            renderSub={renderPendingSendSub}
+            renderExtra={renderPendingSendExtra}
           />
 
           {resultLoading ? (
@@ -1273,7 +1269,7 @@ export default function InspectionPage() {
             vehicles={completedRound2Vehicles}
             loading={completedRound2Loading}
             error={completedRound2Error}
-            renderSub={renderRound2CompletedSub}
+            renderExtra={renderRound2CompletedExtra}
           />
         </>
       )}

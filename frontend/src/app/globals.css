@@ -161,7 +161,6 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .inspect-row-body{flex:1 1 220px;min-width:180px}
 .inspect-row-title{font-weight:600;color:#18243c;font-size:14px}
 .inspect-row-title span{font-weight:400;color:#576781}
-.inspect-row-sub{font-size:12px;color:#929bad;margin-top:4px}
 .inspect-row-checks{display:flex;gap:14px;flex-shrink:0;flex-wrap:wrap}
 .inspect-row-checks label{display:flex;align-items:center;gap:6px;font-size:12px;color:#576781;white-space:nowrap}
 .inspect-row-field{display:flex;align-items:center;gap:6px;font-size:12px;color:#8a94a6;white-space:nowrap;flex-shrink:0}
