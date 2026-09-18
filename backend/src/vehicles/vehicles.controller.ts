@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
-import type { UpdateInspectionDto } from './dto/update-inspection.dto.js';
+import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
+import type { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
@@ -39,13 +40,28 @@ export class VehiclesController {
     return { vehicle: await this.vehiclesService.updateTransferNotice(id, body) };
   }
 
-  @Get('inspection')
-  async findForInspection(@Query('date') date: string) {
-    return { vehicles: await this.vehiclesService.findForInspection(date) };
+  @Get('inspection/pending-send')
+  async findPendingInspectionSend() {
+    return { vehicles: await this.vehiclesService.findPendingInspectionSend() };
   }
 
-  @Patch(':id/inspection')
-  async updateInspection(@Param('id') id: string, @Body() body: UpdateInspectionDto) {
-    return { vehicle: await this.vehiclesService.updateInspection(id, body) };
+  @Get('inspection/pending-result')
+  async findPendingInspectionResult() {
+    return { vehicles: await this.vehiclesService.findPendingInspectionResult() };
+  }
+
+  @Get('inspection/completed')
+  async findRecentlyCompletedInspection() {
+    return { vehicles: await this.vehiclesService.findRecentlyCompletedInspection() };
+  }
+
+  @Patch(':id/inspection-sent')
+  async updateInspectionSent(@Param('id') id: string, @Body() body: UpdateInspectionSentDto) {
+    return { vehicle: await this.vehiclesService.updateInspectionSent(id, body) };
+  }
+
+  @Patch(':id/inspection-result')
+  async updateInspectionResult(@Param('id') id: string, @Body() body: UpdateInspectionResultDto) {
+    return { vehicle: await this.vehiclesService.updateInspectionResult(id, body) };
   }
 }

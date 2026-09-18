@@ -103,9 +103,13 @@ export interface InspectionVehicle {
   body: string | null;
   registrationProvince: string | null;
   suggestedCost: string | null;
-  inspectionDone: boolean;
-  inspectionCompletedDate: string | null;
-  inspectionCost: string | null;
+  inspectionSentType: 'ตรวจนอก' | 'เอารถมาตรวจเอง' | null;
+  inspectionSentDate: string | null;
+  inspectionSentCost: string | null;
+  inspectionResult: 'ผ่าน' | 'ไม่ผ่าน' | null;
+  inspectionResultDate: string | null;
+  inspectionResultCost: string | null;
+  inspectionFailRemark: string | null;
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -161,13 +165,24 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
 
-  listInspection: (date: string) =>
-    request<{ vehicles: InspectionVehicle[] }>(`/api/vehicles/inspection?date=${date}`),
-  updateInspection: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
-    request<{ vehicle: Pick<InspectionVehicle, 'id' | 'inspectionDone' | 'inspectionCompletedDate' | 'inspectionCost'> }>(
-      `/api/vehicles/${id}/inspection`,
+  listPendingInspectionSend: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/pending-send'),
+  listPendingInspectionResult: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/pending-result'),
+  listRecentlyCompletedInspection: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/completed'),
+  updateInspectionSent: (id: string, data: { sentType: string; sentDate: string | null; cost: string | null }) =>
+    request<{ vehicle: Pick<InspectionVehicle, 'id' | 'inspectionSentType' | 'inspectionSentDate' | 'inspectionSentCost'> }>(
+      `/api/vehicles/${id}/inspection-sent`,
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
+  updateInspectionResult: (
+    id: string,
+    data: { result: string; resultDate: string | null; cost: string | null; remark: string | null },
+  ) =>
+    request<{
+      vehicle: Pick<
+        InspectionVehicle,
+        'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionFailRemark'
+      >;
+    }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   listYamahaRelocation: (size: YamahaRelocationSize, month: string) =>
     request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(

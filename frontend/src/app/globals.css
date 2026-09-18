@@ -136,5 +136,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .import-ok{color:#23825f}
 .row-backlog{background:#fff8e7}
 .row-backlog:hover{background:#fef1cf}
+.row-failed{background:#fdecec}
+.row-failed:hover{background:#fbdada}
 .empty-page{padding:60px 24px;text-align:center;color:#8290a5;font-size:14px;background:white;border:1px solid #e3e8f1;border-radius:12px}
 @media(max-width:600px){.vehicle-fields{grid-template-columns:1fr}.vehicle-tab{padding:13px 10px;font-size:14px}}
