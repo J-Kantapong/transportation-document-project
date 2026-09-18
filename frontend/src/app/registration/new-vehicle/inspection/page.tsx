@@ -275,11 +275,6 @@ function SendPanel({
                       style={{ width: 80 }}
                     />
                   </label>
-                  {row.selectedType === "เอารถมาตรวจเอง" ? (
-                    <span className="inspect-row-hint">ไม่มีค่าใช้จ่าย</span>
-                  ) : (
-                    v.suggestedCost && <span className="inspect-row-hint">แนะนำ {v.suggestedCost} บาท</span>
-                  )}
                   <button
                     className="text-button"
                     disabled={!row.selectedType || row.saving || bulkSaving}
@@ -414,7 +409,6 @@ function ResultPanel({
                       style={{ width: 80 }}
                     />
                   </label>
-                  {v.suggestedCost && <span className="inspect-row-hint">แนะนำ {v.suggestedCost} บาท</span>}
                   {showRemark && (
                     <label className="inspect-row-field">
                       Remark
@@ -563,7 +557,6 @@ function Round2Panel({
                       style={{ width: 80 }}
                     />
                   </label>
-                  {v.suggestedRound2Cost && <span className="inspect-row-hint">แนะนำ {v.suggestedRound2Cost} บาท (No bill + Bill 50)</span>}
                   <button className="text-button" disabled={!row.selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
                     บันทึก
                   </button>
