@@ -152,6 +152,7 @@ export interface DocumentSubmission {
   taxAmount: string | null;
   createdAt: string;
   updatedAt: string;
+  receiptReceivedDate: string | null;
   vehicle: {
     chassis: string;
     body: string | null;
@@ -160,6 +161,23 @@ export interface DocumentSubmission {
     customer: { name: string };
     owner: { name: string | null; ownerType: OwnerType } | null;
   };
+}
+
+// หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
+export type ReceivingStep = "plate" | "book" | "delivery";
+
+export interface ReceivingRow {
+  id: string; // vehicleId
+  date: string;
+  customerName: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  doneDate: string | null;
+  recipient: string | null; // เฉพาะ delivery
+  note: string | null; // เฉพาะ delivery
 }
 
 export interface BulkDocumentSubmissionEntry extends CreateDocumentSubmissionInput {
@@ -326,13 +344,20 @@ export const api = {
       '/api/vehicles/document-submission/bulk',
       { method: 'POST', body: JSON.stringify({ entries }) },
     ),
-  listDocumentSubmissions: (date?: string) =>
-    request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${date ? `?date=${date}` : ''}`),
-  updateDocumentSubmissionStatus: (submissionId: string, status: Exclude<DocumentSubmissionStatus, "PENDING">) =>
+  listDocumentSubmissions: (date?: string, status?: DocumentSubmissionStatus) => {
+    const query = [date ? `date=${date}` : '', status ? `status=${status}` : ''].filter(Boolean).join('&');
+    return request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
+  },
+  updateDocumentSubmissionStatus: (submissionId: string, status: Exclude<DocumentSubmissionStatus, "PENDING">, receivedDate?: string) =>
     request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, receivedDate }),
     }),
+
+  listReceivingPending: (step: ReceivingStep) => request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/pending`),
+  listReceivingCompleted: (step: ReceivingStep) => request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/completed`),
+  markReceivingDone: (id: string, step: ReceivingStep, data: { date: string; recipient?: string; note?: string }) =>
+    request<{ vehicle: ReceivingRow }>(`/api/vehicles/${id}/receiving/${step}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
   listRecentlyCompletedTransferNotice: () =>

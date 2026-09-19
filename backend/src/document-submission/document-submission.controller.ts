@@ -24,12 +24,12 @@ export class DocumentSubmissionController {
   }
 
   @Get('document-submission')
-  list(@Query('date') date?: string) {
-    return this.documentSubmissionService.listByDate(date);
+  list(@Query('date') date?: string, @Query('status') status?: string) {
+    return this.documentSubmissionService.listByDate(date, status);
   }
 
   @Patch('document-submission/:id/status')
-  updateStatus(@Param('id') id: string, @Body() body: { status?: unknown }) {
-    return this.documentSubmissionService.updateStatus(id, body?.status);
+  updateStatus(@Param('id') id: string, @Body() body: { status?: unknown; receivedDate?: unknown }) {
+    return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate);
   }
 }

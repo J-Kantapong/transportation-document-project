@@ -126,8 +126,6 @@ export default function SubmitDocumentsPage() {
   const [records, setRecords] = useState<DocumentSubmission[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(null);
-  const [updatingSubmissionId, setUpdatingSubmissionId] = useState<string | null>(null);
-  const [recordStatusError, setRecordStatusError] = useState("");
 
   const confirmDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -405,20 +403,6 @@ export default function SubmitDocumentsPage() {
     }
   }
 
-  // อัปเดตสถานะการยื่นเอกสาร (ได้รับใบเสร็จ/ยื่นไม่สำเร็จ) - ปลด block การยื่นซ้ำของรถคันนั้นทันที
-  async function handleUpdateSubmissionStatus(submissionId: string, status: "RECEIPT_RECEIVED" | "FAILED") {
-    setUpdatingSubmissionId(submissionId);
-    setRecordStatusError("");
-    try {
-      await api.updateDocumentSubmissionStatus(submissionId, status);
-      await loadRecords();
-    } catch (err) {
-      setRecordStatusError(err instanceof ApiError ? err.message : "อัปเดตสถานะไม่สำเร็จ");
-    } finally {
-      setUpdatingSubmissionId(null);
-    }
-  }
-
   useEffect(() => {
     if (phase !== "records") return;
     // Standard fetch-on-phase-enter; loadRecords sets a loading flag before its first await.
@@ -510,11 +494,6 @@ export default function SubmitDocumentsPage() {
           {selectedRecordDate && (
             <section className="panel" style={{ padding: 22 }}>
               <p style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 500 }}>รายการวันที่ {isoToDisplayDate(selectedRecordDate)}</p>
-              {recordStatusError && (
-                <p className="customer-message error" role="alert">
-                  {recordStatusError}
-                </p>
-              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {selectedRecordRows.map((row) => (
                   <div
@@ -543,28 +522,7 @@ export default function SubmitDocumentsPage() {
                       <span style={{ fontSize: 15, fontWeight: 500, color: "#2854d9" }}>
                         {formatMoney(Number(row.billFeeTotal) + Number(row.noBillTotal) + Number(row.taxAmount ?? 0))} บาท
                       </span>
-                      {row.status === "PENDING" && (
-                        <>
-                          <span className="badge warn">รอใบเสร็จ</span>
-                          <button
-                            type="button"
-                            className="text-button"
-                            disabled={updatingSubmissionId === row.id}
-                            onClick={() => handleUpdateSubmissionStatus(row.id, "RECEIPT_RECEIVED")}
-                          >
-                            ได้รับใบเสร็จแล้ว
-                          </button>
-                          <button
-                            type="button"
-                            className="text-button"
-                            style={{ color: "#c0392b" }}
-                            disabled={updatingSubmissionId === row.id}
-                            onClick={() => handleUpdateSubmissionStatus(row.id, "FAILED")}
-                          >
-                            ยื่นไม่สำเร็จ
-                          </button>
-                        </>
-                      )}
+                      {row.status === "PENDING" && <span className="badge warn">รอใบเสร็จ</span>}
                       {row.status === "RECEIPT_RECEIVED" && <span className="badge done">ได้รับใบเสร็จแล้ว</span>}
                       {row.status === "FAILED" && <span className="badge" style={{ background: "#fdecec", color: "#b43434" }}>ยื่นไม่สำเร็จ</span>}
                     </div>

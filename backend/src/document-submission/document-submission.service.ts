@@ -160,23 +160,30 @@ export class DocumentSubmissionService {
     return { succeeded, failed };
   }
 
-  async listByDate(dateIso?: string) {
+  // status: กรองตามสถานะ (หน้ารับใบเสร็จใช้ PENDING = รอใบเสร็จ / RECEIPT_RECEIVED = รับแล้ว)
+  async listByDate(dateIso?: string, status?: string) {
     if (dateIso !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) {
       throw new BadRequestException({ error: 'date ต้องเป็น ค.ศ. YYYY-MM-DD' });
     }
-    const where = dateIso
-      ? {
-          submitDate: {
-            gte: new Date(`${dateIso}T00:00:00.000Z`),
-            lt: new Date(new Date(`${dateIso}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000),
-          },
-        }
-      : {};
+    if (status !== undefined && !['PENDING', 'RECEIPT_RECEIVED', 'FAILED'].includes(status)) {
+      throw new BadRequestException({ error: 'status ต้องเป็น PENDING, RECEIPT_RECEIVED หรือ FAILED' });
+    }
+    const where = {
+      ...(dateIso
+        ? {
+            submitDate: {
+              gte: new Date(`${dateIso}T00:00:00.000Z`),
+              lt: new Date(new Date(`${dateIso}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000),
+            },
+          }
+        : {}),
+      ...(status ? { status } : {}),
+    };
 
     const submissions = await this.prisma.documentSubmission.findMany({
       where,
-      orderBy: [{ submitDate: 'desc' }, { createdAt: 'desc' }],
-      take: 2000,
+      orderBy: status === 'RECEIPT_RECEIVED' ? [{ receiptReceivedDate: 'desc' }, { updatedAt: 'desc' }] : [{ submitDate: 'desc' }, { createdAt: 'desc' }],
+      take: status === 'RECEIPT_RECEIVED' ? 100 : 2000,
       include: {
         vehicle: {
           select: {
@@ -195,15 +202,24 @@ export class DocumentSubmissionService {
 
   // เปลี่ยนสถานะได้ครั้งเดียวจาก PENDING -> RECEIPT_RECEIVED หรือ FAILED เท่านั้น (ห้ามย้อนกลับ/เปลี่ยนซ้ำ)
   // การอัปเดตนี้ปลด block การยื่นซ้ำของรถคันนั้นใน assertNotPending()
-  async updateStatus(submissionId: string, statusRaw: unknown) {
+  // receivedDate (ค.ศ. YYYY-MM-DD) ใช้เฉพาะ RECEIPT_RECEIVED - ไม่ส่งมาจะใช้วันนี้
+  async updateStatus(submissionId: string, statusRaw: unknown, receivedDateRaw?: unknown) {
     if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
       throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
+    }
+    let receiptReceivedDate: Date | null = null;
+    if (statusRaw === 'RECEIPT_RECEIVED') {
+      if (receivedDateRaw === undefined || receivedDateRaw === null || receivedDateRaw === '') {
+        receiptReceivedDate = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+      } else {
+        receiptReceivedDate = parseSubmitDate(receivedDateRaw);
+      }
     }
     const submission = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId } });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
     if (submission.status !== 'PENDING') {
       throw new BadRequestException({ error: 'รายการนี้อัปเดตสถานะไปแล้ว' });
     }
-    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: statusRaw } });
+    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: statusRaw, receiptReceivedDate } });
   }
 }

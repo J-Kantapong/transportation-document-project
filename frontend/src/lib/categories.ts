@@ -22,12 +22,17 @@ export interface RegistrationSubtask {
   href: string;
 }
 
-// The four subtask headings under "จดทะเบียนรถใหม่"; only the first is implemented.
+// The subtask headings under "จดทะเบียนรถใหม่". The last four (รับใบเสร็จ ... Delivery) are
+// title-only placeholders until the user describes their workflow.
 export const NEW_VEHICLE_SUBTASKS: RegistrationSubtask[] = [
   { title: "เพิ่มข้อมูลรถจดใหม่", href: "/registration/new-vehicle/entry" },
   { title: "แจ้งย้าย/ตัดบัญชี", href: "/registration/new-vehicle/transfer-notice" },
   { title: "ตรวจรถ", href: "/registration/new-vehicle/inspection" },
   { title: "ยื่นเอกสารจดทะเบียนรถใหม่", href: "/registration/new-vehicle/submit-documents" },
+  { title: "รับใบเสร็จ", href: "/registration/new-vehicle/receive-receipt" },
+  { title: "รับป้ายทะเบียน", href: "/registration/new-vehicle/receive-plate" },
+  { title: "รับเล่มทะเบียน", href: "/registration/new-vehicle/receive-book" },
+  { title: "Delivery", href: "/registration/new-vehicle/delivery" },
 ];
 
 // The two subtask headings under "งานแจ้งย้ายยามาฮ่า".

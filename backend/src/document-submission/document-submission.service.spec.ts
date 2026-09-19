@@ -129,8 +129,11 @@ describe('DocumentSubmissionService.updateStatus', () => {
       },
     });
     const service = new DocumentSubmissionService(prisma, mockTaxService());
-    const result = await service.updateStatus('sub1', 'RECEIPT_RECEIVED');
+    const result = await service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20');
     expect(result.status).toBe('RECEIPT_RECEIVED');
-    expect(updateMock).toHaveBeenCalledWith({ where: { id: 'sub1' }, data: { status: 'RECEIPT_RECEIVED' } });
+    expect(updateMock).toHaveBeenCalledWith({
+      where: { id: 'sub1' },
+      data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: new Date('2026-09-20T00:00:00.000Z') },
+    });
   });
 });

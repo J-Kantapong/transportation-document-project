@@ -118,6 +118,14 @@ model Vehicle {
   plateCategory String?
   plateNumber   String?
 
+  // Step 6-8 (หลังได้รับใบเสร็จ): รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - วันที่ไม่ว่าง = ดำเนินการแล้ว
+  // (คิวของแต่ละขั้นและเงื่อนไขก่อนหน้าอยู่ใน backend/src/receiving/receiving.service.ts)
+  plateReceivedDate DateTime?
+  bookReceivedDate  DateTime?
+  deliveredDate     DateTime?
+  deliveryRecipient String? // ผู้รับของ Delivery
+  deliveryNote      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -444,23 +452,24 @@ model TaxCalculation {
 // จะยื่นเอกสารซ้ำไม่ได้ตราบใดที่ยังมี DocumentSubmission ล่าสุดค้างสถานะ PENDING อยู่ (บังคับใน
 // DocumentSubmissionService.submit() กันยื่นซ้ำโดยไม่ได้ตั้งใจระหว่างรอกรมขนส่งดำเนินการ)
 model DocumentSubmission {
-  id                 String   @id @default(cuid())
-  vehicleId          String
-  submitDate         DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
-  status             String   @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED
-  plateNumberOption  String // NONE | NORMAL | AUCTION
-  includePlateFee    Boolean  @default(true)
-  newPlateOption     String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์
-  relocateAddon      Boolean  @default(false) // แจ้งย้ายออกต่างจังหวัดพร้อมกัน - รถยนต์เท่านั้น
-  stopUseRelocateOut Boolean  @default(false) // จดใหม่ หยุดใช้ย้ายออก (ลงขัน 250 บาท) - มอเตอร์ไซค์เท่านั้น
-  urgent             Boolean  @default(false)
-  billItems          Json // snapshot [{label, amount}] ไม่รวมภาษี
-  noBillItems        Json
-  billFeeTotal       Decimal  @db.Decimal(12, 2)
-  noBillTotal        Decimal  @db.Decimal(12, 2)
-  taxAmount          Decimal? @db.Decimal(12, 2)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  vehicleId           String
+  submitDate          DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
+  status              String    @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED
+  receiptReceivedDate DateTime? // วันที่ได้รับใบเสร็จ (ตั้งตอน status -> RECEIPT_RECEIVED)
+  plateNumberOption   String // NONE | NORMAL | AUCTION
+  includePlateFee     Boolean   @default(true)
+  newPlateOption      String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์
+  relocateAddon       Boolean   @default(false) // แจ้งย้ายออกต่างจังหวัดพร้อมกัน - รถยนต์เท่านั้น
+  stopUseRelocateOut  Boolean   @default(false) // จดใหม่ หยุดใช้ย้ายออก (ลงขัน 250 บาท) - มอเตอร์ไซค์เท่านั้น
+  urgent              Boolean   @default(false)
+  billItems           Json // snapshot [{label, amount}] ไม่รวมภาษี
+  noBillItems         Json
+  billFeeTotal        Decimal   @db.Decimal(12, 2)
+  noBillTotal         Decimal   @db.Decimal(12, 2)
+  taxAmount           Decimal?  @db.Decimal(12, 2)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
