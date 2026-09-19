@@ -101,8 +101,9 @@ function newDraft(vehicle: Vehicle, submitDate: string): DraftEntry {
     key: `${vehicle.id}-${Date.now()}-${Math.random()}`,
     vehicle,
     options: DEFAULT_OPTIONS,
-    plateCategory: null,
-    plateNumber: null,
+    // รถที่มีเลขทะเบียนอยู่แล้ว (เช่น ยื่นรอบก่อนได้เลขมาแล้ว) แสดงไว้ให้เลย - ตอนยื่นส่งค่านี้กลับไป ไม่ล้างทิ้ง
+    plateCategory: vehicle.plateCategory,
+    plateNumber: vehicle.plateNumber,
     ownerType: existingOwnerType(vehicle),
     submitDate,
   };
@@ -458,6 +459,8 @@ export default function SubmitDocumentsPage() {
   function pickVehicle(vehicle: Vehicle) {
     resetForm();
     setSelectedVehicle(vehicle);
+    setPlateCategory(vehicle.plateCategory ?? "");
+    setPlateNumber(vehicle.plateNumber ?? "");
     setOwnerType(existingOwnerType(vehicle) ?? null);
     setPhase("form");
   }

@@ -5,3 +5,6 @@ dist
 
 /src/generated/prisma
 *.tsbuildinfo
+
+# รูปใบเสร็จที่เก็บในเครื่อง (LocalReceiptStorage)
+/uploads

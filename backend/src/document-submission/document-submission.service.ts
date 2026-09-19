@@ -303,6 +303,11 @@ export class DocumentSubmissionService {
             owner: { select: { name: true, ownerType: true } },
           },
         },
+        // รูปใบเสร็จที่แนบแล้ว - ตัวรูปโหลดผ่าน GET /api/receipts/:id/image
+        receipts: {
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, extractionSource: true, extraction: true, createdAt: true },
+        },
       },
     });
     return { submissions };
@@ -366,5 +371,53 @@ export class DocumentSubmissionService {
       }),
     ]);
     return updated;
+  }
+
+  // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort - คันที่พลาดคืนเหตุผลกลับไป คันอื่นบันทึกต่อ)
+  // RECEIVED = ได้ใบเสร็จ (ต้องแนบรูปใบเสร็จแล้วอย่างน้อย 1 รูป) / FAILED = ยื่นไม่สำเร็จ กลับไป Step 4
+  // CARRY = ยังไม่ได้ใบเสร็จและยังไม่รู้สาเหตุ -> ย้ายไป "ค้างจากใบก่อน" (ยัง PENDING)
+  async saveReceiptCheck(body: { receivedDate?: unknown; entries?: unknown }) {
+    if (!body || !Array.isArray(body.entries)) throw new BadRequestException({ error: 'entries ต้องเป็น array' });
+    if (body.entries.length > 500) throw new BadRequestException({ error: 'บันทึกได้ครั้งละไม่เกิน 500 คัน' });
+    const entries = body.entries as Array<Record<string, unknown> | null>;
+
+    const succeeded: string[] = [];
+    const failed: Array<{ submissionId: unknown; error: string }> = [];
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      const submissionId = entry?.submissionId;
+      if (typeof submissionId !== 'string' || !submissionId || seen.has(submissionId)) {
+        failed.push({ submissionId, error: 'submissionId ไม่ถูกต้องหรือซ้ำ' });
+        continue;
+      }
+      seen.add(submissionId);
+      try {
+        if (entry?.action === 'RECEIVED') {
+          const photos = await this.prisma.receiptImage.count({ where: { submissionId } });
+          if (photos === 0) throw new BadRequestException({ error: 'ต้องแนบรูปใบเสร็จก่อนบันทึกว่าได้รับใบเสร็จ' });
+          await this.updateStatus(submissionId, 'RECEIPT_RECEIVED', body.receivedDate, {
+            plateCategory: entry.plateCategory,
+            plateNumber: entry.plateNumber,
+            receiptAmount: entry.receiptAmount,
+          });
+        } else if (entry?.action === 'FAILED') {
+          await this.updateStatus(submissionId, 'FAILED', undefined, { failRemark: entry.failRemark });
+        } else if (entry?.action === 'CARRY') {
+          const { count } = await this.prisma.documentSubmission.updateMany({
+            where: { id: submissionId, status: 'PENDING' },
+            data: { receiptCarriedAt: new Date() },
+          });
+          if (count === 0) throw new BadRequestException({ error: 'รายการนี้ไม่ได้รอใบเสร็จอยู่แล้ว' });
+        } else {
+          throw new BadRequestException({ error: 'action ต้องเป็น RECEIVED, FAILED หรือ CARRY' });
+        }
+        succeeded.push(submissionId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ';
+        const responseMessage = (err as { response?: { error?: string } })?.response?.error;
+        failed.push({ submissionId, error: responseMessage ?? message });
+      }
+    }
+    return { succeeded, failed };
   }
 }

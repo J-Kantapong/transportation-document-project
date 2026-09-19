@@ -20,7 +20,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      // FormData (อัปโหลดรูป) ให้ browser ตั้ง Content-Type multipart เอง
+      headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...init?.headers },
     });
   } catch {
     throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
@@ -172,6 +173,7 @@ export interface DocumentSubmission {
   receiptReceivedDate: string | null;
   receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
   failRemark: string | null; // เหตุผลที่ยื่นไม่สำเร็จ - มีเฉพาะ status FAILED
+  receiptCarriedAt: string | null; // ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ/ยังไม่รู้สาเหตุ -> อยู่ใน "ค้างจากใบก่อน"
   vehicle: {
     chassis: string;
     body: string | null;
@@ -181,7 +183,55 @@ export interface DocumentSubmission {
     brand: { name: string };
     owner: { name: string | null; ownerType: OwnerType } | null;
   };
+  receipts?: ReceiptSummary[]; // รูปใบเสร็จที่แนบแล้ว (เก่าสุดก่อน) - มีเฉพาะผลจาก listDocumentSubmissions
 }
+
+// รูปใบเสร็จ - ดู backend/src/receipts/receipts.service.ts
+// POST /api/receipts (multipart: file, submissionId ไม่บังคับ) · GET /api/receipts/unassigned · GET /api/receipts/:id/image
+// PATCH /api/receipts/:id {submissionId} = จับคู่กับรายการ · DELETE /api/receipts/:id (รายการที่รับใบเสร็จแล้วลบไม่ได้)
+export interface ReceiptImage {
+  id: string;
+  submissionId: string | null; // null = อัปโหลดหลายใบแล้วยังไม่จับคู่กับรถ
+  mimeType: string;
+  sizeBytes: number;
+  originalName: string | null;
+  extractionSource: string; // NONE = ยังไม่ได้ใช้ AI อ่าน | model id
+  extraction: ReceiptExtraction | null;
+  createdAt: string;
+}
+
+// ผลที่ AI อ่านจากใบเสร็จ - ดู backend/src/receipts/receipt-extraction.ts (วันที่เป็น ค.ศ. แล้ว)
+export interface ReceiptReading {
+  receiptNo: string | null;
+  date: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  chassis: string | null;
+  weightKg: number | null;
+  items: Array<{ label: string; amount: number }>;
+  total: number | null;
+  uncertainFields: string[]; // ช่องที่ AI ไม่มั่นใจ: receiptNo | date | plate | chassis | weightKg | items | total
+}
+
+export type ReceiptExtraction = (
+  | {
+      reading: ReceiptReading;
+      checks: { chassisValid: boolean; receiptNoValid: boolean; plateValid: boolean; itemsSumMatchesTotal: boolean };
+    }
+  | { error: string }
+) & {
+  // chassis = ระบบจับคู่กับรถให้จากเลขตัวถัง / chassis-mismatch = เลขตัวถังในใบเสร็จไม่ตรงกับรถที่แนบ
+  match?: "chassis" | "chassis-mismatch" | null;
+};
+
+export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
+
+export type ReceiptCheckEntry =
+  | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string }
+  | { submissionId: string; action: 'FAILED'; failRemark: string }
+  | { submissionId: string; action: 'CARRY' };
+
+export const receiptImageUrl = (id: string) => `${API_BASE_URL}/api/receipts/${id}/image`;
 
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
 export type ReceivingStep = "plate" | "book" | "delivery";
@@ -419,6 +469,25 @@ export const api = {
         'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionResultBillCost' | 'inspectionFailRemark'
       >;
     }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort) - RECEIVED ต้องแนบรูปแล้ว, FAILED ต้องมี failRemark,
+  // CARRY = ย้ายไป "ค้างจากใบก่อน"
+  saveReceiptCheck: (receivedDate: string, entries: ReceiptCheckEntry[]) =>
+    request<{ succeeded: string[]; failed: Array<{ submissionId: string; error: string }> }>('/api/vehicles/document-submission/receipt-check', {
+      method: 'POST',
+      body: JSON.stringify({ receivedDate, entries }),
+    }),
+
+  uploadReceipt: (image: Blob, fileName: string, submissionId?: string) => {
+    const form = new FormData();
+    form.append('file', image, fileName);
+    if (submissionId) form.append('submissionId', submissionId);
+    return request<{ receipt: ReceiptImage }>('/api/receipts', { method: 'POST', body: form });
+  },
+  listUnassignedReceipts: () => request<{ receipts: ReceiptImage[] }>('/api/receipts/unassigned'),
+  assignReceipt: (id: string, submissionId: string) =>
+    request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
+  deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>

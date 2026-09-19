@@ -34,6 +34,12 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.listByDate(date, status);
   }
 
+  // หน้ารับใบเสร็จ: บันทึกผลตรวจทั้งใบยื่น - ดู DocumentSubmissionService.saveReceiptCheck
+  @Post('document-submission/receipt-check')
+  saveReceiptCheck(@Body() body: { receivedDate?: unknown; entries?: unknown }) {
+    return this.documentSubmissionService.saveReceiptCheck(body);
+  }
+
   @Patch('document-submission/:id/status')
   updateStatus(
     @Param('id') id: string,

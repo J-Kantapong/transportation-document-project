@@ -243,3 +243,54 @@ describe('DocumentSubmissionService.updateStatus', () => {
     expect(submissionUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั้งใบยื่น', () => {
+  function setup(photoCount: number) {
+    const submissionUpdate = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = mockPrisma({
+      vehicle: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+      documentSubmission: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({ id: 'sub1', vehicleId: 'v1', status: 'PENDING', vehicle: { plateCategory: null, plateNumber: null } }),
+        create: vi.fn(),
+        update: submissionUpdate,
+        updateMany,
+      },
+      receiptImage: { count: vi.fn().mockResolvedValue(photoCount) },
+      $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    });
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), submissionUpdate, updateMany };
+  }
+
+  it('ได้รับใบเสร็จต้องแนบรูปก่อน - ไม่มีรูปคืนเหตุผล ไม่บันทึก', async () => {
+    const { service, submissionUpdate } = setup(0);
+    const res = await service.saveReceiptCheck({
+      receivedDate: '2026-09-20',
+      entries: [{ submissionId: 'sub1', action: 'RECEIVED', plateCategory: '8ขก', plateNumber: '3484' }],
+    });
+    expect(res.failed[0].error).toContain('แนบรูปใบเสร็จ');
+    expect(submissionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('มีรูปแล้วบันทึกว่าได้รับใบเสร็จพร้อมทะเบียน', async () => {
+    const { service, submissionUpdate } = setup(1);
+    const res = await service.saveReceiptCheck({
+      receivedDate: '2026-09-20',
+      entries: [{ submissionId: 'sub1', action: 'RECEIVED', plateCategory: '8ขก', plateNumber: '3484', receiptAmount: '1955' }],
+    });
+    expect(res.succeeded).toEqual(['sub1']);
+    expect(submissionUpdate.mock.calls[0][0].data).toMatchObject({ status: 'RECEIPT_RECEIVED', receiptAmount: 1955 });
+  });
+
+  it('ยื่นไม่สำเร็จเก็บสาเหตุ / ค้างไว้ย้ายไปค้างจากใบก่อน', async () => {
+    const { service, submissionUpdate, updateMany } = setup(0);
+    const failed = await service.saveReceiptCheck({ entries: [{ submissionId: 'sub1', action: 'FAILED', failRemark: 'บัตรประชาชนหมดอายุ' }] });
+    expect(failed.succeeded).toEqual(['sub1']);
+    expect(submissionUpdate.mock.calls[0][0].data).toMatchObject({ status: 'FAILED', failRemark: 'บัตรประชาชนหมดอายุ' });
+
+    const carried = await service.saveReceiptCheck({ entries: [{ submissionId: 'sub2', action: 'CARRY' }] });
+    expect(carried.succeeded).toEqual(['sub2']);
+    expect(updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'sub2', status: 'PENDING' } });
+  });
+});

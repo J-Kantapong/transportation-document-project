@@ -5,6 +5,7 @@ import { BrandsModule } from './brands/brands.module.js';
 import { CustomersModule } from './customers/customers.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { ReceiptsModule } from './receipts/receipts.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
 import { TaxModule } from './tax/tax.module.js';
 import { VehicleOwnersModule } from './vehicle-owners/vehicle-owners.module.js';
@@ -22,6 +23,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     YamahaRelocationModule,
     DocumentSubmissionModule,
     ReceivingModule,
+    ReceiptsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
