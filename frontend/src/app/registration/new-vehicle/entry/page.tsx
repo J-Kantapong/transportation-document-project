@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError, type Brand, type Customer, type Vehicle } from "@/lib/api";
 import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
-import { getVehicleRowErrors, normalizeVehicleRow, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
+import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
 
 type Tab = "single" | "batch";
@@ -41,6 +41,8 @@ function VehicleFieldsFieldset({
   customerOptions: Array<{ id: string; label: string }>;
   brands: Brand[];
 }) {
+  // CC หรือ น้ำหนัก บังคับตามประเภทรถ + เชื้อเพลิงที่เลือก (ใช้คำนวณภาษี) - ดู requiredSizeField
+  const sizeField = requiredSizeField(row.body, row.fuel);
   return (
     <div className="vehicle-fields">
       <label className="field">
@@ -70,8 +72,8 @@ function VehicleFieldsFieldset({
         <input maxLength={250} required value={row.chassis} onChange={(e) => onFieldChange("chassis", e.target.value)} />
       </label>
       <label className="field">
-        เลขเครื่อง
-        <input maxLength={250} value={row.engine} onChange={(e) => onFieldChange("engine", e.target.value)} />
+        เลขเครื่อง *
+        <input maxLength={250} required value={row.engine} onChange={(e) => onFieldChange("engine", e.target.value)} />
       </label>
       <label className="field">
         ยี่ห้อ *
@@ -85,8 +87,8 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        ประเภทเชื้อเพลิง
-        <select value={row.fuel} onChange={(e) => onFieldChange("fuel", e.target.value)}>
+        ประเภทเชื้อเพลิง *
+        <select required value={row.fuel} onChange={(e) => onFieldChange("fuel", e.target.value)}>
           <option value="">เลือกประเภทเชื้อเพลิง</option>
           {FUEL_TYPES.map((f) => (
             <option key={f} value={f}>
@@ -96,15 +98,16 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        ขนาด CC
-        <input type="number" min={0} step="any" value={row.cc} onChange={(e) => onFieldChange("cc", e.target.value)} />
+        ขนาด CC{sizeField === "cc" ? " *" : ""}
+        <input type="number" min={0} step="any" required={sizeField === "cc"} value={row.cc} onChange={(e) => onFieldChange("cc", e.target.value)} />
       </label>
       <label className="field">
-        น้ำหนักรถ (กก.)
+        น้ำหนักรถ (กก.){sizeField === "weight" ? " *" : ""}
         <input
           type="number"
           min={0}
           step="any"
+          required={sizeField === "weight"}
           value={row.weight}
           onChange={(e) => onFieldChange("weight", e.target.value)}
         />
@@ -114,8 +117,8 @@ function VehicleFieldsFieldset({
         <input maxLength={250} value={row.color} onChange={(e) => onFieldChange("color", e.target.value)} />
       </label>
       <label className="field">
-        ประเภทรถ
-        <select value={row.body} onChange={(e) => onFieldChange("body", e.target.value)}>
+        ประเภทรถ *
+        <select required value={row.body} onChange={(e) => onFieldChange("body", e.target.value)}>
           <option value="">เลือกประเภทรถ</option>
           {VEHICLE_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -125,8 +128,8 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        จังหวัดที่จดทะเบียน
-        <select value={row.registrationProvince} onChange={(e) => onFieldChange("registrationProvince", e.target.value)}>
+        จังหวัดที่จดทะเบียน *
+        <select required value={row.registrationProvince} onChange={(e) => onFieldChange("registrationProvince", e.target.value)}>
           <option value="">เลือกจังหวัด</option>
           {PROVINCES.map((p) => (
             <option key={p}>{p}</option>
@@ -134,8 +137,8 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        จังหวัดเจ้าของรถ
-        <select value={row.ownerProvince} onChange={(e) => onFieldChange("ownerProvince", e.target.value)}>
+        จังหวัดเจ้าของรถ *
+        <select required value={row.ownerProvince} onChange={(e) => onFieldChange("ownerProvince", e.target.value)}>
           <option value="">เลือกจังหวัด</option>
           {PROVINCES.map((p) => (
             <option key={p}>{p}</option>
@@ -662,6 +665,9 @@ export default function VehicleEntryPage() {
               ใช้ 12 คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
               <br />
               คอลัมน์ลูกค้าและยี่ห้อใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
+              <br />
+              ต้องกรอกทุกคอลัมน์ยกเว้นสี · ขนาด CC บังคับสำหรับ รย.1 ที่ไม่ใช่ไฟฟ้า (BEV) และ รย.12 · น้ำหนักรถบังคับสำหรับ
+              รย.1 ไฟฟ้า (BEV), รย.2 และ รย.3
             </p>
             <div className="vehicle-tools">
               <button type="button" className="text-button" onClick={downloadVehicleCsvTemplate}>

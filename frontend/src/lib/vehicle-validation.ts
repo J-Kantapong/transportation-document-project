@@ -25,6 +25,17 @@ function isValidNumeric(value: string): boolean {
   return /^\d+(\.\d+)?$/.test(value) && Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
+// ขนาด CC / น้ำหนักรถ บังคับกรอกตามที่ใช้คำนวณภาษีประจำปี (backend/src/tax/government-tax-calculator.ts):
+// รย.1 เชื้อเพลิงที่ไม่ใช่ไฟฟ้า (BEV) คิดตาม CC, รย.1 ไฟฟ้า (BEV) / รย.2 / รย.3 คิดตามน้ำหนัก
+// รย.12 (มอเตอร์ไซค์) ภาษีเป็นอัตราคงที่ แต่ผู้ใช้กำหนดให้บังคับกรอก CC เสมอ - ยังไม่เลือกประเภทรถ/เชื้อเพลิง = ยังบอกไม่ได้
+export function requiredSizeField(body: string, fuel: string): 'cc' | 'weight' | null {
+  if (!body || !fuel) return null;
+  if (body.startsWith('รย.12-')) return 'cc';
+  if (body.startsWith('รย.1-')) return fuel === 'ไฟฟ้า (BEV)' ? 'weight' : 'cc';
+  if (body.startsWith('รย.2-') || body.startsWith('รย.3-')) return 'weight';
+  return null;
+}
+
 export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   const errors: string[] = [];
 
@@ -40,6 +51,19 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   if (!row.customerId) errors.push('กรุณาเลือกลูกค้า');
   if (!row.chassis) errors.push('กรุณากรอกเลขตัวถัง');
   if (!row.brandId) errors.push('กรุณาเลือกยี่ห้อ');
+  // ช่องที่ขั้นตอนถัดไปต้องใช้ (ค่าแจ้งย้าย/ตัดบัญชี, ค่าตรวจรถ, ค่าธรรมเนียม, ภาษี) - ขาดแล้วคำนวณราคาไม่ได้
+  if (!row.engine) errors.push('กรุณากรอกเลขเครื่อง');
+  if (!row.fuel) errors.push('กรุณาเลือกประเภทเชื้อเพลิง');
+  if (!row.body) errors.push('กรุณาเลือกประเภทรถ');
+  if (!row.registrationProvince) errors.push('กรุณาเลือกจังหวัดที่จดทะเบียน');
+  if (!row.ownerProvince) errors.push('กรุณาเลือกจังหวัดเจ้าของรถ');
+  const sizeField = requiredSizeField(row.body, row.fuel);
+  if (sizeField === 'cc' && !row.cc) {
+    errors.push(`กรุณากรอกขนาด CC (จำเป็นสำหรับ ${row.body} ${row.fuel})`);
+  }
+  if (sizeField === 'weight' && !row.weight) {
+    errors.push(`กรุณากรอกน้ำหนักรถ (จำเป็นสำหรับ ${row.body} ${row.fuel})`);
+  }
 
   for (const [key, label] of VEHICLE_COLUMNS) {
     if (row[key].length > 250) errors.push(`${label}ยาวเกิน 250 ตัวอักษร`);
