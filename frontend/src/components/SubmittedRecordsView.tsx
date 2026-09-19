@@ -31,17 +31,10 @@ function recordTotal(r: DocumentSubmission): number {
   return Number(r.billFeeTotal) + Number(r.noBillTotal) + Number(r.taxAmount ?? 0);
 }
 
-function StatusBadge({ status, failRemark }: { status: DocumentSubmission["status"]; failRemark: string | null }) {
+// ตารางตามแบบใบส่งงานมีแค่ PENDING/RECEIPT_RECEIVED - FAILED แยกไปอยู่ FailedTable
+function StatusBadge({ status }: { status: DocumentSubmission["status"] }) {
   if (status === "PENDING") return <span className="badge warn">รอใบเสร็จ</span>;
-  if (status === "RECEIPT_RECEIVED") return <span className="badge done">ได้รับใบเสร็จแล้ว</span>;
-  return (
-    <>
-      <span className="badge" style={{ background: "#fdecec", color: "#b43434" }}>
-        ยื่นไม่สำเร็จ
-      </span>
-      {failRemark && <div className="sub">{failRemark}</div>}
-    </>
-  );
+  return <span className="badge done">ได้รับใบเสร็จแล้ว</span>;
 }
 
 function GroupTable({
@@ -102,7 +95,7 @@ function GroupTable({
                   <td>{r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}</td>
                   <td>{formatMoney(recordTotal(r))} บาท</td>
                   <td>
-                    <StatusBadge status={r.status} failRemark={r.failRemark} />
+                    <StatusBadge status={r.status} />
                   </td>
                 </tr>
               ))}
@@ -114,6 +107,54 @@ function GroupTable({
         <span style={{ fontSize: 14, fontWeight: 500 }}>รวม</span>
         <span style={{ fontSize: 16, fontWeight: 500, color: "#2854d9" }}>{formatMoney(total)} บาท</span>
       </div>
+    </section>
+  );
+}
+
+// รายการยื่นไม่สำเร็จ - แยกออกจากตารางตามแบบใบส่งงาน (ไม่ถูกนับยอดรวม/ไม่ถูกปริ้นในใบส่งงาน) แสดงไว้ล่างสุดของแต่ละแท็บ
+// พร้อมเหตุผล รถคันนั้นกลับไปอยู่ในคิวรอยื่นเอกสารแล้ว
+function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
+  return (
+    <section className="panel" style={{ marginBottom: 20 }}>
+      <div className="panel-head">
+        <h2>
+          ยื่นไม่สำเร็จ <span className="muted">· {rows.length} คัน</span>
+        </h2>
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty-customers">ไม่มีรายการ</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>เลขตัวถัง</th>
+                <th>ประเภทรถ</th>
+                <th>เจ้าของงาน</th>
+                <th>วันที่ยื่นเอกสาร</th>
+                <th>ด่วน</th>
+                <th>ยอดรวม</th>
+                <th>เหตุผลที่ยื่นไม่สำเร็จ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id}>
+                  <td>{i + 1}</td>
+                  <td>{r.vehicle.chassis}</td>
+                  <td>{r.vehicle.body || "—"}</td>
+                  <td>{r.vehicle.customer.name}</td>
+                  <td>{isoToDisplayDate(r.submitDate.slice(0, 10))}</td>
+                  <td>{r.urgent ? <span className="badge warn">ด่วน</span> : "—"}</td>
+                  <td>{formatMoney(recordTotal(r))} บาท</td>
+                  <td style={{ whiteSpace: "normal", minWidth: 200 }}>{r.failRemark || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -148,18 +189,31 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
   const owner = owners.includes(ownerChoice) ? ownerChoice : "";
   const filtered = useMemo(() => (owner ? inDate.filter((r) => r.vehicle.customer.name === owner) : inDate), [inDate, owner]);
 
+  // ยื่นไม่สำเร็จ (FAILED) แยกออกจากตารางตามแบบใบส่งงาน ไปอยู่ตารางล่างสุดของแท็บตัวเอง
   const byFamily = useMemo(() => {
     const groups: Record<Family, DocumentSubmission[]> = { car1: [], car23: [], moto: [], unknown: [] };
-    for (const r of filtered) groups[classify(r.vehicle.body)].push(r);
+    for (const r of filtered) if (r.status !== "FAILED") groups[classify(r.vehicle.body)].push(r);
+    return groups;
+  }, [filtered]);
+  const failedByTab = useMemo(() => {
+    const groups: Record<Tab, DocumentSubmission[]> = { car: [], moto: [], unknown: [] };
+    for (const r of filtered) {
+      if (r.status !== "FAILED") continue;
+      const family = classify(r.vehicle.body);
+      groups[family === "car1" || family === "car23" ? "car" : family].push(r);
+    }
     return groups;
   }, [filtered]);
 
   const carCount = byFamily.car1.length + byFamily.car23.length;
+  const failedNote = (n: number) => (n > 0 ? ` (ยื่นไม่สำเร็จ ${n})` : "");
   const tabs: Array<[Tab, string]> = [
-    ["car", `รถยนต์ (แบบ 1) · ${carCount} คัน`],
-    ["moto", `มอเตอร์ไซค์ (แบบ 2) · ${byFamily.moto.length} คัน`],
+    ["car", `รถยนต์ (แบบ 1) · ${carCount} คัน${failedNote(failedByTab.car.length)}`],
+    ["moto", `มอเตอร์ไซค์ (แบบ 2) · ${byFamily.moto.length} คัน${failedNote(failedByTab.moto.length)}`],
   ];
-  if (byFamily.unknown.length > 0) tabs.push(["unknown", `ไม่ระบุประเภทรถ · ${byFamily.unknown.length} คัน`]);
+  if (byFamily.unknown.length > 0 || failedByTab.unknown.length > 0) {
+    tabs.push(["unknown", `ไม่ระบุประเภทรถ · ${byFamily.unknown.length} คัน${failedNote(failedByTab.unknown.length)}`]);
+  }
   const activeTab = tabs.some(([t]) => t === tab) ? tab : "car";
 
   return (
@@ -227,6 +281,7 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
                   onPrint={() => setPrintGroup({ kind: "car", urgent: g.urgent, title: g.title, rows: g.rows, note: g.note })}
                 />
               ))}
+              <FailedTable rows={failedByTab.car} />
             </>
           )}
           {activeTab === "moto" && (
@@ -243,9 +298,15 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
                   onPrint={() => setPrintGroup({ kind: "moto", urgent: g.urgent, title: g.title, rows: g.rows, note: "" })}
                 />
               ))}
+              <FailedTable rows={failedByTab.moto} />
             </>
           )}
-          {activeTab === "unknown" && <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent />}
+          {activeTab === "unknown" && (
+            <>
+              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent />
+              <FailedTable rows={failedByTab.unknown} />
+            </>
+          )}
         </>
       )}
       {printGroup && (
