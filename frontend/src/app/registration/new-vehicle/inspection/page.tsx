@@ -545,8 +545,8 @@ function ResultPanel({
   );
 }
 
-// อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2, "รถที่เพิ่งส่งตรวจ" ใน Tab 1,
-// และ "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" รอบ 2 ใน Tab 4 - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
+// อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" ใน Tab 1
+// - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
 // (คอลัมน์จัดแนวกันเองโดยธรรมชาติของ <table>, ไม่มี action/input ต่อแถวจึงไม่มีปัญหาแถวกว้างเกินไป)
 function ReferencePanel<T extends { id: string }>({
   title,
@@ -608,16 +608,6 @@ function ReferencePanel<T extends { id: string }>({
   );
 }
 
-const PENDING_SEND_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
-  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
-  ["ชื่อลูกค้า", (v) => v.customerName],
-  ["เลขตัวถัง", (v) => v.chassis],
-  ["ยี่ห้อ", (v) => v.brandName],
-  ["ประเภทรถ", (v) => v.body || "—"],
-  ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince || "—"],
-  ["หมายเหตุ", (v) => sendQueueNote(v) || "—"],
-];
-
 const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
   ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
   ["ชื่อลูกค้า", (v) => v.customerName],
@@ -631,7 +621,7 @@ const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> 
   ["ค่าตรวจรถ (Bill)", (v) => (v.inspectionSentBillCost ? `${v.inspectionSentBillCost} บาท` : "—")],
 ];
 
-// ใช้ร่วมกันท้าย Tab 1 และ Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
+// แสดงเป็นตารางล่าง "รถที่รอผลตรวจ" ใน Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
 function CompletedInspectionPanel({
   vehicles,
   loading,
@@ -707,7 +697,7 @@ function CompletedInspectionPanel({
 }
 
 export default function InspectionPage() {
-  const [activeTab, setActiveTab] = useState<"send" | "result" | "completed">("send");
+  const [activeTab, setActiveTab] = useState<"send" | "result">("send");
 
   // Tab 1: ผ่าน Step 2 แล้ว แต่ยังไม่ได้ส่งตรวจ
   const [pendingSendVehicles, setPendingSendVehicles] = useState<InspectionVehicle[]>([]);
@@ -728,12 +718,10 @@ export default function InspectionPage() {
   const [resultBulkSaving, setResultBulkSaving] = useState(false);
   const [resultBulkMessage, setResultBulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
-  // ทราบผลแล้ว - แสดงท้ายทั้ง 2 tab
+  // ทราบผลแล้ว - แสดงเป็นตารางล่าง "รถที่รอผลตรวจ" ใน Tab 2
   const [completedVehicles, setCompletedVehicles] = useState<InspectionVehicle[]>([]);
   const [completedLoading, setCompletedLoading] = useState(true);
   const [completedError, setCompletedError] = useState("");
-
-  // Tab 4: ผ่านตรวจครั้งแรกแล้ว ครบ 90 วัน ต้องตรวจรอบ 2
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<InspectionVehicle | null>(null);
@@ -1074,14 +1062,6 @@ export default function InspectionPage() {
         >
           2. ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน
         </button>
-        <button
-          className={`vehicle-tab${activeTab === "completed" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={activeTab === "completed"}
-          onClick={() => setActiveTab("completed")}
-        >
-          3. รายการที่ตรวจเสร็จล่าสุด
-        </button>
       </div>
 
       {activeTab === "send" ? (
@@ -1127,16 +1107,8 @@ export default function InspectionPage() {
             }
           />
         </>
-      ) : activeTab === "result" ? (
+      ) : (
         <>
-          <ReferencePanel
-            title="รถที่ยังไม่ได้ส่งตรวจ"
-            columns={PENDING_SEND_COLUMNS}
-            vehicles={pendingSendVehicles}
-            loading={sendLoading}
-            error={sendError}
-          />
-
           {resultLoading ? (
             <div className="panel" style={{ marginBottom: 24 }}>
               <div className="empty-customers">กำลังโหลดรายการ…</div>
@@ -1160,9 +1132,9 @@ export default function InspectionPage() {
               bulkMessage={resultBulkMessage}
             />
           )}
+
+          <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
         </>
-      ) : (
-        <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
       )}
 
       <dialog
