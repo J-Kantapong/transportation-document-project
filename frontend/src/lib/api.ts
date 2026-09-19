@@ -370,7 +370,7 @@ export const api = {
   listRecentlyCompletedInspection: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/completed'),
   updateInspectionSent: (
     id: string,
-    data: { sentType: string; sentDate: string | null; cost: string | null; billCost: string | null },
+    data: { sentType: string; sentDate: string | null }, // ค่าใช้จ่าย backend คำนวณเอง (คงที่)
   ) =>
     request<{
       vehicle: Pick<
@@ -380,7 +380,7 @@ export const api = {
     }>(`/api/vehicles/${id}/inspection-sent`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateInspectionResult: (
     id: string,
-    data: { result: string; resultDate: string | null; cost: string | null; remark: string | null },
+    data: { result: string; resultDate: string | null; remark: string | null }, // ค่าใช้จ่าย backend คำนวณเอง (คงที่)
   ) =>
     request<{
       vehicle: Pick<

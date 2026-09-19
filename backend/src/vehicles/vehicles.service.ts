@@ -536,6 +536,25 @@ export class VehiclesService {
     };
   }
 
+  // ค่าใช้จ่ายส่งตรวจคงที่ (หน้าจอแก้ไม่ได้): ราคาตรวจรถ (No bill) ตามตาราง - เอารถมาตรวจเองเป็น 0 - และค่าตรวจรถ
+  // (Bill) 50 บาทเฉพาะรอบ 2 ยังไม่เลือกประเภทการตรวจ = ยังไม่มีค่าใช้จ่าย
+  private fixedSentCosts(
+    sentType: string,
+    round: number,
+    vehicle: { registrationProvince: string | null; body: string | null; brand: { name: string } },
+    bangkokFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
+    provinceFees: Array<{ province: string; vehicleType: string; amount: unknown }>,
+  ): { inspectionSentCost: string | null; inspectionSentBillCost: string | null } {
+    if (!sentType) return { inspectionSentCost: null, inspectionSentBillCost: null };
+    return {
+      inspectionSentCost:
+        sentType === 'เอารถมาตรวจเอง'
+          ? '0'
+          : this.suggestInspectionCost(vehicle.registrationProvince, vehicle.body, vehicle.brand.name, bangkokFees, provinceFees),
+      inspectionSentBillCost: round === 2 ? String(INSPECTION_ROUND2_BILL_FEE) : null,
+    };
+  }
+
   private suggestInspectionCost(
     registrationProvince: string | null,
     body: string | null,
@@ -559,8 +578,6 @@ export class VehiclesService {
   async updateInspectionSent(id: string, dto: UpdateInspectionSentDto) {
     const sentType = typeof dto?.sentType === 'string' ? dto.sentType.trim() : '';
     const sentDateRaw = typeof dto?.sentDate === 'string' ? dto.sentDate.trim() : '';
-    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
-    const billCostRaw = typeof dto?.billCost === 'string' ? dto.billCost.trim() : '';
 
     if (sentType && !INSPECTION_SENT_TYPES.includes(sentType as (typeof INSPECTION_SENT_TYPES)[number])) {
       throw new BadRequestException({ error: 'ประเภทการตรวจไม่ถูกต้อง' });
@@ -568,14 +585,12 @@ export class VehiclesService {
     if (sentDateRaw && !isValidDateParam(sentDateRaw)) {
       throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
     }
-    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
-      throw new BadRequestException({ error: 'ราคาตรวจรถ (No bill) ต้องเป็นตัวเลขตั้งแต่ 0' });
-    }
-    if (billCostRaw && !/^\d+(\.\d+)?$/.test(billCostRaw)) {
-      throw new BadRequestException({ error: 'ค่าตรวจรถ (Bill) ต้องเป็นตัวเลขตั้งแต่ 0' });
-    }
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    const [vehicle, bangkokFees, provinceFees] = await Promise.all([
+      this.prisma.vehicle.findUnique({ where: { id }, include: { brand: { select: { name: true } } } }),
+      this.prisma.feeInspectionBangkok.findMany(),
+      this.prisma.feeInspectionProvince.findMany(),
+    ]);
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     // เริ่มรอบตรวจใหม่เมื่อ: ตรวจไม่ผ่าน (ส่งตรวจซ้ำรอบเดิม) หรือรอบ 1 ผ่านครบ 90 วัน (ขึ้นรอบ 2) - ล้างผลตรวจเดิม
@@ -588,11 +603,11 @@ export class VehiclesService {
       });
     }
     const startsNewCycle = isResend || startsRound2;
+    const round = startsRound2 ? 2 : vehicle.inspectionRound;
     const data = {
       inspectionSentType: sentType || null,
       inspectionSentDate: sentDateRaw ? new Date(`${sentDateRaw}T00:00:00.000Z`) : null,
-      inspectionSentCost: costRaw ? costRaw : null,
-      inspectionSentBillCost: billCostRaw ? billCostRaw : null,
+      ...this.fixedSentCosts(sentType, round, vehicle, bangkokFees, provinceFees),
       ...(startsNewCycle
         ? { inspectionResult: null, inspectionResultDate: null, inspectionResultCost: null, inspectionFailRemark: null }
         : {}),
@@ -636,7 +651,6 @@ export class VehiclesService {
   async updateInspectionResult(id: string, dto: UpdateInspectionResultDto) {
     const result = typeof dto?.result === 'string' ? dto.result.trim() : '';
     const resultDateRaw = typeof dto?.resultDate === 'string' ? dto.resultDate.trim() : '';
-    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
     const remark = typeof dto?.remark === 'string' ? dto.remark.trim() : '';
 
     if (result && !INSPECTION_RESULTS.includes(result as (typeof INSPECTION_RESULTS)[number])) {
@@ -644,9 +658,6 @@ export class VehiclesService {
     }
     if (resultDateRaw && !isValidDateParam(resultDateRaw)) {
       throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
-    }
-    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
-      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
     }
     if (result === 'ไม่ผ่าน' && !remark) {
       throw new BadRequestException({ error: 'กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน' });
@@ -660,8 +671,8 @@ export class VehiclesService {
       data: {
         inspectionResult: result || null,
         inspectionResultDate: resultDateRaw ? new Date(`${resultDateRaw}T00:00:00.000Z`) : null,
-        // ตรวจไม่ผ่าน = ไม่มีค่าใช้จ่ายตรวจ (ได้เงินคืน) จึงเป็น 0 เสมอ ไม่ว่าจะส่งค่าอะไรมา
-        inspectionResultCost: result === 'ไม่ผ่าน' ? '0' : costRaw ? costRaw : null,
+        // ค่าใช้จ่ายคงที่ แก้จากหน้าจอไม่ได้: ผ่าน = ราคาตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน)
+        inspectionResultCost: result === 'ไม่ผ่าน' ? '0' : result === 'ผ่าน' ? vehicle.inspectionSentCost : null,
         inspectionFailRemark: result === 'ไม่ผ่าน' ? remark : null,
       },
     });
