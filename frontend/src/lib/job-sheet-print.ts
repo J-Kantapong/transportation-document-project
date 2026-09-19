@@ -1,34 +1,51 @@
 import type { DocumentSubmission } from "@/lib/api";
 
-// ใบส่งงานรถยนต์ (ตัวอย่าง "ยื่นเอกสารจดใหม่.pdf"): กระดาษ A4 แนวตั้ง หน้าละ 20 คัน หัวใบ (ชื่อบริษัท/วันที่/หมายเหตุ/รวม)
-// ซ้ำทุกหน้า - ยอด "รวม" คือยอดของทั้งใบ (ทุกหน้า) ไม่ใช่เฉพาะหน้านั้น ตามตัวอย่าง
-export const JOB_SHEET_ROWS_PER_PAGE = 20;
+// ใบส่งงาน 2 แบบตามตัวอย่าง PDF ของผู้ใช้ (กระดาษ A4 แนวตั้ง หัวใบซ้ำทุกหน้า):
+// - "car" (ยื่นเอกสารจดใหม่.pdf): หน้าละ 20 คัน หัวใบ = ชื่อบริษัท/วันที่/หมายเหตุ/รวม - "รวม" คือยอดของทั้งใบ (ทุกหน้า)
+//   ไม่ใช่เฉพาะหน้านั้น
+// - "moto" (ยื่นเอกสารจดใหม่รถจักรยานยนต์.pdf): หน้าละ 30 คัน หัวใบ = ชื่อเจ้าของงาน + วันที่ ไม่มียอดรวม/หมายเหตุ
+export type JobSheetKind = "car" | "moto";
+
+export function jobSheetRowsPerPage(kind: JobSheetKind): number {
+  return kind === "moto" ? 30 : 20;
+}
 
 export interface JobSheetRow {
   brand: string;
   chassis: string;
   fee: number; // ค่าธรรมเนียม (รายการ Bill)
   tax: number | null; // null = ยังคำนวณภาษีไม่ได้
-  plate: string; // "หมวด-เลข" หรือว่าง
+  plateCategory: string; // หมวดทะเบียน (ว่างถ้ายังไม่มี)
+  plateNumber: string;
+  owner: string; // ผู้ถือกรรมสิทธิ์ (ใช้เฉพาะแบบ moto) - ว่างถ้ายังไม่ได้ระบุชื่อ
 }
 
 export interface JobSheet {
+  kind: JobSheetKind;
   key: string; // "วันที่ ISO|ชื่อหัวใบเริ่มต้น" - ใช้ผูกชื่อที่ผู้ใช้แก้ไขกับแต่ละใบ
   title: string;
   dateText: string; // เช่น 22/9/2026
-  note: string;
-  total: number;
+  note: string; // เฉพาะแบบ car
+  total: number; // แบบ car: ยอด "รวม" ที่พิมพ์ / แบบ moto: ผลรวมค่าธรรมเนียม+ภาษี (แสดงในหน้าต่างก่อนพิมพ์ ไม่พิมพ์ลงใบ)
   rows: JobSheetRow[];
 }
 
-// คอลัมน์ [หัวข้อ, ความกว้าง %] - รวม 100% สัดส่วนใกล้ตัวอย่าง แต่ขยายคอลัมน์ ลำดับ/ยี่ห้อ/ค่าธรรมเนียมเล็กน้อยให้ข้อความไม่ตัดบรรทัดบนกระดาษ A4
-const COLUMNS: Array<[string, number]> = [
+// คอลัมน์ [หัวข้อ, ความกว้าง %] - รวม 100% สัดส่วนใกล้ตัวอย่าง แต่ขยายคอลัมน์ลำดับ/ค่าธรรมเนียมเล็กน้อยให้ข้อความไม่ตัดบรรทัดบน A4
+const CAR_COLUMNS: Array<[string, number]> = [
   ["ลำดับ", 8],
   ["ยี่ห้อ", 12],
   ["เลขตัวรถ", 33],
   ["ค่าธรรมเนียม", 16],
   ["ค่าภาษี", 14],
   ["เลขทะเบียน", 17],
+];
+
+const MOTO_COLUMNS: Array<[string, number]> = [
+  ["ลำดับ", 7],
+  ["เลขตัวรถ", 28],
+  ["ผู้ถือกรรมสิทธิ์", 26],
+  ["ค่าธรรมเนียม", 18],
+  ["เลขทะเบียน", 21],
 ];
 
 export function formatSheetMoney(amount: number): string {
@@ -48,7 +65,7 @@ function escapeHtml(text: string): string {
 const amountOf = (items: unknown, match: (label: string) => boolean): number =>
   (Array.isArray(items) ? (items as Array<{ label: string; amount: number }>) : []).filter((i) => match(i.label)).reduce((s, i) => s + Number(i.amount), 0);
 
-// ยอดของรถ 1 คันที่รวมในช่อง "รวม": ค่าธรรมเนียม + ภาษี + ลงขัน + ด่วน (ลงขัน/ด่วนอยู่ในรายการ No bill และไม่แสดงเป็นคอลัมน์บนใบ
+// ยอดของรถ 1 คันที่รวมในช่อง "รวม" ของใบรถยนต์: ค่าธรรมเนียม + ภาษี + ลงขัน + ด่วน (ลงขัน/ด่วนอยู่ในรายการ No bill และไม่แสดงเป็นคอลัมน์บนใบ
 // แต่รวมอยู่ในยอดรวม - ยอดในตัวอย่าง 42,564 = 13 คัน x (355 + ลงขัน 40) + ภาษีรวม 37,429) ไม่รวมค่าอากร
 export function jobSheetRowTotal(r: DocumentSubmission): number {
   const longkhan = amountOf(r.noBillItems, (l) => l.startsWith("ลงขัน") && !l.includes("ด่วน"));
@@ -63,13 +80,16 @@ export function toJobSheetRow(r: DocumentSubmission): JobSheetRow {
     chassis: v.chassis,
     fee: Number(r.billFeeTotal),
     tax: r.taxAmount === null ? null : Number(r.taxAmount),
-    plate: v.plateCategory && v.plateNumber ? `${v.plateCategory}-${v.plateNumber}` : "",
+    plateCategory: v.plateCategory ?? "",
+    plateNumber: v.plateNumber ?? "",
+    owner: v.owner?.name?.trim() ?? "",
   };
 }
 
-// แบ่งรายการเป็นใบส่งงานตาม (ชื่อหัวใบเริ่มต้น, วันที่ยื่น) - 1 ใบต่อ 1 บริษัทต่อ 1 วัน เรียงตามลำดับที่บันทึก
+// แบ่งรายการเป็นใบส่งงานตาม (ชื่อหัวใบเริ่มต้น, วันที่ยื่น) - 1 ใบต่อ 1 เจ้าของงานต่อ 1 วัน เรียงตามลำดับที่บันทึก
 // titleOverrides: key ของใบ -> ชื่อหัวใบที่ผู้ใช้แก้ไข (ไม่กระทบการแบ่งใบ)
 export function buildJobSheets(
+  kind: JobSheetKind,
   records: DocumentSubmission[],
   note: string,
   defaultTitleFor: (r: DocumentSubmission) => string,
@@ -86,29 +106,54 @@ export function buildJobSheets(
   return [...groups.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || a.defaultTitle.localeCompare(b.defaultTitle, "th"))
     .map((g) => ({
+      kind,
       key: g.key,
       title: titleOverrides[g.key] ?? g.defaultTitle,
       dateText: sheetDateText(g.date),
       note,
-      total: g.records.reduce((sum, r) => sum + jobSheetRowTotal(r), 0),
+      total: g.records.reduce((sum, r) => sum + (kind === "moto" ? Number(r.billFeeTotal) + Number(r.taxAmount ?? 0) : jobSheetRowTotal(r)), 0),
       rows: g.records.map(toJobSheetRow),
     }));
 }
 
+export function jobSheetPageCount(sheet: JobSheet): number {
+  return Math.max(1, Math.ceil(sheet.rows.length / jobSheetRowsPerPage(sheet.kind)));
+}
+
+// แบบ moto: "ค่าธรรมเนียม" ในใบ = ค่าธรรมเนียม (Bill) + ภาษี รวมเป็นช่องเดียว (ตัวอย่าง 315 = 215 + ภาษี รย.12 100) ไม่รวมลงขัน/ค่าอากร
+// ภาษีคำนวณไม่ได้ = พิมพ์ "-" ทั้งช่อง ไม่พิมพ์ยอดที่ขาดภาษีให้เข้าใจผิดว่าครบ
+function rowCells(kind: JobSheetKind, row: JobSheetRow | undefined): string[] {
+  if (!row) return kind === "moto" ? ["", "", "", ""] : ["", "", "", "", ""];
+  const hasPlate = row.plateCategory !== "" && row.plateNumber !== "";
+  // รูปแบบเลขทะเบียนตามตัวอย่างของแต่ละใบ: รถยนต์ "8ขง-363" (มีขีด) / มอเตอร์ไซค์ "2ฆธ8959" (ไม่มีขีด)
+  if (kind === "moto") {
+    const plate = hasPlate ? `${row.plateCategory}${row.plateNumber}` : "";
+    return [row.chassis, row.owner, row.tax === null ? "-" : formatSheetMoney(row.fee + row.tax), plate];
+  }
+  const plate = hasPlate ? `${row.plateCategory}-${row.plateNumber}` : "";
+  return [row.brand, row.chassis, formatSheetMoney(row.fee), row.tax === null ? "-" : formatSheetMoney(row.tax), plate];
+}
+
 function pageHtml(sheet: JobSheet, pageIndex: number): string {
-  const start = pageIndex * JOB_SHEET_ROWS_PER_PAGE;
-  const cells = (row: JobSheetRow | undefined) =>
-    row
-      ? [row.brand, row.chassis, formatSheetMoney(row.fee), row.tax === null ? "-" : formatSheetMoney(row.tax), row.plate]
-      : ["", "", "", "", ""];
-  const body = Array.from({ length: JOB_SHEET_ROWS_PER_PAGE }, (_, i) => {
-    const row = sheet.rows[start + i];
-    return `<tr><td>${start + i + 1}</td>${cells(row)
-      .map((c) => `<td>${escapeHtml(c)}</td>`)
-      .join("")}</tr>`;
+  const perPage = jobSheetRowsPerPage(sheet.kind);
+  const start = pageIndex * perPage;
+  const columns = sheet.kind === "moto" ? MOTO_COLUMNS : CAR_COLUMNS;
+  const body = Array.from({ length: perPage }, (_, i) => {
+    const cells = rowCells(sheet.kind, sheet.rows[start + i]);
+    return `<tr><td>${start + i + 1}</td>${cells.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`;
   }).join("");
-  const cols = COLUMNS.map(([, w]) => `<col style="width:${w}%">`).join("");
-  const head = COLUMNS.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
+  const cols = columns.map(([, w]) => `<col style="width:${w}%">`).join("");
+  const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
+
+  if (sheet.kind === "moto") {
+    // หัวใบและหัวตารางอยู่ตารางเดียวกันติดกัน (ตามตัวอย่าง): แถวบน = ชื่อเจ้าของงาน (กลาง) + "วันที่" + วันที่ตัวใหญ่
+    return `<section class="page moto">
+<table class="grid"><colgroup>${cols}</colgroup><thead>
+<tr class="mhead"><th colspan="3" class="mtitle">${escapeHtml(sheet.title)}</th><th class="mdatel">วันที่</th><th class="mdate">${escapeHtml(sheet.dateText)}</th></tr>
+<tr>${head}</tr></thead><tbody>${body}</tbody></table>
+<div class="pageno">${pageIndex + 1}</div>
+</section>`;
+  }
 
   return `<section class="page">
 <table class="box"><tr><td colspan="2" class="title">${escapeHtml(sheet.title)}</td></tr>
@@ -117,10 +162,6 @@ function pageHtml(sheet: JobSheet, pageIndex: number): string {
 <table class="grid"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
 <div class="pageno">${pageIndex + 1}</div>
 </section>`;
-}
-
-export function jobSheetPageCount(sheet: JobSheet): number {
-  return Math.max(1, Math.ceil(sheet.rows.length / JOB_SHEET_ROWS_PER_PAGE));
 }
 
 export function buildJobSheetHtml(sheets: JobSheet[]): string {
@@ -153,6 +194,13 @@ export function buildJobSheetHtml(sheets: JobSheet[]): string {
   .box .right b { position: absolute; right: 1.5mm; top: 50%; transform: translateY(-50%); }
   .grid th { height: 10mm; font-style: italic; font-weight: 700; }
   .grid td { height: 10.4mm; }
+  /* แบบมอเตอร์ไซค์: 30 แถว/หน้า แถวเตี้ยกว่าแบบรถยนต์ */
+  .moto .grid th { height: 8mm; }
+  .moto .grid td { height: 7.9mm; }
+  .moto .grid .mhead th { height: 9mm; font-style: normal; }
+  .moto .mtitle { font-size: 14pt; white-space: normal; }
+  .moto .mdatel { font-size: 8pt; text-align: right; font-style: normal; }
+  .moto .mdate { font-size: 14pt; }
   .pageno { position: absolute; right: 0; bottom: 0; font-size: 9pt; }
 </style>
 </head>

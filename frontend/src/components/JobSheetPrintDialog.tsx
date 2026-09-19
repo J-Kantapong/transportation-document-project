@@ -6,27 +6,36 @@ import {
   buildJobSheets,
   formatSheetMoney,
   jobSheetPageCount,
-  JOB_SHEET_ROWS_PER_PAGE,
+  jobSheetRowsPerPage,
   printJobSheets,
+  type JobSheetKind,
 } from "@/lib/job-sheet-print";
 
-// ชื่อหัวใบส่งงานเริ่มต้น: ชื่อบริษัทของลูกค้าถ้ามี ไม่งั้น "บริษัท {ชื่อลูกค้า}" (ตามตัวอย่าง "บริษัท SP") - แก้ไขได้ก่อนพิมพ์
-function defaultTitle(r: DocumentSubmission): string {
-  const c = r.vehicle.customer;
-  const company = c.company?.trim();
-  if (company) return company;
-  return c.name.startsWith("บริษัท") ? c.name : `บริษัท ${c.name}`;
+// ชื่อหัวใบส่งงานเริ่มต้น - แก้ไขได้ก่อนพิมพ์
+// - ใบรถยนต์: ชื่อบริษัทของลูกค้าถ้ามี ไม่งั้น "บริษัท {ชื่อลูกค้า}" (ตามตัวอย่าง "บริษัท SP")
+// - ใบมอเตอร์ไซค์: หัวใบบอกว่าเป็นงานของใคร = ชื่อลูกค้า (เจ้าของงาน) ตรงๆ ตามตัวอย่าง; กลุ่มด่วนต่อท้าย "(ด่วน)" เพราะใบมอเตอร์ไซค์
+//   ไม่มีช่องหมายเหตุ จะได้แยกใบด่วนออกจากใบธรรมดาของเจ้าของงานเดียวกันได้
+function defaultTitleFor(kind: JobSheetKind, urgent: boolean): (r: DocumentSubmission) => string {
+  return (r) => {
+    const c = r.vehicle.customer;
+    if (kind === "moto") return urgent ? `${c.name} (ด่วน)` : c.name;
+    const company = c.company?.trim();
+    if (company) return company;
+    return c.name.startsWith("บริษัท") ? c.name : `บริษัท ${c.name}`;
+  };
 }
 
 interface Props {
+  kind: JobSheetKind;
+  urgent: boolean;
   groupTitle: string;
   rows: DocumentSubmission[];
   defaultNote: string;
   onClose: () => void;
 }
 
-// แสดงเป็นหน้าต่างก่อนพิมพ์: 1 ใบต่อ 1 บริษัทต่อ 1 วันที่ยื่น แก้ชื่อหัวใบ/หมายเหตุได้ แล้วกดพิมพ์ (หน้าละ 20 คัน)
-export function JobSheetPrintDialog({ groupTitle, rows, defaultNote, onClose }: Props) {
+// แสดงเป็นหน้าต่างก่อนพิมพ์: 1 ใบต่อ 1 เจ้าของงานต่อ 1 วันที่ยื่น แก้ชื่อหัวใบ (และหมายเหตุของใบรถยนต์) ได้ แล้วกดพิมพ์
+export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNote, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [note, setNote] = useState(defaultNote);
   // key ของใบ (JobSheet.key) -> ชื่อหัวใบที่ผู้ใช้แก้ไข
@@ -36,7 +45,10 @@ export function JobSheetPrintDialog({ groupTitle, rows, defaultNote, onClose }: 
     dialogRef.current?.showModal();
   }, []);
 
-  const sheets = useMemo(() => buildJobSheets(rows, note, defaultTitle, titleEdits), [rows, note, titleEdits]);
+  const sheets = useMemo(
+    () => buildJobSheets(kind, rows, note, defaultTitleFor(kind, urgent), titleEdits),
+    [kind, urgent, rows, note, titleEdits],
+  );
   const missingTax = rows.filter((r) => r.taxAmount === null).length;
   const totalPages = sheets.reduce((sum, s) => sum + jobSheetPageCount(s), 0);
 
@@ -59,7 +71,7 @@ export function JobSheetPrintDialog({ groupTitle, rows, defaultNote, onClose }: 
       </button>
       <h2>ปริ้นใบส่งงาน - {groupTitle}</h2>
       <p className="muted">
-        หน้าละ {JOB_SHEET_ROWS_PER_PAGE} คัน · {sheets.length} ใบ รวม {totalPages} หน้า · {rows.length} คัน
+        หน้าละ {jobSheetRowsPerPage(kind)} คัน · {sheets.length} ใบ รวม {totalPages} หน้า · {rows.length} คัน
       </p>
 
       <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
@@ -76,23 +88,32 @@ export function JobSheetPrintDialog({ groupTitle, rows, defaultNote, onClose }: 
               <div>
                 {sheet.rows.length} คัน · {jobSheetPageCount(sheet)} หน้า
               </div>
-              <div style={{ fontWeight: 600 }}>รวม {formatSheetMoney(sheet.total)}</div>
+              <div style={{ fontWeight: 600 }}>
+                {kind === "moto" ? "ค่าธรรมเนียมรวม" : "รวม"} {formatSheetMoney(sheet.total)}
+              </div>
             </div>
           </div>
         ))}
       </div>
 
-      <label className="field" style={{ marginTop: 14 }}>
-        หมายเหตุ (พิมพ์ที่หัวใบทุกหน้า)
-        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
-      </label>
+      {kind === "car" && (
+        <label className="field" style={{ marginTop: 14 }}>
+          หมายเหตุ (พิมพ์ที่หัวใบทุกหน้า)
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+      )}
 
       <p className="muted" style={{ marginTop: 12 }}>
-        ยอดรวม = ค่าธรรมเนียม + ค่าภาษี + ลงขัน (+ ด่วน) ของทุกคันในใบ ไม่รวมค่าอากร
+        {kind === "moto"
+          ? "ค่าธรรมเนียมในใบ = ค่าธรรมเนียม (Bill) + ค่าภาษี ของแต่ละคัน ไม่รวมลงขัน/ค่าอากร - ใบมอเตอร์ไซค์ไม่พิมพ์ยอดรวม"
+          : "ยอดรวม = ค่าธรรมเนียม + ค่าภาษี + ลงขัน (+ ด่วน) ของทุกคันในใบ ไม่รวมค่าอากร"}
       </p>
       {missingTax > 0 && (
         <p className="customer-message error" role="alert">
-          {missingTax} คันยังคำนวณภาษีไม่ได้ - จะพิมพ์ค่าภาษีเป็น &quot;-&quot; และยอดรวมไม่รวมภาษีของคันเหล่านั้น
+          {missingTax} คันยังคำนวณภาษีไม่ได้ -{" "}
+          {kind === "moto"
+            ? "จะพิมพ์ค่าธรรมเนียมของคันเหล่านั้นเป็น \"-\" (ไม่พิมพ์ยอดที่ขาดภาษี)"
+            : "จะพิมพ์ค่าภาษีเป็น \"-\" และยอดรวมไม่รวมภาษีของคันเหล่านั้น"}
         </p>
       )}
 

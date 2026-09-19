@@ -5,6 +5,7 @@ import type { DocumentSubmission, OwnerType } from "@/lib/api";
 import { OWNER_TYPES } from "@/lib/vehicle-reference-data";
 import { isoToDisplayDate } from "@/lib/date";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
+import type { JobSheetKind } from "@/lib/job-sheet-print";
 
 const OWNER_TYPE_LABEL: Record<OwnerType, string> = Object.fromEntries(OWNER_TYPES) as Record<OwnerType, string>;
 
@@ -119,8 +120,14 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
   // undefined = ยังไม่ได้เลือก -> ใช้วันที่ล่าสุดที่มีข้อมูล, "" = ทุกวันที่
   const [dateChoice, setDateChoice] = useState<string | undefined>(undefined);
   const [ownerChoice, setOwnerChoice] = useState("");
-  // ใบส่งงานรถยนต์ที่กำลังจะพิมพ์ (เปิด dialog) - มีเฉพาะแบบรถยนต์ เพราะตัวอย่างใบส่งงานที่ได้มาเป็นของรถยนต์
-  const [printGroup, setPrintGroup] = useState<{ title: string; rows: DocumentSubmission[]; note: string } | null>(null);
+  // ใบส่งงานที่กำลังจะพิมพ์ (เปิด dialog) - แบบรถยนต์/มอเตอร์ไซค์ตามตัวอย่างที่ผู้ใช้ให้มา
+  const [printGroup, setPrintGroup] = useState<{
+    kind: JobSheetKind;
+    urgent: boolean;
+    title: string;
+    rows: DocumentSubmission[];
+    note: string;
+  } | null>(null);
 
   const dateCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -205,24 +212,34 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
           {activeTab === "car" && (
             <>
               {[
-                { title: "รย.1 แบบธรรมดา", rows: byFamily.car1.filter((r) => !r.urgent), showUrgent: false, note: "" },
-                { title: "รย.1 แบบด่วน", rows: byFamily.car1.filter((r) => r.urgent), showUrgent: false, note: "ด่วน" },
-                { title: "รย.2 และ รย.3", rows: byFamily.car23, showUrgent: true, note: "" },
+                { title: "รย.1 แบบธรรมดา", rows: byFamily.car1.filter((r) => !r.urgent), showUrgent: false, note: "", urgent: false },
+                { title: "รย.1 แบบด่วน", rows: byFamily.car1.filter((r) => r.urgent), showUrgent: false, note: "ด่วน", urgent: true },
+                { title: "รย.2 และ รย.3", rows: byFamily.car23, showUrgent: true, note: "", urgent: false },
               ].map((g) => (
                 <GroupTable
                   key={g.title}
                   title={g.title}
                   rows={g.rows}
                   showUrgent={g.showUrgent}
-                  onPrint={() => setPrintGroup({ title: g.title, rows: g.rows, note: g.note })}
+                  onPrint={() => setPrintGroup({ kind: "car", urgent: g.urgent, title: g.title, rows: g.rows, note: g.note })}
                 />
               ))}
             </>
           )}
           {activeTab === "moto" && (
             <>
-              <GroupTable title="มอเตอร์ไซค์ แบบธรรมดา" rows={byFamily.moto.filter((r) => !r.urgent)} showUrgent={false} />
-              <GroupTable title="มอเตอร์ไซค์ แบบด่วน" rows={byFamily.moto.filter((r) => r.urgent)} showUrgent={false} />
+              {[
+                { title: "มอเตอร์ไซค์ แบบธรรมดา", rows: byFamily.moto.filter((r) => !r.urgent), urgent: false },
+                { title: "มอเตอร์ไซค์ แบบด่วน", rows: byFamily.moto.filter((r) => r.urgent), urgent: true },
+              ].map((g) => (
+                <GroupTable
+                  key={g.title}
+                  title={g.title}
+                  rows={g.rows}
+                  showUrgent={false}
+                  onPrint={() => setPrintGroup({ kind: "moto", urgent: g.urgent, title: g.title, rows: g.rows, note: "" })}
+                />
+              ))}
             </>
           )}
           {activeTab === "unknown" && <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent />}
@@ -231,6 +248,8 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
       {printGroup && (
         <JobSheetPrintDialog
           key={printGroup.title}
+          kind={printGroup.kind}
+          urgent={printGroup.urgent}
           groupTitle={printGroup.title}
           rows={printGroup.rows}
           defaultNote={printGroup.note}
