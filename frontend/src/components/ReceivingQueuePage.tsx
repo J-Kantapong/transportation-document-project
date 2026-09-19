@@ -45,8 +45,8 @@ interface Props {
   loadPending: () => Promise<QueueRow[]>;
   loadCompleted: () => Promise<QueueRow[]>;
   markDone: (id: string, data: QueueMarkData) => Promise<void>;
-  // เฉพาะหน้ารับใบเสร็จ: ปุ่ม "ยื่นไม่สำเร็จ" (ปลดล็อกให้ยื่นใหม่ได้)
-  markFailed?: (id: string) => Promise<void>;
+  // เฉพาะหน้ารับใบเสร็จ: ปุ่ม "ยื่นไม่สำเร็จ" (รถกลับไปทำ Step 4 ใหม่ได้) - ต้องมีเหตุผล (remark) ทุกครั้ง
+  markFailed?: (id: string, remark: string) => Promise<void>;
 }
 
 interface RowState {
@@ -57,6 +57,8 @@ interface RowState {
   plateCategory: string;
   plateNumber: string;
   amountText: string;
+  failing: boolean; // กด "ยื่นไม่สำเร็จ" แล้ว กำลังกรอกเหตุผล
+  failRemark: string;
   saving: boolean;
   message: { text: string; error?: boolean };
 }
@@ -69,6 +71,8 @@ const newRowState = (r: QueueRow): RowState => ({
   plateCategory: r.plateCategory ?? "",
   plateNumber: r.plateNumber ?? "",
   amountText: "",
+  failing: false,
+  failRemark: "",
   saving: false,
   message: { text: "" },
 });
@@ -192,9 +196,14 @@ export function ReceivingQueuePage({
 
   async function handleFail(id: string) {
     if (!markFailed) return;
+    const remark = (rows[id]?.failRemark ?? "").trim();
+    if (!remark) {
+      patchRow(id, { message: { text: "กรุณาระบุเหตุผลที่ยื่นไม่สำเร็จ", error: true } });
+      return;
+    }
     patchRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
-      await markFailed(id);
+      await markFailed(id, remark);
       await loadAll();
     } catch (err) {
       patchRow(id, { saving: false, message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true } });
@@ -327,10 +336,39 @@ export function ReceivingQueuePage({
                         <button className="text-button" disabled={row.saving} onClick={() => handleSave(r.id)}>
                           บันทึก
                         </button>
-                        {markFailed && (
-                          <button className="text-button" style={{ color: "#c0392b" }} disabled={row.saving} onClick={() => handleFail(r.id)}>
+                        {markFailed && !row.failing && (
+                          <button
+                            className="text-button"
+                            style={{ color: "#c0392b" }}
+                            disabled={row.saving}
+                            onClick={() => patchRow(r.id, { failing: true, message: { text: "" } })}
+                          >
                             ยื่นไม่สำเร็จ
                           </button>
+                        )}
+                        {markFailed && row.failing && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                            <input
+                              type="text"
+                              value={row.failRemark}
+                              onChange={(e) => patchRow(r.id, { failRemark: e.target.value })}
+                              placeholder="เหตุผลที่ยื่นไม่สำเร็จ *"
+                              aria-label="เหตุผลที่ยื่นไม่สำเร็จ"
+                              style={{ width: 200 }}
+                            />
+                            <div style={{ display: "flex", gap: 10 }}>
+                              <button className="text-button" style={{ color: "#c0392b" }} disabled={row.saving} onClick={() => handleFail(r.id)}>
+                                ยืนยันยื่นไม่สำเร็จ
+                              </button>
+                              <button
+                                className="text-button"
+                                disabled={row.saving}
+                                onClick={() => patchRow(r.id, { failing: false, failRemark: "", message: { text: "" } })}
+                              >
+                                ยกเลิก
+                              </button>
+                            </div>
+                          </div>
                         )}
                         {row.message.text && (
                           <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">

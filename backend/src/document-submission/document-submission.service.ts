@@ -6,6 +6,9 @@ import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeePar
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
+import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEntryDto } from './dto/preview-bulk-document-submission.dto.js';
+import type { GovernmentTaxOwnerInput } from '../tax/government-tax-calculator.js';
+import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason } from './submission-eligibility.js';
 import {
   assertPlateFormat,
   assertPlateNumberProvided,
@@ -16,6 +19,7 @@ import {
 } from './document-submission-validation.js';
 
 const BULK_CHUNK_SIZE = 50;
+const MAX_BULK_PREVIEW = 1000;
 
 function toRows(rows: Array<{ key: string; amount: unknown }>): FeeParamRow[] {
   return rows.map((r) => ({ key: r.key, amount: r.amount === null ? null : Number(r.amount) }));
@@ -44,14 +48,24 @@ export class DocumentSubmissionService {
     return vehicle;
   }
 
-  // รถคันหนึ่งยื่นเอกสารซ้ำไม่ได้ตราบใดที่ยื่นครั้งล่าสุดยังค้างสถานะ PENDING (รอใบเสร็จจากกรมขนส่ง) อยู่ -
-  // ต้องได้รับใบเสร็จ (RECEIPT_RECEIVED) หรือยื่นไม่สำเร็จ (FAILED) ก่อนถึงจะยื่นใหม่ได้ ดู
-  // DocumentSubmission.status ใน schema.prisma
-  private async assertNotPending(vehicleId: string) {
-    const latest = await this.prisma.documentSubmission.findFirst({ where: { vehicleId }, orderBy: { createdAt: 'desc' } });
-    if (latest && latest.status === 'PENDING') {
-      throw new BadRequestException({ error: 'รถคันนี้ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ - ยื่นซ้ำไม่ได้จนกว่าจะได้รับใบเสร็จหรือยื่นไม่สำเร็จ' });
-    }
+  // ต้องผ่าน Step 2 (แจ้งย้าย/ตัดบัญชี) + ตรวจรถผ่านภายใน 90 วัน และยังไม่เคยยื่นที่ค้างอยู่/ได้ใบเสร็จแล้ว -
+  // ดูกฎทั้งหมดใน submission-eligibility.ts
+  private async assertEligible(
+    vehicle: {
+      id: string;
+      transferDone: boolean;
+      inspectionSentDate: Date | null;
+      inspectionResult: string | null;
+      inspectionResultDate: Date | null;
+    },
+    submitDate: Date,
+  ) {
+    const active = await this.prisma.documentSubmission.findFirst({
+      where: { vehicleId: vehicle.id, status: { in: ACTIVE_SUBMISSION_STATUSES } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null }, submitDate);
+    if (reason) throw new BadRequestException({ error: reason });
   }
 
   async preview(vehicleId: string, dto: DocumentSubmissionOptionsDto) {
@@ -66,15 +80,83 @@ export class DocumentSubmissionService {
     );
   }
 
+  // preview ค่าธรรมเนียม + ภาษีหลายคันในคำขอเดียว (หน้ายื่นเอกสาร: เพิ่มจากคิว/แก้ตัวเลือกหลายคันพร้อมกัน)
+  // - คำนวณแบบเดียวกับ submit(): ownerType ที่ส่งมาใช้แทนเจ้าของรถเดิม (ถ้าประเภทตรงกับเจ้าของเดิมก็ใช้ของเดิม)
+  // ไม่ส่งมา = ใช้เจ้าของรถเดิม รายการที่พังคืน error รายคัน ไม่ throw ทั้งชุด
+  async previewBulk(dto: PreviewBulkDocumentSubmissionDto) {
+    if (!dto || !Array.isArray(dto.entries)) throw new BadRequestException({ error: 'entries ต้องเป็น array' });
+    const entries = dto.entries as PreviewBulkDocumentSubmissionEntryDto[];
+    if (entries.length > MAX_BULK_PREVIEW) {
+      throw new BadRequestException({ error: `รองรับไม่เกิน ${MAX_BULK_PREVIEW.toLocaleString('en-US')} คันต่อครั้ง` });
+    }
+    const vehicleIds = Array.from(new Set(entries.map((e) => e?.vehicleId).filter((id): id is string => typeof id === 'string')));
+    const [vehicles, rules] = await Promise.all([
+      this.prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, include: { owner: true } }),
+      this.loadRuleSet(),
+    ]);
+    const byId = new Map(vehicles.map((v) => [v.id, v]));
+
+    type Computed =
+      | { vehicleId: unknown; error: string }
+      | { vehicleId: string; fee: ReturnType<typeof computeDocumentFees>; taxInput: Parameters<TaxService['previewMany']>[0][number] };
+    const computed: Computed[] = entries.map((entry) => {
+      const vehicle = typeof entry?.vehicleId === 'string' ? byId.get(entry.vehicleId) : undefined;
+      if (!vehicle) return { vehicleId: entry?.vehicleId, error: 'ไม่พบข้อมูลรถ' };
+      try {
+        const options = parseDocumentSubmissionOptions(entry, isMotorcycle(vehicle.body));
+        const fee = computeDocumentFees(
+          { body: vehicle.body, registrationProvince: vehicle.registrationProvince, ownerProvince: vehicle.ownerProvince },
+          options,
+          rules,
+        );
+        let owner: GovernmentTaxOwnerInput | null = vehicle.owner
+          ? { ownerType: vehicle.owner.ownerType, isHirePurchaseBusiness: vehicle.owner.isHirePurchaseBusiness, hirerType: vehicle.owner.hirerType }
+          : null;
+        if (entry.ownerType !== undefined) {
+          if (entry.ownerType !== OwnerType.INDIVIDUAL && entry.ownerType !== OwnerType.JURISTIC) {
+            return { vehicleId: vehicle.id, error: 'ownerType ต้องเป็น INDIVIDUAL หรือ JURISTIC' };
+          }
+          if (!owner || owner.ownerType !== entry.ownerType) {
+            owner = { ownerType: entry.ownerType, isHirePurchaseBusiness: false, hirerType: null };
+          }
+        }
+        return {
+          vehicleId: vehicle.id,
+          fee,
+          taxInput: {
+            vehicle: {
+              body: vehicle.body,
+              fuel: vehicle.fuel,
+              cc: vehicle.cc?.toString() ?? null,
+              weight: vehicle.weight?.toString() ?? null,
+              firstRegistrationDate: vehicle.firstRegistrationDate,
+            },
+            owner,
+          },
+        };
+      } catch (err) {
+        const responseMessage = (err as { response?: { error?: string } })?.response?.error;
+        return { vehicleId: vehicle.id, error: responseMessage ?? 'คำนวณค่าธรรมเนียมไม่สำเร็จ' };
+      }
+    });
+
+    const ok = computed.filter((c): c is Extract<Computed, { fee: unknown }> => 'fee' in c);
+    const taxes = await this.taxService.previewMany(ok.map((c) => c.taxInput));
+    const taxByEntry = new Map(ok.map((c, i) => [c, taxes[i]]));
+    return {
+      results: computed.map((c) => ('fee' in c ? { vehicleId: c.vehicleId, fee: c.fee, tax: taxByEntry.get(c) } : c)),
+    };
+  }
+
   // บันทึก DocumentSubmission (snapshot ค่าธรรมเนียม) + เรียก TaxService.calculateAndSave ซ้ำในตัว
   // (ให้ "บันทึกรายการนี้" 1 ครั้งได้ทั้งค่าธรรมเนียมและภาษี ตามที่ mockup คาดหวังไว้) แล้ว update
   // plateCategory/plateNumber บน Vehicle ถ้าส่งมา (mutable, ไม่ใช่ส่วนหนึ่งของ snapshot)
   async submit(vehicleId: string, dto: CreateDocumentSubmissionDto) {
     const vehicle = await this.loadVehicle(vehicleId);
-    await this.assertNotPending(vehicleId);
+    const submitDate = parseSubmitDate(dto.submitDate);
+    await this.assertEligible(vehicle, submitDate);
     const isMoto = isMotorcycle(vehicle.body);
     const options = parseDocumentSubmissionOptions(dto, isMoto);
-    const submitDate = parseSubmitDate(dto.submitDate);
     const plateCategory = parsePlateFields(dto.plateCategory, 'plateCategory');
     const plateNumber = parsePlateFields(dto.plateNumber, 'plateNumber');
     assertPlateNumberProvided(options.plateNumberOption, plateCategory, plateNumber);
@@ -89,6 +171,10 @@ export class DocumentSubmissionService {
     // อัปเดตเจ้าของรถ/เลขทะเบียนก่อนคำนวณภาษี - TaxService.calculateAndSave อ่าน Vehicle.ownerId จาก DB
     // ตรงๆ ไม่รับเป็น parameter จึงต้อง persist ก่อนเรียก ไม่งั้นภาษีจะคำนวณจากเจ้าของรถอันเก่า/ยังไม่มี
     const vehicleUpdateData: { ownerId?: string | null; plateCategory?: string | null; plateNumber?: string | null } = {};
+    // ต้องรู้ประเภทเจ้าของรถก่อนยื่นเสมอ (ภาษี รย.1 นิติบุคคลคูณสอง) - ระบบไม่เดาให้ (ผู้ใช้เลือกเอง 2026-09-20)
+    if (dto.ownerType === undefined && !vehicle.ownerId) {
+      throw new BadRequestException({ error: 'กรุณาระบุประเภทเจ้าของรถ (บุคคลธรรมดา/นิติบุคคล) ก่อนยื่น' });
+    }
     if (dto.ownerType !== undefined) {
       const ownerTypeRaw = dto.ownerType;
       if (ownerTypeRaw !== OwnerType.INDIVIDUAL && ownerTypeRaw !== OwnerType.JURISTIC) {
@@ -143,8 +229,22 @@ export class DocumentSubmissionService {
     const succeeded: Array<{ vehicleId: string; submission: unknown }> = [];
     const failed: Array<{ vehicleId: unknown; error: string }> = [];
 
-    for (let i = 0; i < entries.length; i += BULK_CHUNK_SIZE) {
-      const chunk = entries.slice(i, i + BULK_CHUNK_SIZE);
+    // รถคันเดียวกันซ้ำในชุดเดียวกัน - ถ้าปล่อยให้ submit() พร้อมกันใน chunk เดียวกัน ทั้งคู่จะผ่าน
+    // assertEligible ก่อนที่อีกอันจะสร้างแถว จนได้ยื่นซ้ำ 2 แถว จึงรับแค่แถวแรก
+    const seen = new Set<string>();
+    const unique: BulkDocumentSubmissionEntryDto[] = [];
+    for (const entry of entries) {
+      const vehicleId = entry?.vehicleId;
+      if (typeof vehicleId === 'string' && seen.has(vehicleId)) {
+        failed.push({ vehicleId, error: 'รถคันนี้ซ้ำในรายการเดียวกัน' });
+        continue;
+      }
+      if (typeof vehicleId === 'string') seen.add(vehicleId);
+      unique.push(entry);
+    }
+
+    for (let i = 0; i < unique.length; i += BULK_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + BULK_CHUNK_SIZE);
       await Promise.all(
         chunk.map(async (entry) => {
           const vehicleId = entry?.vehicleId;
@@ -217,7 +317,7 @@ export class DocumentSubmissionService {
     submissionId: string,
     statusRaw: unknown,
     receivedDateRaw?: unknown,
-    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown } = {},
+    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; failRemark?: unknown } = {},
   ) {
     if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
       throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
@@ -239,8 +339,14 @@ export class DocumentSubmissionService {
       throw new BadRequestException({ error: 'รายการนี้อัปเดตสถานะไปแล้ว' });
     }
 
+    // ยื่นไม่สำเร็จ = รถกลับไปทำ Step 4 ใหม่ได้ (กฎของผู้ใช้) แต่ต้องมีเหตุผลทุกครั้ง - แสดงในคิวรอยื่นเอกสาร
     if (statusRaw === 'FAILED') {
-      return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: 'FAILED', receiptReceivedDate: null } });
+      const failRemark = typeof extras.failRemark === 'string' ? extras.failRemark.trim() : '';
+      if (!failRemark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่ยื่นไม่สำเร็จ' });
+      return this.prisma.documentSubmission.update({
+        where: { id: submissionId },
+        data: { status: 'FAILED', receiptReceivedDate: null, failRemark },
+      });
     }
 
     const plateCategory =

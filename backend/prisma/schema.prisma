@@ -91,8 +91,8 @@ model Vehicle {
   transferCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate)
 
   // Step 3: ตรวจรถ - รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน (ส่งตรวจ -> ผลตรวจ) โดย inspectionRound บอกว่า
-  // ข้อมูลส่งตรวจ/ผลตรวจชุดปัจจุบันเป็นของรอบไหน รอบ 2 เข้าคิวส่งตรวจเองเมื่อรอบ 1 ผ่านครบ 90 วันจาก
-  // inspectionResultDate ข้อมูลรอบก่อน (หรือครั้งที่ตรวจไม่ผ่าน) ถูกเก็บไว้ใน VehicleEditLog ตอนส่งตรวจใหม่
+  // ข้อมูลส่งตรวจ/ผลตรวจชุดปัจจุบันเป็นของรอบไหน ผลตรวจผ่านมีอายุ 90 วัน: ครบ 90 วันจาก inspectionResultDate
+  // แล้วยังไม่ได้ยื่นเอกสาร รถเข้าคิวส่งตรวจเองเป็นรอบ 2 (ดู submission-eligibility.ts) ข้อมูลรอบก่อน (หรือครั้งที่ตรวจไม่ผ่าน) ถูกเก็บไว้ใน VehicleEditLog ตอนส่งตรวจใหม่
   inspectionRound Int @default(1) // 1 | 2
 
   // Step 3a: ส่งตรวจ (เข้าคิวหลังจากทำ Step 2 เสร็จแล้วเท่านั้น - transferDone = true)
@@ -455,9 +455,10 @@ model DocumentSubmission {
   id                  String    @id @default(cuid())
   vehicleId           String
   submitDate          DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
-  status              String    @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED
+  status              String    @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED - มี PENDING/RECEIPT_RECEIVED = ยื่นซ้ำไม่ได้ (RECEIPT_RECEIVED = จดทะเบียนแล้ว ตลอดไป)
   receiptReceivedDate DateTime? // วันที่ได้รับใบเสร็จ (ตั้งตอน status -> RECEIPT_RECEIVED)
   receiptAmount       Decimal?  @db.Decimal(12, 2) // ยอดที่เห็นบนใบเสร็จจริง (พนักงานกรอก) - เทียบกับ Bill = billFeeTotal + taxAmount
+  failRemark          String? // เหตุผลที่ยื่นไม่สำเร็จ - บังคับกรอกตอน status -> FAILED แล้วรถกลับไปทำ Step 4 ใหม่ได้
   plateNumberOption   String // NONE | NORMAL | AUCTION
   includePlateFee     Boolean   @default(true)
   newPlateOption      String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์

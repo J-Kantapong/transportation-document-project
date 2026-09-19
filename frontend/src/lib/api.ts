@@ -93,6 +93,23 @@ export interface Vehicle {
   pendingDocumentSubmission: boolean;
 }
 
+// รถในหน้ายื่นเอกสาร (Step 4) - ดู backend/src/document-submission/submission-eligibility.ts สำหรับกฎ:
+// แจ้งย้าย/ตัดบัญชีเสร็จ + ตรวจผ่านไม่เกิน 90 วัน ณ วันที่ยื่น + ไม่มีรายการที่รอใบเสร็จ/ได้ใบเสร็จแล้ว
+export interface SubmitCandidate extends Vehicle {
+  inspectionResultDate: string | null; // วันที่ตรวจผ่าน (ค.ศ. YYYY-MM-DD)
+  inspectionValidUntil: string | null; // วันสุดท้ายที่ยังยื่นได้ = วันที่ตรวจผ่าน + 89 วัน
+  submitBlockReason: string | null; // null = ยื่นได้ ณ วันที่ยื่นที่ส่งไป
+  // ครั้งล่าสุดที่ยื่นไม่สำเร็จ (FAILED) - null = ไม่เคยยื่นไม่สำเร็จ หรือยื่นสำเร็จ/ค้างอยู่หลังจากนั้นแล้ว
+  lastFailedSubmission: { submitDate: string; failRemark: string | null } | null;
+}
+
+export interface DocumentSubmissionPreviewResult {
+  vehicleId: string;
+  fee?: FeePreview;
+  tax?: TaxBreakdown;
+  error?: string; // มีเมื่อคำนวณคันนั้นไม่ได้ (ไม่พบรถ / ตัวเลือกไม่ถูกต้อง)
+}
+
 // Step 4 (ยื่นเอกสารจดทะเบียนรถใหม่): ค่าธรรมเนียม Bill/No bill - ดู
 // backend/src/document-submission/document-fee-calculator.ts สำหรับ logic การคำนวณจริง
 export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION";
@@ -154,6 +171,7 @@ export interface DocumentSubmission {
   updatedAt: string;
   receiptReceivedDate: string | null;
   receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
+  failRemark: string | null; // เหตุผลที่ยื่นไม่สำเร็จ - มีเฉพาะ status FAILED
   vehicle: {
     chassis: string;
     body: string | null;
@@ -257,7 +275,7 @@ export interface InspectionVehicle {
   suggestedCost: string | null; // ราคาตรวจรถ (No bill) ตามตาราง
   // รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน - inspectionRound บอกว่าข้อมูลส่งตรวจ/ผลตรวจชุดนี้เป็นของรอบไหน
   inspectionRound: 1 | 2;
-  round2Due: boolean; // รอบ 1 ผ่านครบ 90 วัน ถึงกำหนดตรวจรอบ 2 (ยังไม่ได้ส่ง)
+  round2Due: boolean; // ผลตรวจผ่านครบ 90 วันแล้วยังไม่ได้ยื่นเอกสาร - ต้องตรวจรอบ 2 (ยังไม่ได้ส่ง)
   suggestedBillCost: string | null; // ค่าตรวจรถ (Bill) 50 บาท - มีเฉพาะรอบ 2
   inspectionSentType: 'ส่งตรวจนอก' | 'เอารถมาตรวจเอง' | null;
   inspectionSentDate: string | null;
@@ -313,18 +331,30 @@ export const api = {
   updateVehicle: (id: string, data: Record<string, string>) =>
     request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
-  searchVehiclesByChassis: (chassis: string) =>
-    request<{ vehicles: Vehicle[] }>(`/api/vehicles/search?chassis=${encodeURIComponent(chassis)}`),
-  lookupVehiclesByChassis: (chassisList: string[]) =>
-    request<{ found: Vehicle[]; notFound: string[]; pendingBlocked: string[] }>('/api/vehicles/lookup-by-chassis', {
-      method: 'POST',
-      body: JSON.stringify({ chassisList }),
-    }),
+  // Step 4: คิวรถที่ยื่นเอกสารได้ ณ วันที่ยื่น (เรียงจากตรวจผ่านเก่าสุด = ใกล้หมดอายุสุด ก่อน)
+  listSubmissionQueue: (submitDate: string) =>
+    request<{ vehicles: SubmitCandidate[] }>(`/api/vehicles/submission-queue?submitDate=${submitDate}`),
+  searchVehiclesByChassis: (chassis: string, submitDate: string) =>
+    request<{ vehicles: SubmitCandidate[] }>(`/api/vehicles/search?chassis=${encodeURIComponent(chassis)}&submitDate=${submitDate}`),
+  // blocked = พบในระบบแต่ยื่นไม่ได้ ณ วันที่ยื่น พร้อมเหตุผล
+  lookupVehiclesByChassis: (chassisList: string[], submitDate: string) =>
+    request<{ found: SubmitCandidate[]; notFound: string[]; blocked: Array<{ chassis: string; reason: string }> }>(
+      '/api/vehicles/lookup-by-chassis',
+      { method: 'POST', body: JSON.stringify({ chassisList, submitDate }) },
+    ),
 
   previewDocumentSubmissionFee: (vehicleId: string, options: DocumentSubmissionOptionsInput) =>
     request<FeePreview>(`/api/vehicles/${vehicleId}/document-submission/preview`, {
       method: 'POST',
       body: JSON.stringify(options),
+    }),
+  // ค่าธรรมเนียม + ภาษีหลายคันในคำขอเดียว (สูงสุด 1,000 คัน) - ownerType undefined = ใช้เจ้าของรถเดิม
+  previewDocumentSubmissionBulk: (
+    entries: Array<DocumentSubmissionOptionsInput & { vehicleId: string; ownerType?: OwnerType }>,
+  ) =>
+    request<{ results: DocumentSubmissionPreviewResult[] }>('/api/vehicles/document-submission/preview-bulk', {
+      method: 'POST',
+      body: JSON.stringify({ entries }),
     }),
   createDocumentSubmission: (vehicleId: string, input: CreateDocumentSubmissionInput) =>
     request<{ submission: DocumentSubmission; taxCalculation: TaxCalculation }>(`/api/vehicles/${vehicleId}/document-submission`, {
@@ -340,11 +370,11 @@ export const api = {
     const query = [date ? `date=${date}` : '', status ? `status=${status}` : ''].filter(Boolean).join('&');
     return request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
   },
-  // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (ส่งมา หรือรถมีอยู่แล้ว) - FAILED ไม่ต้อง
+  // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (ส่งมา หรือรถมีอยู่แล้ว) - FAILED ไม่ต้อง แต่ต้องมี failRemark (เหตุผล)
   updateDocumentSubmissionStatus: (
     submissionId: string,
     status: Exclude<DocumentSubmissionStatus, "PENDING">,
-    options: { receivedDate?: string; plateCategory?: string; plateNumber?: string; receiptAmount?: string } = {},
+    options: { receivedDate?: string; plateCategory?: string; plateNumber?: string; receiptAmount?: string; failRemark?: string } = {},
   ) =>
     request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/status`, {
       method: 'PATCH',

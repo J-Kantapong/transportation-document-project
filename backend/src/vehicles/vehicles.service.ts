@@ -9,6 +9,12 @@ import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from '
 import { TaxService } from '../tax/tax.service.js';
 import { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
 import { parseTaxDate } from '../tax/tax-validation.js';
+import {
+  ACTIVE_SUBMISSION_STATUSES,
+  getSubmitBlockReason,
+  INSPECTION_VALID_DAYS,
+  inspectionValidUntil,
+} from '../document-submission/submission-eligibility.js';
 
 const EDITABLE_VEHICLE_FIELDS = [
   ['date', 'วันที่'],
@@ -25,21 +31,42 @@ const EDITABLE_VEHICLE_FIELDS = [
   ['ownerProvince', 'จังหวัดเจ้าของรถ'],
 ] as const;
 
-// ตรวจรอบ 1 ผ่านวันนี้หรือก่อนหน้านี้ = ครบกำหนดตรวจรอบ 2 แล้ว
-function round2Threshold(): Date {
+// ตรวจผ่านวันนี้หรือก่อนหน้านี้ = ผลตรวจหมดอายุแล้ว (ครบ 90 วัน)
+function reinspectionThreshold(): Date {
   const threshold = new Date();
-  threshold.setUTCDate(threshold.getUTCDate() - INSPECTION_ROUND2_WAIT_DAYS);
+  threshold.setUTCDate(threshold.getUTCDate() - INSPECTION_VALID_DAYS);
   return threshold;
 }
 
-function isRound2Due(vehicle: { inspectionRound: number; inspectionResult: string | null; inspectionResultDate: Date | null }) {
+// ผลตรวจผ่านมีอายุ 90 วัน (กฎของผู้ใช้): ครบ 90 วันแล้วยังไม่ได้ยื่นเอกสาร (ไม่มี DocumentSubmission ที่ค้าง
+// รอใบเสร็จ/ได้ใบเสร็จแล้ว) ต้องกลับไปตรวจรถใหม่เป็นรอบ 2 - ใช้ได้ทั้งผลรอบ 1 และผลรอบ 2 ที่หมดอายุอีกครั้ง
+// รถที่ยื่นเอกสารไปแล้วไม่ต้องตรวจใหม่ documentSubmissions = แถวที่กรองด้วย ACTIVE_SUBMISSION_STATUSES แล้ว
+// (ดู activeSubmissionsInclude)
+function isReinspectionDue(vehicle: {
+  inspectionResult: string | null;
+  inspectionResultDate: Date | null;
+  documentSubmissions: Array<unknown>;
+}) {
   return (
-    vehicle.inspectionRound === 1 &&
     vehicle.inspectionResult === 'ผ่าน' &&
     vehicle.inspectionResultDate != null &&
-    vehicle.inspectionResultDate <= round2Threshold()
+    vehicle.inspectionResultDate <= reinspectionThreshold() &&
+    vehicle.documentSubmissions.length === 0
   );
 }
+
+const activeSubmissionsInclude = {
+  documentSubmissions: { where: { status: { in: ACTIVE_SUBMISSION_STATUSES } }, select: { id: true }, take: 1 },
+} as const;
+
+// ยื่นเอกสารแล้ว (ถึง Step 4) ย้อนกลับไปแก้ Step 2 (แจ้งย้าย/ตัดบัญชี) หรือ Step 3 (ตรวจรถ) ไม่ได้ - กฎของผู้ใช้
+function assertNotSubmitted(vehicle: { documentSubmissions: Array<unknown> }) {
+  if (vehicle.documentSubmissions.length > 0) {
+    throw new BadRequestException({ error: 'รถคันนี้ยื่นเอกสารจดทะเบียนแล้ว - ย้อนกลับไปแก้ไขขั้นตอนก่อนหน้าไม่ได้' });
+  }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function diffField(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -71,9 +98,8 @@ function isValidDateParam(value: string): boolean {
 const INSPECTION_SENT_TYPES = ['ส่งตรวจนอก', 'เอารถมาตรวจเอง'] as const;
 const INSPECTION_RESULTS = ['ผ่าน', 'ไม่ผ่าน'] as const;
 
-// ตรวจรถรอบ 2: รอบ 1 ผ่านครบ 90 วันแล้วรถกลับเข้าคิวส่งตรวจเอง - ค่าใช้จ่ายแยก 2 ส่วน คือราคาตรวจรถ (No bill)
-// ตามตารางเดิม และค่าตรวจรถ (Bill) 50 บาท
-const INSPECTION_ROUND2_WAIT_DAYS = 90;
+// ตรวจรถรอบ 2: ผลตรวจผ่านครบ 90 วันแล้วยังไม่ได้ยื่นเอกสาร รถกลับเข้าคิวส่งตรวจเอง - ค่าใช้จ่ายแยก 2 ส่วน
+// คือราคาตรวจรถ (No bill) ตามตารางเดิม และค่าตรวจรถ (Bill) 50 บาท
 const INSPECTION_ROUND2_BILL_FEE = 50;
 
 @Injectable()
@@ -87,9 +113,14 @@ export class VehiclesService {
     customer: { select: { name: true } },
     brand: { select: { name: true } },
     owner: { select: { id: true, name: true, ownerType: true } },
-    // แค่แถวล่าสุด 1 แถวพอ - ใช้เช็คว่ารถคันนี้ยื่นเอกสารซ้ำได้ไหม (ดู DocumentSubmission.status
-    // ใน schema.prisma - ยื่นซ้ำไม่ได้ตราบใดที่แถวล่าสุดยังค้าง PENDING)
-    documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true } },
+    // แถวล่าสุดที่ยัง active (PENDING = รอใบเสร็จ / RECEIPT_RECEIVED = จดทะเบียนแล้ว) - มี = ยื่นซ้ำไม่ได้
+    // ดู submission-eligibility.ts
+    documentSubmissions: {
+      where: { status: { in: ACTIVE_SUBMISSION_STATUSES } },
+      orderBy: { createdAt: 'desc' as const },
+      take: 1,
+      select: { status: true },
+    },
   } as const;
 
   private mapVehicleFull(vehicle: {
@@ -146,6 +177,69 @@ export class VehiclesService {
     };
   }
 
+  // รถที่ใช้ในหน้ายื่นเอกสาร (Step 4) - เพิ่มผลตรวจ/วันหมดอายุผลตรวจ เหตุผลที่ยื่นไม่ได้ ณ วันที่ยื่น และครั้งล่าสุดที่
+  // ยื่นไม่สำเร็จพร้อมเหตุผล (รถกลับมาทำ Step 4 ใหม่ - คันที่ยื่นค้าง/จดทะเบียนแล้วไม่แสดงเพราะไม่เกี่ยวแล้ว)
+  private async mapSubmitCandidates(
+    vehicles: Array<
+      Parameters<VehiclesService['mapVehicleFull']>[0] & {
+        transferDone: boolean;
+        inspectionSentDate: Date | null;
+        inspectionResult: string | null;
+        inspectionResultDate: Date | null;
+      }
+    >,
+    submitDate: Date,
+  ) {
+    const failed = vehicles.length
+      ? await this.prisma.documentSubmission.findMany({
+          where: { vehicleId: { in: vehicles.map((v) => v.id) }, status: 'FAILED' },
+          orderBy: { createdAt: 'desc' },
+          distinct: ['vehicleId'],
+          select: { vehicleId: true, submitDate: true, failRemark: true },
+        })
+      : [];
+    const lastFailedByVehicle = new Map(failed.map((f) => [f.vehicleId, f]));
+    return vehicles.map((vehicle) => {
+      const activeSubmissionStatus = vehicle.documentSubmissions[0]?.status ?? null;
+      const lastFailed = activeSubmissionStatus ? undefined : lastFailedByVehicle.get(vehicle.id);
+      return {
+        ...this.mapVehicleFull(vehicle),
+        inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
+        inspectionValidUntil:
+          vehicle.inspectionResult === 'ผ่าน' && vehicle.inspectionResultDate ? inspectionValidUntil(vehicle.inspectionResultDate) : null,
+        submitBlockReason: getSubmitBlockReason({ ...vehicle, activeSubmissionStatus }, submitDate),
+        lastFailedSubmission: lastFailed
+          ? { submitDate: lastFailed.submitDate.toISOString().slice(0, 10), failRemark: lastFailed.failRemark }
+          : null,
+      };
+    });
+  }
+
+  private parseSubmitDateParam(raw: string | undefined): Date {
+    const value = raw?.trim() || new Date().toISOString().slice(0, 10);
+    if (!isValidDateParam(value)) throw new BadRequestException({ error: 'submitDate ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  // คิวรอยื่นเอกสาร (Step 4) ณ วันที่ยื่น: แจ้งย้าย/ตัดบัญชีเสร็จ + ตรวจผ่านไม่เกิน 90 วัน + ยังไม่เคยยื่นที่ค้างอยู่
+  // หรือได้ใบเสร็จแล้ว - เรียงจากตรวจผ่านเก่าสุด (ใกล้หมดอายุสุด) ก่อน หน้าจอกรองยี่ห้อ/เจ้าของงาน/วันที่ตรวจเอง
+  async findSubmissionQueue(submitDateRaw?: string) {
+    const submitDate = this.parseSubmitDateParam(submitDateRaw);
+    const earliestValidPass = new Date(submitDate.getTime() - (INSPECTION_VALID_DAYS - 1) * DAY_MS);
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: {
+        transferDone: true,
+        inspectionResult: 'ผ่าน',
+        inspectionResultDate: { gte: earliestValidPass, lte: submitDate },
+        documentSubmissions: { none: { status: { in: ACTIVE_SUBMISSION_STATUSES } } },
+      },
+      orderBy: [{ inspectionResultDate: 'asc' }, { date: 'asc' }, { chassis: 'asc' }],
+      include: this.vehicleFullInclude,
+    });
+    // กฎเดียวกับตอน submit() - กรองซ้ำอีกชั้นให้คิวกับการยื่นจริงไม่มีทางไม่ตรงกัน
+    return (await this.mapSubmitCandidates(vehicles, submitDate)).filter((v) => v.submitBlockReason === null);
+  }
+
   async findAll() {
     const vehicles = await this.prisma.vehicle.findMany({
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -157,7 +251,8 @@ export class VehiclesService {
 
   // ค้นหารถด้วยเลขตัวถัง (บางส่วนก็ได้) สำหรับหน้ายื่นเอกสารจดทะเบียน (Step 4) - แยกจาก findAll() เพราะ
   // findAll() จำกัดแค่ 100 คันล่าสุด รถเก่ากว่านั้นต้องค้นด้วย endpoint นี้ถึงจะเจอ
-  async searchByChassis(query: string) {
+  async searchByChassis(query: string, submitDateRaw?: string) {
+    const submitDate = this.parseSubmitDateParam(submitDateRaw);
     const trimmed = query.trim();
     if (!trimmed) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
@@ -166,12 +261,13 @@ export class VehiclesService {
       take: 20,
       include: this.vehicleFullInclude,
     });
-    return vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+    return this.mapSubmitCandidates(vehicles, submitDate);
   }
 
   // นำเข้าหลายคันพร้อมกัน (bulk paste เลขตัวถัง สูงสุด 1,000 คัน) - จับคู่แบบ exact match
   // (case-insensitive) กับรถที่มีอยู่แล้วในระบบ ไม่ใช่การสร้างรถใหม่ - รถที่ไม่พบคืนแยกไว้ให้ผู้ใช้แก้ไข
-  async lookupByChassis(chassisList: string[]) {
+  async lookupByChassis(chassisList: string[], submitDateRaw?: string) {
+    const submitDate = this.parseSubmitDateParam(submitDateRaw);
     const trimmed = Array.from(new Set(chassisList.map((c) => c.trim()).filter(Boolean)));
     if (trimmed.length === 0) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถังอย่างน้อย 1 รายการ' });
     if (trimmed.length > MAX_BATCH_SIZE) throw new BadRequestException({ error: `รองรับไม่เกิน ${MAX_BATCH_SIZE} คันต่อครั้ง` });
@@ -180,14 +276,16 @@ export class VehiclesService {
       where: { chassis: { in: trimmed, mode: 'insensitive' } },
       include: this.vehicleFullInclude,
     });
-    const mapped = vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
-    // คันที่ยังรอใบเสร็จ (ยื่นซ้ำไม่ได้) แยกออกจาก found กันไม่ให้ bulk import พยายามยื่นซ้ำโดยไม่ตั้งใจ
+    const mapped = await this.mapSubmitCandidates(vehicles, submitDate);
+    // คันที่ยื่นไม่ได้ (ยังไม่ผ่าน Step 2/3, ผลตรวจหมดอายุ, รอใบเสร็จ, จดทะเบียนแล้ว) แยกออกจาก found พร้อมเหตุผล
     // - submit() ก็ปฏิเสธอยู่แล้วเช่นกัน (defense in depth) แต่แยกไว้ตั้งแต่ต้นทางให้ผู้ใช้เห็นชัดกว่า
-    const found = mapped.filter((v) => !v.pendingDocumentSubmission);
-    const pendingBlocked = mapped.filter((v) => v.pendingDocumentSubmission).map((v) => v.chassis);
+    const found = mapped.filter((v) => v.submitBlockReason === null);
+    const blocked = mapped
+      .filter((v) => v.submitBlockReason !== null)
+      .map((v) => ({ chassis: v.chassis, reason: v.submitBlockReason as string }));
     const foundChassisLower = new Set(mapped.map((v) => v.chassis.toLowerCase()));
     const notFound = trimmed.filter((c) => !foundChassisLower.has(c.toLowerCase()));
-    return { found, notFound, pendingBlocked };
+    return { found, notFound, blocked };
   }
 
   async createBatch(body: CreateVehiclesDto): Promise<{ count: number }> {
@@ -393,8 +491,9 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
     }
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: activeSubmissionsInclude });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertNotSubmitted(vehicle);
 
     const updated = await this.prisma.vehicle.update({
       where: { id },
@@ -413,8 +512,8 @@ export class VehiclesService {
     };
   }
 
-  // ผ่าน Step 2 แล้ว (transferDone = true) และ: ยังไม่ได้ส่งตรวจ, ตรวจไม่ผ่าน (ส่งตรวจใหม่), หรือตรวจรอบ 1
-  // ผ่านครบ 90 วันแล้ว (ถึงกำหนดตรวจรอบ 2) - ไม่จำกัดวันที่รับงาน
+  // ผ่าน Step 2 แล้ว (transferDone = true) และ: ยังไม่ได้ส่งตรวจ, ตรวจไม่ผ่าน (ส่งตรวจใหม่), หรือผลตรวจผ่านครบ
+  // 90 วันแล้วยังไม่ได้ยื่นเอกสาร (ต้องตรวจรอบ 2 - ดู isReinspectionDue) - ไม่จำกัดวันที่รับงาน
   async findPendingInspectionSend() {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
@@ -423,13 +522,18 @@ export class VehiclesService {
           OR: [
             { inspectionSentDate: null },
             { inspectionResult: 'ไม่ผ่าน' },
-            { inspectionRound: 1, inspectionResult: 'ผ่าน', inspectionResultDate: { lte: round2Threshold() } },
+            {
+              inspectionResult: 'ผ่าน',
+              inspectionResultDate: { lte: reinspectionThreshold() },
+              documentSubmissions: { none: { status: { in: ACTIVE_SUBMISSION_STATUSES } } },
+            },
           ],
         },
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
+          ...activeSubmissionsInclude,
         },
       }),
       this.prisma.feeInspectionBangkok.findMany(),
@@ -448,6 +552,7 @@ export class VehiclesService {
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
+          ...activeSubmissionsInclude,
         },
       }),
       this.prisma.feeInspectionBangkok.findMany(),
@@ -467,6 +572,7 @@ export class VehiclesService {
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
+          ...activeSubmissionsInclude,
         },
       }),
       this.prisma.feeInspectionBangkok.findMany(),
@@ -496,6 +602,7 @@ export class VehiclesService {
       inspectionResultDate: Date | null;
       inspectionResultCost: unknown;
       inspectionFailRemark: string | null;
+      documentSubmissions: Array<unknown>;
     },
     bangkokFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
     provinceFees: Array<{ province: string; vehicleType: string; amount: unknown }>,
@@ -521,10 +628,10 @@ export class VehiclesService {
       registrationProvince: vehicle.registrationProvince,
       suggestedCost,
       inspectionRound: vehicle.inspectionRound,
-      // ถึงกำหนดตรวจรอบ 2 (ยังไม่ได้ส่ง) - หน้าจอใช้แสดงหมายเหตุในคิวส่งตรวจ
-      round2Due: isRound2Due(vehicle),
+      // ผลตรวจผ่านหมดอายุ (ครบ 90 วัน ยังไม่ยื่นเอกสาร) ต้องตรวจรอบ 2 - หน้าจอใช้แสดงหมายเหตุในคิวส่งตรวจ
+      round2Due: isReinspectionDue(vehicle),
       // ค่าตรวจรถ (Bill) มีเฉพาะรอบ 2 (ทั้งตอนถึงกำหนดและตอนส่งตรวจรอบ 2 ซ้ำหลังไม่ผ่าน)
-      suggestedBillCost: isRound2Due(vehicle) || vehicle.inspectionRound === 2 ? String(INSPECTION_ROUND2_BILL_FEE) : null,
+      suggestedBillCost: isReinspectionDue(vehicle) || vehicle.inspectionRound === 2 ? String(INSPECTION_ROUND2_BILL_FEE) : null,
       inspectionSentType: vehicle.inspectionSentType,
       inspectionSentDate: vehicle.inspectionSentDate?.toISOString().slice(0, 10) ?? null,
       inspectionSentCost: vehicle.inspectionSentCost,
@@ -587,20 +694,21 @@ export class VehiclesService {
     }
 
     const [vehicle, bangkokFees, provinceFees] = await Promise.all([
-      this.prisma.vehicle.findUnique({ where: { id }, include: { brand: { select: { name: true } } } }),
+      this.prisma.vehicle.findUnique({ where: { id }, include: { brand: { select: { name: true } }, ...activeSubmissionsInclude } }),
       this.prisma.feeInspectionBangkok.findMany(),
       this.prisma.feeInspectionProvince.findMany(),
     ]);
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertNotSubmitted(vehicle);
+    // Step 1 -> 4 ต้องทำตามลำดับ: ส่งตรวจได้หลังแจ้งย้าย/ตัดบัญชีเสร็จแล้วเท่านั้น
+    if (!vehicle.transferDone) throw new BadRequestException({ error: 'ยังไม่ผ่านขั้นตอนแจ้งย้าย/ตัดบัญชี - ส่งตรวจรถไม่ได้' });
 
-    // เริ่มรอบตรวจใหม่เมื่อ: ตรวจไม่ผ่าน (ส่งตรวจซ้ำรอบเดิม) หรือรอบ 1 ผ่านครบ 90 วัน (ขึ้นรอบ 2) - ล้างผลตรวจเดิม
+    // เริ่มรอบตรวจใหม่เมื่อ: ตรวจไม่ผ่าน (ส่งตรวจซ้ำรอบเดิม) หรือผลตรวจผ่านหมดอายุ (ขึ้นรอบ 2) - ล้างผลตรวจเดิม
     // ให้รถเข้าคิวรอผลตรวจอีกครั้ง และเก็บข้อมูลรอบก่อนไว้ใน VehicleEditLog เพราะช่องบน Vehicle เก็บได้แค่ชุดล่าสุด
     const isResend = vehicle.inspectionResult === 'ไม่ผ่าน';
-    const startsRound2 = isRound2Due(vehicle);
+    const startsRound2 = isReinspectionDue(vehicle);
     if (vehicle.inspectionResult === 'ผ่าน' && !startsRound2) {
-      throw new BadRequestException({
-        error: vehicle.inspectionRound === 2 ? 'รถคันนี้ตรวจรอบ 2 ผ่านแล้ว' : 'รถคันนี้ตรวจผ่านแล้ว ยังไม่ครบ 90 วันสำหรับตรวจรอบ 2',
-      });
+      throw new BadRequestException({ error: `รถคันนี้ตรวจผ่านแล้ว ผลตรวจยังไม่หมดอายุ (${INSPECTION_VALID_DAYS} วัน)` });
     }
     const startsNewCycle = isResend || startsRound2;
     const round = startsRound2 ? 2 : vehicle.inspectionRound;
@@ -628,7 +736,7 @@ export class VehiclesService {
               data: {
                 vehicleId: id,
                 remark: startsRound2
-                  ? `เริ่มตรวจรอบ 2 (ครบ 90 วันหลังผ่านตรวจรอบ 1 วันที่ ${diffField(vehicle.inspectionResultDate)})`
+                  ? `เริ่มตรวจรอบ 2 (ผลตรวจรอบ ${vehicle.inspectionRound} ผ่านวันที่ ${diffField(vehicle.inspectionResultDate)} ครบ ${INSPECTION_VALID_DAYS} วันแล้วยังไม่ได้ยื่นเอกสาร)`
                   : `ส่งตรวจใหม่หลังตรวจไม่ผ่าน (เหตุผลเดิม: ${vehicle.inspectionFailRemark ?? '—'})`,
                 changes: JSON.stringify(changes),
               },
@@ -663,8 +771,12 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน' });
     }
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: activeSubmissionsInclude });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertNotSubmitted(vehicle);
+    if (result && !vehicle.inspectionSentDate) {
+      throw new BadRequestException({ error: 'ยังไม่ได้บันทึกการส่งตรวจ - บันทึกผลตรวจไม่ได้' });
+    }
 
     const updated = await this.prisma.vehicle.update({
       where: { id },

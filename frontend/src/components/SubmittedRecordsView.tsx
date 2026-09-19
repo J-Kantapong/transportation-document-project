@@ -31,13 +31,16 @@ function recordTotal(r: DocumentSubmission): number {
   return Number(r.billFeeTotal) + Number(r.noBillTotal) + Number(r.taxAmount ?? 0);
 }
 
-function StatusBadge({ status }: { status: DocumentSubmission["status"] }) {
+function StatusBadge({ status, failRemark }: { status: DocumentSubmission["status"]; failRemark: string | null }) {
   if (status === "PENDING") return <span className="badge warn">รอใบเสร็จ</span>;
   if (status === "RECEIPT_RECEIVED") return <span className="badge done">ได้รับใบเสร็จแล้ว</span>;
   return (
-    <span className="badge" style={{ background: "#fdecec", color: "#b43434" }}>
-      ยื่นไม่สำเร็จ
-    </span>
+    <>
+      <span className="badge" style={{ background: "#fdecec", color: "#b43434" }}>
+        ยื่นไม่สำเร็จ
+      </span>
+      {failRemark && <div className="sub">{failRemark}</div>}
+    </>
   );
 }
 
@@ -99,7 +102,7 @@ function GroupTable({
                   <td>{r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}</td>
                   <td>{formatMoney(recordTotal(r))} บาท</td>
                   <td>
-                    <StatusBadge status={r.status} />
+                    <StatusBadge status={r.status} failRemark={r.failRemark} />
                   </td>
                 </tr>
               ))}

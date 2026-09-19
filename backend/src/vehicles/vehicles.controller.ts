@@ -21,16 +21,22 @@ export class VehiclesController {
     return this.vehiclesService.createBatch(body);
   }
 
-  // ยื่นเอกสารจดทะเบียน (Step 4): findAll() จำกัด 100 คันล่าสุด - ค้นหารถเก่ากว่านั้นด้วยเลขตัวถังที่นี่
+  // ยื่นเอกสารจดทะเบียน (Step 4): คิวรถที่ยื่นได้ ณ วันที่ยื่น (submitDate ค.ศ. YYYY-MM-DD, ไม่ส่ง = วันนี้)
+  @Get('submission-queue')
+  async submissionQueue(@Query('submitDate') submitDate?: string) {
+    return { vehicles: await this.vehiclesService.findSubmissionQueue(submitDate) };
+  }
+
+  // ยื่นเอกสารจดทะเบียน (Step 4): ค้นหาด้วยเลขตัวถังเพื่อดูว่าทำไมรถคันนั้นไม่อยู่ในคิว (submitBlockReason)
   @Get('search')
-  async search(@Query('chassis') chassis = '') {
-    return { vehicles: await this.vehiclesService.searchByChassis(chassis) };
+  async search(@Query('chassis') chassis = '', @Query('submitDate') submitDate?: string) {
+    return { vehicles: await this.vehiclesService.searchByChassis(chassis, submitDate) };
   }
 
   @Post('lookup-by-chassis')
-  lookupByChassis(@Body() body: { chassisList?: unknown }) {
+  lookupByChassis(@Body() body: { chassisList?: unknown; submitDate?: unknown }) {
     const chassisList = Array.isArray(body?.chassisList) ? body.chassisList.filter((c): c is string => typeof c === 'string') : [];
-    return this.vehiclesService.lookupByChassis(chassisList);
+    return this.vehiclesService.lookupByChassis(chassisList, typeof body?.submitDate === 'string' ? body.submitDate : undefined);
   }
 
   @Patch(':id')

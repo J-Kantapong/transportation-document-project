@@ -91,7 +91,7 @@ function defaultSendDateIso(v: InspectionVehicle): string {
 // หมายเหตุตามระบบในคิวส่งตรวจ: ถึงกำหนดตรวจรอบ 2 หรือตรวจไม่ผ่านต้องส่งตรวจใหม่ - ว่าง = ส่งตรวจครั้งแรก
 function sendQueueNote(v: InspectionVehicle): string {
   if (v.round2Due) {
-    return `ครบ 90 วันหลังผ่านตรวจรอบ 1 (${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}) — ตรวจรอบ 2`;
+    return `ผลตรวจรอบ ${v.inspectionRound} ผ่าน (${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}) ครบ 90 วันแล้วยังไม่ได้ยื่นเอกสาร — ตรวจรอบ 2`;
   }
   if (v.inspectionResult === "ไม่ผ่าน") {
     const round = v.inspectionRound === 2 ? "รอบ 2 " : "";

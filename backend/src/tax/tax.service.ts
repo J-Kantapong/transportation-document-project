@@ -56,6 +56,18 @@ export class TaxService {
     return { ...result, status: deriveStatus(result) };
   }
 
+  // preview หลายคันพร้อมกัน (หน้ายื่นเอกสาร) - โหลดตารางอัตราครั้งเดียว ไม่ยิง query ต่อคัน
+  async previewMany(
+    inputs: Array<{ vehicle: GovernmentTaxVehicleInput; owner: GovernmentTaxOwnerInput | null }>,
+  ): Promise<Array<GovernmentTaxResult & { status: string }>> {
+    if (inputs.length === 0) return [];
+    const rules = await this.loadRuleSet();
+    return inputs.map(({ vehicle, owner }) => {
+      const result = calculateGovernmentTax(vehicle, owner, rules);
+      return { ...result, status: deriveStatus(result) };
+    });
+  }
+
   // เรียกหลังบันทึก ownerId/isFactoryNew/firstRegistrationDate ของรถแล้ว (PATCH /api/vehicles/:id/tax-input)
   // สร้าง TaxCalculation แถวใหม่เสมอ (immutable snapshot) ไม่ update ของเดิม
   async calculateAndSave(vehicleId: string) {

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto } from './dto/bulk-create-document-submission.dto.js';
+import type { PreviewBulkDocumentSubmissionDto } from './dto/preview-bulk-document-submission.dto.js';
 import { DocumentSubmissionService } from './document-submission.service.js';
 
 @Controller('api/vehicles')
@@ -18,6 +19,11 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.submit(id, body);
   }
 
+  @Post('document-submission/preview-bulk')
+  previewBulk(@Body() body: PreviewBulkDocumentSubmissionDto) {
+    return this.documentSubmissionService.previewBulk(body);
+  }
+
   @Post('document-submission/bulk')
   submitBulk(@Body() body: BulkCreateDocumentSubmissionDto) {
     return this.documentSubmissionService.submitBulk(body);
@@ -31,12 +37,14 @@ export class DocumentSubmissionController {
   @Patch('document-submission/:id/status')
   updateStatus(
     @Param('id') id: string,
-    @Body() body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown },
+    @Body()
+    body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; failRemark?: unknown },
   ) {
     return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate, {
       plateCategory: body?.plateCategory,
       plateNumber: body?.plateNumber,
       receiptAmount: body?.receiptAmount,
+      failRemark: body?.failRemark,
     });
   }
 }

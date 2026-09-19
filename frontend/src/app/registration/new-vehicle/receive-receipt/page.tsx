@@ -40,8 +40,8 @@ export default function ReceiveReceiptPage() {
           receiptAmount: data.receiptAmount || undefined,
         });
       }}
-      markFailed={async (id) => {
-        await api.updateDocumentSubmissionStatus(id, "FAILED");
+      markFailed={async (id, remark) => {
+        await api.updateDocumentSubmissionStatus(id, "FAILED", { failRemark: remark });
       }}
     />
   );
