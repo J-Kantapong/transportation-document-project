@@ -16,6 +16,7 @@ import {
   type Vehicle,
 } from "@/lib/api";
 import { OWNER_TYPES } from "@/lib/vehicle-reference-data";
+import { SubmittedRecordsView } from "@/components/SubmittedRecordsView";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 const OWNER_TYPE_LABEL: Record<OwnerType, string> = Object.fromEntries(OWNER_TYPES) as Record<OwnerType, string>;
@@ -125,7 +126,6 @@ export default function SubmitDocumentsPage() {
   // ดูข้อมูลที่ยื่นแล้ว
   const [records, setRecords] = useState<DocumentSubmission[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
-  const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(null);
 
   const confirmDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -410,22 +410,6 @@ export default function SubmitDocumentsPage() {
     loadRecords();
   }, [phase]);
 
-  const recordsByDate = useMemo(() => {
-    const map = new Map<string, DocumentSubmission[]>();
-    for (const r of records) {
-      const date = r.submitDate.slice(0, 10);
-      if (!map.has(date)) map.set(date, []);
-      map.get(date)!.push(r);
-    }
-    return map;
-  }, [records]);
-  const recordDates = useMemo(() => Array.from(recordsByDate.keys()).sort().reverse(), [recordsByDate]);
-  const selectedRecordRows = selectedRecordDate ? recordsByDate.get(selectedRecordDate) ?? [] : [];
-  const selectedRecordTotal = selectedRecordRows.reduce(
-    (sum, r) => sum + Number(r.billFeeTotal) + Number(r.noBillTotal) + Number(r.taxAmount ?? 0),
-    0,
-  );
-
   const batchGrandTotal = batch.reduce((sum, e) => sum + e.grandTotal, 0);
 
   return (
@@ -452,12 +436,11 @@ export default function SubmitDocumentsPage() {
             </button>
             <button
               onClick={() => {
-                setSelectedRecordDate(null);
                 setPhase("records");
               }}
             >
               <strong>ดูข้อมูลที่ยื่นแล้ว</strong>
-              <div className="muted">ดูรายการย้อนหลังตามวันที่ยื่น</div>
+              <div className="muted">ดูรายการที่ยื่นแล้ว แยกรถยนต์ / มอเตอร์ไซค์ ตามแบบใบส่งงาน</div>
             </button>
           </div>
         </section>
@@ -468,82 +451,7 @@ export default function SubmitDocumentsPage() {
           <button type="button" className="text-button" style={{ marginBottom: 14 }} onClick={() => setPhase("menu")}>
             ← กลับเมนู
           </button>
-          <section className="panel" style={{ padding: 22, marginBottom: 20 }}>
-            <p style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 500, color: "#18243c" }}>เลือกวันที่ต้องการดู</p>
-            {recordsLoading ? (
-              <div className="customer-message" role="status">
-                กำลังโหลด...
-              </div>
-            ) : recordDates.length === 0 ? (
-              <p className="muted">ยังไม่มีข้อมูลที่ยื่นแล้ว</p>
-            ) : (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {recordDates.map((date) => (
-                  <button
-                    key={date}
-                    className={`filter-chip${selectedRecordDate === date ? " selected" : ""}`}
-                    onClick={() => setSelectedRecordDate(date)}
-                  >
-                    {isoToDisplayDate(date) || date} ({recordsByDate.get(date)?.length ?? 0} คัน)
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {selectedRecordDate && (
-            <section className="panel" style={{ padding: 22 }}>
-              <p style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 500 }}>รายการวันที่ {isoToDisplayDate(selectedRecordDate)}</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {selectedRecordRows.map((row) => (
-                  <div
-                    key={row.id}
-                    style={{
-                      border: "1px solid #eef0f6",
-                      borderRadius: 8,
-                      padding: "12px 16px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 10,
-                    }}
-                  >
-                    <div>
-                      <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 500 }}>
-                        {row.vehicle.chassis} <span style={{ fontWeight: 400, color: "#8a90a2" }}>· {row.vehicle.body || "—"}</span>
-                      </p>
-                      <p className="muted">
-                        {row.vehicle.customer.name} · เจ้าของรถ {row.vehicle.owner ? `${row.vehicle.owner.name || "(ไม่มีชื่อ)"} (${OWNER_TYPE_LABEL[row.vehicle.owner.ownerType]})` : "ยังไม่ระบุ"}
-                        {row.vehicle.plateCategory ? ` · ทะเบียน ${row.vehicle.plateCategory} ${row.vehicle.plateNumber}` : ""}
-                      </p>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ fontSize: 15, fontWeight: 500, color: "#2854d9" }}>
-                        {formatMoney(Number(row.billFeeTotal) + Number(row.noBillTotal) + Number(row.taxAmount ?? 0))} บาท
-                      </span>
-                      {row.status === "PENDING" && <span className="badge warn">รอใบเสร็จ</span>}
-                      {row.status === "RECEIPT_RECEIVED" && <span className="badge done">ได้รับใบเสร็จแล้ว</span>}
-                      {row.status === "FAILED" && <span className="badge" style={{ background: "#fdecec", color: "#b43434" }}>ยื่นไม่สำเร็จ</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  marginTop: 16,
-                  paddingTop: 16,
-                  borderTop: "1px solid #e3e6ee",
-                }}
-              >
-                <span style={{ fontSize: 14, fontWeight: 500 }}>รวมวันนี้</span>
-                <span style={{ fontSize: 20, fontWeight: 500, color: "#2854d9" }}>{formatMoney(selectedRecordTotal)} บาท</span>
-              </div>
-            </section>
-          )}
+          <SubmittedRecordsView records={records} loading={recordsLoading} />
         </>
       )}
 
