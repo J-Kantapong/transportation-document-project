@@ -3,8 +3,15 @@ import type { DocumentSubmission } from "@/lib/api";
 // ใบส่งงาน 2 แบบตามตัวอย่าง PDF ของผู้ใช้ (กระดาษ A4 แนวตั้ง หัวใบซ้ำทุกหน้า):
 // - "car" (ยื่นเอกสารจดใหม่.pdf): หน้าละ 20 คัน หัวใบ = ชื่อบริษัท/วันที่/หมายเหตุ/รวม - "รวม" คือยอดของทั้งใบ (ทุกหน้า)
 //   ไม่ใช่เฉพาะหน้านั้น
-// - "moto" (ยื่นเอกสารจดใหม่รถจักรยานยนต์.pdf): หน้าละ 30 คัน หัวใบ = ชื่อเจ้าของงาน + วันที่ ไม่มียอดรวม/หมายเหตุ
+// - "moto" (ยื่นเอกสารจดใหม่รถจักรยานยนต์.pdf): หน้าละ 30 คัน หัวใบ = "มนต์ชัย จิตกุศลรุ่งเรือง - {เจ้าของงาน}" + วันที่ ไม่มียอดรวม/หมายเหตุ
 export type JobSheetKind = "car" | "moto";
+
+// ชื่อที่ขึ้นต้นหัวใบมอเตอร์ไซค์ทุกใบเสมอ (ผู้ใช้กำหนด) - ส่วนที่แก้ไขได้คือชื่อเจ้าของงานที่ตามหลัง
+export const MOTO_TITLE_PREFIX = "มนต์ชัย จิตกุศลรุ่งเรือง";
+
+export function jobSheetPrintedTitle(sheet: Pick<JobSheet, "kind" | "title">): string {
+  return sheet.kind === "moto" ? `${MOTO_TITLE_PREFIX} - ${sheet.title}` : sheet.title;
+}
 
 export function jobSheetRowsPerPage(kind: JobSheetKind): number {
   return kind === "moto" ? 30 : 20;
@@ -146,10 +153,10 @@ function pageHtml(sheet: JobSheet, pageIndex: number): string {
   const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
 
   if (sheet.kind === "moto") {
-    // หัวใบและหัวตารางอยู่ตารางเดียวกันติดกัน (ตามตัวอย่าง): แถวบน = ชื่อเจ้าของงาน (กลาง) + "วันที่" + วันที่ตัวใหญ่
+    // หัวใบและหัวตารางอยู่ตารางเดียวกันติดกัน (ตามตัวอย่าง): แถวบน = "มนต์ชัย จิตกุศลรุ่งเรือง - เจ้าของงาน" (กลาง) + "วันที่" + วันที่ตัวใหญ่
     return `<section class="page moto">
 <table class="grid"><colgroup>${cols}</colgroup><thead>
-<tr class="mhead"><th colspan="3" class="mtitle">${escapeHtml(sheet.title)}</th><th class="mdatel">วันที่</th><th class="mdate">${escapeHtml(sheet.dateText)}</th></tr>
+<tr class="mhead"><th colspan="3" class="mtitle">${escapeHtml(jobSheetPrintedTitle(sheet))}</th><th class="mdatel">วันที่</th><th class="mdate">${escapeHtml(sheet.dateText)}</th></tr>
 <tr>${head}</tr></thead><tbody>${body}</tbody></table>
 <div class="pageno">${pageIndex + 1}</div>
 </section>`;

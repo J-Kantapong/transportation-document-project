@@ -7,14 +7,15 @@ import {
   formatSheetMoney,
   jobSheetPageCount,
   jobSheetRowsPerPage,
+  MOTO_TITLE_PREFIX,
   printJobSheets,
   type JobSheetKind,
 } from "@/lib/job-sheet-print";
 
 // ชื่อหัวใบส่งงานเริ่มต้น - แก้ไขได้ก่อนพิมพ์
 // - ใบรถยนต์: ชื่อบริษัทของลูกค้าถ้ามี ไม่งั้น "บริษัท {ชื่อลูกค้า}" (ตามตัวอย่าง "บริษัท SP")
-// - ใบมอเตอร์ไซค์: หัวใบบอกว่าเป็นงานของใคร = ชื่อลูกค้า (เจ้าของงาน) ตรงๆ ตามตัวอย่าง; กลุ่มด่วนต่อท้าย "(ด่วน)" เพราะใบมอเตอร์ไซค์
-//   ไม่มีช่องหมายเหตุ จะได้แยกใบด่วนออกจากใบธรรมดาของเจ้าของงานเดียวกันได้
+// - ใบมอเตอร์ไซค์: ส่วนที่แก้ได้ = ชื่อลูกค้า (เจ้าของงาน) - ตอนพิมพ์ขึ้นต้นด้วย "มนต์ชัย จิตกุศลรุ่งเรือง - " เสมอ (MOTO_TITLE_PREFIX);
+//   กลุ่มด่วนต่อท้าย "(ด่วน)" เพราะใบมอเตอร์ไซค์ไม่มีช่องหมายเหตุ จะได้แยกใบด่วนออกจากใบธรรมดาของเจ้าของงานเดียวกันได้
 function defaultTitleFor(kind: JobSheetKind, urgent: boolean): (r: DocumentSubmission) => string {
   return (r) => {
     const c = r.vehicle.customer;
@@ -82,7 +83,10 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
           >
             <label className="field" style={{ gap: 4 }}>
               ชื่อหัวใบ · วันที่ {sheet.dateText}
-              <input type="text" value={sheet.title} onChange={(e) => setTitleEdits((prev) => ({ ...prev, [sheet.key]: e.target.value }))} />
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {kind === "moto" && <span style={{ whiteSpace: "nowrap" }}>{MOTO_TITLE_PREFIX} -</span>}
+                <input type="text" style={{ flex: 1 }} value={sheet.title} onChange={(e) => setTitleEdits((prev) => ({ ...prev, [sheet.key]: e.target.value }))} />
+              </span>
             </label>
             <div style={{ textAlign: "right", fontSize: 13 }}>
               <div>
