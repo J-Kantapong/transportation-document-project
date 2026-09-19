@@ -254,29 +254,19 @@ export interface InspectionVehicle {
   brandName: string;
   body: string | null;
   registrationProvince: string | null;
-  suggestedCost: string | null;
+  suggestedCost: string | null; // ราคาตรวจรถ (No bill) ตามตาราง
+  // รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน - inspectionRound บอกว่าข้อมูลส่งตรวจ/ผลตรวจชุดนี้เป็นของรอบไหน
+  inspectionRound: 1 | 2;
+  round2Due: boolean; // รอบ 1 ผ่านครบ 90 วัน ถึงกำหนดตรวจรอบ 2 (ยังไม่ได้ส่ง)
+  suggestedBillCost: string | null; // ค่าตรวจรถ (Bill) 50 บาท - มีเฉพาะรอบ 2
   inspectionSentType: 'ส่งตรวจนอก' | 'เอารถมาตรวจเอง' | null;
   inspectionSentDate: string | null;
-  inspectionSentCost: string | null;
+  inspectionSentCost: string | null; // ราคาตรวจรถ (No bill)
+  inspectionSentBillCost: string | null; // ค่าตรวจรถ (Bill)
   inspectionResult: 'ผ่าน' | 'ไม่ผ่าน' | null;
   inspectionResultDate: string | null;
   inspectionResultCost: string | null;
   inspectionFailRemark: string | null;
-}
-
-export interface Round2Vehicle {
-  id: string;
-  date: string;
-  customerName: string;
-  chassis: string;
-  brandName: string;
-  body: string | null;
-  registrationProvince: string | null;
-  inspectionResultDate: string | null;
-  suggestedRound2Cost: string | null;
-  inspectionRound2Done: boolean;
-  inspectionRound2Date: string | null;
-  inspectionRound2Cost: string | null;
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -378,11 +368,16 @@ export const api = {
   listPendingInspectionSend: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/pending-send'),
   listPendingInspectionResult: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/pending-result'),
   listRecentlyCompletedInspection: () => request<{ vehicles: InspectionVehicle[] }>('/api/vehicles/inspection/completed'),
-  updateInspectionSent: (id: string, data: { sentType: string; sentDate: string | null; cost: string | null }) =>
-    request<{ vehicle: Pick<InspectionVehicle, 'id' | 'inspectionSentType' | 'inspectionSentDate' | 'inspectionSentCost'> }>(
-      `/api/vehicles/${id}/inspection-sent`,
-      { method: 'PATCH', body: JSON.stringify(data) },
-    ),
+  updateInspectionSent: (
+    id: string,
+    data: { sentType: string; sentDate: string | null; cost: string | null; billCost: string | null },
+  ) =>
+    request<{
+      vehicle: Pick<
+        InspectionVehicle,
+        'id' | 'inspectionRound' | 'inspectionSentType' | 'inspectionSentDate' | 'inspectionSentCost' | 'inspectionSentBillCost'
+      >;
+    }>(`/api/vehicles/${id}/inspection-sent`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateInspectionResult: (
     id: string,
     data: { result: string; resultDate: string | null; cost: string | null; remark: string | null },
@@ -393,15 +388,6 @@ export const api = {
         'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionFailRemark'
       >;
     }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
-
-  listPendingInspectionRound2: () => request<{ vehicles: Round2Vehicle[] }>('/api/vehicles/inspection/round2-pending'),
-  listRecentlyCompletedInspectionRound2: () =>
-    request<{ vehicles: Round2Vehicle[] }>('/api/vehicles/inspection/round2-completed'),
-  updateInspectionRound2: (id: string, data: { done: boolean; date: string | null; cost: string | null }) =>
-    request<{ vehicle: Pick<Round2Vehicle, 'id' | 'inspectionRound2Done' | 'inspectionRound2Date' | 'inspectionRound2Cost'> }>(
-      `/api/vehicles/${id}/inspection-round2`,
-      { method: 'PATCH', body: JSON.stringify(data) },
-    ),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>

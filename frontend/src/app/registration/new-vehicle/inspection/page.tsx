@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, type InspectionVehicle, type Round2Vehicle } from "@/lib/api";
+import { api, ApiError, type InspectionVehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
 
@@ -42,7 +42,8 @@ function matchesProvinceFilter(v: InspectionVehicle, filter: ProvinceFilter): bo
 interface SendRowState {
   selectedType: SentType | null;
   dateText: string;
-  costText: string;
+  costText: string; // ราคาตรวจรถ (No bill)
+  billCostText: string; // ค่าตรวจรถ (Bill) - เฉพาะรอบ 2
   saving: boolean;
   message: { text: string; error?: boolean };
 }
@@ -56,19 +57,12 @@ interface ResultRowState {
   message: { text: string; error?: boolean };
 }
 
-interface Round2RowState {
-  selected: boolean;
-  dateText: string;
-  costText: string;
-  saving: boolean;
-  message: { text: string; error?: boolean };
-}
-
 function toSendRowState(): SendRowState {
   return {
     selectedType: null,
     dateText: "",
     costText: "",
+    billCostText: "",
     saving: false,
     message: { text: "" },
   };
@@ -85,9 +79,34 @@ function addDaysIso(iso: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+// วันส่งตรวจเริ่มต้น = วันถัดไปของวันที่รับงาน - ส่งตรวจใหม่หลังตรวจไม่ผ่านใช้วันถัดไปของวันที่ทราบผลแทน
+// ถึงกำหนดตรวจรอบ 2 ใช้วันนี้ (วันที่ผ่านรอบ 1 + 1 จะย้อนหลังไป 90 วัน)
+function defaultSendDateIso(v: InspectionVehicle): string {
+  if (v.round2Due) return todayIso();
+  const base = v.inspectionResult === "ไม่ผ่าน" && v.inspectionResultDate ? v.inspectionResultDate : v.date;
+  return addDaysIso(base, 1);
+}
+
 // ลำดับข้อมูลหลักที่ใช้ร่วมกันทุกแถวในหน้านี้ อยู่บรรทัดเดียว: วันที่ - เลขตัวถัง - ยี่ห้อ - ประเภทรถ - เจ้าของงาน
 function rowInfoLine(v: { date: string; chassis: string; brandName: string; body: string | null; customerName: string }): string {
   return `${isoToDisplayDate(v.date) || v.date} · ${v.chassis} · ${v.brandName} · ${v.body || "—"} · ${v.customerName}`;
+}
+
+// หมายเหตุตามระบบในคิวส่งตรวจ: ถึงกำหนดตรวจรอบ 2 หรือตรวจไม่ผ่านต้องส่งตรวจใหม่ - ว่าง = ส่งตรวจครั้งแรก
+function sendQueueNote(v: InspectionVehicle): string {
+  if (v.round2Due) {
+    return `ครบ 90 วันหลังผ่านตรวจรอบ 1 (${v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}) — ตรวจรอบ 2`;
+  }
+  if (v.inspectionResult === "ไม่ผ่าน") {
+    const round = v.inspectionRound === 2 ? "รอบ 2 " : "";
+    const date = v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "";
+    return `ตรวจ${round}ไม่ผ่าน ${date} · ${v.inspectionFailRemark || "—"} — ส่งตรวจใหม่`;
+  }
+  return "";
+}
+
+function roundLabel(v: InspectionVehicle): string {
+  return v.inspectionRound === 2 ? "รอบ 2" : "รอบ 1";
 }
 
 // แบ่งหน้าละ 10 คัน ทุก panel ในหน้านี้ - select all/บันทึกทั้งหมด ยังทำงานกับทั้งลิสต์ ไม่ใช่แค่หน้าที่เห็น
@@ -129,15 +148,12 @@ function toResultRowState(): ResultRowState {
   };
 }
 
-function toRound2RowState(): Round2RowState {
-  return { selected: false, dateText: "", costText: "", saving: false, message: { text: "" } };
-}
-
 function validateSendRow(row: SendRowState): { dateIso: string } {
   const digits = row.dateText.replace(/\D/g, "");
   const dateIso = digits ? displayDateToIso(digits) : "";
   if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
-  if (row.costText && !/^\d+(\.\d+)?$/.test(row.costText)) throw new Error("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
+  if (row.costText && !/^\d+(\.\d+)?$/.test(row.costText)) throw new Error("ราคาตรวจรถ (No bill) ต้องเป็นตัวเลขตั้งแต่ 0");
+  if (row.billCostText && !/^d+(.d+)?$/.test(row.billCostText)) throw new Error("ค่าตรวจรถ (Bill) ต้องเป็นตัวเลขตั้งแต่ 0");
   return { dateIso };
 }
 
@@ -150,12 +166,10 @@ function validateResultRow(row: ResultRowState, panelResult: ResultType): { date
   return { dateIso };
 }
 
-function validateRound2Row(row: Round2RowState): { dateIso: string } {
-  const digits = row.dateText.replace(/\D/g, "");
-  const dateIso = digits ? displayDateToIso(digits) : "";
-  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
-  if (row.costText && !/^\d+(\.\d+)?$/.test(row.costText)) throw new Error("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
-  return { dateIso };
+// ตรวจไม่ผ่าน = ไม่มีค่าใช้จ่ายตรวจ (ได้เงินคืน) - backend บังคับเป็น 0 ซ้ำอีกชั้น
+function resultDefaultCost(v: InspectionVehicle, panelResult: ResultType): string {
+  if (panelResult === "ไม่ผ่าน") return "0";
+  return v.inspectionSentCost || v.suggestedCost || "";
 }
 
 const COMPLETED_DETAIL_FIELDS: Array<[string, (v: InspectionVehicle) => string]> = [
@@ -165,9 +179,11 @@ const COMPLETED_DETAIL_FIELDS: Array<[string, (v: InspectionVehicle) => string]>
   ["ยี่ห้อ", (v) => v.brandName],
   ["ประเภทรถ", (v) => v.body ?? ""],
   ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince ?? ""],
+  ["รอบตรวจ", roundLabel],
   ["ประเภทการตรวจ", (v) => v.inspectionSentType ?? ""],
   ["วันที่ส่งตรวจ", (v) => (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "")],
-  ["ค่าใช้จ่าย (ส่งตรวจ)", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "")],
+  ["ราคาตรวจรถ (No bill)", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "")],
+  ["ค่าตรวจรถ (Bill)", (v) => (v.inspectionSentBillCost ? `${v.inspectionSentBillCost} บาท` : "")],
   ["ผลตรวจ", (v) => v.inspectionResult ?? ""],
   ["วันที่ตรวจเสร็จ", (v) => (v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "")],
   ["ค่าใช้จ่าย (ผลตรวจ)", (v) => (v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "")],
@@ -273,7 +289,8 @@ function SendPanel({
             <div className="inspect-row-controls inspect-row-controls--send">
               <div>ประเภทการส่งตรวจ</div>
               <div>วันที่</div>
-              <div>ค่าใช้จ่าย</div>
+              <div>ราคาตรวจรถ (No bill)</div>
+              <div>ค่าตรวจรถ (Bill)</div>
               <div />
             </div>
           </div>
@@ -287,6 +304,11 @@ function SendPanel({
                     <div className="inspect-row-title">
                       {rowInfoLine(v)} <span>· {v.registrationProvince || "—"}</span>
                     </div>
+                    {sendQueueNote(v) && (
+                      <div className="customer-message error" style={{ fontSize: 11, marginTop: 6 }}>
+                        หมายเหตุ: {sendQueueNote(v)}
+                      </div>
+                    )}
                     {row.message.text && (
                       <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
                         {row.message.text}
@@ -326,10 +348,21 @@ function SendPanel({
                       type="number"
                       min={0}
                       step="any"
-                      aria-label="ค่าใช้จ่าย"
+                      aria-label="ราคาตรวจรถ (No bill)"
                       value={row.costText}
                       disabled={!row.selectedType}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
+                    />
+                    {/* ค่าตรวจรถ (Bill) มีเฉพาะรอบ 2 - รอบ 1 ปิดช่องไว้ */}
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      aria-label="ค่าตรวจรถ (Bill)"
+                      placeholder={v.suggestedBillCost == null ? "—" : ""}
+                      value={row.billCostText}
+                      disabled={!row.selectedType || v.suggestedBillCost == null}
+                      onChange={(e) => patchRow(v.id, { billCostText: e.target.value })}
                     />
                     <button
                       className="text-button"
@@ -424,7 +457,7 @@ function ResultPanel({
                 <div className="inspect-row" key={v.id}>
                   <div className="inspect-row-body">
                     <div className="inspect-row-title">
-                      {rowInfoLine(v)} <span>· ส่งตรวจแบบ {v.inspectionSentType || "—"}</span>
+                      {rowInfoLine(v)} <span>· {roundLabel(v)} · ส่งตรวจแบบ {v.inspectionSentType || "—"}</span>
                     </div>
                     {row.message.text && (
                       <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
@@ -449,8 +482,9 @@ function ResultPanel({
                                     ? isoToDisplayDate(v.inspectionSentDate)
                                     : isoToDisplayDate(todayIso())
                                   : row.dateText,
-                              // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กกลับให้คืนราคาแนะนำถ้าช่องว่างอยู่
-                              costText: isChecked ? row.costText || v.inspectionSentCost || v.suggestedCost || "" : "",
+                              // เอาติ๊กออก = เอาราคาออกด้วย - ติ๊กให้ใช้ราคาตอนส่งตรวจ/ราคาแนะนำ
+                              // ตรวจไม่ผ่าน = ไม่มีค่าใช้จ่าย (ได้เงินคืน) จึงเป็น 0 เสมอ
+                              costText: isChecked ? resultDefaultCost(v, panelResult) : "",
                             });
                           }}
                         />
@@ -473,7 +507,7 @@ function ResultPanel({
                       step="any"
                       aria-label="ค่าใช้จ่าย"
                       value={row.costText}
-                      disabled={!checked}
+                      disabled={!checked || panelResult === "ไม่ผ่าน"}
                       onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                     />
                     {showRemark && (
@@ -500,148 +534,8 @@ function ResultPanel({
   );
 }
 
-// Tab 4 - ตรวจรถรอบ 2: ผ่านตรวจครั้งแรกแล้วครบ 90 วัน ต้องตรวจใหม่ - action เดียว (ไม่มีตรวจนอก/เอารถมาตรวจเองแยก)
-// ราคาแนะนำ = No bill ตามตารางเดิม + Bill 50 บาท (คำนวณจาก backend แล้วส่งมาเป็น suggestedRound2Cost)
-function Round2Panel({
-  vehicles,
-  rows,
-  patchRow,
-  onCheck,
-  onSelectAll,
-  onSave,
-  onSaveAll,
-  bulkSaving,
-  bulkMessage,
-  selectAllDateText,
-  onSelectAllDateTextChange,
-}: {
-  vehicles: Round2Vehicle[];
-  rows: Record<string, Round2RowState>;
-  patchRow: (id: string, patch: Partial<Round2RowState>) => void;
-  onCheck: (id: string, checked: boolean) => void;
-  onSelectAll: (checked: boolean) => void;
-  onSave: (id: string) => void;
-  onSaveAll: () => void;
-  bulkSaving: boolean;
-  bulkMessage: { text: string; error?: boolean };
-  selectAllDateText: string;
-  onSelectAllDateTextChange: (text: string) => void;
-}) {
-  const selectedCount = vehicles.filter((v) => rows[v.id]?.selected).length;
-  const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selected);
-  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
-
-  return (
-    <div className="panel" style={{ marginBottom: 24 }}>
-      <div className="panel-head">
-        <h2>รถที่ครบกำหนดตรวจรอบ 2 (90 วันหลังผ่านตรวจครั้งแรก)</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {bulkMessage.text && (
-            <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
-              {bulkMessage.text}
-            </span>
-          )}
-          <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
-            บันทึกทั้งหมด
-          </button>
-        </div>
-      </div>
-
-      {!vehicles.length ? (
-        <div className="empty-customers">ไม่มีรถที่ครบกำหนดตรวจรอบ 2</div>
-      ) : (
-        <>
-          <div className="inspect-select-all">
-            <div className="inspect-select-all-info">
-              <label>
-                วันที่ (ใช้กับที่เลือกทั้งหมด)
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
-                  value={selectAllDateText}
-                  onChange={(e) => onSelectAllDateTextChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
-                  style={{ width: 100 }}
-                />
-              </label>
-              <span className="muted">({vehicles.length} คัน)</span>
-            </div>
-            <div className="inspect-row-checks">
-              <label>
-                <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
-                เลือกทั้งหมด
-              </label>
-            </div>
-          </div>
-          <div className="inspect-row-header">
-            <div className="inspect-row-body">วันที่ · เลขตัวถัง · ยี่ห้อ · ประเภทรถ · เจ้าของงาน · วันที่ผ่านตรวจครั้งแรก</div>
-            <div className="inspect-row-controls inspect-row-controls--round2">
-              <div>ตรวจรอบ 2</div>
-              <div>วันที่</div>
-              <div>ค่าใช้จ่าย</div>
-              <div />
-            </div>
-          </div>
-          <div className="inspect-rows">
-            {pageItems.map((v) => {
-              const row = rows[v.id];
-              if (!row) return null;
-              return (
-                <div className="inspect-row" key={v.id}>
-                  <div className="inspect-row-body">
-                    <div className="inspect-row-title">
-                      {rowInfoLine(v)}{" "}
-                      <span>· ผ่านตรวจครั้งแรก {v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</span>
-                    </div>
-                    {row.message.text && (
-                      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11, marginTop: 6 }} role="status">
-                        {row.message.text}
-                      </div>
-                    )}
-                  </div>
-                  <div className="inspect-row-controls inspect-row-controls--round2">
-                    <div className="inspect-row-checks">
-                      <label>
-                        <input type="checkbox" checked={row.selected} onChange={(e) => onCheck(v.id, e.target.checked)} />
-                        ตรวจรอบ 2 เรียบร้อย
-                      </label>
-                    </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      aria-label="วันที่"
-                      placeholder="วว/ดด/ปปปป"
-                      value={row.dateText}
-                      onChange={(e) =>
-                        patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
-                      }
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      aria-label="ค่าใช้จ่าย"
-                      value={row.costText}
-                      disabled={!row.selected}
-                      onChange={(e) => patchRow(v.id, { costText: e.target.value })}
-                    />
-                    <button className="text-button" disabled={!row.selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                      บันทึก
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-        </>
-      )}
-    </div>
-  );
-}
-
 // อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่ยังไม่ได้ส่งตรวจ" ใน Tab 2, "รถที่เพิ่งส่งตรวจ" ใน Tab 1,
-// และ "ตรวจรอบ 2 เสร็จแล้ว" ใน Tab 4 - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
+// และ "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" รอบ 2 ใน Tab 4 - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
 // (คอลัมน์จัดแนวกันเองโดยธรรมชาติของ <table>, ไม่มี action/input ต่อแถวจึงไม่มีปัญหาแถวกว้างเกินไป)
 function ReferencePanel<T extends { id: string }>({
   title,
@@ -710,6 +604,7 @@ const PENDING_SEND_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = 
   ["ยี่ห้อ", (v) => v.brandName],
   ["ประเภทรถ", (v) => v.body || "—"],
   ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince || "—"],
+  ["หมายเหตุ", (v) => sendQueueNote(v) || "—"],
 ];
 
 const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> = [
@@ -718,20 +613,11 @@ const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> 
   ["เลขตัวถัง", (v) => v.chassis],
   ["ยี่ห้อ", (v) => v.brandName],
   ["ประเภทรถ", (v) => v.body || "—"],
+  ["รอบตรวจ", roundLabel],
   ["ประเภทการส่งตรวจ", (v) => v.inspectionSentType || "—"],
   ["วันที่ส่งตรวจ", (v) => (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—")],
-  ["ค่าใช้จ่าย", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—")],
-];
-
-const ROUND2_COMPLETED_COLUMNS: Array<[string, (v: Round2Vehicle) => string]> = [
-  ["วันที่", (v) => isoToDisplayDate(v.date) || v.date],
-  ["ชื่อลูกค้า", (v) => v.customerName],
-  ["เลขตัวถัง", (v) => v.chassis],
-  ["ยี่ห้อ", (v) => v.brandName],
-  ["ประเภทรถ", (v) => v.body || "—"],
-  ["วันที่ผ่านครั้งแรก", (v) => (v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—")],
-  ["วันที่ตรวจรอบ 2", (v) => (v.inspectionRound2Date ? isoToDisplayDate(v.inspectionRound2Date) : "—")],
-  ["ค่าใช้จ่าย", (v) => (v.inspectionRound2Cost ? `${v.inspectionRound2Cost} บาท` : "—")],
+  ["ราคาตรวจรถ (No bill)", (v) => (v.inspectionSentCost ? `${v.inspectionSentCost} บาท` : "—")],
+  ["ค่าตรวจรถ (Bill)", (v) => (v.inspectionSentBillCost ? `${v.inspectionSentBillCost} บาท` : "—")],
 ];
 
 // ใช้ร่วมกันท้าย Tab 1 และ Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
@@ -773,6 +659,7 @@ function CompletedInspectionPanel({
                   <th>เลขตัวถัง</th>
                   <th>ยี่ห้อ</th>
                   <th>ประเภทรถ</th>
+                  <th>รอบตรวจ</th>
                   <th>ผลตรวจ</th>
                   <th>วันที่เสร็จ</th>
                   <th>ค่าใช้จ่าย</th>
@@ -787,6 +674,7 @@ function CompletedInspectionPanel({
                     <td>{v.chassis}</td>
                     <td>{v.brandName}</td>
                     <td>{v.body || "—"}</td>
+                    <td>{roundLabel(v)}</td>
                     <td>{v.inspectionResult || "—"}</td>
                     <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
                     <td>{v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}</td>
@@ -808,7 +696,7 @@ function CompletedInspectionPanel({
 }
 
 export default function InspectionPage() {
-  const [activeTab, setActiveTab] = useState<"send" | "result" | "round2" | "completed">("send");
+  const [activeTab, setActiveTab] = useState<"send" | "result" | "completed">("send");
 
   // Tab 1: ผ่าน Step 2 แล้ว แต่ยังไม่ได้ส่งตรวจ
   const [pendingSendVehicles, setPendingSendVehicles] = useState<InspectionVehicle[]>([]);
@@ -837,30 +725,20 @@ export default function InspectionPage() {
   const [completedError, setCompletedError] = useState("");
 
   // Tab 4: ผ่านตรวจครั้งแรกแล้ว ครบ 90 วัน ต้องตรวจรอบ 2
-  const [pendingRound2Vehicles, setPendingRound2Vehicles] = useState<Round2Vehicle[]>([]);
-  const [round2Rows, setRound2Rows] = useState<Record<string, Round2RowState>>({});
-  const [round2Loading, setRound2Loading] = useState(true);
-  const [round2Error, setRound2Error] = useState("");
-  const [round2BulkSaving, setRound2BulkSaving] = useState(false);
-  const [round2BulkMessage, setRound2BulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
-  const [round2SelectAllDateText, setRound2SelectAllDateText] = useState("");
-
-  const [completedRound2Vehicles, setCompletedRound2Vehicles] = useState<Round2Vehicle[]>([]);
-  const [completedRound2Loading, setCompletedRound2Loading] = useState(true);
-  const [completedRound2Error, setCompletedRound2Error] = useState("");
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<InspectionVehicle | null>(null);
 
-  // พิมพ์ใบรายการรถส่งตรวจ (PDF) - อ้างอิงรถที่ส่งตรวจแล้วรอผล (pendingResultVehicles)
+  // พิมพ์ใบรายการรถส่งตรวจ (PDF) - เฉพาะรถส่งตรวจนอกที่รอผล รถที่เอามาตรวจเองไม่ต้องพิมพ์
+  const sentOutPendingVehicles = pendingResultVehicles.filter((v) => v.inspectionSentType !== "เอารถมาตรวจเอง");
   const printDialogRef = useRef<HTMLDialogElement>(null);
   const [printHeader, setPrintHeader] = useState(DEFAULT_INSPECTION_PRINT_HEADER);
   const [printSentDate, setPrintSentDate] = useState<string>("all");
-  const printSentDates = [...new Set(pendingResultVehicles.map((v) => v.inspectionSentDate).filter((d): d is string => !!d))].sort(
+  const printSentDates = [...new Set(sentOutPendingVehicles.map((v) => v.inspectionSentDate).filter((d): d is string => !!d))].sort(
     (a, b) => b.localeCompare(a),
   );
   const printVehicles =
-    printSentDate === "all" ? pendingResultVehicles : pendingResultVehicles.filter((v) => v.inspectionSentDate === printSentDate);
+    printSentDate === "all" ? sentOutPendingVehicles : sentOutPendingVehicles.filter((v) => v.inspectionSentDate === printSentDate);
 
   async function loadPendingSend() {
     setSendLoading(true);
@@ -908,44 +786,12 @@ export default function InspectionPage() {
     }
   }
 
-  async function loadPendingRound2() {
-    setRound2Loading(true);
-    setRound2Error("");
-    try {
-      const data = await api.listPendingInspectionRound2();
-      setPendingRound2Vehicles(data.vehicles);
-      setRound2Rows(Object.fromEntries(data.vehicles.map((v) => [v.id, toRound2RowState()])));
-    } catch (err) {
-      setRound2Error(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
-      setPendingRound2Vehicles([]);
-      setRound2Rows({});
-    } finally {
-      setRound2Loading(false);
-    }
-  }
-
-  async function loadCompletedRound2() {
-    setCompletedRound2Loading(true);
-    setCompletedRound2Error("");
-    try {
-      const data = await api.listRecentlyCompletedInspectionRound2();
-      setCompletedRound2Vehicles(data.vehicles);
-    } catch (err) {
-      setCompletedRound2Error(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
-      setCompletedRound2Vehicles([]);
-    } finally {
-      setCompletedRound2Loading(false);
-    }
-  }
-
   useEffect(() => {
     // Standard fetch-on-mount; load*() set their own loading flag before the first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPendingSend();
     loadPendingResult();
     loadCompleted();
-    loadPendingRound2();
-    loadCompletedRound2();
   }, []);
 
   function patchSendRow(id: string, patch: Partial<SendRowState>) {
@@ -963,9 +809,11 @@ export default function InspectionPage() {
     patchSendRow(id, {
       selectedType: checked ? type : null,
       // Default = วันถัดไปของวันที่รับงาน (ไม่ใช่วันนี้) - งานส่งตรวจปกติจะทำวันรุ่งขึ้น
-      dateText: checked && !row.dateText && vehicle ? isoToDisplayDate(addDaysIso(vehicle.date, 1)) : row.dateText,
+      dateText: checked && !row.dateText && vehicle ? isoToDisplayDate(defaultSendDateIso(vehicle)) : row.dateText,
       // เอาติ๊กออก = เอาราคาออกด้วย (ช่องราคาจะถูก disable ต่อเมื่อไม่ได้ติ๊กอยู่แล้ว)
       costText: checked ? costForSentType(type, vehicle?.suggestedCost ?? null) : "",
+      // ค่าตรวจรถ (Bill) เฉพาะรอบ 2 - backend ส่ง suggestedBillCost = null มาสำหรับรอบ 1
+      billCostText: checked ? (vehicle?.suggestedBillCost ?? "") : "",
     });
   }
 
@@ -981,11 +829,12 @@ export default function InspectionPage() {
           next[v.id] = {
             ...row,
             selectedType: type,
-            dateText: sendSelectAllDateText || isoToDisplayDate(addDaysIso(v.date, 1)),
+            dateText: sendSelectAllDateText || isoToDisplayDate(defaultSendDateIso(v)),
             costText: costForSentType(type, v.suggestedCost),
+            billCostText: v.suggestedBillCost ?? "",
           };
         } else if (row.selectedType === type) {
-          next[v.id] = { ...row, selectedType: null, costText: "" };
+          next[v.id] = { ...row, selectedType: null, costText: "", billCostText: "" };
         }
       }
       return next;
@@ -1005,7 +854,12 @@ export default function InspectionPage() {
 
     patchSendRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
-      await api.updateInspectionSent(id, { sentType: row.selectedType, sentDate: dateIso || null, cost: row.costText || null });
+      await api.updateInspectionSent(id, {
+        sentType: row.selectedType,
+        sentDate: dateIso || null,
+        cost: row.costText || null,
+        billCost: row.billCostText || null,
+      });
       await Promise.all([loadPendingSend(), loadPendingResult()]);
     } catch (err) {
       patchSendRow(id, {
@@ -1019,13 +873,13 @@ export default function InspectionPage() {
     const selected = filteredSendVehicles.filter((v) => sendRows[v.id]?.selectedType);
     if (!selected.length) return;
 
-    const parsed: Array<{ id: string; chassis: string; type: SentType; dateIso: string; cost: string }> = [];
+    const parsed: Array<{ id: string; chassis: string; type: SentType; dateIso: string; cost: string; billCost: string }> = [];
     for (const v of selected) {
       const row = sendRows[v.id];
       if (!row || !row.selectedType) continue;
       try {
         const { dateIso } = validateSendRow(row);
-        parsed.push({ id: v.id, chassis: v.chassis, type: row.selectedType, dateIso, cost: row.costText });
+        parsed.push({ id: v.id, chassis: v.chassis, type: row.selectedType, dateIso, cost: row.costText, billCost: row.billCostText });
       } catch (err) {
         setSendBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
@@ -1036,7 +890,14 @@ export default function InspectionPage() {
     setSendBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
     try {
       const results = await Promise.allSettled(
-        parsed.map((p) => api.updateInspectionSent(p.id, { sentType: p.type, sentDate: p.dateIso || null, cost: p.cost || null })),
+        parsed.map((p) =>
+          api.updateInspectionSent(p.id, {
+            sentType: p.type,
+            sentDate: p.dateIso || null,
+            cost: p.cost || null,
+            billCost: p.billCost || null,
+          }),
+        ),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       setSendBulkMessage(
@@ -1062,7 +923,9 @@ export default function InspectionPage() {
             selectedResult: panelResult,
             // Default = วันที่ส่งตรวจ (ไม่ใช่วันนี้) - ทราบผลควรอ้างอิงวันที่ส่งไป
             dateText: row.dateText || (v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : isoToDisplayDate(todayIso())),
-            costText: row.costText || v.inspectionSentCost || v.suggestedCost || "",
+            // คงราคาที่แก้ไว้ถ้าแถวอยู่ panel นี้อยู่แล้ว (ยกเว้นตรวจไม่ผ่าน ที่เป็น 0 เสมอ)
+            costText:
+              row.selectedResult === panelResult && panelResult !== "ไม่ผ่าน" ? row.costText : resultDefaultCost(v, panelResult),
           };
         } else if (row.selectedResult === panelResult) {
           next[v.id] = { ...row, selectedResult: null, costText: "" };
@@ -1091,7 +954,8 @@ export default function InspectionPage() {
         cost: row.costText || null,
         remark: row.selectedResult === "ไม่ผ่าน" ? row.remarkText : null,
       });
-      await Promise.all([loadPendingResult(), loadCompleted()]);
+      // ตรวจไม่ผ่านกลับเข้าคิวส่งตรวจ จึงโหลดรายการรอส่งตรวจใหม่ด้วย
+      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
     } catch (err) {
       patchResultRow(id, {
         saving: false,
@@ -1140,104 +1004,9 @@ export default function InspectionPage() {
           ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
           : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
       );
-      await Promise.all([loadPendingResult(), loadCompleted()]);
+      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
     } finally {
       setSaving(false);
-    }
-  }
-
-  function patchRound2Row(id: string, patch: Partial<Round2RowState>) {
-    setRound2Rows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
-  }
-
-  function handleRound2Check(id: string, checked: boolean) {
-    const row = round2Rows[id];
-    if (!row) return;
-    const vehicle = pendingRound2Vehicles.find((v) => v.id === id);
-    patchRound2Row(id, {
-      selected: checked,
-      dateText: checked && !row.dateText ? isoToDisplayDate(todayIso()) : row.dateText,
-      // เอาติ๊กออก = เอาราคาออกด้วย
-      costText: checked ? row.costText || vehicle?.suggestedRound2Cost || "" : "",
-    });
-  }
-
-  function handleSelectAllRound2(checked: boolean) {
-    setRound2Rows((prev) => {
-      const next = { ...prev };
-      for (const v of pendingRound2Vehicles) {
-        const row = next[v.id];
-        if (!row) continue;
-        if (checked) {
-          next[v.id] = {
-            ...row,
-            selected: true,
-            dateText: round2SelectAllDateText || isoToDisplayDate(todayIso()),
-            costText: row.costText || v.suggestedRound2Cost || "",
-          };
-        } else {
-          next[v.id] = { ...row, selected: false, costText: "" };
-        }
-      }
-      return next;
-    });
-  }
-
-  async function handleSaveRound2(id: string) {
-    const row = round2Rows[id];
-    if (!row || !row.selected) return;
-    let dateIso: string;
-    try {
-      ({ dateIso } = validateRound2Row(row));
-    } catch (err) {
-      patchRound2Row(id, { message: { text: (err as Error).message, error: true } });
-      return;
-    }
-
-    patchRound2Row(id, { saving: true, message: { text: "กำลังบันทึก…" } });
-    try {
-      await api.updateInspectionRound2(id, { done: true, date: dateIso || null, cost: row.costText || null });
-      await Promise.all([loadPendingRound2(), loadCompletedRound2()]);
-    } catch (err) {
-      patchRound2Row(id, {
-        saving: false,
-        message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true },
-      });
-    }
-  }
-
-  async function handleSaveAllRound2() {
-    const selected = pendingRound2Vehicles.filter((v) => round2Rows[v.id]?.selected);
-    if (!selected.length) return;
-
-    const parsed: Array<{ id: string; dateIso: string; cost: string }> = [];
-    for (const v of selected) {
-      const row = round2Rows[v.id];
-      if (!row) continue;
-      try {
-        const { dateIso } = validateRound2Row(row);
-        parsed.push({ id: v.id, dateIso, cost: row.costText });
-      } catch (err) {
-        setRound2BulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
-        return;
-      }
-    }
-
-    setRound2BulkSaving(true);
-    setRound2BulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
-    try {
-      const results = await Promise.allSettled(
-        parsed.map((p) => api.updateInspectionRound2(p.id, { done: true, date: p.dateIso || null, cost: p.cost || null })),
-      );
-      const failed = results.filter((r) => r.status === "rejected").length;
-      setRound2BulkMessage(
-        failed
-          ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
-          : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
-      );
-      await Promise.all([loadPendingRound2(), loadCompletedRound2()]);
-    } finally {
-      setRound2BulkSaving(false);
     }
   }
 
@@ -1298,14 +1067,6 @@ export default function InspectionPage() {
         >
           3. รายการที่ตรวจเสร็จล่าสุด
         </button>
-        <button
-          className={`vehicle-tab${activeTab === "round2" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={activeTab === "round2"}
-          onClick={() => setActiveTab("round2")}
-        >
-          4. ตรวจรถรอบ 2 (ครบ 90 วัน)
-        </button>
       </div>
 
       {activeTab === "send" ? (
@@ -1345,7 +1106,7 @@ export default function InspectionPage() {
             loading={resultLoading}
             error={resultError}
             action={
-              <button className="primary" disabled={resultLoading || !pendingResultVehicles.length} onClick={openPrintDialog}>
+              <button className="primary" disabled={resultLoading || !sentOutPendingVehicles.length} onClick={openPrintDialog}>
                 พิมพ์รายการส่งตรวจ (PDF)
               </button>
             }
@@ -1402,43 +1163,8 @@ export default function InspectionPage() {
             </div>
           )}
         </>
-      ) : activeTab === "completed" ? (
-        <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
       ) : (
-        <>
-          {round2Loading ? (
-            <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers">กำลังโหลดรายการ…</div>
-            </div>
-          ) : round2Error ? (
-            <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers" role="alert">
-                {round2Error}
-              </div>
-            </div>
-          ) : (
-            <Round2Panel
-              vehicles={pendingRound2Vehicles}
-              rows={round2Rows}
-              patchRow={patchRound2Row}
-              onCheck={handleRound2Check}
-              onSelectAll={handleSelectAllRound2}
-              onSave={handleSaveRound2}
-              onSaveAll={handleSaveAllRound2}
-              bulkSaving={round2BulkSaving}
-              bulkMessage={round2BulkMessage}
-              selectAllDateText={round2SelectAllDateText}
-              onSelectAllDateTextChange={setRound2SelectAllDateText}
-            />
-          )}
-          <ReferencePanel
-            title="รายการที่ตรวจรอบ 2 เสร็จแล้ว"
-            columns={ROUND2_COMPLETED_COLUMNS}
-            vehicles={completedRound2Vehicles}
-            loading={completedRound2Loading}
-            error={completedRound2Error}
-          />
-        </>
+        <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
       )}
 
       <dialog
@@ -1494,14 +1220,14 @@ export default function InspectionPage() {
             <select value={printSentDate} onChange={(e) => setPrintSentDate(e.target.value)}>
               {printSentDates.map((d) => (
                 <option key={d} value={d}>
-                  {isoToDisplayDate(d)} ({pendingResultVehicles.filter((v) => v.inspectionSentDate === d).length} คัน)
+                  {isoToDisplayDate(d)} ({sentOutPendingVehicles.filter((v) => v.inspectionSentDate === d).length} คัน)
                 </option>
               ))}
-              <option value="all">ทั้งหมด ({pendingResultVehicles.length} คัน)</option>
+              <option value="all">ทั้งหมด ({sentOutPendingVehicles.length} คัน)</option>
             </select>
           </label>
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            คอลัมน์: ลำดับที่ · ประเภทรถ · ยี่ห้อ · เลขตัวถัง · เลขเครื่อง · สี — เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์
+            พิมพ์เฉพาะรถส่งตรวจนอก (ไม่รวมรถที่นำมาตรวจเอง) · คอลัมน์: ลำดับที่ · ประเภทรถ · ยี่ห้อ · เลขตัวถัง · เลขเครื่อง · สี — เลือก &quot;บันทึกเป็น PDF&quot; ในหน้าต่างพิมพ์
           </p>
           <button className="primary" style={{ justifySelf: "end" }} disabled={!printVehicles.length} onClick={handlePrint}>
             พิมพ์ {printVehicles.length} คัน

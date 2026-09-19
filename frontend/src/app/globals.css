@@ -156,7 +156,7 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 
 /* .inspect-row และ .inspect-row-header เรียงเป็น 2 ส่วนซ้อนกันเสมอ: บรรทัดข้อมูล (.inspect-row-body,
    เต็มความกว้าง) ด้านบน แล้ว .inspect-row-controls (grid คอลัมน์คงที่) ด้านล่าง - หัวข้อกับข้อมูลใช้
-   grid-template-columns เดียวกันทุกตัวต่อ panel (--send/--result/--result-remark/--round2) จึงขนานกันเป๊ะ
+   grid-template-columns เดียวกันทุกตัวต่อ panel (--send/--result/--result-remark) จึงขนานกันเป๊ะ
    ไม่ต้องพึ่ง flex ที่ความกว้างแต่ละคอลัมน์ขึ้นกับเนื้อหาซึ่งไม่เท่ากันในแต่ละแถว */
 /* align-items:flex-start กันไม่ให้ลูกที่ไม่ต้องเต็มแถว (เช่นปุ่ม "ดูข้อมูล" เดี่ยวๆ) ถูก stretch
    เต็มความกว้างตาม flex-direction:column default - .inspect-row-body/.inspect-row-controls
@@ -169,11 +169,10 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .inspect-row-title span{font-weight:400;color:#576781}
 
 .inspect-row-controls{align-self:stretch;display:grid;gap:12px;align-items:center}
-.inspect-row-controls--send{grid-template-columns:220px 120px 100px 64px}
+.inspect-row-controls--send{grid-template-columns:220px 120px 100px 100px 64px}
 .inspect-row-controls--result{grid-template-columns:80px 120px 100px 64px}
 .inspect-row-controls--result-remark{grid-template-columns:80px 120px 100px 160px 64px}
-.inspect-row-controls--round2{grid-template-columns:150px 120px 100px 64px}
-@media(max-width:640px){.inspect-row-controls--send,.inspect-row-controls--result,.inspect-row-controls--result-remark,.inspect-row-controls--round2{grid-template-columns:1fr}}
+@media(max-width:640px){.inspect-row-controls--send,.inspect-row-controls--result,.inspect-row-controls--result-remark{grid-template-columns:1fr}}
 
 .inspect-row-checks{display:flex;gap:14px;flex-wrap:wrap;align-items:center;min-width:0}
 .inspect-row-checks label{display:flex;align-items:center;gap:6px;font-size:12px;color:#576781;white-space:nowrap}

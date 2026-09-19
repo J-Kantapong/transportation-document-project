@@ -4,7 +4,6 @@ import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
-import { UpdateInspectionRound2Dto } from './dto/update-inspection-round2.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 import { TaxService } from '../tax/tax.service.js';
@@ -25,6 +24,22 @@ const EDITABLE_VEHICLE_FIELDS = [
   ['registrationProvince', 'จังหวัดที่จดทะเบียน'],
   ['ownerProvince', 'จังหวัดเจ้าของรถ'],
 ] as const;
+
+// ตรวจรอบ 1 ผ่านวันนี้หรือก่อนหน้านี้ = ครบกำหนดตรวจรอบ 2 แล้ว
+function round2Threshold(): Date {
+  const threshold = new Date();
+  threshold.setUTCDate(threshold.getUTCDate() - INSPECTION_ROUND2_WAIT_DAYS);
+  return threshold;
+}
+
+function isRound2Due(vehicle: { inspectionRound: number; inspectionResult: string | null; inspectionResultDate: Date | null }) {
+  return (
+    vehicle.inspectionRound === 1 &&
+    vehicle.inspectionResult === 'ผ่าน' &&
+    vehicle.inspectionResultDate != null &&
+    vehicle.inspectionResultDate <= round2Threshold()
+  );
+}
 
 function diffField(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -56,7 +71,8 @@ function isValidDateParam(value: string): boolean {
 const INSPECTION_SENT_TYPES = ['ส่งตรวจนอก', 'เอารถมาตรวจเอง'] as const;
 const INSPECTION_RESULTS = ['ผ่าน', 'ไม่ผ่าน'] as const;
 
-// ตรวจรถรอบ 2: ต้องตรวจใหม่หลังผ่านครั้งแรกแล้วครบ 90 วัน - ราคา = No bill ตามตารางเดิม + Bill 50 บาท
+// ตรวจรถรอบ 2: รอบ 1 ผ่านครบ 90 วันแล้วรถกลับเข้าคิวส่งตรวจเอง - ค่าใช้จ่ายแยก 2 ส่วน คือราคาตรวจรถ (No bill)
+// ตามตารางเดิม และค่าตรวจรถ (Bill) 50 บาท
 const INSPECTION_ROUND2_WAIT_DAYS = 90;
 const INSPECTION_ROUND2_BILL_FEE = 50;
 
@@ -397,11 +413,19 @@ export class VehiclesService {
     };
   }
 
-  // ผ่าน Step 2 แล้ว (transferDone = true) แต่ยังไม่ได้ส่งตรวจ (inspectionSentDate ยังไม่มี) - ไม่จำกัดวันที่รับงาน
+  // ผ่าน Step 2 แล้ว (transferDone = true) และ: ยังไม่ได้ส่งตรวจ, ตรวจไม่ผ่าน (ส่งตรวจใหม่), หรือตรวจรอบ 1
+  // ผ่านครบ 90 วันแล้ว (ถึงกำหนดตรวจรอบ 2) - ไม่จำกัดวันที่รับงาน
   async findPendingInspectionSend() {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { transferDone: true, inspectionSentDate: null },
+        where: {
+          transferDone: true,
+          OR: [
+            { inspectionSentDate: null },
+            { inspectionResult: 'ไม่ผ่าน' },
+            { inspectionRound: 1, inspectionResult: 'ผ่าน', inspectionResultDate: { lte: round2Threshold() } },
+          ],
+        },
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           customer: { select: { name: true } },
@@ -463,9 +487,11 @@ export class VehiclesService {
       registrationProvince: string | null;
       customer: { name: string };
       brand: { name: string };
+      inspectionRound: number;
       inspectionSentType: string | null;
       inspectionSentDate: Date | null;
       inspectionSentCost: unknown;
+      inspectionSentBillCost: unknown;
       inspectionResult: string | null;
       inspectionResultDate: Date | null;
       inspectionResultCost: unknown;
@@ -494,9 +520,15 @@ export class VehiclesService {
       body: vehicle.body,
       registrationProvince: vehicle.registrationProvince,
       suggestedCost,
+      inspectionRound: vehicle.inspectionRound,
+      // ถึงกำหนดตรวจรอบ 2 (ยังไม่ได้ส่ง) - หน้าจอใช้แสดงหมายเหตุในคิวส่งตรวจ
+      round2Due: isRound2Due(vehicle),
+      // ค่าตรวจรถ (Bill) มีเฉพาะรอบ 2 (ทั้งตอนถึงกำหนดและตอนส่งตรวจรอบ 2 ซ้ำหลังไม่ผ่าน)
+      suggestedBillCost: isRound2Due(vehicle) || vehicle.inspectionRound === 2 ? String(INSPECTION_ROUND2_BILL_FEE) : null,
       inspectionSentType: vehicle.inspectionSentType,
       inspectionSentDate: vehicle.inspectionSentDate?.toISOString().slice(0, 10) ?? null,
       inspectionSentCost: vehicle.inspectionSentCost,
+      inspectionSentBillCost: vehicle.inspectionSentBillCost,
       inspectionResult: vehicle.inspectionResult,
       inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
       inspectionResultCost: vehicle.inspectionResultCost,
@@ -528,6 +560,7 @@ export class VehiclesService {
     const sentType = typeof dto?.sentType === 'string' ? dto.sentType.trim() : '';
     const sentDateRaw = typeof dto?.sentDate === 'string' ? dto.sentDate.trim() : '';
     const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
+    const billCostRaw = typeof dto?.billCost === 'string' ? dto.billCost.trim() : '';
 
     if (sentType && !INSPECTION_SENT_TYPES.includes(sentType as (typeof INSPECTION_SENT_TYPES)[number])) {
       throw new BadRequestException({ error: 'ประเภทการตรวจไม่ถูกต้อง' });
@@ -536,26 +569,66 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
     }
     if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
-      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
+      throw new BadRequestException({ error: 'ราคาตรวจรถ (No bill) ต้องเป็นตัวเลขตั้งแต่ 0' });
+    }
+    if (billCostRaw && !/^\d+(\.\d+)?$/.test(billCostRaw)) {
+      throw new BadRequestException({ error: 'ค่าตรวจรถ (Bill) ต้องเป็นตัวเลขตั้งแต่ 0' });
     }
 
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
-    const updated = await this.prisma.vehicle.update({
-      where: { id },
-      data: {
-        inspectionSentType: sentType || null,
-        inspectionSentDate: sentDateRaw ? new Date(`${sentDateRaw}T00:00:00.000Z`) : null,
-        inspectionSentCost: costRaw ? costRaw : null,
-      },
-    });
+    // เริ่มรอบตรวจใหม่เมื่อ: ตรวจไม่ผ่าน (ส่งตรวจซ้ำรอบเดิม) หรือรอบ 1 ผ่านครบ 90 วัน (ขึ้นรอบ 2) - ล้างผลตรวจเดิม
+    // ให้รถเข้าคิวรอผลตรวจอีกครั้ง และเก็บข้อมูลรอบก่อนไว้ใน VehicleEditLog เพราะช่องบน Vehicle เก็บได้แค่ชุดล่าสุด
+    const isResend = vehicle.inspectionResult === 'ไม่ผ่าน';
+    const startsRound2 = isRound2Due(vehicle);
+    if (vehicle.inspectionResult === 'ผ่าน' && !startsRound2) {
+      throw new BadRequestException({
+        error: vehicle.inspectionRound === 2 ? 'รถคันนี้ตรวจรอบ 2 ผ่านแล้ว' : 'รถคันนี้ตรวจผ่านแล้ว ยังไม่ครบ 90 วันสำหรับตรวจรอบ 2',
+      });
+    }
+    const startsNewCycle = isResend || startsRound2;
+    const data = {
+      inspectionSentType: sentType || null,
+      inspectionSentDate: sentDateRaw ? new Date(`${sentDateRaw}T00:00:00.000Z`) : null,
+      inspectionSentCost: costRaw ? costRaw : null,
+      inspectionSentBillCost: billCostRaw ? billCostRaw : null,
+      ...(startsNewCycle
+        ? { inspectionResult: null, inspectionResultDate: null, inspectionResultCost: null, inspectionFailRemark: null }
+        : {}),
+      ...(startsRound2 ? { inspectionRound: 2 } : {}),
+    };
+    const changes: Record<string, { from: string | null; to: string | null }> = {};
+    for (const [key, value] of Object.entries(data)) {
+      const from = diffField((vehicle as Record<string, unknown>)[key]);
+      const to = diffField(value);
+      if (from !== to) changes[key] = { from, to };
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.vehicle.update({ where: { id }, data }),
+      ...(startsNewCycle
+        ? [
+            this.prisma.vehicleEditLog.create({
+              data: {
+                vehicleId: id,
+                remark: startsRound2
+                  ? `เริ่มตรวจรอบ 2 (ครบ 90 วันหลังผ่านตรวจรอบ 1 วันที่ ${diffField(vehicle.inspectionResultDate)})`
+                  : `ส่งตรวจใหม่หลังตรวจไม่ผ่าน (เหตุผลเดิม: ${vehicle.inspectionFailRemark ?? '—'})`,
+                changes: JSON.stringify(changes),
+              },
+            }),
+          ]
+        : []),
+    ]);
 
     return {
       id: updated.id,
+      inspectionRound: updated.inspectionRound,
       inspectionSentType: updated.inspectionSentType,
       inspectionSentDate: updated.inspectionSentDate?.toISOString().slice(0, 10) ?? null,
       inspectionSentCost: updated.inspectionSentCost,
+      inspectionSentBillCost: updated.inspectionSentBillCost,
     };
   }
 
@@ -587,7 +660,8 @@ export class VehiclesService {
       data: {
         inspectionResult: result || null,
         inspectionResultDate: resultDateRaw ? new Date(`${resultDateRaw}T00:00:00.000Z`) : null,
-        inspectionResultCost: costRaw ? costRaw : null,
+        // ตรวจไม่ผ่าน = ไม่มีค่าใช้จ่ายตรวจ (ได้เงินคืน) จึงเป็น 0 เสมอ ไม่ว่าจะส่งค่าอะไรมา
+        inspectionResultCost: result === 'ไม่ผ่าน' ? '0' : costRaw ? costRaw : null,
         inspectionFailRemark: result === 'ไม่ผ่าน' ? remark : null,
       },
     });
@@ -598,120 +672,6 @@ export class VehiclesService {
       inspectionResultDate: updated.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
       inspectionResultCost: updated.inspectionResultCost,
       inspectionFailRemark: updated.inspectionFailRemark,
-    };
-  }
-
-  // ผ่านตรวจครั้งแรกแล้ว (inspectionResult = 'ผ่าน') และครบ 90 วันจาก inspectionResultDate แล้ว แต่ยังไม่ตรวจรอบ 2
-  async findPendingInspectionRound2() {
-    const threshold = new Date();
-    threshold.setUTCDate(threshold.getUTCDate() - INSPECTION_ROUND2_WAIT_DAYS);
-
-    const [vehicles, bangkokFees, provinceFees] = await Promise.all([
-      this.prisma.vehicle.findMany({
-        where: { inspectionResult: 'ผ่าน', inspectionResultDate: { lte: threshold }, inspectionRound2Done: false },
-        orderBy: [{ inspectionResultDate: 'asc' }, { id: 'asc' }],
-        include: {
-          customer: { select: { name: true } },
-          brand: { select: { name: true } },
-        },
-      }),
-      this.prisma.feeInspectionBangkok.findMany(),
-      this.prisma.feeInspectionProvince.findMany(),
-    ]);
-
-    return vehicles.map((vehicle) => this.mapInspectionRound2Vehicle(vehicle, bangkokFees, provinceFees));
-  }
-
-  // ตรวจรอบ 2 เสร็จแล้ว เรียงจากทำเสร็จล่าสุด
-  async findRecentlyCompletedInspectionRound2() {
-    const [vehicles, bangkokFees, provinceFees] = await Promise.all([
-      this.prisma.vehicle.findMany({
-        where: { inspectionRound2Done: true },
-        orderBy: [{ inspectionRound2Date: 'desc' }, { updatedAt: 'desc' }],
-        take: 100,
-        include: {
-          customer: { select: { name: true } },
-          brand: { select: { name: true } },
-        },
-      }),
-      this.prisma.feeInspectionBangkok.findMany(),
-      this.prisma.feeInspectionProvince.findMany(),
-    ]);
-
-    return vehicles.map((vehicle) => this.mapInspectionRound2Vehicle(vehicle, bangkokFees, provinceFees));
-  }
-
-  private mapInspectionRound2Vehicle(
-    vehicle: {
-      id: string;
-      date: Date;
-      chassis: string;
-      body: string | null;
-      registrationProvince: string | null;
-      customer: { name: string };
-      brand: { name: string };
-      inspectionResultDate: Date | null;
-      inspectionRound2Done: boolean;
-      inspectionRound2Date: Date | null;
-      inspectionRound2Cost: unknown;
-    },
-    bangkokFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
-    provinceFees: Array<{ province: string; vehicleType: string; amount: unknown }>,
-  ) {
-    const noBillCost = this.suggestInspectionCost(
-      vehicle.registrationProvince,
-      vehicle.body,
-      vehicle.brand.name,
-      bangkokFees,
-      provinceFees,
-    );
-    const suggestedRound2Cost = noBillCost != null ? String(Number(noBillCost) + INSPECTION_ROUND2_BILL_FEE) : null;
-
-    return {
-      id: vehicle.id,
-      date: vehicle.date.toISOString().slice(0, 10),
-      customerName: vehicle.customer.name,
-      chassis: vehicle.chassis,
-      brandName: vehicle.brand.name,
-      body: vehicle.body,
-      registrationProvince: vehicle.registrationProvince,
-      inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
-      suggestedRound2Cost,
-      inspectionRound2Done: vehicle.inspectionRound2Done,
-      inspectionRound2Date: vehicle.inspectionRound2Date?.toISOString().slice(0, 10) ?? null,
-      inspectionRound2Cost: vehicle.inspectionRound2Cost,
-    };
-  }
-
-  async updateInspectionRound2(id: string, dto: UpdateInspectionRound2Dto) {
-    const done = Boolean(dto?.done);
-    const dateRaw = typeof dto?.date === 'string' ? dto.date.trim() : '';
-    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
-
-    if (dateRaw && !isValidDateParam(dateRaw)) {
-      throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
-    }
-    if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) {
-      throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
-    }
-
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
-    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
-
-    const updated = await this.prisma.vehicle.update({
-      where: { id },
-      data: {
-        inspectionRound2Done: done,
-        inspectionRound2Date: dateRaw ? new Date(`${dateRaw}T00:00:00.000Z`) : null,
-        inspectionRound2Cost: costRaw ? costRaw : null,
-      },
-    });
-
-    return {
-      id: updated.id,
-      inspectionRound2Done: updated.inspectionRound2Done,
-      inspectionRound2Date: updated.inspectionRound2Date?.toISOString().slice(0, 10) ?? null,
-      inspectionRound2Cost: updated.inspectionRound2Cost,
     };
   }
 
