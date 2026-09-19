@@ -37,6 +37,7 @@ export interface GovernmentTaxCcBracketRow {
 }
 
 export interface GovernmentTaxWeightBracketRow {
+  vehicleFamily: GovTaxVehicleFamily;
   fuelGroup: GovTaxFuelGroup | null;
   weightFrom: number | string;
   weightTo: number | string | null;
@@ -123,14 +124,22 @@ function calcCcProgressiveMicroBaht(cc: number, brackets: GovernmentTaxCcBracket
   return totalMicro;
 }
 
-function findWeightBracket(weight: number, brackets: GovernmentTaxWeightBracketRow[], fuelGroup: GovTaxFuelGroup | null) {
-  return brackets.find((b) => {
-    if (b.fuelGroup !== fuelGroup) return false;
-    const from = toNumber(b.weightFrom);
-    const to = toNumber(b.weightTo);
-    if (from === null) return false;
-    return weight >= from && (to === null || weight <= to);
-  });
+// ต้องกรองด้วย vehicleFamily ด้วย - รย.2 กับ รย.3 ต่างก็ fuelGroup = null เหมือนกัน ถ้ากรองแค่
+// fuelGroup ตาราง รย.3 จะไม่ถูกใช้เลย (รถบรรทุกโดนคิดด้วยอัตรา รย.2 แทน)
+// เรียงตาม weightFrom แล้วเอาช่วงแรกที่ตรง: ขอบล่าง-บนใช้ค่าเดียวกัน (0-500, 500-750, ...) น้ำหนักตรงขอบ
+// พอดีจึงต้องได้ช่วงล่างเสมอ (500 กก. = "≤500") ไม่ขึ้นกับลำดับแถวที่ DB คืนมา
+function findWeightBracket(
+  weight: number,
+  brackets: GovernmentTaxWeightBracketRow[],
+  vehicleFamily: GovTaxVehicleFamily,
+  fuelGroup: GovTaxFuelGroup | null,
+) {
+  return brackets
+    .filter((b) => b.vehicleFamily === vehicleFamily && b.fuelGroup === fuelGroup)
+    .map((b) => ({ row: b, from: toNumber(b.weightFrom), to: toNumber(b.weightTo) }))
+    .filter((b): b is { row: GovernmentTaxWeightBracketRow; from: number; to: number | null } => b.from !== null)
+    .sort((a, b) => a.from - b.from)
+    .find((b) => weight >= b.from && (b.to === null || weight <= b.to))?.row;
 }
 
 function findActiveEvIncentive(date: Date, incentives: GovernmentTaxEvIncentiveRow[]) {
@@ -217,7 +226,7 @@ export function calculateGovernmentTax(
   if (weight === null) return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ไม่มีข้อมูลน้ำหนักรถของรถคันนี้' };
 
   const weightFuelGroup = vehicleFamily === GovTaxVehicleFamily.RY1 ? fuelGroup : null;
-  const bracket = findWeightBracket(weight, rules.weightBrackets, weightFuelGroup);
+  const bracket = findWeightBracket(weight, rules.weightBrackets, vehicleFamily, weightFuelGroup);
   const baseMicro = bracket ? toMicroBaht(bracket.amount) : null;
   if (baseMicro === null) {
     return {

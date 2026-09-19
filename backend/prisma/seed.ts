@@ -204,6 +204,13 @@ async function seedGovernmentTaxMotorcycleFlat() {
     create: { fuelGroup: GovTaxFuelGroup.ICE, amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true },
     update: { amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true },
   });
+  // RY12 HEV (เช่น Yamaha Grand Filano Hybrid): ผู้ใช้ยืนยัน 2026-09-19 ให้ใช้ 100 บาท/ปีเหมือน ICE
+  // (ยังมีเครื่องยนต์) - VERIFIED+active. PHEV จักรยานยนต์ไม่ได้อยู่ในคำยืนยันนี้ จึงยังไม่มีแถว
+  await prisma.governmentTaxMotorcycleFlat.upsert({
+    where: { fuelGroup: GovTaxFuelGroup.HEV },
+    create: { fuelGroup: GovTaxFuelGroup.HEV, amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true, note: "ผู้ใช้ยืนยันให้ใช้ 100 บาทเหมือน ICE" },
+    update: { amount: 100, status: GovTaxRuleStatus.VERIFIED, active: true },
+  });
   // RY12 BEV: กฎแยกต่างหาก ยังไม่มีข้อมูล - เตรียมแถวไว้เฉยๆ รอผู้ใช้ให้เงื่อนไข
   await prisma.governmentTaxMotorcycleFlat.upsert({
     where: { fuelGroup: GovTaxFuelGroup.BEV },

@@ -38,6 +38,7 @@ export class TaxService {
     return {
       ccBrackets: ccBrackets.map((r) => ({ fuelGroup: r.fuelGroup, ccFrom: r.ccFrom.toString(), ccTo: r.ccTo?.toString() ?? null, ratePerCc: r.ratePerCc.toString() })),
       weightBrackets: weightBrackets.map((r) => ({
+        vehicleFamily: r.vehicleFamily,
         fuelGroup: r.fuelGroup,
         weightFrom: r.weightFrom.toString(),
         weightTo: r.weightTo?.toString() ?? null,

@@ -1,5 +1,5 @@
 import { calculateGovernmentTax, GovernmentTaxOwnerInput, GovernmentTaxRuleSet, GovernmentTaxVehicleInput } from './government-tax-calculator.js';
-import { GovTaxFuelGroup, OwnerType } from '../generated/prisma/enums.js';
+import { GovTaxFuelGroup, GovTaxVehicleFamily, OwnerType } from '../generated/prisma/enums.js';
 
 // Fixture matching the real VERIFIED rows in backend/prisma/seed.ts (0-600@0.5, 600-1800@1.5,
 // 1800+@4 บาท/cc for RY1 ICE/HEV/PHEV; RY12 ICE flat 100 บาท/ปี). Weight brackets/EV incentive
@@ -83,7 +83,7 @@ describe('calculateGovernmentTax - juristic multiplier matrix (RY1)', () => {
     const ry2 = calculateGovernmentTax(
       { body: 'รย.2-นั่ง 2 แถว', fuel: 'เบนซิน', cc: null, weight: 1500, firstRegistrationDate: null },
       JURISTIC,
-      baseRules({ weightBrackets: [{ fuelGroup: null, weightFrom: 0, weightTo: null, amount: 500 }] }),
+      baseRules({ weightBrackets: [{ vehicleFamily: GovTaxVehicleFamily.RY2, fuelGroup: null, weightFrom: 0, weightTo: null, amount: 500 }] }),
     );
     expect(ry2.juristicMultiplier).toBe(1);
     expect(ry2.amount).toBe(500);
@@ -120,6 +120,41 @@ describe('calculateGovernmentTax - RY12 motorcycle flat', () => {
   });
 });
 
+// รย.2 กับ รย.3 มี fuelGroup = null เหมือนกัน - ต้องแยกตารางด้วย vehicleFamily เท่านั้น
+// ค่าจริงตรงกับ seed.ts (ตารางที่ผู้ใช้ยืนยัน: รย.2 และ รย.3 คนละคอลัมน์)
+describe('calculateGovernmentTax - RY2 vs RY3 weight tables stay separate', () => {
+  const ry2Amounts = [150, 300, 450, 800, 1000, 1300, 1600, 1900, 2200, 2400, 2600, 2800, 3000, 3200, 3400, 3600];
+  const ry3Amounts = [300, 450, 600, 750, 900, 1050, 1350, 1650, 1950, 2250, 2550, 2850, 3150, 3450, 3750, 4050];
+  const bounds: Array<[number, number | null]> = [
+    [0, 500], [500, 750], [750, 1000], [1000, 1250], [1250, 1500], [1500, 1750], [1750, 2000], [2000, 2500],
+    [2500, 3000], [3000, 3500], [3500, 4000], [4000, 4500], [4500, 5000], [5000, 6000], [6000, 7000], [7000, null],
+  ];
+  const table = (family: GovTaxVehicleFamily, amounts: number[]) =>
+    bounds.map(([weightFrom, weightTo], i) => ({ vehicleFamily: family, fuelGroup: null, weightFrom, weightTo, amount: amounts[i] }));
+  // สลับลำดับแถว RY3 มาก่อน RY2 ตั้งใจ - ต้องไม่ขึ้นกับลำดับที่ DB คืนมา
+  const rules = baseRules({ weightBrackets: [...table(GovTaxVehicleFamily.RY3, ry3Amounts), ...table(GovTaxVehicleFamily.RY2, ry2Amounts)].reverse() });
+
+  it.each([
+    [500, 150], [501, 300], [750, 300], [1000, 450], [1500, 1000], [1751, 1600], [7000, 3400], [7001, 3600],
+  ])('รย.2 น้ำหนัก %d กก. -> %d บาท (≤ ขอบบนเป็นของช่วงล่าง)', (weight, expected) => {
+    const result = calculateGovernmentTax({ body: 'รย.2-นั่ง 2 แถว', fuel: 'ดีเซล', cc: null, weight, firstRegistrationDate: null }, INDIVIDUAL, rules);
+    expect(result.amount).toBe(expected);
+  });
+
+  it.each([
+    [500, 300], [501, 450], [750, 450], [1000, 600], [1500, 900], [1751, 1350], [7000, 3750], [7001, 4050],
+  ])('รย.3 น้ำหนัก %d กก. -> %d บาท (ใช้ตาราง รย.3 ไม่ใช่ รย.2)', (weight, expected) => {
+    const result = calculateGovernmentTax({ body: 'รย.3-กระบะบรรทุก', fuel: 'ดีเซล', cc: null, weight, firstRegistrationDate: null }, INDIVIDUAL, rules);
+    expect(result.amount).toBe(expected);
+  });
+
+  it('รย.3 เจ้าของนิติบุคคล -> ไม่คูณสอง', () => {
+    const result = calculateGovernmentTax({ body: 'รย.3-กระบะบรรทุกมีหลังคา', fuel: 'ดีเซล', cc: null, weight: 1500, firstRegistrationDate: null }, JURISTIC, rules);
+    expect(result.juristicMultiplier).toBe(1);
+    expect(result.amount).toBe(900);
+  });
+});
+
 describe('calculateGovernmentTax - fail closed when no verified rate exists', () => {
   it('RY1-BEV/RY2/RY3 ไม่มี weight bracket -> MISSING_VERIFIED_RULE, ไม่คืน 0', () => {
     const cases: GovernmentTaxVehicleInput[] = [
@@ -144,7 +179,7 @@ describe('calculateGovernmentTax - fail closed when no verified rate exists', ()
 
 describe('calculateGovernmentTax - EV incentive (fixture only, not real production data)', () => {
   const rulesWithIncentive = baseRules({
-    weightBrackets: [{ fuelGroup: GovTaxFuelGroup.BEV, weightFrom: 0, weightTo: null, amount: 1000 }],
+    weightBrackets: [{ vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup: GovTaxFuelGroup.BEV, weightFrom: 0, weightTo: null, amount: 1000 }],
     evIncentives: [{ effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: new Date('2026-12-31T23:59:59.999Z'), discountPercent: 80 }],
   });
   const bevVehicle: GovernmentTaxVehicleInput = {
