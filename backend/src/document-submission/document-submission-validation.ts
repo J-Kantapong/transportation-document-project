@@ -57,6 +57,20 @@ export function parsePlateFields(raw: unknown, field: string): string | null {
   return trimmed || null;
 }
 
+// รูปแบบเดียวกับช่องกรอกฝั่งหน้าเว็บ: หมวดทะเบียนสูงสุด 3 ตัวอักษร (เช่น "4กข"), เลขทะเบียน 1-4 หลัก (เช่น "4444")
+export function assertPlateFormat(plateCategory: string, plateNumber: string) {
+  if (plateCategory.length > 3) throw new BadRequestException({ error: 'หมวดทะเบียนต้องไม่เกิน 3 ตัวอักษร' });
+  if (!/^\d{1,4}$/.test(plateNumber)) throw new BadRequestException({ error: 'เลขทะเบียนต้องเป็นตัวเลข 1-4 หลัก' });
+}
+
+// ยอดเงินบนใบเสร็จ: ว่าง = ไม่ระบุ (null), ไม่งั้นต้องเป็นตัวเลขไม่ติดลบ ทศนิยมไม่เกิน 2 ตำแหน่ง
+export function parseReceiptAmount(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : '';
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) throw new BadRequestException({ error: 'ยอดใบเสร็จต้องเป็นตัวเลขตั้งแต่ 0 ทศนิยมไม่เกิน 2 ตำแหน่ง' });
+  return Number(text);
+}
+
 // ตาม mockup: ถ้าเลือกขอใช้เลขทะเบียน (NORMAL/AUCTION) ต้องกรอกหมวดทะเบียน+เลขทะเบียนก่อนบันทึกจริง
 // (ต่างจากกรณี "ไม่ขอ" ที่เว้นว่างได้ เพราะกรมขนส่งรันเลขให้เองแล้วมากรอกทีหลัง)
 export function assertPlateNumberProvided(plateNumberOption: PlateNumberOption, plateCategory: string | null, plateNumber: string | null) {

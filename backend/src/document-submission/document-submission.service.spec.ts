@@ -96,44 +96,86 @@ describe('DocumentSubmissionService.submit - บล็อกยื่นซ้�
 });
 
 describe('DocumentSubmissionService.updateStatus', () => {
+  const pendingSubmission = (plate: { plateCategory: string | null; plateNumber: string | null } = { plateCategory: null, plateNumber: null }) => ({
+    id: 'sub1',
+    vehicleId: 'v1',
+    status: 'PENDING',
+    vehicle: plate,
+  });
+
+  function setup(submission: unknown) {
+    const submissionUpdate = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
+    const vehicleUpdate = vi.fn().mockResolvedValue({});
+    const prisma = mockPrisma({
+      vehicle: { findUnique: vi.fn(), update: vehicleUpdate },
+      documentSubmission: { findFirst: vi.fn(), findUnique: vi.fn().mockResolvedValue(submission), create: vi.fn(), update: submissionUpdate },
+      $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    });
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), submissionUpdate, vehicleUpdate };
+  }
+
   it('ปฏิเสธ status ที่ไม่ใช่ RECEIPT_RECEIVED หรือ FAILED', async () => {
-    const service = new DocumentSubmissionService(mockPrisma(), mockTaxService());
+    const { service } = setup(pendingSubmission());
     await expect(service.updateStatus('sub1', 'PENDING')).rejects.toMatchObject({
       response: { error: expect.stringContaining('RECEIPT_RECEIVED') },
     });
   });
 
   it('ปฏิเสธถ้ารายการนั้นอัปเดตสถานะไปแล้ว (ไม่ใช่ PENDING)', async () => {
-    const prisma = mockPrisma({
-      documentSubmission: {
-        findFirst: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue({ id: 'sub1', status: 'RECEIPT_RECEIVED' }),
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    });
-    const service = new DocumentSubmissionService(prisma, mockTaxService());
+    const { service } = setup({ ...pendingSubmission(), status: 'RECEIPT_RECEIVED' });
     await expect(service.updateStatus('sub1', 'FAILED')).rejects.toMatchObject({
       response: { error: expect.stringContaining('อัปเดตสถานะไปแล้ว') },
     });
   });
 
-  it('อัปเดตสำเร็จจากสถานะ PENDING', async () => {
-    const updateMock = vi.fn().mockResolvedValue({ id: 'sub1', status: 'RECEIPT_RECEIVED' });
-    const prisma = mockPrisma({
-      documentSubmission: {
-        findFirst: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue({ id: 'sub1', status: 'PENDING' }),
-        create: vi.fn(),
-        update: updateMock,
-      },
+  it('รับใบเสร็จ: บันทึกเลขทะเบียนลงรถ + วันที่ + ยอดใบเสร็จ', async () => {
+    const { service, submissionUpdate, vehicleUpdate } = setup(pendingSubmission());
+    const result = await service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20', {
+      plateCategory: '4กข',
+      plateNumber: '1234',
+      receiptAmount: '355.50',
     });
-    const service = new DocumentSubmissionService(prisma, mockTaxService());
-    const result = await service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20');
     expect(result.status).toBe('RECEIPT_RECEIVED');
-    expect(updateMock).toHaveBeenCalledWith({
+    expect(vehicleUpdate).toHaveBeenCalledWith({ where: { id: 'v1' }, data: { plateCategory: '4กข', plateNumber: '1234' } });
+    expect(submissionUpdate).toHaveBeenCalledWith({
       where: { id: 'sub1' },
-      data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: new Date('2026-09-20T00:00:00.000Z') },
+      data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: new Date('2026-09-20T00:00:00.000Z'), receiptAmount: 355.5 },
     });
+  });
+
+  it('รับใบเสร็จไม่ได้ถ้ายังไม่มีเลขทะเบียนทั้งในคำขอและในรถ', async () => {
+    const { service, submissionUpdate } = setup(pendingSubmission());
+    await expect(service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20')).rejects.toMatchObject({
+      response: { error: expect.stringContaining('เลขทะเบียน') },
+    });
+    expect(submissionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('รับใบเสร็จได้โดยไม่ต้องส่งเลขทะเบียนซ้ำ ถ้ารถมีเลขทะเบียนอยู่แล้ว', async () => {
+    const { service, vehicleUpdate } = setup(pendingSubmission({ plateCategory: '1กข', plateNumber: '99' }));
+    await service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20');
+    expect(vehicleUpdate).toHaveBeenCalledWith({ where: { id: 'v1' }, data: { plateCategory: '1กข', plateNumber: '99' } });
+  });
+
+  it('ยื่นไม่สำเร็จ: ไม่ต้องมีเลขทะเบียน และไม่แตะข้อมูลรถ', async () => {
+    const { service, vehicleUpdate, submissionUpdate } = setup(pendingSubmission());
+    const result = await service.updateStatus('sub1', 'FAILED');
+    expect(result.status).toBe('FAILED');
+    expect(vehicleUpdate).not.toHaveBeenCalled();
+    expect(submissionUpdate).toHaveBeenCalledWith({ where: { id: 'sub1' }, data: { status: 'FAILED', receiptReceivedDate: null } });
+  });
+
+  it.each([
+    [{ plateCategory: '4กขคง', plateNumber: '1234' }, 'หมวดทะเบียน'],
+    [{ plateCategory: '4กข', plateNumber: '12345' }, 'เลขทะเบียน'],
+    [{ plateCategory: '4กข', plateNumber: 'ab12' }, 'เลขทะเบียน'],
+    [{ plateCategory: '4กข', plateNumber: '1234', receiptAmount: '-5' }, 'ยอดใบเสร็จ'],
+    [{ plateCategory: '4กข', plateNumber: '1234', receiptAmount: '10.123' }, 'ยอดใบเสร็จ'],
+  ])('ปฏิเสธข้อมูลรูปแบบผิด %j', async (extras, expected) => {
+    const { service, submissionUpdate } = setup(pendingSubmission());
+    await expect(service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20', extras)).rejects.toMatchObject({
+      response: { error: expect.stringContaining(expected) },
+    });
+    expect(submissionUpdate).not.toHaveBeenCalled();
   });
 });

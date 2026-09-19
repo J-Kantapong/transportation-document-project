@@ -6,7 +6,14 @@ import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeePar
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
-import { assertPlateNumberProvided, parseDocumentSubmissionOptions, parsePlateFields, parseSubmitDate } from './document-submission-validation.js';
+import {
+  assertPlateFormat,
+  assertPlateNumberProvided,
+  parseDocumentSubmissionOptions,
+  parsePlateFields,
+  parseReceiptAmount,
+  parseSubmitDate,
+} from './document-submission-validation.js';
 
 const BULK_CHUNK_SIZE = 50;
 
@@ -203,7 +210,14 @@ export class DocumentSubmissionService {
   // เปลี่ยนสถานะได้ครั้งเดียวจาก PENDING -> RECEIPT_RECEIVED หรือ FAILED เท่านั้น (ห้ามย้อนกลับ/เปลี่ยนซ้ำ)
   // การอัปเดตนี้ปลด block การยื่นซ้ำของรถคันนั้นใน assertNotPending()
   // receivedDate (ค.ศ. YYYY-MM-DD) ใช้เฉพาะ RECEIPT_RECEIVED - ไม่ส่งมาจะใช้วันนี้
-  async updateStatus(submissionId: string, statusRaw: unknown, receivedDateRaw?: unknown) {
+  // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (หมวด+เลข) - ใช้ที่ส่งมา หรือที่รถคันนี้มีอยู่แล้วถ้าไม่ได้ส่ง ไม่มีทั้งคู่บันทึกไม่ได้
+  // (FAILED ไม่ต้องมี) และบันทึกลง Vehicle.plateCategory/plateNumber; receiptAmount (ไม่บังคับ) = ยอดบนใบเสร็จจริง
+  async updateStatus(
+    submissionId: string,
+    statusRaw: unknown,
+    receivedDateRaw?: unknown,
+    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown } = {},
+  ) {
     if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
       throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
     }
@@ -215,11 +229,35 @@ export class DocumentSubmissionService {
         receiptReceivedDate = parseSubmitDate(receivedDateRaw);
       }
     }
-    const submission = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId } });
+    const submission = await this.prisma.documentSubmission.findUnique({
+      where: { id: submissionId },
+      include: { vehicle: { select: { plateCategory: true, plateNumber: true } } },
+    });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
     if (submission.status !== 'PENDING') {
       throw new BadRequestException({ error: 'รายการนี้อัปเดตสถานะไปแล้ว' });
     }
-    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: statusRaw, receiptReceivedDate } });
+
+    if (statusRaw === 'FAILED') {
+      return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { status: 'FAILED', receiptReceivedDate: null } });
+    }
+
+    const plateCategory =
+      extras.plateCategory !== undefined ? parsePlateFields(extras.plateCategory, 'plateCategory') : submission.vehicle.plateCategory;
+    const plateNumber = extras.plateNumber !== undefined ? parsePlateFields(extras.plateNumber, 'plateNumber') : submission.vehicle.plateNumber;
+    if (!plateCategory || !plateNumber) {
+      throw new BadRequestException({ error: 'กรุณากรอกหมวดทะเบียนและเลขทะเบียนก่อนบันทึกการรับใบเสร็จ' });
+    }
+    assertPlateFormat(plateCategory, plateNumber);
+    const receiptAmount = parseReceiptAmount(extras.receiptAmount);
+
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.vehicle.update({ where: { id: submission.vehicleId }, data: { plateCategory, plateNumber } }),
+      this.prisma.documentSubmission.update({
+        where: { id: submissionId },
+        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptAmount },
+      }),
+    ]);
+    return updated;
   }
 }

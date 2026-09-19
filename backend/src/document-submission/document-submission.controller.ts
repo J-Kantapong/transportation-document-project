@@ -29,7 +29,14 @@ export class DocumentSubmissionController {
   }
 
   @Patch('document-submission/:id/status')
-  updateStatus(@Param('id') id: string, @Body() body: { status?: unknown; receivedDate?: unknown }) {
-    return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown },
+  ) {
+    return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate, {
+      plateCategory: body?.plateCategory,
+      plateNumber: body?.plateNumber,
+      receiptAmount: body?.receiptAmount,
+    });
   }
 }

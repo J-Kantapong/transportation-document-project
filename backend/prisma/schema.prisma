@@ -457,6 +457,7 @@ model DocumentSubmission {
   submitDate          DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
   status              String    @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED
   receiptReceivedDate DateTime? // วันที่ได้รับใบเสร็จ (ตั้งตอน status -> RECEIPT_RECEIVED)
+  receiptAmount       Decimal?  @db.Decimal(12, 2) // ยอดที่เห็นบนใบเสร็จจริง (พนักงานกรอก) - เทียบกับ Bill = billFeeTotal + taxAmount
   plateNumberOption   String // NONE | NORMAL | AUCTION
   includePlateFee     Boolean   @default(true)
   newPlateOption      String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์

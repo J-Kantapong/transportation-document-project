@@ -153,6 +153,7 @@ export interface DocumentSubmission {
   createdAt: string;
   updatedAt: string;
   receiptReceivedDate: string | null;
+  receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
   vehicle: {
     chassis: string;
     body: string | null;
@@ -348,10 +349,15 @@ export const api = {
     const query = [date ? `date=${date}` : '', status ? `status=${status}` : ''].filter(Boolean).join('&');
     return request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
   },
-  updateDocumentSubmissionStatus: (submissionId: string, status: Exclude<DocumentSubmissionStatus, "PENDING">, receivedDate?: string) =>
+  // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (ส่งมา หรือรถมีอยู่แล้ว) - FAILED ไม่ต้อง
+  updateDocumentSubmissionStatus: (
+    submissionId: string,
+    status: Exclude<DocumentSubmissionStatus, "PENDING">,
+    options: { receivedDate?: string; plateCategory?: string; plateNumber?: string; receiptAmount?: string } = {},
+  ) =>
     request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, receivedDate }),
+      body: JSON.stringify({ status, ...options }),
     }),
 
   listReceivingPending: (step: ReceivingStep) => request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/pending`),
