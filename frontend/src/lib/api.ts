@@ -159,7 +159,8 @@ export interface DocumentSubmission {
     body: string | null;
     plateCategory: string | null;
     plateNumber: string | null;
-    customer: { name: string };
+    customer: { name: string; company: string | null };
+    brand: { name: string };
     owner: { name: string | null; ownerType: OwnerType } | null;
   };
 }

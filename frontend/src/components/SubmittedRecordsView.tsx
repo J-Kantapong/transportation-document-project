@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { DocumentSubmission, OwnerType } from "@/lib/api";
 import { OWNER_TYPES } from "@/lib/vehicle-reference-data";
 import { isoToDisplayDate } from "@/lib/date";
+import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 
 const OWNER_TYPE_LABEL: Record<OwnerType, string> = Object.fromEntries(OWNER_TYPES) as Record<OwnerType, string>;
 
@@ -39,7 +40,17 @@ function StatusBadge({ status }: { status: DocumentSubmission["status"] }) {
   );
 }
 
-function GroupTable({ title, rows, showUrgent }: { title: string; rows: DocumentSubmission[]; showUrgent: boolean }) {
+function GroupTable({
+  title,
+  rows,
+  showUrgent,
+  onPrint,
+}: {
+  title: string;
+  rows: DocumentSubmission[];
+  showUrgent: boolean;
+  onPrint?: () => void;
+}) {
   const total = rows.reduce((sum, r) => sum + recordTotal(r), 0);
   return (
     <section className="panel" style={{ marginBottom: 20 }}>
@@ -47,6 +58,11 @@ function GroupTable({ title, rows, showUrgent }: { title: string; rows: Document
         <h2>
           {title} <span className="muted">· {rows.length} คัน</span>
         </h2>
+        {onPrint && (
+          <button type="button" className="text-button" disabled={rows.length === 0} onClick={onPrint}>
+            ปริ้นใบส่งงาน
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="empty-customers">ไม่มีรายการ</div>
@@ -103,6 +119,8 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
   // undefined = ยังไม่ได้เลือก -> ใช้วันที่ล่าสุดที่มีข้อมูล, "" = ทุกวันที่
   const [dateChoice, setDateChoice] = useState<string | undefined>(undefined);
   const [ownerChoice, setOwnerChoice] = useState("");
+  // ใบส่งงานรถยนต์ที่กำลังจะพิมพ์ (เปิด dialog) - มีเฉพาะแบบรถยนต์ เพราะตัวอย่างใบส่งงานที่ได้มาเป็นของรถยนต์
+  const [printGroup, setPrintGroup] = useState<{ title: string; rows: DocumentSubmission[]; note: string } | null>(null);
 
   const dateCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -186,9 +204,19 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
 
           {activeTab === "car" && (
             <>
-              <GroupTable title="รย.1 แบบธรรมดา" rows={byFamily.car1.filter((r) => !r.urgent)} showUrgent={false} />
-              <GroupTable title="รย.1 แบบด่วน" rows={byFamily.car1.filter((r) => r.urgent)} showUrgent={false} />
-              <GroupTable title="รย.2 และ รย.3" rows={byFamily.car23} showUrgent />
+              {[
+                { title: "รย.1 แบบธรรมดา", rows: byFamily.car1.filter((r) => !r.urgent), showUrgent: false, note: "" },
+                { title: "รย.1 แบบด่วน", rows: byFamily.car1.filter((r) => r.urgent), showUrgent: false, note: "ด่วน" },
+                { title: "รย.2 และ รย.3", rows: byFamily.car23, showUrgent: true, note: "" },
+              ].map((g) => (
+                <GroupTable
+                  key={g.title}
+                  title={g.title}
+                  rows={g.rows}
+                  showUrgent={g.showUrgent}
+                  onPrint={() => setPrintGroup({ title: g.title, rows: g.rows, note: g.note })}
+                />
+              ))}
             </>
           )}
           {activeTab === "moto" && (
@@ -199,6 +227,15 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
           )}
           {activeTab === "unknown" && <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent />}
         </>
+      )}
+      {printGroup && (
+        <JobSheetPrintDialog
+          key={printGroup.title}
+          groupTitle={printGroup.title}
+          rows={printGroup.rows}
+          defaultNote={printGroup.note}
+          onClose={() => setPrintGroup(null)}
+        />
       )}
     </>
   );
