@@ -165,6 +165,12 @@ function bahtText(value: string): string {
   return value === "" ? "—" : `${value} บาท`;
 }
 
+// ค่าตรวจรถ (Bill) ตอนทราบผล: มีเฉพาะรอบ 2 - ผ่าน = Bill ตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน)
+function resultDefaultBillCost(v: InspectionVehicle, panelResult: ResultType): string {
+  if (v.inspectionSentBillCost == null) return "";
+  return panelResult === "ไม่ผ่าน" ? "0" : v.inspectionSentBillCost;
+}
+
 function resultDefaultCost(v: InspectionVehicle, panelResult: ResultType): string {
   if (panelResult === "ไม่ผ่าน") return "0";
   return v.inspectionSentCost ?? "";
@@ -184,7 +190,8 @@ const COMPLETED_DETAIL_FIELDS: Array<[string, (v: InspectionVehicle) => string]>
   ["ค่าตรวจรถ (Bill)", (v) => (v.inspectionSentBillCost ? `${v.inspectionSentBillCost} บาท` : "")],
   ["ผลตรวจ", (v) => v.inspectionResult ?? ""],
   ["วันที่ตรวจเสร็จ", (v) => (v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "")],
-  ["ค่าใช้จ่าย (ผลตรวจ)", (v) => (v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "")],
+  ["ราคาตรวจรถ (No bill) ผลตรวจ", (v) => (v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "")],
+  ["ค่าตรวจรถ (Bill) ผลตรวจ", (v) => (v.inspectionResultBillCost ? `${v.inspectionResultBillCost} บาท` : "")],
   ["Remark (ตรวจไม่ผ่าน)", (v) => v.inspectionFailRemark ?? ""],
 ];
 
@@ -454,7 +461,8 @@ function ResultPanel({
                   <th>วันที่ส่งตรวจ</th>
                   <th>ผลตรวจ</th>
                   <th>วันที่ทราบผล</th>
-                  <th>ค่าใช้จ่าย</th>
+                  <th>ราคาตรวจรถ (No bill)</th>
+                  <th>ค่าตรวจรถ (Bill)</th>
                   <th>Remark</th>
                   <th />
                 </tr>
@@ -510,6 +518,7 @@ function ResultPanel({
                       </td>
                       {/* ค่าใช้จ่ายคงที่ แก้ไม่ได้ - ผ่าน = ราคาตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน) */}
                       <td>{selected ? bahtText(row.costText) : "—"}</td>
+                      <td>{selected ? bahtText(resultDefaultBillCost(v, selected)) : "—"}</td>
                       <td>
                         {selected === "ไม่ผ่าน" && (
                           <input
@@ -663,7 +672,8 @@ function CompletedInspectionPanel({
                   <th>รอบตรวจ</th>
                   <th>ผลตรวจ</th>
                   <th>วันที่เสร็จ</th>
-                  <th>ค่าใช้จ่าย</th>
+                  <th>ราคาตรวจรถ (No bill)</th>
+                  <th>ค่าตรวจรถ (Bill)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -679,6 +689,7 @@ function CompletedInspectionPanel({
                     <td>{v.inspectionResult || "—"}</td>
                     <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
                     <td>{v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}</td>
+                    <td>{v.inspectionResultBillCost ? `${v.inspectionResultBillCost} บาท` : "—"}</td>
                     <td>
                       <button className="text-button" onClick={() => onOpenDetail(v)}>
                         ดูข้อมูล

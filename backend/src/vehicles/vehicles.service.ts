@@ -601,6 +601,7 @@ export class VehiclesService {
       inspectionResult: string | null;
       inspectionResultDate: Date | null;
       inspectionResultCost: unknown;
+      inspectionResultBillCost: unknown;
       inspectionFailRemark: string | null;
       documentSubmissions: Array<unknown>;
     },
@@ -639,6 +640,7 @@ export class VehiclesService {
       inspectionResult: vehicle.inspectionResult,
       inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
       inspectionResultCost: vehicle.inspectionResultCost,
+      inspectionResultBillCost: vehicle.inspectionResultBillCost,
       inspectionFailRemark: vehicle.inspectionFailRemark,
     };
   }
@@ -717,7 +719,13 @@ export class VehiclesService {
       inspectionSentDate: sentDateRaw ? new Date(`${sentDateRaw}T00:00:00.000Z`) : null,
       ...this.fixedSentCosts(sentType, round, vehicle, bangkokFees, provinceFees),
       ...(startsNewCycle
-        ? { inspectionResult: null, inspectionResultDate: null, inspectionResultCost: null, inspectionFailRemark: null }
+        ? {
+            inspectionResult: null,
+            inspectionResultDate: null,
+            inspectionResultCost: null,
+            inspectionResultBillCost: null,
+            inspectionFailRemark: null,
+          }
         : {}),
       ...(startsRound2 ? { inspectionRound: 2 } : {}),
     };
@@ -785,6 +793,9 @@ export class VehiclesService {
         inspectionResultDate: resultDateRaw ? new Date(`${resultDateRaw}T00:00:00.000Z`) : null,
         // ค่าใช้จ่ายคงที่ แก้จากหน้าจอไม่ได้: ผ่าน = ราคาตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน)
         inspectionResultCost: result === 'ไม่ผ่าน' ? '0' : result === 'ผ่าน' ? vehicle.inspectionSentCost : null,
+        // ค่าตรวจรถ (Bill) มีเฉพาะรอบ 2 (inspectionSentBillCost ไม่ว่าง) - กติกาเดียวกับ No bill
+        inspectionResultBillCost:
+          vehicle.inspectionSentBillCost == null ? null : result === 'ไม่ผ่าน' ? '0' : result === 'ผ่าน' ? vehicle.inspectionSentBillCost : null,
         inspectionFailRemark: result === 'ไม่ผ่าน' ? remark : null,
       },
     });
@@ -794,6 +805,7 @@ export class VehiclesService {
       inspectionResult: updated.inspectionResult,
       inspectionResultDate: updated.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
       inspectionResultCost: updated.inspectionResultCost,
+      inspectionResultBillCost: updated.inspectionResultBillCost,
       inspectionFailRemark: updated.inspectionFailRemark,
     };
   }

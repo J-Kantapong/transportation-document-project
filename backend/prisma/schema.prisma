@@ -104,7 +104,8 @@ model Vehicle {
   // Step 3b: ผลตรวจ (เข้าคิวหลังจาก inspectionSentDate ถูกกรอกแล้วเท่านั้น)
   inspectionResult     String? // 'ผ่าน' | 'ไม่ผ่าน'
   inspectionResultDate DateTime? // วันที่ทราบผลตรวจ
-  inspectionResultCost Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
+  inspectionResultCost Decimal?  @db.Decimal(10, 2) // ราคาตรวจรถ (No bill) ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
+  inspectionResultBillCost Decimal? @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) ณ วันทราบผล - เฉพาะรอบ 2, ตรวจไม่ผ่านเป็น 0
   inspectionFailRemark String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
 
   // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax*/VehicleOwner/TaxCalculation ด้านล่าง)

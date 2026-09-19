@@ -283,7 +283,8 @@ export interface InspectionVehicle {
   inspectionSentBillCost: string | null; // ค่าตรวจรถ (Bill)
   inspectionResult: 'ผ่าน' | 'ไม่ผ่าน' | null;
   inspectionResultDate: string | null;
-  inspectionResultCost: string | null;
+  inspectionResultCost: string | null; // ราคาตรวจรถ (No bill)
+  inspectionResultBillCost: string | null; // ค่าตรวจรถ (Bill) - เฉพาะรอบ 2
   inspectionFailRemark: string | null;
 }
 
@@ -415,7 +416,7 @@ export const api = {
     request<{
       vehicle: Pick<
         InspectionVehicle,
-        'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionFailRemark'
+        'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionResultBillCost' | 'inspectionFailRemark'
       >;
     }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
 
