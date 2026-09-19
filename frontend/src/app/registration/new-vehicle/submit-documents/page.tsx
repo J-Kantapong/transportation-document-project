@@ -881,6 +881,15 @@ export default function SubmitDocumentsPage() {
                     <span style={{ fontSize: 16, fontWeight: 500 }}>{formatMoney(feePreview.billTotal)} บาท</span>
                   </div>
                   {taxPreview && <TaxResultView result={taxPreview} />}
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: "1px solid #dbe3f5", paddingTop: 8, marginTop: 2 }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>รวมค่า Bill ทั้งหมด</span>
+                    <span style={{ fontSize: 18, fontWeight: 600, color: "#2854d9" }}>
+                      {formatMoney(feePreview.billTotal + (taxPreview?.amount ?? 0))} บาท
+                      {taxPreview?.amount === null ? " + ภาษี (รอข้อมูล)" : ""}
+                    </span>
+                  </div>
                 </div>
 
                 <p className="muted" style={{ margin: "16px 0 8px" }}>
