@@ -3,6 +3,7 @@ import { z } from 'zod';
 // ข้อมูลที่ AI อ่านจากใบเสร็จรับเงินกรมการขนส่งทางบก - รูปแบบจากใบเสร็จจริงของผู้ใช้ (2026-09-20)
 // เก็บใน ReceiptImage.extraction พร้อม checks (ตรวจอัตโนมัติแบบตายตัว ไม่ใช้ AI) ให้หน้าเว็บเน้นช่องที่ต้องให้คนเช็ก
 export const RECEIPT_FIELDS = ['receiptNo', 'date', 'plate', 'chassis', 'weightKg', 'items', 'total'] as const;
+export type ReceiptField = (typeof RECEIPT_FIELDS)[number];
 
 export const ReceiptReadingSchema = z.object({
   receiptNo: z.string().nullable(),
@@ -13,10 +14,36 @@ export const ReceiptReadingSchema = z.object({
   weightKg: z.number().nullable(),
   items: z.array(z.object({ label: z.string(), amount: z.number() })),
   total: z.number().nullable(),
-  uncertainFields: z.array(z.enum(RECEIPT_FIELDS)), // ช่องที่ AI เองไม่มั่นใจ
+  // ช่องที่ AI เองไม่มั่นใจ - รับเป็นข้อความอิสระแล้วค่อยกรองด้วย normalizeUncertainFields
+  // เคยใช้ z.enum(RECEIPT_FIELDS) แล้วพบว่า AI ตอบชื่อช่องตาม schema (plateCategory/plateNumber) ซึ่งไม่อยู่ในลิสต์
+  // ทำให้ผลทั้งใบถูกทิ้งทั้งที่ช่องอื่นอ่านถูกหมด - ชื่อช่องที่ไม่รู้จักไม่ควรทำให้เสียทั้งใบ
+  uncertainFields: z.array(z.string()),
 });
 
 export type ReceiptReading = z.infer<typeof ReceiptReadingSchema>;
+
+// ชื่อที่ AI เรียกไม่ตรงกับที่หน้าเว็บใช้ -> จับคู่ให้; ชื่อที่ไม่รู้จักทิ้งไป
+const UNCERTAIN_ALIASES: Record<string, ReceiptField> = {
+  platecategory: 'plate',
+  platenumber: 'plate',
+  licenseplate: 'plate',
+  receiptnumber: 'receiptNo',
+  chassisnumber: 'chassis',
+  vin: 'chassis',
+  weight: 'weightKg',
+  item: 'items',
+};
+
+// เหลือเฉพาะชื่อช่องที่ needsCheck() ในหน้าเว็บรู้จัก (plate / total / items / chassis / ...) ไม่ซ้ำ
+export function normalizeUncertainFields(raw: string[]): ReceiptField[] {
+  const out = new Set<ReceiptField>();
+  for (const value of raw) {
+    const key = value.trim().toLowerCase();
+    const known = RECEIPT_FIELDS.find((f) => f.toLowerCase() === key) ?? UNCERTAIN_ALIASES[key];
+    if (known) out.add(known);
+  }
+  return [...out];
+}
 
 export interface ReceiptChecks {
   chassisValid: boolean; // VIN 17 ตัว ไม่มี I O Q
@@ -43,4 +70,4 @@ export const RECEIPT_READING_PROMPT = `รูปนี้คือใบเส�
 - weightKg: ตัวเลขหลัง "น้ำหนักรถ"
 - items: ทุกรายการค่าใช้จ่ายระหว่างข้อมูลรถกับยอดรวม ตามลำดับที่พิมพ์
 - total: ยอดหลัง "รวมเป็นเงินทั้งสิ้น"
-ช่องไหนอ่านไม่ออกให้ใส่ null ห้ามเดา ช่องไหนอ่านได้แต่ไม่มั่นใจ (ตัวอักษรเลือน/ถูกตราประทับหรือลายเซ็นทับ) ให้ใส่ชื่อช่องใน uncertainFields`;
+ช่องไหนอ่านไม่ออกให้ใส่ null ห้ามเดา ช่องไหนอ่านได้แต่ไม่มั่นใจ (ตัวอักษรเลือน/ถูกตราประทับหรือลายเซ็นทับ) ให้ใส่ชื่อช่องใน uncertainFields โดยใช้ชื่อจากลิสต์นี้เท่านั้น: receiptNo, date, plate, chassis, weightKg, items, total (ทะเบียนไม่ว่าหมวดหรือตัวเลขใช้ plate)`;

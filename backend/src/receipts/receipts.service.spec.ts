@@ -95,7 +95,7 @@ const READING: ReceiptReading = {
 };
 const aiReading = (reading: ReceiptReading): ReceiptExtractor => ({
   source: 'claude-sonnet-5',
-  extract: () => Promise.resolve({ reading, checks: checkReading(reading), usage: { inputTokens: 1, outputTokens: 1 } }),
+  extract: () => Promise.resolve({ reading, checks: checkReading(reading), usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 } }),
 });
 
 describe('ReceiptsService.upload - จับคู่ด้วยเลขตัวถังที่ AI อ่าน', () => {

@@ -2,14 +2,26 @@ import * as process from 'node:process';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { Injectable, Logger } from '@nestjs/common';
-import { RECEIPT_READING_PROMPT, ReceiptReadingSchema, checkReading, type ReceiptChecks, type ReceiptReading } from './receipt-extraction.js';
+import {
+  RECEIPT_READING_PROMPT,
+  ReceiptReadingSchema,
+  checkReading,
+  normalizeUncertainFields,
+  type ReceiptChecks,
+  type ReceiptReading,
+} from './receipt-extraction.js';
 
 // ตัวอ่านข้อมูลจากรูปใบเสร็จ (AI) - ผลที่ได้เก็บใน ReceiptImage.extraction ให้พนักงานตรวจทานก่อนบันทึกเสมอ
 export const RECEIPT_EXTRACTOR = Symbol('RECEIPT_EXTRACTOR');
 
 // ผลใน ReceiptImage.extraction: อ่านสำเร็จ = reading + checks, อ่านไม่สำเร็จ = error (ยังเก็บรูปไว้ พนักงานกรอกเอง)
 export type ReceiptExtraction =
-  | { reading: ReceiptReading; checks: ReceiptChecks; usage: { inputTokens: number; outputTokens: number } }
+  | {
+      reading: ReceiptReading;
+      checks: ReceiptChecks;
+      // cachedTokens = prompt ที่อ่านจาก cache (คิด 10% ของราคาปกติ) - ถ้าเป็น 0 ตลอดแปลว่า cache ไม่ทำงาน
+      usage: { inputTokens: number; outputTokens: number; cachedTokens: number };
+    }
   | { error: string };
 
 export interface ReceiptExtractor {
@@ -43,8 +55,11 @@ export class ClaudeReceiptExtractor implements ReceiptExtractor {
       const response = await this.client.messages.parse({
         model: RECEIPT_MODEL,
         max_tokens: 8000,
-        // medium: เลขตัวถัง/ทะเบียนต้องแม่นทุกตัว แต่ไม่ต้องคิดลึกแบบ high - ดูจำนวน token จริงใน usage แล้วปรับได้
+        // วัดกับใบเสร็จจริง 34 ใบแล้ว: effort low/medium ใช้ token เท่ากัน (output แค่ ~290) เลยคง medium ไว้
         output_config: { effort: 'medium', format: zodOutputFormat(ReceiptReadingSchema) },
+        // prompt = ส่วนที่ซ้ำทุกใบ (~1,380 token) อยู่ใน system แล้ว cache ไว้ อ่านซ้ำคิดแค่ 10% ของราคาปกติ
+        // รูปซึ่งเปลี่ยนทุกใบต้องอยู่หลัง cache breakpoint เสมอ ไม่งั้น cache ใช้ไม่ได้เลยสักใบ
+        system: [{ type: 'text', text: RECEIPT_READING_PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [
           {
             role: 'user',
@@ -53,19 +68,25 @@ export class ClaudeReceiptExtractor implements ReceiptExtractor {
                 type: 'image',
                 source: { type: 'base64', media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/webp', data: image.toString('base64') },
               },
-              { type: 'text', text: RECEIPT_READING_PROMPT },
+              { type: 'text', text: 'อ่านใบเสร็จใบนี้' },
             ],
           },
         ],
       });
       if (response.stop_reason === 'refusal') return { error: 'AI ปฏิเสธการอ่านรูปนี้' };
       if (response.stop_reason === 'max_tokens') return { error: 'AI อ่านไม่จบ (ข้อความยาวเกิน)' };
-      const reading = response.parsed_output;
-      if (!reading) return { error: 'AI ตอบกลับในรูปแบบที่อ่านไม่ได้' };
+      const parsed = response.parsed_output;
+      if (!parsed) return { error: 'AI ตอบกลับในรูปแบบที่อ่านไม่ได้' };
+      // AI เรียกชื่อช่องไม่ตรงลิสต์ได้ - กรองทิ้งตรงนี้ ไม่ให้กระทบช่องอื่นที่อ่านถูกแล้ว
+      const reading: ReceiptReading = { ...parsed, uncertainFields: normalizeUncertainFields(parsed.uncertainFields) };
       return {
         reading,
         checks: checkReading(reading),
-        usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          cachedTokens: response.usage.cache_read_input_tokens ?? 0,
+        },
       };
     } catch (err) {
       if (err instanceof Anthropic.AuthenticationError) return { error: 'API key ไม่ถูกต้อง' };
