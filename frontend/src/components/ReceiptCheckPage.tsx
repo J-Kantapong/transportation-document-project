@@ -384,6 +384,15 @@ export function ReceiptCheckPage() {
       </Link>
       <h1 tabIndex={-1}>รับใบเสร็จ</h1>
 
+      {/* อยู่บนสุดให้เห็นเสมอ - คนถ่ายใบเสร็จไม่ต้องเปิดใบยื่นก่อน รูปที่ถ่ายจะจับคู่กับรถเอง หรือไปรอในถาดของใบยื่น */}
+      <Link
+        href="/registration/new-vehicle/receive-receipt/capture"
+        className="primary"
+        style={{ display: "inline-flex", marginTop: 14, textDecoration: "none" }}
+      >
+        📷 ถ่ายใบเสร็จจากมือถือ
+      </Link>
+
       <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center", flexWrap: "wrap" }}>
         {(
           [

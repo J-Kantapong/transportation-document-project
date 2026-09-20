@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
@@ -210,6 +211,10 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
             {message.text}
           </div>
         )}
+        {/* คนที่ถือใบเสร็จอยู่เปิดหน้านี้บนมือถือแล้วถ่ายส่งเข้าระบบได้เลย - รูปที่จับคู่ไม่ได้จะมาโผล่ในถาดนี้ */}
+        <div className="customer-message" style={{ marginBottom: 10 }}>
+          📱 ถ่ายจากมือถือ: เปิด <Link href="/registration/new-vehicle/receive-receipt/capture">หน้าถ่ายใบเสร็จ</Link> บนมือถือ
+        </div>
         {tray.length === 0 ? (
           <div className="customer-message">ไม่มีรูปรอจับคู่ - กด &quot;เลือกรูปหลายใบ&quot; เพื่ออัปโหลดใบเสร็จทีละหลายรูป</div>
         ) : (
