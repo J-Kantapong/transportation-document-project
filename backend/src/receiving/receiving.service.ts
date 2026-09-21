@@ -34,7 +34,7 @@ const VEHICLE_INCLUDE = {
   customer: { select: { name: true } },
   brand: { select: { name: true } },
   // แถวล่าสุดแถวเดียวพอ - ใช้เช็คว่าได้รับใบเสร็จแล้วหรือยัง (ขั้น plate/book ต้องมีใบเสร็จก่อน)
-  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true } },
+  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true, receiptNo: true } },
 } as const;
 
 // รับป้ายทะเบียน/รับเล่มทะเบียน เข้าคิวเมื่อได้รับใบเสร็จแล้ว (ยื่นเอกสารครั้งล่าสุด = RECEIPT_RECEIVED)
@@ -66,6 +66,7 @@ export class ReceivingService {
       deliveryNote: string | null;
       customer: { name: string };
       brand: { name: string };
+      documentSubmissions: Array<{ receiptNo?: string | null }>;
     },
   ) {
     const doneDate = vehicle[DONE_DATE_FIELD[step]];
@@ -78,6 +79,7 @@ export class ReceivingService {
       body: vehicle.body,
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
+      receiptNo: vehicle.documentSubmissions[0]?.receiptNo ?? null, // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด - เรียงไปห้องรับป้าย
       doneDate: doneDate?.toISOString().slice(0, 10) ?? null,
       recipient: step === 'delivery' ? vehicle.deliveryRecipient : null,
       note: step === 'delivery' ? vehicle.deliveryNote : null,

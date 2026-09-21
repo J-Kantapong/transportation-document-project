@@ -16,6 +16,7 @@ export interface QueueRow {
   body: string | null;
   plateCategory: string | null;
   plateNumber: string | null;
+  receiptNo?: string | null; // เลขที่ใบเสร็จ - แสดงเมื่อ showReceiptNo (รับป้ายทะเบียน)
   doneDate: string | null; // ISO
   recipient?: string | null;
   note?: string | null;
@@ -33,6 +34,7 @@ interface Props {
   doneLabel: string; // หัวคอลัมน์ checkbox เช่น "ได้รับป้ายทะเบียนแล้ว"
   doneDateLabel: string; // เช่น "วันที่รับป้ายทะเบียน"
   showDeliveryFields?: boolean;
+  showReceiptNo?: boolean;
   emptyText: string;
   loadPending: () => Promise<QueueRow[]>;
   loadCompleted: () => Promise<QueueRow[]>;
@@ -65,6 +67,7 @@ export function ReceivingQueuePage({
   doneLabel,
   doneDateLabel,
   showDeliveryFields,
+  showReceiptNo,
   emptyText,
   loadPending,
   loadCompleted,
@@ -150,6 +153,7 @@ export function ReceivingQueuePage({
                   <th>เลขตัวถัง</th>
                   <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
+                  {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
                   <th>{doneLabel}</th>
                   <th>{doneDateLabel}</th>
                   {showDeliveryFields && <th>ผู้รับ</th>}
@@ -168,6 +172,7 @@ export function ReceivingQueuePage({
                       <td>{r.chassis}</td>
                       <td>{r.body || "—"}</td>
                       <td>{plateText(r)}</td>
+                      {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
                       <td>
                         <input type="checkbox" checked={row.checked} onChange={(e) => patchRow(r.id, { checked: e.target.checked })} aria-label={doneLabel} />
                       </td>
@@ -226,6 +231,7 @@ export function ReceivingQueuePage({
                   <th>เลขตัวถัง</th>
                   <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
+                  {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
                   <th>{doneDateLabel}</th>
                   {showDeliveryFields && <th>ผู้รับ</th>}
                   {showDeliveryFields && <th>หมายเหตุ</th>}
@@ -239,6 +245,7 @@ export function ReceivingQueuePage({
                     <td>{r.chassis}</td>
                     <td>{r.body || "—"}</td>
                     <td>{plateText(r)}</td>
+                    {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
                     <td>{r.doneDate ? isoToDisplayDate(r.doneDate) : "—"}</td>
                     {showDeliveryFields && <td>{r.recipient || "—"}</td>}
                     {showDeliveryFields && <td>{r.note || "—"}</td>}

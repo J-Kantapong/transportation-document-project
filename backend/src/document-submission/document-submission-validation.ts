@@ -71,6 +71,15 @@ export function parseReceiptAmount(raw: unknown): number | null {
   return Number(text);
 }
 
+// เลขที่ใบเสร็จไม่บังคับ และไม่ล็อกรูปแบบ (ผู้ใช้: prefix น่าจะเป็นปี พ.ศ. เปลี่ยนทุกปี - UI แค่เตือนถ้าไม่ใช่ ตัวเลข/ตัวเลข)
+export function parseReceiptNo(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new BadRequestException({ error: 'เลขที่ใบเสร็จต้องเป็นข้อความ' });
+  const text = raw.trim();
+  if (text.length > 30) throw new BadRequestException({ error: 'เลขที่ใบเสร็จยาวเกิน 30 ตัวอักษร' });
+  return text || null;
+}
+
 // ตาม mockup: ถ้าเลือกขอใช้เลขทะเบียน (NORMAL/AUCTION) ต้องกรอกหมวดทะเบียน+เลขทะเบียนก่อนบันทึกจริง
 // (ต่างจากกรณี "ไม่ขอ" ที่เว้นว่างได้ เพราะกรมขนส่งรันเลขให้เองแล้วมากรอกทีหลัง)
 export function assertPlateNumberProvided(plateNumberOption: PlateNumberOption, plateCategory: string | null, plateNumber: string | null) {

@@ -181,18 +181,19 @@ describe('DocumentSubmissionService.updateStatus', () => {
     });
   });
 
-  it('รับใบเสร็จ: บันทึกเลขทะเบียนลงรถ + วันที่ + ยอดใบเสร็จ', async () => {
+  it('รับใบเสร็จ: บันทึกเลขทะเบียนลงรถ + วันที่ + ยอด + เลขที่ใบเสร็จ', async () => {
     const { service, submissionUpdate, vehicleUpdate } = setup(pendingSubmission());
     const result = await service.updateStatus('sub1', 'RECEIPT_RECEIVED', '2026-09-20', {
       plateCategory: '4กข',
       plateNumber: '1234',
       receiptAmount: '355.50',
+      receiptNo: ' 69/0035358 ',
     });
     expect(result.status).toBe('RECEIPT_RECEIVED');
     expect(vehicleUpdate).toHaveBeenCalledWith({ where: { id: 'v1' }, data: { plateCategory: '4กข', plateNumber: '1234' } });
     expect(submissionUpdate).toHaveBeenCalledWith({
       where: { id: 'sub1' },
-      data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: new Date('2026-09-20T00:00:00.000Z'), receiptAmount: 355.5 },
+      data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: new Date('2026-09-20T00:00:00.000Z'), receiptAmount: 355.5, receiptNo: '69/0035358' },
     });
   });
 

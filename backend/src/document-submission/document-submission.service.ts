@@ -15,6 +15,7 @@ import {
   parseDocumentSubmissionOptions,
   parsePlateFields,
   parseReceiptAmount,
+  parseReceiptNo,
   parseSubmitDate,
 } from './document-submission-validation.js';
 
@@ -317,12 +318,12 @@ export class DocumentSubmissionService {
   // การอัปเดตนี้ปลด block การยื่นซ้ำของรถคันนั้นใน assertNotPending()
   // receivedDate (ค.ศ. YYYY-MM-DD) ใช้เฉพาะ RECEIPT_RECEIVED - ไม่ส่งมาจะใช้วันนี้
   // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (หมวด+เลข) - ใช้ที่ส่งมา หรือที่รถคันนี้มีอยู่แล้วถ้าไม่ได้ส่ง ไม่มีทั้งคู่บันทึกไม่ได้
-  // (FAILED ไม่ต้องมี) และบันทึกลง Vehicle.plateCategory/plateNumber; receiptAmount (ไม่บังคับ) = ยอดบนใบเสร็จจริง
+  // (FAILED ไม่ต้องมี) และบันทึกลง Vehicle.plateCategory/plateNumber; receiptAmount/receiptNo (ไม่บังคับ) = ยอด/เลขที่บนใบเสร็จจริง
   async updateStatus(
     submissionId: string,
     statusRaw: unknown,
     receivedDateRaw?: unknown,
-    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; failRemark?: unknown } = {},
+    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; failRemark?: unknown } = {},
   ) {
     if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
       throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
@@ -362,12 +363,13 @@ export class DocumentSubmissionService {
     }
     assertPlateFormat(plateCategory, plateNumber);
     const receiptAmount = parseReceiptAmount(extras.receiptAmount);
+    const receiptNo = parseReceiptNo(extras.receiptNo);
 
     const [, updated] = await this.prisma.$transaction([
       this.prisma.vehicle.update({ where: { id: submission.vehicleId }, data: { plateCategory, plateNumber } }),
       this.prisma.documentSubmission.update({
         where: { id: submissionId },
-        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptAmount },
+        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptAmount, receiptNo },
       }),
     ]);
     return updated;
@@ -399,6 +401,7 @@ export class DocumentSubmissionService {
             plateCategory: entry.plateCategory,
             plateNumber: entry.plateNumber,
             receiptAmount: entry.receiptAmount,
+            receiptNo: entry.receiptNo,
           });
         } else if (entry?.action === 'FAILED') {
           await this.updateStatus(submissionId, 'FAILED', undefined, { failRemark: entry.failRemark });

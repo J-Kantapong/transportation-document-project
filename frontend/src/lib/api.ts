@@ -172,6 +172,7 @@ export interface DocumentSubmission {
   updatedAt: string;
   receiptReceivedDate: string | null;
   receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
+  receiptNo: string | null; // เลขที่ใบเสร็จ (AI กรอกให้ พนักงานแก้ได้)
   failRemark: string | null; // เหตุผลที่ยื่นไม่สำเร็จ - มีเฉพาะ status FAILED
   receiptCarriedAt: string | null; // ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ/ยังไม่รู้สาเหตุ -> อยู่ใน "ค้างจากใบก่อน"
   vehicle: {
@@ -227,7 +228,7 @@ export type ReceiptExtraction = (
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
 
 export type ReceiptCheckEntry =
-  | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string }
+  | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string; receiptNo?: string }
   | { submissionId: string; action: 'FAILED'; failRemark: string }
   | { submissionId: string; action: 'CARRY' };
 
@@ -245,6 +246,7 @@ export interface ReceivingRow {
   body: string | null;
   plateCategory: string | null;
   plateNumber: string | null;
+  receiptNo: string | null; // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด
   doneDate: string | null;
   recipient: string | null; // เฉพาะ delivery
   note: string | null; // เฉพาะ delivery

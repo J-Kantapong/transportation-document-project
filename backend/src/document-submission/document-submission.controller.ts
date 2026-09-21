@@ -44,12 +44,13 @@ export class DocumentSubmissionController {
   updateStatus(
     @Param('id') id: string,
     @Body()
-    body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; failRemark?: unknown },
+    body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; failRemark?: unknown },
   ) {
     return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate, {
       plateCategory: body?.plateCategory,
       plateNumber: body?.plateNumber,
       receiptAmount: body?.receiptAmount,
+      receiptNo: body?.receiptNo,
       failRemark: body?.failRemark,
     });
   }

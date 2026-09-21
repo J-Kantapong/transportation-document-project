@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
@@ -50,13 +51,17 @@ interface RowInput {
   plateCategory: string;
   plateNumber: string;
   amountText: string;
+  receiptNo: string;
   reason: string; // "" = ยังไม่รู้สาเหตุ (ค้างไว้)
   otherText: string;
+  reviewed: boolean; // พนักงานกดยืนยันใน popup แล้วว่าตรงกับรูป -> เลิก highlight ช่องที่ AI ไม่แน่ใจ
 }
 
 const money = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const billOf = (s: DocumentSubmission) => (s.taxAmount === null ? null : Number(s.billFeeTotal) + Number(s.taxAmount));
 const AMOUNT_RE = /^\d+(\.\d{1,2})?$/;
+// รูปแบบที่เห็นบนใบเสร็จจริง 69/0035358 - ไม่ล็อก prefix/จำนวนหลัก (ปี พ.ศ. เปลี่ยนทุกปี) แค่เตือน ไม่บล็อก
+const RECEIPT_NO_RE = /^\d+\/\d+$/;
 
 function CompareBadge({ s, amountText }: { s: DocumentSubmission; amountText: string }) {
   const text = amountText.trim();
@@ -90,26 +95,44 @@ function wrongCarReceipts(list: ReceiptSummary[] | undefined): Ai[] {
   return (list ?? []).flatMap((r) => (r.extraction && "reading" in r.extraction && r.extraction.match === "chassis-mismatch" ? [r.extraction as Ai] : []));
 }
 
+// รูปที่ใช้เปิดใน popup: รูปที่ AI อ่าน (ตัวเดียวกับ latestAi) ไม่มีก็ใช้รูปล่าสุด
+function latestAiImageId(list: ReceiptSummary[] | undefined): string | null {
+  const all = list ?? [];
+  const read = [...all].reverse().find((r) => r.extraction && "reading" in r.extraction && r.extraction.match !== "chassis-mismatch");
+  return read?.id ?? all[all.length - 1]?.id ?? null;
+}
+
 function latestAiError(list: ReceiptSummary[] | undefined): string | null {
   const last = list?.[list.length - 1]?.extraction;
   return last && "error" in last ? last.error : null;
 }
 
-// ช่องที่ต้องให้คนเช็ก: AI บอกเองว่าไม่มั่นใจ หรือการตรวจอัตโนมัติไม่ผ่าน
-function needsCheck(ai: Ai | null) {
-  if (!ai) return { plate: false, total: false, chassis: false };
-  const u = ai.reading.uncertainFields;
+const NO_FLAGS: FieldFlags = { plate: null, total: null, chassis: null, receiptNo: null };
+
+// ช่องที่ต้องให้คนเช็ก (ค่า = เหตุผลที่แสดงใน popup): AI อ่านไม่ออก, AI บอกเองว่าไม่มั่นใจ หรือการตรวจอัตโนมัติไม่ผ่าน
+// พนักงานกดยืนยันใน popup แล้ว (reviewed) = เลิก highlight ของแถวนั้น
+function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
+  if (!ai || reviewed) return NO_FLAGS;
+  const r = ai.reading;
+  const u = r.uncertainFields;
+  const reason = (unreadable: boolean, uncertain: boolean, checkFailed: string | null) =>
+    unreadable ? "AI อ่านไม่ออก - กรอกตามรูป" : uncertain ? "AI ไม่แน่ใจ - เทียบกับรูป" : checkFailed;
   return {
-    plate: u.includes("plate") || !ai.checks.plateValid,
-    total: u.includes("total") || u.includes("items") || !ai.checks.itemsSumMatchesTotal,
-    chassis: u.includes("chassis") || !ai.checks.chassisValid,
+    plate: reason(!r.plateCategory || !r.plateNumber, u.includes("plate"), ai.checks.plateValid ? null : "รูปแบบทะเบียนไม่ถูกต้อง"),
+    total: reason(
+      r.total === null,
+      u.includes("total") || u.includes("items"),
+      ai.checks.itemsSumMatchesTotal ? null : "รายการในใบเสร็จรวมกันไม่เท่ายอดรวม",
+    ),
+    chassis: reason(!r.chassis, u.includes("chassis"), ai.checks.chassisValid ? null : "เลขตัวถังไม่ผ่านการตรวจ check digit"),
+    receiptNo: reason(!r.receiptNo, u.includes("receiptNo"), ai.checks.receiptNoValid ? null : "รูปแบบไม่ใช่ ตัวเลข/ตัวเลข"),
   };
 }
 
 const CHECK_STYLE = { border: "2px solid #e0a31a", background: "#fff8e6" };
 
 // เทียบรายการบนใบเสร็จกับ Bill ที่ระบบคำนวณ: แยกภาษีกับค่าธรรมเนียม + บอกสาเหตุที่น่าจะเป็น (แบบ ข - แก้ข้อมูลรถ)
-function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string, wrong: Ai[]): string[] {
+function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string, wrong: Ai[], reviewed = false): string[] {
   const lines: string[] = wrong.map((w) => `มีรูปใบเสร็จของรถคันอื่นแนบอยู่ (เลขตัวถัง ${w.reading.chassis}) - ลบรูปนั้นก่อนบันทึก`);
   if (!ai) return lines;
   // ทะเบียนที่กรอกไว้ตอนยื่น (Step 4) ไม่ตรงกับใบเสร็จ = พนักงานกรอกผิดตอนยื่น - บันทึกจะใช้ตามใบเสร็จ
@@ -118,8 +141,8 @@ function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string
   if (v.plateCategory && v.plateNumber && r.plateCategory && r.plateNumber && (v.plateCategory !== r.plateCategory || v.plateNumber !== r.plateNumber)) {
     lines.push(`ทะเบียนตอนยื่น ${v.plateCategory} ${v.plateNumber} ไม่ตรงกับใบเสร็จ ${r.plateCategory} ${r.plateNumber} - บันทึกแล้วจะใช้ตามใบเสร็จ`);
   }
-  const check = needsCheck(ai);
-  const toCheck = [check.plate && "ทะเบียน", check.total && "ยอดเงิน", check.chassis && "เลขตัวถัง"].filter(Boolean);
+  const check = needsCheck(ai, reviewed);
+  const toCheck = [check.plate && "ทะเบียน", check.receiptNo && "เลขที่ใบเสร็จ", check.total && "ยอดเงิน", check.chassis && "เลขตัวถัง"].filter(Boolean);
   if (toCheck.length) lines.push(`เช็กกับรูปอีกครั้ง: ${toCheck.join(", ")}`);
 
   const amount = AMOUNT_RE.test(amountText.trim()) ? Number(amountText.trim()) : null;
@@ -147,9 +170,9 @@ function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string
   return lines;
 }
 
-function AiFindings({ s, ai, amountText, wrong }: { s: DocumentSubmission; ai: Ai | null; amountText: string; wrong: Ai[] }) {
-  const lines = aiFindingLines(s, ai, amountText, wrong);
-  if (lines.length === 0) return <span className="badge done">AI ตรวจแล้ว ตรงทุกอย่าง</span>;
+function AiFindings({ s, ai, amountText, wrong, reviewed }: { s: DocumentSubmission; ai: Ai | null; amountText: string; wrong: Ai[]; reviewed: boolean }) {
+  const lines = aiFindingLines(s, ai, amountText, wrong, reviewed);
+  if (lines.length === 0) return <span className="badge done">{reviewed ? "ตรวจกับรูปแล้ว" : "AI ตรวจแล้ว ตรงทุกอย่าง"}</span>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {lines.map((text) => (
@@ -161,15 +184,17 @@ function AiFindings({ s, ai, amountText, wrong }: { s: DocumentSubmission; ai: A
   );
 }
 
-// ใบเสร็จคือข้อเท็จจริง: มีผลอ่านแล้วใช้ทะเบียน/ยอดตามใบเสร็จ (ช่องที่อ่านไม่ออกคงค่าเดิมไว้)
+// ใบเสร็จคือข้อเท็จจริง: มีผลอ่านแล้วใช้ทะเบียน/เลขที่/ยอดตามใบเสร็จ (ช่องที่อ่านไม่ออกคงค่าเดิมไว้)
 function withAi(input: RowInput, ai: Ai | null): RowInput {
   if (!ai) return input;
   const r = ai.reading;
   return {
     ...input,
+    reviewed: false, // ผลอ่านใหม่ = ต้องเช็กใหม่
     plateCategory: r.plateCategory ?? input.plateCategory,
     plateNumber: r.plateNumber ?? input.plateNumber,
     amountText: r.total !== null ? String(r.total) : input.amountText,
+    receiptNo: r.receiptNo ?? input.receiptNo,
   };
 }
 
@@ -223,7 +248,7 @@ export function ReceiptCheckPage() {
           p.submissions.map((s) => [
             s.id,
             withAi(
-              { plateCategory: s.vehicle.plateCategory ?? "", plateNumber: s.vehicle.plateNumber ?? "", amountText: "", reason: "", otherText: "" },
+              { plateCategory: s.vehicle.plateCategory ?? "", plateNumber: s.vehicle.plateNumber ?? "", amountText: "", receiptNo: "", reason: "", otherText: "", reviewed: false },
               latestAi(s.receipts),
             ),
           ]),
@@ -286,7 +311,7 @@ export function ReceiptCheckPage() {
   // คันที่ AI อ่านใบเสร็จแล้ว - ตรงทุกอย่าง = พนักงานแค่เหลือบดู, ที่เหลือต้องเช็กตามที่ขึ้นเตือน
   const aiChecked = activeRows.filter((s) => latestAi(receipts[s.id]) || wrongCarReceipts(receipts[s.id]).length > 0);
   const aiAllGood = aiChecked.filter(
-    (s) => aiFindingLines(s, latestAi(receipts[s.id]), inputs[s.id]?.amountText ?? "", wrongCarReceipts(receipts[s.id])).length === 0,
+    (s) => aiFindingLines(s, latestAi(receipts[s.id]), inputs[s.id]?.amountText ?? "", wrongCarReceipts(receipts[s.id]), inputs[s.id]?.reviewed).length === 0,
   ).length;
 
   function patchInput(id: string, patch: Partial<RowInput>) {
@@ -333,6 +358,7 @@ export function ReceiptCheckPage() {
             plateCategory: input.plateCategory.trim(),
             plateNumber: input.plateNumber.trim(),
             receiptAmount: input.amountText.trim() || undefined,
+            receiptNo: input.receiptNo.trim() || undefined,
           });
       } else if (input.reason) {
         const remark = input.reason === "อื่นๆ" ? input.otherText.trim() : input.reason;
@@ -527,6 +553,7 @@ export function ReceiptCheckPage() {
                     <th>เลขตัวรถ</th>
                     <th>รูปใบเสร็จ</th>
                     <th>เลขทะเบียน (หมวด / เลข)</th>
+                    <th>เลขที่ใบเสร็จ</th>
                     <th>Bill</th>
                     <th>ยอดใบเสร็จ</th>
                     <th>สถานะ</th>
@@ -540,7 +567,7 @@ export function ReceiptCheckPage() {
                     const rowError = rowErrors[s.id];
                     const ai = latestAi(receipts[s.id]);
                     const wrong = wrongCarReceipts(receipts[s.id]);
-                    const check = needsCheck(ai);
+                    const check = needsCheck(ai, input?.reviewed);
                     const aiError = photo && !ai ? latestAiError(receipts[s.id]) : null;
                     const bill = billOf(s);
                     return (
@@ -600,6 +627,29 @@ export function ReceiptCheckPage() {
                           )}
                         </td>
                         <td>
+                          {active && input ? (
+                            <>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="69/0035358"
+                                maxLength={30}
+                                value={input.receiptNo}
+                                onChange={(e) => patchInput(s.id, { receiptNo: e.target.value.replace(/[^\d/]/g, "") })}
+                                aria-label="เลขที่ใบเสร็จ"
+                                style={{ width: 110, ...(check.receiptNo ? CHECK_STYLE : {}) }}
+                              />
+                              {input.receiptNo.trim() && !RECEIPT_NO_RE.test(input.receiptNo.trim()) && (
+                                <div style={{ marginTop: 4 }}>
+                                  <span className="badge warn">รูปแบบไม่ใช่ ตัวเลข/ตัวเลข</span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            s.receiptNo || "—"
+                          )}
+                        </td>
+                        <td>
                           <div>{bill === null ? "—" : money(bill)}</div>
                           <div style={{ fontSize: 11, color: "#8a94a6" }}>
                             ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
@@ -632,7 +682,7 @@ export function ReceiptCheckPage() {
                             <StatusText s={s} />
                           ) : photo ? (
                             ai || wrong.length > 0 ? (
-                              <AiFindings s={s} ai={ai} amountText={input?.amountText ?? ""} wrong={wrong} />
+                              <AiFindings s={s} ai={ai} amountText={input?.amountText ?? ""} wrong={wrong} reviewed={input?.reviewed ?? false} />
                             ) : aiError ? (
                               <span style={{ fontSize: 12, color: "#b43434" }}>{aiError} - ตรวจรูปแล้วกรอกเอง</span>
                             ) : (
@@ -664,6 +714,21 @@ export function ReceiptCheckPage() {
                                 />
                               )}
                             </>
+                          )}
+                          {active && photo && input && (
+                            <div>
+                              <ReceiptEditButton
+                                submission={s}
+                                receipts={receipts[s.id] ?? []}
+                                imageId={latestAiImageId(receipts[s.id])}
+                                values={input}
+                                flags={needsCheck(ai)}
+                                highlight={!input.reviewed}
+                                aiChassis={ai?.reading.chassis ?? null}
+                                aiDate={ai?.reading.date ?? null}
+                                onSave={(values) => patchInput(s.id, { ...values, reviewed: true })}
+                              />
+                            </div>
                           )}
                           {rowError && (
                             <div className="customer-message error" style={{ fontSize: 11 }} role="alert">
@@ -707,6 +772,7 @@ export function ReceiptCheckPage() {
                   <th>ชื่อลูกค้า</th>
                   <th>เลขตัวถัง</th>
                   <th>ทะเบียน</th>
+                  <th>เลขที่ใบเสร็จ</th>
                   <th>วันที่รับใบเสร็จ</th>
                   <th>รูปใบเสร็จ</th>
                   <th>Bill</th>
@@ -724,6 +790,7 @@ export function ReceiptCheckPage() {
                         <td>{s.vehicle.customer.name}</td>
                         <td>{s.vehicle.chassis}</td>
                         <td>{s.vehicle.plateCategory && s.vehicle.plateNumber ? `${s.vehicle.plateCategory} ${s.vehicle.plateNumber}` : "—"}</td>
+                        <td>{s.receiptNo || "—"}</td>
                         <td>{s.receiptReceivedDate ? isoToDisplayDate(s.receiptReceivedDate.slice(0, 10)) : "—"}</td>
                         <td>{(receipts[s.id] ?? []).length ? <ReceiptThumbs receipts={receipts[s.id]} /> : "—"}</td>
                         <td>{bill === null ? "—" : money(bill)}</td>

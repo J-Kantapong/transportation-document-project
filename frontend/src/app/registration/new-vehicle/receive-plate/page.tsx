@@ -2,6 +2,7 @@
 
 import { ReceivingQueuePage, type QueueRow } from "@/components/ReceivingQueuePage";
 import { api, type ReceivingRow } from "@/lib/api";
+import { comparePlate } from "@/lib/plate-order";
 
 function toRow(r: ReceivingRow): QueueRow {
   return {
@@ -12,6 +13,7 @@ function toRow(r: ReceivingRow): QueueRow {
     body: r.body,
     plateCategory: r.plateCategory,
     plateNumber: r.plateNumber,
+    receiptNo: r.receiptNo,
     doneDate: r.doneDate,
     recipient: r.recipient,
     note: r.note,
@@ -26,7 +28,9 @@ export default function ReceivePlatePage() {
       doneLabel="รับป้ายแล้ว"
       doneDateLabel="วันที่รับป้าย"
       emptyText="ไม่มีรถที่รอรับป้ายทะเบียน (ต้องได้รับใบเสร็จก่อน)"
-      loadPending={async () => (await api.listReceivingPending("plate")).vehicles.map(toRow)}
+      showReceiptNo
+      // เรียงตามหมวด+เลขทะเบียน ให้ถือรายการไปห้องรับป้ายได้เลย (กก 1 … กก 9999 แล้ว กข 1 …)
+      loadPending={async () => (await api.listReceivingPending("plate")).vehicles.map(toRow).sort(comparePlate)}
       loadCompleted={async () => (await api.listReceivingCompleted("plate")).vehicles.map(toRow)}
       markDone={async (id, data) => {
         await api.markReceivingDone(id, "plate", data);
