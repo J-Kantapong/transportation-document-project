@@ -9,6 +9,8 @@ export const PlateReadingSchema = z.object({
       number: z.string().nullable(), // เลข เช่น "3484"
       province: z.string().nullable(),
       uncertain: z.boolean(), // AI ไม่มั่นใจตัวอักษร/ตัวเลขบางตัว
+      // ดูจากรูปแบบป้าย (รถยนต์: หมวด+เลขบรรทัดบน จังหวัดล่าง / มอเตอร์ไซค์: 3 บรรทัด เลขอยู่ล่าง) - ใช้เตือนถ่ายผิดแท็บ
+      plateType: z.enum(['car', 'motorcycle']).nullable(),
     }),
   ),
 });
@@ -22,6 +24,7 @@ export const PLATE_READING_PROMPT = `รูปนี้ถ่ายป้าย�
 - number: เลขทะเบียน 1-4 หลัก เช่น "3484"
 - province: ชื่อจังหวัดบนป้าย เช่น "กรุงเทพมหานคร" (ไม่เห็นใส่ null)
 - uncertain: true ถ้าตัวอักษรหรือตัวเลขบางตัวเลือน ถูกบัง สะท้อนแสง หรือเห็นไม่ชัด
+- plateType: "car" ถ้าเป็นป้ายรถยนต์ (แผ่นกว้าง 2 บรรทัด), "motorcycle" ถ้าเป็นป้ายรถจักรยานยนต์ (แผ่นเล็ก 3 บรรทัด), ไม่แน่ใจใส่ null
 ป้ายรถยนต์: หมวดและเลขอยู่บรรทัดบน จังหวัดอยู่บรรทัดล่าง ป้ายรถจักรยานยนต์: หมวดอยู่บรรทัดบน จังหวัดตรงกลาง เลขอยู่บรรทัดล่าง
 ป้ายที่เห็นไม่ครบจนอ่านหมวดหรือเลขไม่ได้ ให้ใส่ช่องนั้นเป็น null ห้ามเดา ถ้าในรูปไม่มีป้ายทะเบียนเลยให้ตอบ plates เป็นลิสต์ว่าง`;
 
@@ -58,9 +61,19 @@ export interface PlateMatch {
   kind: PlateMatchKind;
   vehicleIds: string[]; // exact/received = 1 คัน, close = ตัวเลือก (อาจหลายคัน)
   provinceMismatch: boolean; // จังหวัดบนป้ายไม่ตรงกับจังหวัดที่จดทะเบียนของรถ (exact เท่านั้น) - เตือนอย่างเดียว
+  // AI ว่าเป็นป้ายอีกประเภทกับแท็บที่ถ่าย (เช่น ป้ายมอเตอร์ไซค์ในแท็บรถยนต์) - เตือน และหน้าเว็บไม่ติ๊กให้
+  typeMismatch: boolean;
 }
 
-export function matchPlate(plate: ReadPlate, pending: PlateCandidate[], received: PlateCandidate[]): PlateMatch {
+export type PlateKind = 'car' | 'moto';
+
+// pending/received ต้องกรองให้เหลือเฉพาะรถประเภทเดียวกับ kind มาแล้ว (ป้ายรถยนต์กับมอเตอร์ไซค์เลขซ้ำกันได้)
+export function matchPlate(plate: ReadPlate, pending: PlateCandidate[], received: PlateCandidate[], kind: PlateKind = 'car'): PlateMatch {
+  const typeMismatch = plate.plateType !== null && plate.plateType !== undefined && (plate.plateType === 'motorcycle') !== (kind === 'moto');
+  return { ...matchPlateInKind(plate, pending, received), typeMismatch };
+}
+
+function matchPlateInKind(plate: ReadPlate, pending: PlateCandidate[], received: PlateCandidate[]): Omit<PlateMatch, 'typeMismatch'> {
   const cat = normCategory(plate.category);
   const num = normNumber(plate.number);
   if (!cat || !num) return { kind: 'unreadable', vehicleIds: [], provinceMismatch: false };

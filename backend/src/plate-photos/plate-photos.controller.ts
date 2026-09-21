@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { PlatePhotosService } from './plate-photos.service.js';
@@ -7,16 +7,17 @@ import { PlatePhotosService } from './plate-photos.service.js';
 export class PlatePhotosController {
   constructor(private readonly platePhotosService: PlatePhotosService) {}
 
-  // multipart/form-data: file = รูปป้ายทะเบียน (แผ่นเดียวหรือหลายแผ่นในรูปเดียว)
+  // multipart/form-data: file = รูปป้ายทะเบียน (แผ่นเดียวหรือหลายแผ่นในรูปเดียว), kind = car | moto (แท็บที่ถ่าย)
   @Post()
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
-  upload(@UploadedFile() file: UploadedReceiptFile | undefined) {
-    return this.platePhotosService.upload(file);
+  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { kind?: unknown }) {
+    return this.platePhotosService.upload(file, body?.kind);
   }
 
+  // ?kind=car | moto
   @Get('open')
-  listOpen() {
-    return this.platePhotosService.listOpen();
+  listOpen(@Query('kind') kind: unknown) {
+    return this.platePhotosService.listOpen(kind);
   }
 
   @Get(':id/image')

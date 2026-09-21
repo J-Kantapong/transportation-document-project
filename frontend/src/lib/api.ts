@@ -235,7 +235,7 @@ export type ReceiptCheckEntry =
 export const receiptImageUrl = (id: string) => `${API_BASE_URL}/api/receipts/${id}/image`;
 
 // รูปป้ายทะเบียน (Step 6 รับป้ายทะเบียน) - ดู backend/src/plate-photos/
-// POST /api/plate-photos (multipart: file) · GET /api/plate-photos/open · GET /api/plate-photos/:id/image
+// POST /api/plate-photos (multipart: file, kind) · GET /api/plate-photos/open?kind=car|moto · GET /api/plate-photos/:id/image
 // POST /api/plate-photos/confirm {date, items:[{vehicleId, photoId}], closePhotoIds} · DELETE /api/plate-photos/:id
 // exact = ตรงเป๊ะ 1 คัน · close = ต่างกัน 1 ตัว/ทะเบียนซ้ำ (ให้พนักงานเลือก) · received = รับป้ายไปแล้ว · none · unreadable
 export type PlateMatchKind = "exact" | "close" | "received" | "none" | "unreadable";
@@ -245,11 +245,17 @@ export interface PlatePhotoPlate {
   number: string | null;
   province: string | null;
   uncertain: boolean;
-  match: { kind: PlateMatchKind; vehicleIds: string[]; provinceMismatch: boolean };
+  plateType?: "car" | "motorcycle" | null; // AI ดูจากรูปแบบป้าย (รูปเก่าก่อนแยกประเภทไม่มีช่องนี้)
+  // typeMismatch = AI ว่าเป็นป้ายอีกประเภทกับแท็บที่ถ่าย
+  match: { kind: PlateMatchKind; vehicleIds: string[]; provinceMismatch: boolean; typeMismatch: boolean };
 }
+
+// car | moto - แท็บที่ถ่าย จับคู่เฉพาะรถประเภทเดียวกัน (ป้ายรถยนต์กับมอเตอร์ไซค์เลขซ้ำกันได้)
+export type PlateKind = "car" | "moto";
 
 export interface PlatePhoto {
   id: string;
+  kind: PlateKind;
   extractionSource: string; // NONE = ไม่มี AI
   error: string | null; // AI อ่านไม่สำเร็จ
   closedAt: string | null;
@@ -533,12 +539,13 @@ export const api = {
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
   deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
 
-  uploadPlatePhoto: (image: Blob, fileName: string) => {
+  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind) => {
     const form = new FormData();
     form.append('file', image, fileName);
+    form.append('kind', kind);
     return request<PlatePhotoList>('/api/plate-photos', { method: 'POST', body: form });
   },
-  listOpenPlatePhotos: () => request<PlatePhotoList>('/api/plate-photos/open'),
+  listOpenPlatePhotos: (kind: PlateKind) => request<PlatePhotoList>(`/api/plate-photos/open?kind=${kind}`),
   confirmPlatePhotos: (date: string, items: Array<{ vehicleId: string; photoId: string }>, closePhotoIds: string[]) =>
     request<{ succeeded: string[]; failed: Array<{ vehicleId: string; error: string }> }>('/api/plate-photos/confirm', {
       method: 'POST',

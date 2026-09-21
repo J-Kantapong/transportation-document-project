@@ -7,13 +7,13 @@ const car = (id: string, cat: string, num: string, province: string | null = '�
   plateNumber: num,
   registrationProvince: province,
 });
-const read = (category: string | null, number: string | null, province: string | null = 'กรุงเทพมหานคร') => ({ category, number, province, uncertain: false });
+const read = (category: string | null, number: string | null, province: string | null = 'กรุงเทพมหานคร') => ({ category, number, province, uncertain: false, plateType: null });
 
 describe('matchPlate', () => {
   const pending = [car('a', '8ขก', '3484'), car('b', '8ขค', '195'), car('c', '1กข', '12')];
 
   it('exact match ignores spaces and leading zeros', () => {
-    expect(matchPlate(read('8 ขก', '3484'), pending, [])).toEqual({ kind: 'exact', vehicleIds: ['a'], provinceMismatch: false });
+    expect(matchPlate(read('8 ขก', '3484'), pending, [])).toEqual({ kind: 'exact', vehicleIds: ['a'], provinceMismatch: false, typeMismatch: false });
     expect(matchPlate(read('1กข', '012'), pending, []).vehicleIds).toEqual(['c']);
   });
 
@@ -45,5 +45,20 @@ describe('matchPlate province tie-break', () => {
   it('uses the province on the plate to pick between duplicate plates', () => {
     const dup = [car('x', 'กข', '1', 'กรุงเทพมหานคร'), car('y', 'กข', '1', 'ชลบุรี')];
     expect(matchPlate(read('กข', '1', 'ชลบุรี'), dup, [])).toMatchObject({ kind: 'exact', vehicleIds: ['y'] });
+  });
+});
+
+describe('matchPlate plate type', () => {
+  const pending = [car('a', '1กข', '12')];
+  const typed = (plateType: 'car' | 'motorcycle' | null) => ({ ...read('1กข', '12'), plateType });
+
+  it('flags a motorcycle plate photographed on the car tab (and vice versa)', () => {
+    expect(matchPlate(typed('motorcycle'), pending, [], 'car')).toMatchObject({ kind: 'exact', typeMismatch: true });
+    expect(matchPlate(typed('car'), pending, [], 'moto').typeMismatch).toBe(true);
+  });
+
+  it('no warning when the type agrees or the AI is unsure', () => {
+    expect(matchPlate(typed('motorcycle'), pending, [], 'moto').typeMismatch).toBe(false);
+    expect(matchPlate(typed(null), pending, [], 'moto').typeMismatch).toBe(false);
   });
 });

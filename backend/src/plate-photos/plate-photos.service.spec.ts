@@ -8,11 +8,11 @@ function service(existingPhotoIds: string[]) {
   const update = vi.fn().mockResolvedValue({});
   const prisma = {
     vehicle: {
-      findMany: vi.fn().mockResolvedValue([{ id: 'v1', plateCategory: '8ขก', plateNumber: '1', registrationProvince: null, documentSubmissions: [{ status: 'RECEIPT_RECEIVED' }] }]),
+      findMany: vi.fn().mockResolvedValue([{ id: 'v1', plateCategory: '8ขก', plateNumber: '1', registrationProvince: null, body: 'รย.1-นั่ง 2 ตอน', documentSubmissions: [{ status: 'RECEIPT_RECEIVED' }] }]),
       update,
     },
     platePhoto: {
-      findMany: vi.fn().mockResolvedValue(existingPhotoIds.map((id) => ({ id }))),
+      findMany: vi.fn().mockResolvedValue(existingPhotoIds.map((id) => ({ id, kind: id.startsWith('m') ? 'moto' : 'car' }))),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   } as unknown as PrismaService;
@@ -33,5 +33,12 @@ describe('PlatePhotosService.confirm', () => {
     const res = await svc.confirm({ date: '2026-09-21', items: [{ vehicleId: 'v1', photoId: 'p1' }] });
     expect(res.succeeded).toEqual(['v1']);
     expect(update).toHaveBeenCalledWith({ where: { id: 'v1' }, data: { plateReceivedDate: new Date('2026-09-21T00:00:00.000Z'), platePhotoId: 'p1' } });
+  });
+
+  it('รูปถ่ายในแท็บมอเตอร์ไซค์ ยืนยันให้รถยนต์ไม่ได้', async () => {
+    const { svc, update } = service(['m1']);
+    const res = await svc.confirm({ date: '2026-09-21', items: [{ vehicleId: 'v1', photoId: 'm1' }] });
+    expect(res.failed[0].error).toContain('แท็บมอเตอร์ไซค์');
+    expect(update).not.toHaveBeenCalled();
   });
 });

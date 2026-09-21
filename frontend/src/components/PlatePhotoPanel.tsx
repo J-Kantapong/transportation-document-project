@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ApiError, api, platePhotoImageUrl, type PlatePhotoList, type PlatePhotoPlate, type PlatePhotoVehicle } from "@/lib/api";
+import { ApiError, api, platePhotoImageUrl, type PlateKind, type PlatePhotoList, type PlatePhotoPlate, type PlatePhotoVehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
@@ -20,10 +20,10 @@ const plateLabel = (p: { category: string | null; number: string | null }) => `$
 const vehiclePlate = (v: PlatePhotoVehicle) => `${v.plateCategory ?? "?"} ${v.plateNumber ?? "?"}`;
 const errorText = (err: unknown) => (err instanceof ApiError || err instanceof Error ? err.message : "ดำเนินการไม่สำเร็จ");
 
-// ค่าเริ่มต้น: ตรงเป๊ะติ๊กให้, ใกล้เคียงคันเดียวเลือกคันให้แต่ไม่ติ๊ก
+// ค่าเริ่มต้น: ตรงเป๊ะติ๊กให้ (ยกเว้น AI ว่าเป็นป้ายอีกประเภท), ใกล้เคียงคันเดียวเลือกคันให้แต่ไม่ติ๊ก
 function defaultChoice(plate: PlatePhotoPlate): Choice {
-  const { kind, vehicleIds } = plate.match;
-  if (kind === "exact") return { vehicleId: vehicleIds[0], checked: true };
+  const { kind, vehicleIds, typeMismatch } = plate.match;
+  if (kind === "exact") return { vehicleId: vehicleIds[0], checked: !typeMismatch };
   if (kind === "close" && vehicleIds.length === 1) return { vehicleId: vehicleIds[0], checked: false };
   return { vehicleId: "", checked: false };
 }
@@ -35,7 +35,48 @@ const STATUS = {
   info: { color: "#5a6b87", background: "#f3f5f9" },
 };
 
-export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => void; compact?: boolean }) {
+export const PLATE_KIND_LABEL: Record<PlateKind, string> = { car: "รถยนต์", moto: "มอเตอร์ไซค์" };
+const KIND_STORAGE_KEY = "plate-photo-kind";
+
+// จำแท็บล่าสุดไว้ในเครื่อง (คนถ่ายรถยนต์กับมอเตอร์ไซค์มักเป็นคนละคน) - อ่านไม่ได้ก็เริ่มที่รถยนต์
+export function loadPlateKind(): PlateKind {
+  try {
+    return window.localStorage.getItem(KIND_STORAGE_KEY) === "moto" ? "moto" : "car";
+  } catch {
+    return "car";
+  }
+}
+
+export function savePlateKind(kind: PlateKind) {
+  try {
+    window.localStorage.setItem(KIND_STORAGE_KEY, kind);
+  } catch {}
+}
+
+// รถยนต์ = ทุกประเภทยกเว้น รย.12 (มอเตอร์ไซค์) - ตรงกับ isMotorcycle ฝั่ง backend
+export const isMotorcycleBody = (body: string | null) => Boolean(body?.startsWith("รย.12-"));
+
+export function PlateKindTabs({ kind, onChange }: { kind: PlateKind; onChange: (kind: PlateKind) => void }) {
+  return (
+    <div style={{ display: "flex", gap: 10, marginTop: 14 }} role="group" aria-label="ประเภทป้าย">
+      {(["car", "moto"] as PlateKind[]).map((k) => (
+        <button
+          key={k}
+          type="button"
+          onClick={() => onChange(k)}
+          className={kind === k ? "primary" : undefined}
+          style={kind === k ? undefined : { border: "1px solid #dce2ec", background: "#fff", padding: "12px 20px", borderRadius: 8 }}
+          aria-pressed={kind === k}
+        >
+          {PLATE_KIND_LABEL[k]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// kind = แท็บที่เลือก: รูปที่ถ่ายผูกกับประเภทนี้และจับคู่เฉพาะรถประเภทนี้ (เปลี่ยนแท็บให้ remount ด้วย key={kind})
+export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKind; onConfirmed?: () => void; compact?: boolean }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<PlatePhotoList>({ photos: [], vehicles: [] });
@@ -65,7 +106,7 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
 
   async function load() {
     try {
-      merge(await api.listOpenPlatePhotos(), true);
+      merge(await api.listOpenPlatePhotos(kind), true);
     } catch (err) {
       setMessage({ text: errorText(err), error: true });
     }
@@ -86,7 +127,7 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
       setProgress(list.length > 1 ? `กำลังอ่านป้ายทะเบียน ${i + 1}/${list.length}…` : "กำลังอ่านป้ายทะเบียน…");
       try {
         const image = await compressReceiptImage(file);
-        merge(await api.uploadPlatePhoto(image, compressedFileName(file)), false);
+        merge(await api.uploadPlatePhoto(image, compressedFileName(file), kind), false);
       } catch (err) {
         failed.push(errorText(err));
       }
@@ -160,10 +201,12 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
   const setChoice = (key: string, patch: Partial<Choice>) => setChoices((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   const busy = progress !== "";
 
+  const photoKind = kind; // ในฟังก์ชันข้างล่าง kind คือผลจับคู่ (exact/close/...)
+
   function renderPlate(photoId: string, plate: PlatePhotoPlate, index: number) {
     const key = plateKey(photoId, index);
     const choice = choices[key] ?? { vehicleId: "", checked: false };
-    const { kind, vehicleIds, provinceMismatch } = plate.match;
+    const { kind, vehicleIds, provinceMismatch, typeMismatch } = plate.match;
     const read = `${plateLabel(plate)}${plate.province ? ` ${plate.province}` : ""}`;
     const chosen = choice.vehicleId ? vehicleById.get(choice.vehicleId) : undefined;
     const duplicate = chosen && choice.checked && selected.get(chosen.id) !== photoId ? " (เห็นในรูปอื่นแล้ว)" : "";
@@ -171,7 +214,7 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
     let style = STATUS.info;
     let status: string;
     if (kind === "exact") {
-      style = provinceMismatch || plate.uncertain ? STATUS.warn : STATUS.ok;
+      style = provinceMismatch || typeMismatch || plate.uncertain ? STATUS.warn : STATUS.ok;
       status = "ตรงกับรถที่รอรับป้าย";
     } else if (kind === "close") {
       style = STATUS.warn;
@@ -231,6 +274,11 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
                 {duplicate}
               </div>
             )}
+            {typeMismatch && (
+              <div style={{ color: STATUS.warn.color }}>
+                AI ว่าแผ่นนี้เป็นป้าย{plate.plateType === "motorcycle" ? "มอเตอร์ไซค์" : "รถยนต์"} แต่ถ่ายในแท็บ{PLATE_KIND_LABEL[photoKind]} - ถ้าถ่ายผิดแท็บให้ลบรูปแล้วถ่ายใหม่ในแท็บที่ถูก
+              </div>
+            )}
             {provinceMismatch && chosen && (
               <div style={{ color: STATUS.warn.color }}>
                 จังหวัดบนป้าย ({plate.province}) ไม่ตรงกับจังหวัดที่จดทะเบียนของรถ ({chosen.registrationProvince}) - ตรวจสอบก่อนยืนยัน
@@ -245,7 +293,7 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
   return (
     <section className="panel" style={{ marginTop: compact ? 0 : 20 }}>
       <div className="panel-head">
-        <h2>ถ่ายรูปป้ายทะเบียน - ระบบอ่านและจับคู่ให้</h2>
+        <h2>ถ่ายรูปป้าย{PLATE_KIND_LABEL[kind]} - ระบบอ่านและจับคู่ให้</h2>
       </div>
       <div style={{ padding: "0 23px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="customer-message" style={{ margin: 0 }}>
@@ -263,7 +311,7 @@ export function PlatePhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => 
             onClick={() => cameraRef.current?.click()}
             style={compact ? { width: "100%", justifyContent: "center", minHeight: 60, fontSize: 18 } : undefined}
           >
-            {busy ? progress : "📷 ถ่ายรูปป้าย"}
+            {busy ? progress : `📷 ถ่ายรูปป้าย${PLATE_KIND_LABEL[kind]}`}
           </button>
           <button type="button" className="text-button" disabled={busy} onClick={() => galleryRef.current?.click()}>
             เลือกรูปจากเครื่อง (หลายรูปได้)

@@ -1,20 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { isMotorcycle } from '../document-submission/document-fee-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { PLATE_READER, type PlateExtraction, type PlateReader } from './plate-reader.js';
-import { matchPlate, type PlateCandidate, type PlateMatch, type ReadPlate } from './plate-reading.js';
+import { matchPlate, type PlateCandidate, type PlateKind, type PlateMatch, type ReadPlate } from './plate-reading.js';
 
-const photoSelect = { id: true, extractionSource: true, extraction: true, closedAt: true, createdAt: true } as const;
+const photoSelect = { id: true, kind: true, extractionSource: true, extraction: true, closedAt: true, createdAt: true } as const;
 
-const candidateSelect = { id: true, plateCategory: true, plateNumber: true, registrationProvince: true } as const;
+// body ใช้แยกรถยนต์/มอเตอร์ไซค์ (รย.12 = มอเตอร์ไซค์) - ป้ายสองประเภทเลขซ้ำกันได้ จึงจับคู่เฉพาะประเภทเดียวกับรูป
+const candidateSelect = { id: true, plateCategory: true, plateNumber: true, registrationProvince: true, body: true } as const;
+
+const vehicleKind = (body: string | null): PlateKind => (isMotorcycle(body) ? 'moto' : 'car');
+
+// แท็บรถยนต์/มอเตอร์ไซค์ในหน้ารับป้าย
+export function parseKind(raw: unknown): PlateKind {
+  if (raw === 'car' || raw === 'moto') return raw;
+  throw new BadRequestException({ error: 'กรุณาเลือกประเภทป้าย: รถยนต์ หรือ มอเตอร์ไซค์' });
+}
 
 // ข้อมูลรถที่หน้าเว็บใช้แสดงคู่กับป้ายที่อ่านได้
 const vehicleSelect = {
   ...candidateSelect,
   chassis: true,
-  body: true,
   plateReceivedDate: true,
   customer: { select: { name: true } },
 } as const;
@@ -26,7 +35,7 @@ function parseIsoDate(raw: unknown): Date {
   return new Date(`${raw}T00:00:00.000Z`);
 }
 
-type PhotoRow = { id: string; extractionSource: string; extraction: unknown; closedAt: Date | null; createdAt: Date };
+type PhotoRow = { id: string; kind: string; extractionSource: string; extraction: unknown; closedAt: Date | null; createdAt: Date };
 
 // รูปป้ายทะเบียน (Step 6): อัปโหลด -> AI อ่านเลขทะเบียน -> จับคู่กับรถที่รอรับป้าย (ทะเบียนรู้แล้วจาก Step 5)
 // AI ไม่บันทึกเอง: พนักงานกดยืนยัน (confirm) แล้วจึงตั้ง plateReceivedDate + platePhotoId
@@ -57,17 +66,20 @@ export class PlatePhotosService {
             where: { plateReceivedDate: { not: null }, plateNumber: { in: [...new Set(plates.map((p) => p.number ?? '').filter(Boolean))] } },
             select: candidateSelect,
           })
-        : Promise.resolve([] as PlateCandidate[]),
+        : Promise.resolve([] as Array<PlateCandidate & { body: string | null }>),
     ]);
-    const matched = photos.map((photo) => ({
-      photo,
-      plates: plateList(photo.extraction).map((plate) => ({ ...plate, match: matchPlate(plate, pending, received) })),
-    }));
+    const matched = photos.map((photo) => {
+      const kind = photo.kind === 'moto' ? 'moto' : 'car';
+      const sameKind = (v: PlateCandidate & { body: string | null }) => vehicleKind(v.body) === kind;
+      const [p, r] = [pending.filter(sameKind), received.filter(sameKind)];
+      return { photo, plates: plateList(photo.extraction).map((plate) => ({ ...plate, match: matchPlate(plate, p, r, kind) })) };
+    });
     const ids = [...new Set(matched.flatMap((m) => m.plates.flatMap((p) => p.match.vehicleIds)))];
     const vehicles = ids.length ? await this.prisma.vehicle.findMany({ where: { id: { in: ids } }, select: vehicleSelect }) : [];
     return {
       photos: matched.map(({ photo, plates: ps }) => ({
         id: photo.id,
+        kind: photo.kind,
         extractionSource: photo.extractionSource,
         error: extractionError(photo.extraction),
         closedAt: photo.closedAt?.toISOString() ?? null,
@@ -87,7 +99,8 @@ export class PlatePhotosService {
     };
   }
 
-  async upload(file: UploadedReceiptFile | undefined) {
+  async upload(file: UploadedReceiptFile | undefined, kindRaw: unknown) {
+    const kind = parseKind(kindRaw);
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปป้ายทะเบียน' });
     if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: 'ไฟล์รูปใหญ่เกิน 8MB' });
     const type = detectImageType(file.buffer);
@@ -101,6 +114,7 @@ export class PlatePhotosService {
       const photo = await this.prisma.platePhoto.create({
         data: {
           storageKey,
+          kind,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
@@ -117,8 +131,9 @@ export class PlatePhotosService {
   }
 
   // ถาดรอยืนยัน: รูปที่ยังไม่ได้ยืนยัน/ปิด (รวมที่ถ่ายจากมือถือ)
-  async listOpen() {
-    const photos = await this.prisma.platePhoto.findMany({ where: { closedAt: null }, orderBy: { createdAt: 'asc' }, take: 200, select: photoSelect });
+  async listOpen(kindRaw: unknown) {
+    const kind = parseKind(kindRaw);
+    const photos = await this.prisma.platePhoto.findMany({ where: { closedAt: null, kind }, orderBy: { createdAt: 'asc' }, take: 200, select: photoSelect });
     return this.withMatches(photos);
   }
 
@@ -140,29 +155,34 @@ export class PlatePhotosService {
     const items = dto.items as Array<{ vehicleId?: unknown; photoId?: unknown }>;
     const closePhotoIds = Array.isArray(dto.closePhotoIds) ? dto.closePhotoIds.filter((id): id is string => typeof id === 'string') : [];
 
-    const pendingIds = new Set((await this.pendingCandidates()).map((v) => v.id));
+    const pendingKinds = new Map((await this.pendingCandidates()).map((v) => [v.id, vehicleKind(v.body)])); // vehicleId -> car/moto
     // ผู้ใช้ 2026-09-21: ต้องมีรูปป้ายทุกคัน - รถที่ไม่มีรูปที่มีอยู่จริงยืนยันไม่ได้
     const requestedPhotoIds = [...new Set(items.map((it) => it?.photoId).filter((id): id is string => typeof id === 'string'))];
-    const photoIds = new Set(
+    const photoKinds = new Map(
       requestedPhotoIds.length
-        ? (await this.prisma.platePhoto.findMany({ where: { id: { in: requestedPhotoIds } }, select: { id: true } })).map((p) => p.id)
+        ? (await this.prisma.platePhoto.findMany({ where: { id: { in: requestedPhotoIds } }, select: { id: true, kind: true } })).map((p) => [p.id, p.kind])
         : [],
     );
     const succeeded: string[] = [];
     const failed: Array<{ vehicleId: string; error: string }> = [];
     for (const item of items) {
       const vehicleId = typeof item?.vehicleId === 'string' ? item.vehicleId : '';
-      const photoId = typeof item?.photoId === 'string' && photoIds.has(item.photoId) ? item.photoId : null;
+      const photoId = typeof item?.photoId === 'string' && photoKinds.has(item.photoId) ? item.photoId : null;
       if (!photoId) {
         failed.push({ vehicleId, error: 'ต้องมีรูปป้ายทะเบียนของรถคันนี้ก่อนยืนยัน' });
         continue;
       }
-      if (!pendingIds.has(vehicleId)) {
+      const kind = pendingKinds.get(vehicleId);
+      if (!kind) {
         failed.push({ vehicleId, error: 'รถคันนี้ไม่อยู่ในคิวรอรับป้าย (รับป้ายไปแล้ว หรือยังไม่ได้รับใบเสร็จ)' });
         continue;
       }
+      if (photoKinds.get(photoId) !== kind) {
+        failed.push({ vehicleId, error: kind === 'moto' ? 'รถคันนี้เป็นมอเตอร์ไซค์ แต่รูปป้ายถ่ายในแท็บรถยนต์' : 'รถคันนี้เป็นรถยนต์ แต่รูปป้ายถ่ายในแท็บมอเตอร์ไซค์' });
+        continue;
+      }
       await this.prisma.vehicle.update({ where: { id: vehicleId }, data: { plateReceivedDate: date, platePhotoId: photoId } });
-      pendingIds.delete(vehicleId); // กันยืนยันคันเดิมซ้ำจากป้ายหน้า/หลังในคำขอเดียวกัน
+      pendingKinds.delete(vehicleId); // กันยืนยันคันเดิมซ้ำจากป้ายหน้า/หลังในคำขอเดียวกัน
       succeeded.push(vehicleId);
     }
     if (closePhotoIds.length) {
