@@ -81,7 +81,10 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
   const galleryRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<PlatePhotoList>({ photos: [], vehicles: [] });
   const [choices, setChoices] = useState<Record<string, Choice>>({});
-  const [dateText, setDateText] = useState(isoToDisplayDate(todayIso()));
+  // วันที่รับป้าย: ผู้ใช้ 2026-09-21 ให้เติมอัตโนมัติเป็นวันที่บันทึก (วันนี้) - null = ยังไม่แก้เอง ใช้วันนี้เสมอ
+  // (คำนวณใหม่ทุก render เปิดหน้าค้างข้ามคืนก็ยังเป็นวันที่กดบันทึกจริง) พนักงานแก้เป็นวันอื่นได้
+  const [editedDate, setEditedDate] = useState<string | null>(null);
+  const dateText = editedDate ?? isoToDisplayDate(todayIso());
   const [progress, setProgress] = useState("");
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
@@ -168,6 +171,7 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
       const res = await api.confirmPlatePhotos(dateIso, items, resolvedPhotoIds);
       await load();
       onConfirmed?.();
+      setEditedDate(null); // รอบถัดไปกลับไปใช้วันที่บันทึกอัตโนมัติ
       setMessage(
         res.failed.length
           ? { text: `ยืนยันแล้ว ${res.succeeded.length} คัน · ไม่สำเร็จ ${res.failed.length} คัน - ${res.failed.map((f) => f.error).join(" · ")}`, error: true }
@@ -318,6 +322,27 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
           </button>
         </div>
 
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <span>วันที่รับป้าย</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="วว/ดด/ปปปป"
+              value={dateText}
+              onChange={(e) => setEditedDate(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+              style={{ width: 120 }}
+            />
+          </label>
+          {editedDate === null ? (
+            <span className="customer-message">อัตโนมัติ = วันที่บันทึก (วันนี้)</span>
+          ) : (
+            <button type="button" className="text-button" onClick={() => setEditedDate(null)}>
+              กลับไปใช้วันนี้
+            </button>
+          )}
+        </div>
+
         {message.text && (
           <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
             {message.text}
@@ -361,17 +386,7 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
             </div>
 
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #dfe5f0", paddingTop: 12 }}>
-              <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <span>วันที่รับป้าย</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
-                  value={dateText}
-                  onChange={(e) => setDateText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
-                  style={{ width: 120 }}
-                />
-              </label>
+              <span>วันที่รับป้าย {dateText}</span>
               <button type="button" className="primary" disabled={busy || selected.size === 0} onClick={confirm}>
                 ยืนยันรับป้าย {selected.size} คัน
               </button>
