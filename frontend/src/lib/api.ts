@@ -234,6 +234,47 @@ export type ReceiptCheckEntry =
 
 export const receiptImageUrl = (id: string) => `${API_BASE_URL}/api/receipts/${id}/image`;
 
+// รูปป้ายทะเบียน (Step 6 รับป้ายทะเบียน) - ดู backend/src/plate-photos/
+// POST /api/plate-photos (multipart: file) · GET /api/plate-photos/open · GET /api/plate-photos/:id/image
+// POST /api/plate-photos/confirm {date, items:[{vehicleId, photoId}], closePhotoIds} · DELETE /api/plate-photos/:id
+// exact = ตรงเป๊ะ 1 คัน · close = ต่างกัน 1 ตัว/ทะเบียนซ้ำ (ให้พนักงานเลือก) · received = รับป้ายไปแล้ว · none · unreadable
+export type PlateMatchKind = "exact" | "close" | "received" | "none" | "unreadable";
+
+export interface PlatePhotoPlate {
+  category: string | null;
+  number: string | null;
+  province: string | null;
+  uncertain: boolean;
+  match: { kind: PlateMatchKind; vehicleIds: string[]; provinceMismatch: boolean };
+}
+
+export interface PlatePhoto {
+  id: string;
+  extractionSource: string; // NONE = ไม่มี AI
+  error: string | null; // AI อ่านไม่สำเร็จ
+  closedAt: string | null;
+  createdAt: string;
+  plates: PlatePhotoPlate[];
+}
+
+export interface PlatePhotoVehicle {
+  id: string;
+  customerName: string;
+  chassis: string;
+  body: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  registrationProvince: string | null;
+  plateReceivedDate: string | null;
+}
+
+export interface PlatePhotoList {
+  photos: PlatePhoto[];
+  vehicles: PlatePhotoVehicle[];
+}
+
+export const platePhotoImageUrl = (id: string) => `${API_BASE_URL}/api/plate-photos/${id}/image`;
+
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
 export type ReceivingStep = "plate" | "book" | "delivery";
 
@@ -247,6 +288,7 @@ export interface ReceivingRow {
   plateCategory: string | null;
   plateNumber: string | null;
   receiptNo: string | null; // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด
+  platePhotoId: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - ดูรูปที่ platePhotoImageUrl(id) (เฉพาะขั้น plate)
   doneDate: string | null;
   recipient: string | null; // เฉพาะ delivery
   note: string | null; // เฉพาะ delivery
@@ -490,6 +532,19 @@ export const api = {
   assignReceipt: (id: string, submissionId: string) =>
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
   deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
+
+  uploadPlatePhoto: (image: Blob, fileName: string) => {
+    const form = new FormData();
+    form.append('file', image, fileName);
+    return request<PlatePhotoList>('/api/plate-photos', { method: 'POST', body: form });
+  },
+  listOpenPlatePhotos: () => request<PlatePhotoList>('/api/plate-photos/open'),
+  confirmPlatePhotos: (date: string, items: Array<{ vehicleId: string; photoId: string }>, closePhotoIds: string[]) =>
+    request<{ succeeded: string[]; failed: Array<{ vehicleId: string; error: string }> }>('/api/plate-photos/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ date, items, closePhotoIds }),
+    }),
+  deletePlatePhoto: (id: string) => request<{ id: string }>(`/api/plate-photos/${id}`, { method: 'DELETE' }),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { ApiError } from "@/lib/api";
+import { type ReactNode, useEffect, useState } from "react";
+import { ApiError, platePhotoImageUrl } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 // หน้าคิวของขั้นตอนหลังได้รับใบเสร็จ (รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery) - ใช้โครงเดียวกัน:
@@ -17,6 +17,7 @@ export interface QueueRow {
   plateCategory: string | null;
   plateNumber: string | null;
   receiptNo?: string | null; // เลขที่ใบเสร็จ - แสดงเมื่อ showReceiptNo (รับป้ายทะเบียน)
+  platePhotoId?: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - แสดงเมื่อ showPlatePhoto
   doneDate: string | null; // ISO
   recipient?: string | null;
   note?: string | null;
@@ -35,10 +36,14 @@ interface Props {
   doneDateLabel: string; // เช่น "วันที่รับป้ายทะเบียน"
   showDeliveryFields?: boolean;
   showReceiptNo?: boolean;
+  showPlatePhoto?: boolean; // ตาราง "ดำเนินการแล้ว" แสดงรูปป้ายที่เก็บไว้เป็นหลักฐาน (รับป้ายทะเบียน)
   emptyText: string;
   loadPending: () => Promise<QueueRow[]>;
   loadCompleted: () => Promise<QueueRow[]>;
-  markDone: (id: string, data: QueueMarkData) => Promise<void>;
+  // ไม่ส่ง = ติ๊กในตารางไม่ได้ (รับป้ายทะเบียน: ต้องยืนยันด้วยรูปป้ายผ่าน headerSlot เท่านั้น)
+  markDone?: (id: string, data: QueueMarkData) => Promise<void>;
+  headerSlot?: ReactNode; // แสดงใต้หัวข้อ เช่น ส่วนถ่ายรูปป้ายทะเบียน (PlatePhotoPanel)
+  reloadSignal?: number; // เปลี่ยนค่า = โหลดคิวใหม่ (หลังยืนยันจากส่วนอื่นของหน้า)
 }
 
 interface RowState {
@@ -68,10 +73,13 @@ export function ReceivingQueuePage({
   doneDateLabel,
   showDeliveryFields,
   showReceiptNo,
+  showPlatePhoto,
   emptyText,
   loadPending,
   loadCompleted,
   markDone,
+  headerSlot,
+  reloadSignal,
 }: Props) {
   const [pending, setPending] = useState<QueueRow[]>([]);
   const [completed, setCompleted] = useState<QueueRow[]>([]);
@@ -99,7 +107,7 @@ export function ReceivingQueuePage({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadSignal]);
 
   function patchRow(id: string, patch: Partial<RowState>) {
     setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -107,7 +115,7 @@ export function ReceivingQueuePage({
 
   async function handleSave(id: string) {
     const row = rows[id];
-    if (!row) return;
+    if (!row || !markDone) return;
     const fail = (text: string) => patchRow(id, { message: { text, error: true } });
     if (!row.checked) return fail(`ติ๊ก "${doneLabel}" ก่อนบันทึก`);
     const dateIso = displayDateToIso(row.dateText.replace(/\D/g, ""));
@@ -128,6 +136,7 @@ export function ReceivingQueuePage({
         ← จดทะเบียนรถใหม่
       </Link>
       <h1 tabIndex={-1}>{title}</h1>
+      {headerSlot}
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-head">
@@ -154,11 +163,11 @@ export function ReceivingQueuePage({
                   <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
                   {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
-                  <th>{doneLabel}</th>
-                  <th>{doneDateLabel}</th>
+                  {markDone && <th>{doneLabel}</th>}
+                  {markDone && <th>{doneDateLabel}</th>}
                   {showDeliveryFields && <th>ผู้รับ</th>}
                   {showDeliveryFields && <th>หมายเหตุ</th>}
-                  <th></th>
+                  {markDone && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -173,39 +182,43 @@ export function ReceivingQueuePage({
                       <td>{r.body || "—"}</td>
                       <td>{plateText(r)}</td>
                       {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
-                      <td>
-                        <input type="checkbox" checked={row.checked} onChange={(e) => patchRow(r.id, { checked: e.target.checked })} aria-label={doneLabel} />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="วว/ดด/ปปปป"
-                          value={row.dateText}
-                          onChange={(e) => patchRow(r.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
-                          style={{ width: 110 }}
-                        />
-                      </td>
-                      {showDeliveryFields && (
-                        <td>
-                          <input type="text" value={row.recipient} onChange={(e) => patchRow(r.id, { recipient: e.target.value })} style={{ width: 130 }} />
-                        </td>
+                      {markDone && (
+                        <>
+                          <td>
+                            <input type="checkbox" checked={row.checked} onChange={(e) => patchRow(r.id, { checked: e.target.checked })} aria-label={doneLabel} />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="วว/ดด/ปปปป"
+                              value={row.dateText}
+                              onChange={(e) => patchRow(r.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                              style={{ width: 110 }}
+                            />
+                          </td>
+                          {showDeliveryFields && (
+                            <td>
+                              <input type="text" value={row.recipient} onChange={(e) => patchRow(r.id, { recipient: e.target.value })} style={{ width: 130 }} />
+                            </td>
+                          )}
+                          {showDeliveryFields && (
+                            <td>
+                              <input type="text" value={row.note} onChange={(e) => patchRow(r.id, { note: e.target.value })} style={{ width: 160 }} />
+                            </td>
+                          )}
+                          <td>
+                            <button className="text-button" disabled={row.saving} onClick={() => handleSave(r.id)}>
+                              บันทึก
+                            </button>
+                            {row.message.text && (
+                              <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
+                                {row.message.text}
+                              </div>
+                            )}
+                          </td>
+                        </>
                       )}
-                      {showDeliveryFields && (
-                        <td>
-                          <input type="text" value={row.note} onChange={(e) => patchRow(r.id, { note: e.target.value })} style={{ width: 160 }} />
-                        </td>
-                      )}
-                      <td>
-                        <button className="text-button" disabled={row.saving} onClick={() => handleSave(r.id)}>
-                          บันทึก
-                        </button>
-                        {row.message.text && (
-                          <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
-                            {row.message.text}
-                          </div>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
@@ -232,6 +245,7 @@ export function ReceivingQueuePage({
                   <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
                   {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
+                  {showPlatePhoto && <th>รูปป้าย</th>}
                   <th>{doneDateLabel}</th>
                   {showDeliveryFields && <th>ผู้รับ</th>}
                   {showDeliveryFields && <th>หมายเหตุ</th>}
@@ -246,6 +260,18 @@ export function ReceivingQueuePage({
                     <td>{r.body || "—"}</td>
                     <td>{plateText(r)}</td>
                     {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
+                    {showPlatePhoto && (
+                      <td>
+                        {r.platePhotoId ? (
+                          <a href={platePhotoImageUrl(r.platePhotoId)} target="_blank" rel="noreferrer" title="เปิดรูปป้ายขนาดเต็ม">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
+                            <img src={platePhotoImageUrl(r.platePhotoId)} alt="รูปป้ายทะเบียน" loading="lazy" style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }} />
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    )}
                     <td>{r.doneDate ? isoToDisplayDate(r.doneDate) : "—"}</td>
                     {showDeliveryFields && <td>{r.recipient || "—"}</td>}
                     {showDeliveryFields && <td>{r.note || "—"}</td>}

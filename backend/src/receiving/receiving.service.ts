@@ -60,6 +60,7 @@ export class ReceivingService {
       plateCategory: string | null;
       plateNumber: string | null;
       plateReceivedDate: Date | null;
+      platePhotoId: string | null;
       bookReceivedDate: Date | null;
       deliveredDate: Date | null;
       deliveryRecipient: string | null;
@@ -80,6 +81,7 @@ export class ReceivingService {
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
       receiptNo: vehicle.documentSubmissions[0]?.receiptNo ?? null, // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด - เรียงไปห้องรับป้าย
+      platePhotoId: step === 'plate' ? vehicle.platePhotoId : null, // รูปป้ายที่ใช้ยืนยันการรับป้าย (หลักฐาน)
       doneDate: doneDate?.toISOString().slice(0, 10) ?? null,
       recipient: step === 'delivery' ? vehicle.deliveryRecipient : null,
       note: step === 'delivery' ? vehicle.deliveryNote : null,
@@ -112,6 +114,10 @@ export class ReceivingService {
 
   async markDone(id: string, stepRaw: string, dto: { date?: unknown; recipient?: unknown; note?: unknown }) {
     const step = parseStep(stepRaw);
+    // ผู้ใช้ 2026-09-21: รับป้ายต้องมีรูปป้ายทุกคัน -> ยืนยันได้ทางเดียวคือ POST /api/plate-photos/confirm (ติ๊กเองปิดแล้ว)
+    if (step === 'plate') {
+      throw new BadRequestException({ error: 'รับป้ายทะเบียนต้องยืนยันด้วยรูปป้ายทุกคัน - ถ่ายรูปป้ายแล้วกดยืนยันในส่วนถ่ายรูปป้าย' });
+    }
     const date = parseIsoDate(dto?.date);
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: VEHICLE_INCLUDE });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });

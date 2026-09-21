@@ -28,17 +28,23 @@ function service(found: unknown, updateMock = vi.fn().mockImplementation(async (
 }
 
 describe('ReceivingService.markDone', () => {
-  it('รับป้ายทะเบียนไม่ได้ถ้ายังไม่ได้รับใบเสร็จ', async () => {
+  it('รับเล่มทะเบียนไม่ได้ถ้ายังไม่ได้รับใบเสร็จ', async () => {
     const { svc } = service(vehicle({ documentSubmissions: [{ status: 'PENDING' }] }));
-    await expect(svc.markDone('v1', 'plate', { date: '2026-09-20' })).rejects.toMatchObject({
+    await expect(svc.markDone('v1', 'book', { date: '2026-09-20' })).rejects.toMatchObject({
       response: { error: expect.stringContaining('ต้องได้รับใบเสร็จก่อน') },
     });
   });
 
-  it('รับป้ายทะเบียนได้เมื่อได้รับใบเสร็จแล้ว และบันทึกวันที่', async () => {
+  it('รับป้ายทะเบียนติ๊กเองไม่ได้ ต้องยืนยันด้วยรูปป้าย', async () => {
     const { svc, updateMock } = service(vehicle());
-    const row = await svc.markDone('v1', 'plate', { date: '2026-09-20' });
-    expect(updateMock.mock.calls[0][0].data).toEqual({ plateReceivedDate: new Date('2026-09-20T00:00:00.000Z') });
+    await expect(svc.markDone('v1', 'plate', { date: '2026-09-20' })).rejects.toMatchObject({ response: { error: expect.stringContaining('รูปป้าย') } });
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('รับเล่มทะเบียนได้เมื่อได้รับใบเสร็จแล้ว และบันทึกวันที่', async () => {
+    const { svc, updateMock } = service(vehicle());
+    const row = await svc.markDone('v1', 'book', { date: '2026-09-20' });
+    expect(updateMock.mock.calls[0][0].data).toEqual({ bookReceivedDate: new Date('2026-09-20T00:00:00.000Z') });
     expect(row.doneDate).toBe('2026-09-20');
   });
 
@@ -65,7 +71,7 @@ describe('ReceivingService.markDone', () => {
   it('ปฏิเสธ step ที่ไม่รู้จักและวันที่ผิดรูปแบบ', async () => {
     const { svc } = service(vehicle());
     await expect(svc.markDone('v1', 'nope', { date: '2026-09-20' })).rejects.toMatchObject({ response: { error: expect.stringContaining('step') } });
-    await expect(svc.markDone('v1', 'plate', { date: '20/09/2026' })).rejects.toMatchObject({ response: { error: expect.stringContaining('วันที่') } });
+    await expect(svc.markDone('v1', 'book', { date: '20/09/2026' })).rejects.toMatchObject({ response: { error: expect.stringContaining('วันที่') } });
   });
 });
 

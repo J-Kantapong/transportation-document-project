@@ -122,6 +122,7 @@ model Vehicle {
   // Step 6-8 (หลังได้รับใบเสร็จ): รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - วันที่ไม่ว่าง = ดำเนินการแล้ว
   // (คิวของแต่ละขั้นและเงื่อนไขก่อนหน้าอยู่ใน backend/src/receiving/receiving.service.ts)
   plateReceivedDate DateTime?
+  platePhotoId      String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
   bookReceivedDate  DateTime?
   deliveredDate     DateTime?
   deliveryRecipient String? // ผู้รับของ Delivery
@@ -133,6 +134,7 @@ model Vehicle {
   customer            Customer             @relation(fields: [customerId], references: [id])
   brand               Brand                @relation(fields: [brandId], references: [id])
   owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
+  platePhoto          PlatePhoto?          @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
   cases               Case[]
   editLogs            VehicleEditLog[]
   taxCalculations     TaxCalculation[]
@@ -528,4 +530,25 @@ model YamahaRelocationEntry {
   createdAt DateTime             @default(now())
 
   @@index([size, date])
+}
+
+// --- รูปป้ายทะเบียน (หน้ารับป้ายทะเบียน Step 6) ------------------------------------
+// พนักงานถ่ายรูปป้ายที่ได้รับ (รูปเดียวมีได้หลายแผ่น) -> AI อ่านเลขทะเบียน -> ระบบจับคู่กับรถที่รอรับป้าย
+// จากทะเบียนที่รู้แล้วใน Step 5 (Vehicle.plateCategory/plateNumber). extraction เก็บแค่ผลอ่าน ส่วนการจับคู่
+// คำนวณใหม่ทุกครั้งที่เปิดดู (คิวเปลี่ยนได้). AI ไม่บันทึกเอง - พนักงานกดยืนยันแล้วจึงตั้ง Vehicle.plateReceivedDate
+// พร้อม Vehicle.platePhotoId เป็นหลักฐาน. closedAt ไม่ว่าง = ยืนยัน/ปิดรูปนี้แล้ว ไม่แสดงในถาดรอยืนยัน
+model PlatePhoto {
+  id               String    @id @default(cuid())
+  storageKey       String    @unique
+  mimeType         String
+  sizeBytes        Int
+  originalName     String?
+  extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
+  extraction       Json? // { plates: [...], usage } หรือ { error }
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+
+  vehicles Vehicle[]
+
+  @@index([closedAt])
 }
