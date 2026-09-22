@@ -1,0 +1,12 @@
+import { Module } from '@nestjs/common';
+import { LocalReceiptStorage, RECEIPT_STORAGE } from '../receipts/receipt-storage.js';
+import { bookReaderProvider } from './book-reader.js';
+import { BookPhotosController } from './book-photos.controller.js';
+import { BookPhotosService } from './book-photos.service.js';
+
+// รูปเก็บที่เดียวกับใบเสร็จ (key ขึ้นต้น books/)
+@Module({
+  controllers: [BookPhotosController],
+  providers: [BookPhotosService, { provide: RECEIPT_STORAGE, useClass: LocalReceiptStorage }, bookReaderProvider],
+})
+export class BookPhotosModule {}

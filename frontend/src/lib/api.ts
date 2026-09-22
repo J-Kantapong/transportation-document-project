@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
@@ -281,6 +281,47 @@ export interface PlatePhotoList {
 
 export const platePhotoImageUrl = (id: string) => `${API_BASE_URL}/api/plate-photos/${id}/image`;
 
+// รูปเล่มทะเบียน (Step 7 รับเล่มทะเบียน) - ดู backend/src/book-photos/ (โครงเดียวกับรูปป้าย แต่ไม่แยกรถยนต์/มอเตอร์ไซค์)
+// POST /api/book-photos (multipart: file) · GET /api/book-photos/open · GET /api/book-photos/:id/image
+// POST /api/book-photos/confirm {date, items:[{vehicleId, photoId}], closePhotoIds} · DELETE /api/book-photos/:id
+// จับคู่ด้วยเลขตัวรถ (VIN) ก่อน ถ้าอ่าน VIN ไม่ได้จึงใช้ทะเบียน
+export interface BookPhotoBook {
+  chassis: string | null; // เลขตัวรถที่ AI อ่านได้
+  category: string | null;
+  number: string | null;
+  province: string | null;
+  uncertain: boolean;
+  // by = จับคู่ได้ด้วยเลขตัวรถหรือทะเบียน · plateMismatch = VIN ตรงแต่ทะเบียนในเล่มไม่ตรงกับที่บันทึกไว้
+  match: { kind: PlateMatchKind; vehicleIds: string[]; by: "chassis" | "plate" | null; plateMismatch: boolean; provinceMismatch: boolean };
+}
+
+export interface BookPhoto {
+  id: string;
+  extractionSource: string; // NONE = ไม่มี AI
+  error: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  books: BookPhotoBook[];
+}
+
+export interface BookPhotoVehicle {
+  id: string;
+  customerName: string;
+  chassis: string;
+  body: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  registrationProvince: string | null;
+  bookReceivedDate: string | null;
+}
+
+export interface BookPhotoList {
+  photos: BookPhoto[];
+  vehicles: BookPhotoVehicle[];
+}
+
+export const bookPhotoImageUrl = (id: string) => `${API_BASE_URL}/api/book-photos/${id}/image`;
+
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
 export type ReceivingStep = "plate" | "book" | "delivery";
 
@@ -295,6 +336,7 @@ export interface ReceivingRow {
   plateNumber: string | null;
   receiptNo: string | null; // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด
   platePhotoId: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - ดูรูปที่ platePhotoImageUrl(id) (เฉพาะขั้น plate)
+  bookPhotoId: string | null; // รูปเล่มที่ใช้ยืนยันการรับเล่ม - ดูรูปที่ bookPhotoImageUrl(id) (เฉพาะขั้น book)
   doneDate: string | null;
   recipient: string | null; // เฉพาะ delivery
   note: string | null; // เฉพาะ delivery
@@ -552,6 +594,19 @@ export const api = {
       body: JSON.stringify({ date, items, closePhotoIds }),
     }),
   deletePlatePhoto: (id: string) => request<{ id: string }>(`/api/plate-photos/${id}`, { method: 'DELETE' }),
+
+  uploadBookPhoto: (image: Blob, fileName: string) => {
+    const form = new FormData();
+    form.append('file', image, fileName);
+    return request<BookPhotoList>('/api/book-photos', { method: 'POST', body: form });
+  },
+  listOpenBookPhotos: () => request<BookPhotoList>('/api/book-photos/open'),
+  confirmBookPhotos: (date: string, items: Array<{ vehicleId: string; photoId: string }>, closePhotoIds: string[]) =>
+    request<{ succeeded: string[]; failed: Array<{ vehicleId: string; error: string }> }>('/api/book-photos/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ date, items, closePhotoIds }),
+    }),
+  deleteBookPhoto: (id: string) => request<{ id: string }>(`/api/book-photos/${id}`, { method: 'DELETE' }),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>

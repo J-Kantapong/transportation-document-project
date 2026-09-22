@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PlateKindTabs, PlatePhotoPanel, isMotorcycleBody, loadPlateKind, savePlateKind } from "@/components/PlatePhotoPanel";
 import { ReceivingQueuePage, type QueueRow } from "@/components/ReceivingQueuePage";
-import { api, type PlateKind, type ReceivingRow } from "@/lib/api";
+import { api, platePhotoImageUrl, type PlateKind, type ReceivingRow } from "@/lib/api";
 import { comparePlate } from "@/lib/plate-order";
 
 function toRow(r: ReceivingRow): QueueRow {
@@ -17,7 +17,7 @@ function toRow(r: ReceivingRow): QueueRow {
     plateCategory: r.plateCategory,
     plateNumber: r.plateNumber,
     receiptNo: r.receiptNo,
-    platePhotoId: r.platePhotoId,
+    photoUrl: r.platePhotoId ? platePhotoImageUrl(r.platePhotoId) : null,
     doneDate: r.doneDate,
     recipient: r.recipient,
     note: r.note,
@@ -50,7 +50,7 @@ export default function ReceivePlatePage() {
       doneDateLabel="วันที่รับป้าย"
       emptyText={`ไม่มี${kind === "moto" ? "มอเตอร์ไซค์" : "รถยนต์"}ที่รอรับป้ายทะเบียน (ต้องได้รับใบเสร็จก่อน)`}
       showReceiptNo
-      showPlatePhoto
+      photoColumnLabel="รูปป้าย"
       // เรียงตามหมวด+เลขทะเบียน ให้ถือรายการไปห้องรับป้ายได้เลย (กก 1 … กก 9999 แล้ว กข 1 …)
       loadPending={async () => (await api.listReceivingPending("plate")).vehicles.filter(sameKind).map(toRow).sort(comparePlate)}
       loadCompleted={async () => (await api.listReceivingCompleted("plate")).vehicles.filter(sameKind).map(toRow)}

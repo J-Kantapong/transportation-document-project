@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ReactNode, useEffect, useState } from "react";
-import { ApiError, platePhotoImageUrl } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 // หน้าคิวของขั้นตอนหลังได้รับใบเสร็จ (รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery) - ใช้โครงเดียวกัน:
@@ -17,7 +17,7 @@ export interface QueueRow {
   plateCategory: string | null;
   plateNumber: string | null;
   receiptNo?: string | null; // เลขที่ใบเสร็จ - แสดงเมื่อ showReceiptNo (รับป้ายทะเบียน)
-  platePhotoId?: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - แสดงเมื่อ showPlatePhoto
+  photoUrl?: string | null; // รูปหลักฐาน (รูปป้าย/รูปเล่ม) ที่ใช้ยืนยัน - แสดงเมื่อส่ง photoColumnLabel
   doneDate: string | null; // ISO
   recipient?: string | null;
   note?: string | null;
@@ -36,7 +36,7 @@ interface Props {
   doneDateLabel: string; // เช่น "วันที่รับป้ายทะเบียน"
   showDeliveryFields?: boolean;
   showReceiptNo?: boolean;
-  showPlatePhoto?: boolean; // ตาราง "ดำเนินการแล้ว" แสดงรูปป้ายที่เก็บไว้เป็นหลักฐาน (รับป้ายทะเบียน)
+  photoColumnLabel?: string; // ตาราง "ดำเนินการแล้ว" แสดงรูปหลักฐาน (รับป้าย: "รูปป้าย" / รับเล่ม: "รูปเล่ม")
   emptyText: string;
   loadPending: () => Promise<QueueRow[]>;
   loadCompleted: () => Promise<QueueRow[]>;
@@ -73,7 +73,7 @@ export function ReceivingQueuePage({
   doneDateLabel,
   showDeliveryFields,
   showReceiptNo,
-  showPlatePhoto,
+  photoColumnLabel,
   emptyText,
   loadPending,
   loadCompleted,
@@ -245,7 +245,7 @@ export function ReceivingQueuePage({
                   <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
                   {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
-                  {showPlatePhoto && <th>รูปป้าย</th>}
+                  {photoColumnLabel && <th>{photoColumnLabel}</th>}
                   <th>{doneDateLabel}</th>
                   {showDeliveryFields && <th>ผู้รับ</th>}
                   {showDeliveryFields && <th>หมายเหตุ</th>}
@@ -260,12 +260,12 @@ export function ReceivingQueuePage({
                     <td>{r.body || "—"}</td>
                     <td>{plateText(r)}</td>
                     {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
-                    {showPlatePhoto && (
+                    {photoColumnLabel && (
                       <td>
-                        {r.platePhotoId ? (
-                          <a href={platePhotoImageUrl(r.platePhotoId)} target="_blank" rel="noreferrer" title="เปิดรูปป้ายขนาดเต็ม">
+                        {r.photoUrl ? (
+                          <a href={r.photoUrl} target="_blank" rel="noreferrer" title={`เปิด${photoColumnLabel}ขนาดเต็ม`}>
                             {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-                            <img src={platePhotoImageUrl(r.platePhotoId)} alt="รูปป้ายทะเบียน" loading="lazy" style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }} />
+                            <img src={r.photoUrl} alt={photoColumnLabel} loading="lazy" style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }} />
                           </a>
                         ) : (
                           "—"

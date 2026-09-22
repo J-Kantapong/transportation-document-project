@@ -36,7 +36,7 @@ export const normNumber = (raw: string | null | undefined) => {
 };
 
 // ต่างกันได้ไม่เกิน 1 ตำแหน่ง (แทนที่ 1 ตัว ความยาวเท่ากัน) - ใช้หาคันที่ AI อาจอ่านผิดตัวเดียว เช่น ฆ -> ม
-function oneSubstitution(a: string, b: string): boolean {
+export function oneSubstitution(a: string, b: string): boolean {
   const x = [...a];
   const y = [...b];
   if (x.length !== y.length) return false;

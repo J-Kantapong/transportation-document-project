@@ -57,8 +57,16 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vehicles       Vehicle[]
-  requestedCases Case[]
+  // เงื่อนไขวางบิลในนามบริษัท (ดู backend/src/billing) - VAT 7% และหัก ณ ที่จ่ายคิดจากทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่ง
+  billingVat             Boolean   @default(true) // false = บิลไม่มี VAT
+  billingWhtRate         Decimal   @default(3) @db.Decimal(5, 2) // % หัก ณ ที่จ่ายอัตราปกติ (0 = ไม่หัก)
+  billingWhtSpecialRate  Decimal?  @db.Decimal(5, 2) // % อัตราพิเศษชั่วคราว เช่น 1% ถึงสิ้นปี
+  billingWhtSpecialUntil DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
+
+  vehicles        Vehicle[]
+  requestedCases  Case[]
+  serviceFeeRates ServiceFeeRate[]
+  invoices        Invoice[]
 }
 
 model Brand {
@@ -124,9 +132,13 @@ model Vehicle {
   plateReceivedDate DateTime?
   platePhotoId      String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
   bookReceivedDate  DateTime?
+  bookPhotoId       String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
   deliveredDate     DateTime?
   deliveryRecipient String? // ผู้รับของ Delivery
   deliveryNote      String?
+  // ส่งงาน = ส่งใบเสร็จ + เล่ม (deliveredDate) ป้ายส่งพร้อมกันถ้ารับป้ายแล้ว ถ้าป้ายยังไม่ออกจะส่งตามทีหลัง
+  // plateDeliveredDate ว่าง ทั้งที่ deliveredDate ไม่ว่าง = ป้ายค้างส่ง (ดู backend/src/delivery)
+  plateDeliveredDate DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -135,6 +147,8 @@ model Vehicle {
   brand               Brand                @relation(fields: [brandId], references: [id])
   owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
   platePhoto          PlatePhoto?          @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
+  bookPhoto           BookPhoto?           @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
+  invoiceLines        InvoiceLine[]
   cases               Case[]
   editLogs            VehicleEditLog[]
   taxCalculations     TaxCalculation[]
@@ -552,4 +566,103 @@ model PlatePhoto {
   vehicles Vehicle[]
 
   @@index([kind, closedAt])
+}
+
+// --- รูปเล่มทะเบียน (หน้ารับเล่มทะเบียน Step 7) -------------------------------------
+// โครงเดียวกับ PlatePhoto: ถ่ายรูปเล่มที่ได้รับ (รูปเดียวมีได้หลายเล่ม) -> AI อ่านเลขตัวรถ (VIN) + ทะเบียน -> ระบบจับคู่
+// กับรถที่รอรับเล่ม (VIN ไม่ซ้ำ จึงไม่ต้องแยกรถยนต์/มอเตอร์ไซค์). พนักงานกดยืนยันแล้วจึงตั้ง Vehicle.bookReceivedDate
+// พร้อม Vehicle.bookPhotoId เป็นหลักฐาน. closedAt ไม่ว่าง = ยืนยัน/ปิดรูปนี้แล้ว ไม่แสดงในถาดรอยืนยัน
+model BookPhoto {
+  id               String    @id @default(cuid())
+  storageKey       String    @unique
+  mimeType         String
+  sizeBytes        Int
+  originalName     String?
+  extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
+  extraction       Json? // { books: [...], usage } หรือ { error }
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+
+  vehicles Vehicle[]
+
+  @@index([closedAt])
+}
+
+// --- วางบิลในนามบริษัท (พื้นที่ทำงานบัญชี) -------------------------------------------
+// ขั้นตอน: พนักงานบันทึกส่งงาน (Vehicle.deliveredDate) -> รถเข้าคิวรอวางบิล -> บัญชีเลือกรถ ตรวจค่าดำเนินการ แล้วออก Invoice
+// รถหนึ่งคันอยู่ในบิลที่ยังไม่ถูกยกเลิกได้ใบเดียว (บังคับใน BillingService.createInvoice)
+
+// ตารางค่าดำเนินการต่อลูกค้า - ใช้เสนอราคาเริ่มต้นให้รถแต่ละคันตอนออกบิล (บัญชีแก้รายคันได้เสมอ)
+// จับคู่ด้วยชนิดรถ + ช่วง CC (ccMin <= cc < ccMax, ว่าง = ไม่จำกัด) แถวที่ sortOrder น้อยสุดที่เข้าเงื่อนไขชนะ
+model ServiceFeeRate {
+  id           String   @id @default(cuid())
+  customerId   String
+  label        String // ข้อความบนบิล เช่น "จดทะเบียนรถจักรยานยนต์ 150 cc - 299 cc"
+  vehicleKind  String   @default("ANY") // CAR | MOTO | ANY
+  ccMin        Decimal? @db.Decimal(10, 2)
+  ccMax        Decimal? @db.Decimal(10, 2)
+  amount       Decimal  @db.Decimal(12, 2)
+  vatInclusive Boolean  @default(false) // true = amount เป็นราคารวม VAT แล้ว (เช่น 1,045) ระบบถอดเป็นก่อน VAT (/1.07) ให้
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
+// invoiceNo พิมพ์เอง (ช่วงแรกล้อเลขกับ Google Sheet "Invoice Tradeinter") ห้ามซ้ำ
+// status: ISSUED (วางบิลแล้ว รอรับเงิน) -> PAID (รับเงินแล้ว) | VOID (ยกเลิก - รถกลับเข้าคิวรอวางบิล)
+model Invoice {
+  id               String    @id @default(cuid())
+  invoiceNo        String    @unique
+  issueDate        DateTime
+  customerId       String
+  customerSnapshot Json // { name, branch, address, taxId } ตามที่พิมพ์บนบิล
+  jobLabel         String // เช่น "จดทะเบียนรถยนต์" - ใช้ประกอบชื่อรายการบนหน้าบิล
+  extras           Json // [{ label, amount }] ค่าใช้จ่ายอื่นๆ - นับเป็นค่าดำเนินการ (คิด VAT + หัก ณ ที่จ่าย)
+  vatRate          Decimal   @db.Decimal(5, 2) // 7 หรือ 0
+  whtRate          Decimal   @db.Decimal(5, 2)
+  feeTotal         Decimal   @db.Decimal(12, 2) // รวมค่าใบเสร็จกรมขนส่ง (เงินทดรองจ่าย ไม่คิด VAT)
+  serviceTotal     Decimal   @db.Decimal(12, 2) // รวมค่าดำเนินการ + extras (ก่อน VAT)
+  vatAmount        Decimal   @db.Decimal(12, 2)
+  whtAmount        Decimal   @db.Decimal(12, 2)
+  netTotal         Decimal   @db.Decimal(12, 2) // fee + service + vat - wht = "จำนวนเงินทั้งสิ้น" บนบิล
+  status           String    @default("ISSUED")
+  paidDate         DateTime?
+  taxInvoiceNo     String? // เลขที่ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ที่ออกตอนรับเงิน
+  voidReason       String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  customer Customer      @relation(fields: [customerId], references: [id])
+  lines    InvoiceLine[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model InvoiceLine {
+  id            String   @id @default(cuid())
+  invoiceId     String
+  vehicleId     String
+  chassis       String
+  brandName     String
+  body          String?
+  plateText     String // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
+  receiptNo     String?
+  deliveredDate DateTime
+  receiptAmount Decimal  @db.Decimal(12, 2) // ค่าใบเสร็จของคันนี้
+  serviceFee    Decimal  @db.Decimal(12, 2) // ค่าดำเนินการก่อน VAT หลังหัก deduction แล้ว
+  serviceLabel  String? // ข้อความต่อท้ายชื่อรายการ เช่น "(ขอใช้ต่างภูมิลำเนา)" - คันที่ label/ราคาเดียวกันถูกรวมเป็นบรรทัดเดียวบนหน้าบิล
+  deduction     Decimal  @default(0) @db.Decimal(12, 2) // ยอดที่หักออกจากค่าดำเนินการแล้ว เช่น 500 เมื่อลูกค้าชำระค่าขอใช้เลขเอง
+  deductionNote String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@index([invoiceId])
+  @@index([vehicleId])
 }
