@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
@@ -53,9 +54,10 @@ export class ReceiptsService {
     }
     const submission = await this.prisma.documentSubmission.findUnique({
       where: { id: submissionIdRaw.trim() },
-      select: { id: true, status: true },
+      select: { id: true, status: true, vehicle: { select: { body: true } } },
     });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body); // STAFF_CAR / STAFF_MOTO แนบใบเสร็จได้เฉพาะประเภทรถของตัวเอง
     if (submission.status === 'FAILED') {
       throw new BadRequestException({ error: 'รายการนี้ยื่นไม่สำเร็จ แนบใบเสร็จไม่ได้' });
     }
@@ -74,7 +76,7 @@ export class ReceiptsService {
     if (!chassis) return { submissionId, match: null };
     if (!submissionId) {
       const found = await this.prisma.documentSubmission.findFirst({
-        where: { status: 'PENDING', vehicle: { chassis } },
+        where: { status: 'PENDING', vehicle: { chassis, ...vehicleTypeWhere() } },
         select: { id: true },
       });
       return found ? { submissionId: found.id, match: 'chassis' } : { submissionId: null, match: null };

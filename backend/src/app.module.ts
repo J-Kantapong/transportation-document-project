@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AdminUsersModule } from './admin-users/admin-users.module.js';
+import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { BookPhotosModule } from './book-photos/book-photos.module.js';
 import { BrandsModule } from './brands/brands.module.js';
@@ -8,6 +10,7 @@ import { CustomersModule } from './customers/customers.module.js';
 import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
 import { FinanceCompaniesModule } from './finance-companies/finance-companies.module.js';
+import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ReceiptsModule } from './receipts/receipts.module.js';
@@ -20,6 +23,9 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
 @Module({
   imports: [
     PrismaModule,
+    AuthModule,
+    AdminUsersModule,
+    PortalModule,
     CustomersModule,
     BrandsModule,
     FinanceCompaniesModule,

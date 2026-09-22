@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { assertKindInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { isMotorcycle } from '../document-submission/document-fee-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
@@ -50,7 +51,8 @@ export class PlatePhotosService {
   // เงื่อนไขเดียวกับคิวรับป้ายใน ReceivingService: ยังไม่รับป้าย + การยื่นเอกสารล่าสุด = RECEIPT_RECEIVED
   private async pendingCandidates() {
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { plateReceivedDate: null, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } } },
+      // ...vehicleTypeWhere(): STAFF_CAR / STAFF_MOTO จับคู่ได้เฉพาะประเภทรถของตัวเอง (แท็บถูกกันไว้แล้วอีกชั้นที่ listOpen/upload)
+      where: { plateReceivedDate: null, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } }, ...vehicleTypeWhere() },
       select: { ...candidateSelect, documentSubmissions: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } } },
     });
     return vehicles.filter((v) => v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED');
@@ -63,7 +65,11 @@ export class PlatePhotosService {
       this.pendingCandidates(),
       plates.length
         ? this.prisma.vehicle.findMany({
-            where: { plateReceivedDate: { not: null }, plateNumber: { in: [...new Set(plates.map((p) => p.number ?? '').filter(Boolean))] } },
+            where: {
+              plateReceivedDate: { not: null },
+              plateNumber: { in: [...new Set(plates.map((p) => p.number ?? '').filter(Boolean))] },
+              ...vehicleTypeWhere(),
+            },
             select: candidateSelect,
           })
         : Promise.resolve([] as Array<PlateCandidate & { body: string | null }>),
@@ -101,6 +107,7 @@ export class PlatePhotosService {
 
   async upload(file: UploadedReceiptFile | undefined, kindRaw: unknown) {
     const kind = parseKind(kindRaw);
+    assertKindInScope(kind); // STAFF_CAR ถ่ายได้เฉพาะแท็บรถยนต์ / STAFF_MOTO เฉพาะแท็บมอเตอร์ไซค์
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปป้ายทะเบียน' });
     if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: 'ไฟล์รูปใหญ่เกิน 8MB' });
     const type = detectImageType(file.buffer);
@@ -133,6 +140,7 @@ export class PlatePhotosService {
   // ถาดรอยืนยัน: รูปที่ยังไม่ได้ยืนยัน/ปิด (รวมที่ถ่ายจากมือถือ)
   async listOpen(kindRaw: unknown) {
     const kind = parseKind(kindRaw);
+    assertKindInScope(kind);
     const photos = await this.prisma.platePhoto.findMany({ where: { closedAt: null, kind }, orderBy: { createdAt: 'asc' }, take: 200, select: photoSelect });
     return this.withMatches(photos);
   }

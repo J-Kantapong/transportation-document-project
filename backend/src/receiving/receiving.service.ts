@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 export const RECEIVING_STEPS = ['plate', 'book', 'delivery'] as const;
@@ -93,7 +94,7 @@ export class ReceivingService {
   async listPending(stepRaw: string) {
     const step = parseStep(stepRaw);
     const vehicles = await this.prisma.vehicle.findMany({
-      where: this.pendingWhere(step),
+      where: { ...this.pendingWhere(step), ...vehicleTypeWhere() }, // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: VEHICLE_INCLUDE,
     });
@@ -106,7 +107,7 @@ export class ReceivingService {
     const step = parseStep(stepRaw);
     const field = DONE_DATE_FIELD[step];
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { [field]: { not: null } },
+      where: { [field]: { not: null }, ...vehicleTypeWhere() },
       orderBy: [{ [field]: 'desc' }, { updatedAt: 'desc' }],
       take: 100,
       include: VEHICLE_INCLUDE,
@@ -127,6 +128,7 @@ export class ReceivingService {
     const date = parseIsoDate(dto?.date);
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: VEHICLE_INCLUDE });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertVehicleInScope(vehicle.body);
 
     if (step === 'delivery') {
       if (!vehicle.plateReceivedDate || !vehicle.bookReceivedDate) {

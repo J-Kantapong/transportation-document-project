@@ -166,3 +166,46 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .filter-chip{border:1px solid #dce2ec;background:white;border-radius:999px;padding:7px 16px;font-size:13px;color:#576781}
 .filter-chip.selected{background:#edf2ff;border-color:#2854d9;color:#2854d9;font-weight:600}
 .inspect-pagination{display:flex;align-items:center;justify-content:center;gap:16px;padding:14px 22px;border-top:1px solid #f0f2f6;font-size:13px}
+
+/* ระบบล็อกอิน: หน้า login/register (ไม่มี sidebar), เมนูโปรไฟล์, หน้าจัดการผู้ใช้ (Admin), portal ลูกค้า */
+.auth-page{min-height:100vh;display:grid;place-items:center;padding:32px 16px;background:linear-gradient(180deg,#eef2fb,#f5f7fb)}
+.auth-card{width:min(440px,100%);background:white;border:1px solid #e3e8f1;border-radius:16px;padding:36px 34px;box-shadow:0 18px 60px #14203c14}
+.auth-card--wide{width:min(640px,100%)}
+.auth-card .brand{padding:0 0 26px}
+.auth-card h1{font-size:24px}
+.auth-card .vehicle-tabs{margin-top:20px}
+.auth-fields{display:grid;gap:18px;margin-top:24px}
+.auth-fields--grid{grid-template-columns:1fr 1fr}
+.auth-submit{width:100%;justify-content:center;margin-top:22px;font-size:15px}
+.auth-footer{margin-top:20px;text-align:center;font-size:14px;color:#6a768c}
+.auth-footer a{color:#2854d9;font-weight:500}
+.auth-notice{margin-top:18px;padding:12px 14px;background:#eaf7f2;color:#23825f;border-radius:8px;font-size:14px;line-height:1.7}
+.auth-card .customer-message.error{margin-top:14px}
+.profile-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.profile-actions .text-button{padding:2px 4px}
+.admin-roles{display:flex;flex-direction:column;gap:6px;font-size:13px;white-space:nowrap}
+.admin-roles label{display:flex;align-items:center;gap:6px}
+.admin-customer-select{width:260px;margin-top:4px}
+.admin-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.admin-actions .primary{padding:8px 14px;font-size:13px}
+.portal-list{display:grid;gap:18px}
+.portal-card{padding:22px 24px}
+.portal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.portal-badge-done{background:#eaf7f2;color:#278f6b;border-color:#cdeadd}
+.portal-steps{list-style:none;margin:20px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 12px}
+.portal-step{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#8a94a6}
+.portal-step-dot{display:grid;place-items:center;flex-shrink:0;width:28px;height:28px;border-radius:50%;background:#f0f3f8;color:#8a94a6;font-size:12px;font-weight:600}
+.portal-step-title{color:#8a94a6}
+.portal-step--done .portal-step-dot{background:#eaf7f2;color:#278f6b}
+.portal-step--done .portal-step-title{color:#34415a}
+.portal-step--current .portal-step-dot{background:#2854d9;color:white;box-shadow:0 0 0 4px #edf2ff}
+.portal-step--current .portal-step-title{color:#2854d9;font-weight:600}
+.portal-step--failed .portal-step-dot{background:#fdecec;color:#b43434}
+.portal-step--failed .portal-step-title{color:#b43434;font-weight:600}
+.portal-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid #f0f2f6}
+.portal-foot .primary{padding:9px 16px;font-size:14px}
+@media(max-width:900px){.portal-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.auth-fields--grid{grid-template-columns:1fr}.auth-card{padding:28px 22px}}
+/* เมนูยาวขึ้นหลังมีส่วนผู้ดูแลระบบ - ให้ sidebar เลื่อนได้ ปุ่มออกจากระบบไม่หลุดจอบนจอเตี้ย */
+aside{overflow-y:auto}
