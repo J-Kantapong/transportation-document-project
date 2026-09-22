@@ -44,7 +44,7 @@ services:
         sync: false # pooled connection string of the Neon *dev* branch
       - key: DIRECT_URL
         sync: false # direct connection string of the Neon *dev* branch
-      # Cloudflare R2: same bucket and token as production, files go under the `DEV/` folder.
+      # Cloudflare R2: same bucket and token as production, files go under the `dev/` folder.
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -54,7 +54,7 @@ services:
       - key: R2_BUCKET
         sync: false # transport-photos
       - key: R2_PREFIX
-        value: DEV
+        value: dev
       # FRONTEND_ORIGIN is deliberately not set on dev: the backend then allows any origin,
       # so every Vercel preview URL for the `dev` branch can call it. Set it if you want to
       # lock dev down to the stable branch URL only.

@@ -147,8 +147,8 @@ created on (`master`), so this change has to be on `master` before it shows up.
 
 Leave `FRONTEND_ORIGIN` unset on dev so any Vercel preview URL can call it. `ANTHROPIC_API_KEY`
 is optional (photos are stored without AI reading if it's empty). The four `R2_*` credentials are the
-same bucket and token as production; `R2_PREFIX` = `DEV` (set by `render.yaml`) so dev files live
-under `DEV/` while production uses the `production/` folder.
+same bucket and token as production; `R2_PREFIX` = `dev` (set by `render.yaml`) so dev files live
+under `dev/` while production uses the `production/` folder.
 
 The service URL will be `https://transportation-document-backend-dev.onrender.com`.
 
@@ -182,5 +182,5 @@ from step 1. `npm run dev` at the repo root works unchanged.
 | `DATABASE_URL` | Render (`…-backend-dev`) | Neon **dev branch** pooled connection string |
 | `DIRECT_URL` | Render (`…-backend-dev`) | Neon **dev branch** direct connection string |
 | `FRONTEND_ORIGIN` | Render (`…-backend-dev`) | leave unset (allow any origin) |
-| `R2_*` (4 vars) | Render (`…-backend-dev`) | same bucket and token as production; `R2_PREFIX` = `DEV` |
+| `R2_*` (4 vars) | Render (`…-backend-dev`) | same bucket and token as production; `R2_PREFIX` = `dev` |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel, **Preview** scope, branch `dev` | `https://transportation-document-backend-dev.onrender.com` |
