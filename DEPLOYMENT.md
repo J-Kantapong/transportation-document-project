@@ -75,9 +75,112 @@ permissive local-dev default.
 | `DATABASE_URL` | Render (backend) | Neon **pooled** connection string (`-pooler` host) |
 | `DIRECT_URL` | Render (backend) | Neon **direct** connection string (no `-pooler`) |
 | `FRONTEND_ORIGIN` | Render (backend) | the Vercel deployment URL |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | Render (backend) | same Cloudflare account and token as dev |
+| `R2_BUCKET` | Render (backend) | `transport-photos` (same bucket as dev) |
+| `R2_PREFIX` | Render (backend) | `production` (set by `render.yaml`): production files live under `production/` |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel (frontend) | the Render deployment URL |
+
+Photo storage setup (bucket, token, testing with `node scripts/check-r2.mjs .env.production`) is in
+`CLOUDFLARE-R2.md`. Without the four `R2_*` vars, the backend stores photos on Render's disk, which is
+wiped on every deploy, so production must have them.
 
 ## Redeploying
 
 Both Render and Vercel auto-deploy on push to `master` once connected. No manual step needed
 for ordinary code changes — only new/changed env vars need to be set again in each dashboard.
+
+## Dev environment (branch `dev`)
+
+A second, fully separate deployment for development and testing. Nothing here touches
+production: it has its own git branch, its own database, its own backend service, and its own
+frontend URL. Production keeps deploying from `master` exactly as above.
+
+| | Production | Dev |
+|---|---|---|
+| Git branch | `master` | `dev` |
+| Neon database | branch `main` | branch `dev` (copy of `main` at creation time) |
+| Render service | `transportation-document-backend` | `transportation-document-backend-dev` |
+| Vercel | Production deployment | Preview deployment of branch `dev` (stable URL `https://transportation-document-project-git-dev-tradeinter.vercel.app`) |
+
+Workflow: feature branches merge into `dev` (auto-deploys the dev environment); when `dev` is
+verified, merge `dev` into `master` (auto-deploys production). Schema migrations run against the
+dev database first, on the dev deploy, and only reach production when `master` deploys.
+
+### 1. Neon: create the `dev` branch
+
+Neon dashboard → project `transportation-document-project` → **Branches** → **Create branch**:
+name `dev`, parent `main`, "Include data" (a point-in-time copy, so dev starts with realistic
+data; wipe it later with `backend/scripts/dev-wipe-vehicle-data.mjs` if you want a clean slate).
+Copy the branch's **pooled** and **direct** connection strings — they differ from `main`'s by the
+endpoint host. Or with the CLI:
+
+```bash
+npx neonctl branches create --project-id small-river-26857171 --name dev --parent main
+```
+
+```bash
+npx neonctl connection-string dev --project-id small-river-26857171 --pooled
+```
+
+```bash
+npx neonctl connection-string dev --project-id small-river-26857171
+```
+
+To reset the dev database to match production again later, delete the `dev` branch and
+recreate it from `main` (then update the Render env vars below, since the endpoint host changes).
+
+### 2. Render: the dev backend service
+
+`render.yaml` now declares two services; the second one, `transportation-document-backend-dev`,
+deploys from the `dev` branch. Render only reads `render.yaml` from the branch the Blueprint was
+created on (`master`), so this change has to be on `master` before it shows up.
+
+- **If production was created from the Blueprint**: Render dashboard → **Blueprints** → the
+  blueprint for this repo → **Sync** (or it syncs itself on the next `master` push). It proposes
+  the new dev service; before approving, fill in `DATABASE_URL` and `DIRECT_URL` with the Neon
+  **dev-branch** strings from step 1.
+- **If production was created by hand**: **New +** → **Web Service** → same repo, **Branch**
+  `dev`, Root Directory `backend`, Build Command
+  `npm ci && npx prisma generate && npx prisma migrate deploy && npm run build`, Start Command
+  `npm run start:prod`, name `transportation-document-backend-dev`, and the two Neon dev-branch
+  env vars.
+
+Leave `FRONTEND_ORIGIN` unset on dev so any Vercel preview URL can call it. `ANTHROPIC_API_KEY`
+is optional (photos are stored without AI reading if it's empty). The four `R2_*` credentials are the
+same bucket and token as production; `R2_PREFIX` = `dev` (set by `render.yaml`) so dev files live
+under `dev/` while production uses the `production/` folder.
+
+The service URL will be `https://transportation-document-backend-dev.onrender.com`.
+
+### 3. Vercel: point the `dev` preview at the dev backend
+
+Vercel already builds a Preview deployment for every non-`master` branch that is pushed, so the
+`dev` branch gets a frontend automatically. It just needs to know about the dev backend:
+
+1. Vercel → project `transportation-document-project` → **Settings** → **Environment Variables**
+   → **Add**: `NEXT_PUBLIC_API_BASE_URL` = `https://transportation-document-backend-dev.onrender.com`,
+   environment **Preview** only, and (recommended) limit it to the branch `dev` using the
+   "Preview" → branch selector. Production keeps its own value.
+2. Push `dev` (or redeploy the latest `dev` preview) so the build picks the variable up —
+   `NEXT_PUBLIC_*` values are baked in at build time.
+3. Optional, to keep dev private: **Settings** → **Deployment Protection** → enable **Vercel
+   Authentication** for Preview deployments, so only members of the Vercel team can open it.
+
+The stable URL for the branch is `https://transportation-document-project-git-dev-tradeinter.vercel.app`
+(each commit also gets its own throwaway URL).
+
+### 4. Local development against the dev database
+
+Point your local backend at the Neon `dev` branch instead of `main` so local work never touches
+production data: in `backend/.env`, set `DATABASE_URL` and `DIRECT_URL` to the dev-branch strings
+from step 1. `npm run dev` at the repo root works unchanged.
+
+### Dev env var summary
+
+| Var | Where | Value |
+|---|---|---|
+| `DATABASE_URL` | Render (`…-backend-dev`) | Neon **dev branch** pooled connection string |
+| `DIRECT_URL` | Render (`…-backend-dev`) | Neon **dev branch** direct connection string |
+| `FRONTEND_ORIGIN` | Render (`…-backend-dev`) | leave unset (allow any origin) |
+| `R2_*` (4 vars) | Render (`…-backend-dev`) | same bucket and token as production; `R2_PREFIX` = `dev` |
+| `NEXT_PUBLIC_API_BASE_URL` | Vercel, **Preview** scope, branch `dev` | `https://transportation-document-backend-dev.onrender.com` |

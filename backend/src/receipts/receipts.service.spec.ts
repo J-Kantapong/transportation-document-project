@@ -45,7 +45,7 @@ describe('ReceiptsService.upload', () => {
     await svc.upload(file(), 's1');
     const data = create.mock.calls[0][0].data;
     expect(data).toMatchObject({ submissionId: 's1', mimeType: 'image/jpeg', extractionSource: 'NONE' });
-    expect(data.storageKey).toMatch(/^\d{4}\/\d{2}\/[0-9a-f-]+\.jpg$/);
+    expect(data.storageKey).toMatch(/^receipts\/\d{4}\/\d{2}\/[0-9a-f-]+\.jpg$/);
     expect(storage.put).toHaveBeenCalledWith(data.storageKey, JPEG, 'image/jpeg');
   });
 
