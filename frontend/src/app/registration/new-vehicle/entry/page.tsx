@@ -389,6 +389,9 @@ export default function VehicleEntryPage() {
     () => customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") })),
     [customers],
   );
+  // ตารางตัวอย่างก่อนนำเข้า (batch) แสดงชื่อแทน id ที่ผู้ใช้อ่านไม่รู้เรื่อง
+  const customerNameById = useMemo(() => new Map(customers.map((c) => [c.id, c.name])), [customers]);
+  const brandNameById = useMemo(() => new Map(brands.map((b) => [b.id, b.name])), [brands]);
 
   function updateSingle<K extends keyof NormalizedVehicleRow>(key: K, value: string) {
     setSingle((prev) => ({ ...prev, [key]: value }));
@@ -870,8 +873,11 @@ export default function VehicleEntryPage() {
                   <thead>
                     <tr>
                       <th>แถว</th>
-                      <th>ลูกค้า</th>
+                      <th>ชื่อลูกค้า</th>
                       <th>เลขตัวถัง</th>
+                      <th>ยี่ห้อ</th>
+                      <th>ประเภทเชื้อเพลิง</th>
+                      <th>ประเภทรถ</th>
                       <th>ผลตรวจสอบ</th>
                     </tr>
                   </thead>
@@ -879,8 +885,11 @@ export default function VehicleEntryPage() {
                     {batchRows.map((row) => (
                       <tr key={row.sourceRow}>
                         <td>{row.sourceRow}</td>
-                        <td>{row.customerId}</td>
+                        <td>{customerNameById.get(row.customerId) ?? row.customerId}</td>
                         <td>{row.chassis}</td>
+                        <td>{brandNameById.get(row.brandId) ?? row.brandId}</td>
+                        <td>{row.fuel}</td>
+                        <td>{row.body}</td>
                         <td className={row.issues.length ? "import-error" : "import-ok"}>
                           {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
                         </td>
