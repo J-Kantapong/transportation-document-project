@@ -600,7 +600,32 @@ model YamahaRelocationEntry {
   noBillFee Decimal              @db.Decimal(10, 2) // count x อัตรา No bill ณ ตอนบันทึก
   createdAt DateTime             @default(now())
 
+  attachments YamahaRelocationAttachment[]
+
   @@index([size, date])
+}
+
+// ไฟล์แนบของรายการแจ้งย้ายยามาฮ่า (ผู้ใช้ 2026-09-22: ทุกครั้งที่กรอกจำนวนคันต่อวันต้องแนบ ใบเสร็จ 1 ไฟล์ + Report 1 ไฟล์ เสมอ)
+// ตัวไฟล์อยู่ใน storage เดียวกับรูปใบเสร็จ (ดิสก์เครื่อง/R2) key ขึ้นต้น yamaha-relocation/receipts/ หรือ yamaha-relocation/reports/
+// โหลดไฟล์ผ่าน GET /api/yamaha-relocation/attachments/:id/file
+enum YamahaRelocationAttachmentKind {
+  RECEIPT // ใบเสร็จ
+  REPORT // Report
+}
+
+model YamahaRelocationAttachment {
+  id           String                         @id @default(cuid())
+  entryId      String
+  kind         YamahaRelocationAttachmentKind
+  storageKey   String                         @unique
+  mimeType     String
+  sizeBytes    Int
+  originalName String?
+  createdAt    DateTime                       @default(now())
+
+  entry YamahaRelocationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, kind])
 }
 
 // --- รูปป้ายทะเบียน (หน้ารับป้ายทะเบียน Step 6) ------------------------------------
