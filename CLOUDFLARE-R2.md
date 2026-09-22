@@ -46,14 +46,14 @@
 | Git branch | `dev` | `master` |
 | Render service | `transportation-document-backend-dev` | `transportation-document-backend` |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | ค่าเดิม | **ค่าเดียวกับ dev** |
-| `R2_PREFIX` | `DEV` | `production` (ทั้งคู่ตั้งไว้ใน `render.yaml` แล้ว) |
-| ไฟล์อยู่ที่ | `DEV/receipts/...`, `DEV/plates/...`, `DEV/books/...` | `production/receipts/...`, `production/plates/...` ฯลฯ |
+| `R2_PREFIX` | `dev` | `production` (ทั้งคู่ตั้งไว้ใน `render.yaml` แล้ว) |
+| ไฟล์อยู่ที่ | `dev/receipts/...`, `dev/plates/...`, `dev/books/...` | `production/receipts/...`, `production/plates/...` ฯลฯ |
 | สถานะ | ตั้งค่าแล้ว | รอใส่ค่าใน Render |
 
 - prefix ใส่ที่ชั้น storage (`R2ReceiptStorage`) เท่านั้น ฐานข้อมูลยังเก็บ key แบบไม่มี prefix เหมือนเดิม จึงไม่ต้องแก้ข้อมูลหรือ migration
-- ชื่อโฟลเดอร์ใน R2 แยกตัวพิมพ์เล็ก/ใหญ่ `DEV` กับ `dev` คือคนละโฟลเดอร์
-- ตอนเปลี่ยน dev มาใช้ `DEV/` (2026-09-22) ยังไม่มีรูปที่ root ของ bucket จึงไม่มีไฟล์ต้องย้าย
-- `backend/.env` ในเครื่องตั้ง `R2_PREFIX=DEV` ด้วย (ต่อฐานข้อมูล dev เหมือนกัน)
+- ชื่อโฟลเดอร์ใน R2 แยกตัวพิมพ์เล็ก/ใหญ่ `dev` กับ `DEV` คือคนละโฟลเดอร์ ใช้ตัวเล็ก `dev` (เปลี่ยนจาก `DEV` 2026-09-22)
+- ตอนเปลี่ยน dev มาใช้ `dev/` (2026-09-22) ยังไม่มีรูปที่ root ของ bucket จึงไม่มีไฟล์ต้องย้าย
+- `backend/.env` ในเครื่องตั้ง `R2_PREFIX=dev` ด้วย (ต่อฐานข้อมูล dev เหมือนกัน)
 - ข้อควรรู้: token เดียวกันแปลว่า backend dev มีสิทธิ์เขียน/ลบไฟล์ในโฟลเดอร์ `production/` ได้ในทางเทคนิค (โค้ดไม่ทำ เพราะใช้ prefix ต่างกัน) ถ้าวันหนึ่งอยากกันให้ขาด ให้ย้าย production ไป bucket แยกพร้อม token ของตัวเอง
 - `render.yaml` ประกาศ `R2_*` ไว้ทั้ง 2 service แล้ว แต่ค่าลับต้องใส่ใน Render dashboard เอง
 
