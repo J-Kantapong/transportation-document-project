@@ -32,6 +32,14 @@ export default function NewVehicleRegistrationPage() {
           </Link>
         ))}
       </div>
+      {/* เครื่องมือค้นรูป (ไม่ใช่ขั้นตอนงาน) - ผู้ใช้ 2026-09-22: ค้นใบเสร็จ/ป้าย/เล่ม ของรถด้วยเลขตัวถังในระบบ */}
+      {(roles === null || canAccessPage("/registration/new-vehicle/receive-receipt", roles)) && (
+        <p style={{ marginTop: 18 }}>
+          <Link href="/registration/new-vehicle/photos" className="text-button">
+            ค้นหารูปตามเลขตัวถัง →
+          </Link>
+        </p>
+      )}
     </div>
   );
 }
