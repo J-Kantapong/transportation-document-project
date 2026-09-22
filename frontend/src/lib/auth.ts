@@ -156,6 +156,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/new-vehicle/receive-receipt', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/registration/new-vehicle/receive-plate', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/registration/new-vehicle/receive-book', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
+  // งานสลับเลข รถเก่า-รถใหม่ (รถยนต์): ยื่น/รับเอกสารกลับ = กลุ่มยื่นรถยนต์ (+ACCOUNTANT อ่าน) - backend: /api/plate-swaps
+  { prefix: '/registration/plate-swap/old-new', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },
   { prefix: '/registration', roles: ALL_STAFF },
   { prefix: '/', exact: true, roles: ['ADMIN', 'ACCOUNTANT'] },

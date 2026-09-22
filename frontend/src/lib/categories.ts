@@ -40,3 +40,9 @@ export const YAMAHA_RELOCATION_SUBTASKS: RegistrationSubtask[] = [
   { title: "แจ้งย้ายรถเล็ก", href: "/registration/yamaha-relocation/small" },
   { title: "แจ้งย้ายรถใหญ่", href: "/registration/yamaha-relocation/large" },
 ];
+
+// งานย่อยของ "การสลับเลข" (ผู้ใช้ 2026-09-22) - รถเก่า กับ รถเก่า ยังรอเงื่อนไข
+export const PLATE_SWAP_SUBTASKS: RegistrationSubtask[] = [
+  { title: "รถเก่า กับ รถใหม่ (รถยนต์)", href: "/registration/plate-swap/old-new" },
+  { title: "รถเก่า กับ รถเก่า", href: "/registration/plate-swap/old-old" },
+];
