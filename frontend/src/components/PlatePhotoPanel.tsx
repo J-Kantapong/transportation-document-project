@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, platePhotoImageUrl, type PlateKind, type PlatePhotoList, type PlatePhotoPlate, type PlatePhotoVehicle } from "@/lib/api";
+import { getCachedUser, vehicleScopeFor } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
@@ -38,8 +39,16 @@ const STATUS = {
 export const PLATE_KIND_LABEL: Record<PlateKind, string> = { car: "รถยนต์", moto: "มอเตอร์ไซค์" };
 const KIND_STORAGE_KEY = "plate-photo-kind";
 
+// แท็บที่บทบาทนี้ล็อกไว้: STAFF_CAR = รถยนต์เท่านั้น / STAFF_MOTO = มอเตอร์ไซค์เท่านั้น (ผู้ใช้ 2026-09-22) - backend กันอีกชั้น
+export function lockedPlateKind(): PlateKind | null {
+  const scope = vehicleScopeFor(getCachedUser()?.roles ?? []);
+  return scope === "CAR" ? "car" : scope === "MOTO" ? "moto" : null;
+}
+
 // จำแท็บล่าสุดไว้ในเครื่อง (คนถ่ายรถยนต์กับมอเตอร์ไซค์มักเป็นคนละคน) - อ่านไม่ได้ก็เริ่มที่รถยนต์
 export function loadPlateKind(): PlateKind {
+  const locked = lockedPlateKind();
+  if (locked) return locked;
   try {
     return window.localStorage.getItem(KIND_STORAGE_KEY) === "moto" ? "moto" : "car";
   } catch {
@@ -57,6 +66,19 @@ export function savePlateKind(kind: PlateKind) {
 export const isMotorcycleBody = (body: string | null) => Boolean(body?.startsWith("รย.12-"));
 
 export function PlateKindTabs({ kind, onChange }: { kind: PlateKind; onChange: (kind: PlateKind) => void }) {
+  // บทบาทที่ดูแลประเภทเดียวไม่ต้องเลือกแท็บ - แสดงป้ายบอกแทน (อ่าน localStorage หลัง mount ให้ server/client render ตรงกัน)
+  const [locked, setLocked] = useState<PlateKind | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่านบทบาทจาก localStorage หลัง mount
+    setLocked(lockedPlateKind());
+  }, []);
+  if (locked) {
+    return (
+      <div style={{ marginTop: 14 }}>
+        <span className="status-badge">ป้าย{PLATE_KIND_LABEL[locked]}เท่านั้น</span>
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", gap: 10, marginTop: 14 }} role="group" aria-label="ประเภทป้าย">
       {(["car", "moto"] as PlateKind[]).map((k) => (
@@ -108,6 +130,9 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
   }
 
   async function load() {
+    // หน้าเริ่มที่แท็บรถยนต์ก่อนอ่านค่าที่จำไว้ - บทบาทที่ล็อกอีกประเภทไม่ต้องยิง (backend จะตอบ 403) รอ remount ด้วยแท็บที่ถูก
+    const locked = lockedPlateKind();
+    if (locked && locked !== kind) return;
     try {
       merge(await api.listOpenPlatePhotos(kind), true);
     } catch (err) {

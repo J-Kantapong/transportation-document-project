@@ -12,9 +12,29 @@ datasource db {
   provider = "postgresql"
 }
 
+// บทบาทผู้ใช้ (ผู้ใช้กำหนด 2026-09-22) - คนเดียวถือได้หลายบทบาท (User.roles)
+// ADMIN = เจ้าของ/ผู้ดูแลระบบ ทำได้ทุกอย่าง + อนุมัติผู้ใช้
+// STAFF_ENTRY = พนักงานรับข้อมูลรถ: ขั้น 1-3 (เพิ่มข้อมูลรถ, แจ้งย้าย/ตัดบัญชี, ตรวจรถ) ทุกประเภทรถ
+// STAFF_CAR / STAFF_MOTO = พนักงานยื่นรถยนต์ / จักรยานยนต์: ขั้น 4-8 (ยื่นเอกสาร -> Delivery) เฉพาะประเภทรถของตัวเอง
+//   (แยกจาก Vehicle.body ขึ้นต้น "รย.12-" = จักรยานยนต์ - ดู backend/src/auth/vehicle-scope.ts) ถือทั้งคู่ = เห็นทุกคัน
+// ACCOUNTANT = บัญชี/วางบิล + อ่านข้อมูลงานได้ | DELIVERY = ส่งของ (เห็นเฉพาะหน้า Delivery ไม่เห็นราคา)
+// CUSTOMER = ลูกค้า (portal) เห็นเฉพาะรถของบริษัทที่ผูกไว้ (User.customerId)
 enum UserRole {
   ADMIN
-  STAFF
+  STAFF_ENTRY
+  STAFF_CAR
+  STAFF_MOTO
+  ACCOUNTANT
+  DELIVERY
+  CUSTOMER
+}
+
+// สมัครแล้วเป็น PENDING จนกว่า Admin จะอนุมัติ - ล็อกอินได้เฉพาะ APPROVED
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DISABLED
 }
 
 enum DocumentType {
@@ -34,15 +54,30 @@ enum CaseStatus {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         UserRole @default(STAFF)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String     @id @default(cuid())
+  email            String     @unique // ใช้เป็น username ตอนล็อกอิน (เก็บเป็นตัวพิมพ์เล็ก)
+  passwordHash     String // scrypt (ดู backend/src/auth/password.ts)
+  name             String // ชื่อ-นามสกุล
+  displayName      String? // ชื่อเล่น - ใช้แสดงในหัวใบส่งงาน/ประวัติแก้ไข
+  phone            String?
+  roles            UserRole[] @default([]) // ว่างจนกว่า Admin อนุมัติ (Admin กำหนดตอนอนุมัติ)
+  status           UserStatus @default(PENDING)
+  // ตอนสมัคร: พนักงานเลือกตำแหน่งที่ขอ / ลูกค้ากรอกชื่อบริษัท - Admin ดูประกอบตอนอนุมัติ
+  requestedRole    UserRole? // STAFF_ENTRY | STAFF_CAR | STAFF_MOTO | ACCOUNTANT | DELIVERY | CUSTOMER
+  requestedCompany String? // ลูกค้าพิมพ์ชื่อบริษัท/ร้านตอนสมัคร Admin เลือกผูก customerId ให้ตอนอนุมัติ
+  customerId       String? // ผูกบัญชีลูกค้ากับรายชื่อในฐานข้อมูลลูกค้า (เฉพาะ role CUSTOMER)
+  approvedById     String?
+  approvedAt       DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
-  assignedCases Case[] @relation("AssignedStaff")
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  approvedBy    User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers User[]    @relation("ApprovedUsers")
+  assignedCases Case[]    @relation("AssignedStaff")
+
+  @@index([status])
+  @@index([customerId])
 }
 
 model Customer {
@@ -67,6 +102,7 @@ model Customer {
   requestedCases  Case[]
   serviceFeeRates ServiceFeeRate[]
   invoices        Invoice[]
+  users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
 }
 
 model Brand {
@@ -110,11 +146,11 @@ model Vehicle {
   inspectionSentBillCost Decimal?  @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) 50 บาท - เฉพาะรอบ 2
 
   // Step 3b: ผลตรวจ (เข้าคิวหลังจาก inspectionSentDate ถูกกรอกแล้วเท่านั้น)
-  inspectionResult     String? // 'ผ่าน' | 'ไม่ผ่าน'
-  inspectionResultDate DateTime? // วันที่ทราบผลตรวจ
-  inspectionResultCost Decimal?  @db.Decimal(10, 2) // ราคาตรวจรถ (No bill) ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
-  inspectionResultBillCost Decimal? @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) ณ วันทราบผล - เฉพาะรอบ 2, ตรวจไม่ผ่านเป็น 0
-  inspectionFailRemark String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
+  inspectionResult         String? // 'ผ่าน' | 'ไม่ผ่าน'
+  inspectionResultDate     DateTime? // วันที่ทราบผลตรวจ
+  inspectionResultCost     Decimal?  @db.Decimal(10, 2) // ราคาตรวจรถ (No bill) ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
+  inspectionResultBillCost Decimal?  @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) ณ วันทราบผล - เฉพาะรอบ 2, ตรวจไม่ผ่านเป็น 0
+  inspectionFailRemark     String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
 
   // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax*/VehicleOwner/TaxCalculation ด้านล่าง)
   firstRegistrationDate DateTime? // วันจดทะเบียนครั้งแรก - ใช้คำนวณอายุรถและตรวจสอบมาตรการลดภาษี EV ตามช่วงเวลา
@@ -129,16 +165,18 @@ model Vehicle {
 
   // Step 6-8 (หลังได้รับใบเสร็จ): รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - วันที่ไม่ว่าง = ดำเนินการแล้ว
   // (คิวของแต่ละขั้นและเงื่อนไขก่อนหน้าอยู่ใน backend/src/receiving/receiving.service.ts)
-  plateReceivedDate DateTime?
-  platePhotoId      String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
-  bookReceivedDate  DateTime?
-  bookPhotoId       String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
-  deliveredDate     DateTime?
-  deliveryRecipient String? // ผู้รับของ Delivery
-  deliveryNote      String?
+  plateReceivedDate   DateTime?
+  platePhotoId        String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
+  bookReceivedDate    DateTime?
+  bookPhotoId         String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
+  deliveredDate       DateTime?
+  deliveryRecipient   String? // ผู้รับของ Delivery
+  deliveryNote        String?
   // ส่งงาน = ส่งใบเสร็จ + เล่ม (deliveredDate) ป้ายส่งพร้อมกันถ้ารับป้ายแล้ว ถ้าป้ายยังไม่ออกจะส่งตามทีหลัง
   // plateDeliveredDate ว่าง ทั้งที่ deliveredDate ไม่ว่าง = ป้ายค้างส่ง (ดู backend/src/delivery)
-  plateDeliveredDate DateTime?
+  plateDeliveredDate  DateTime?
+  // ลูกค้ากดยืนยันรับของใน portal (ดู backend/src/portal) - ไม่บังคับ พนักงานยังปิดงานได้โดยไม่ต้องรอ
+  deliveryConfirmedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -153,6 +191,7 @@ model Vehicle {
   editLogs            VehicleEditLog[]
   taxCalculations     TaxCalculation[]
   documentSubmissions DocumentSubmission[]
+  plateSwapsAsNew     PlateSwap[] // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ที่รับเลขจากรถเก่า
 
   @@index([customerId])
   @@index([brandId])
@@ -533,9 +572,77 @@ model ReceiptImage {
   extraction       Json? // ผลที่ AI อ่านได้ - รูปแบบจะกำหนดหลังเห็นใบเสร็จจริง
   createdAt        DateTime @default(now())
 
+  // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง
+  plateSwapId String?
+
   submission DocumentSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  plateSwap  PlateSwap?          @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
 
   @@index([submissionId])
+  @@index([plateSwapId])
+}
+
+// --- การสลับเลข (Plate swap) ------------------------------------------------------
+// ผู้ใช้ 2026-09-22: เริ่มจากรถยนต์ แบบ "รถเก่า <-> รถใหม่" ก่อน (รถจักรยานยนต์ และ "รถเก่า <-> รถเก่า" รอเงื่อนไขจากผู้ใช้)
+// หนึ่งแถว = งานสลับเลขของรถเก่า 1 คัน (รถเก่าไม่อยู่ในฐานข้อมูลรถจดใหม่ จึงกรอกข้อมูลเอง) ลิงก์กับรถใหม่ใน
+// ฐานข้อมูลรถจดใหม่ได้ด้วยเลขตัวถัง (newVehicleId) ค่าใช้จ่ายคิดตอนบันทึก (ดู backend/src/plate-swap/plate-swap-fee.ts)
+// แล้วเก็บ snapshot ไว้ใน billItems/noBillItems. ขั้นตอน: ยื่น (submitDate) -> รับเอกสารกลับ (returnedDate + รูปใบเสร็จ)
+enum PlateSwapKind {
+  OLD_NEW // รถเก่า <-> รถใหม่ (รถใหม่จากฐานข้อมูลรถจดใหม่)
+  OLD_OLD // รถเก่า <-> รถเก่า (ยังไม่เปิดใช้ - รอเงื่อนไข)
+}
+
+// ที่มาของเลขทะเบียนใหม่ของรถเก่า - กำหนดรายการค่าธรรมเนียม (Bill) ที่ต่างกัน
+enum PlateSwapNumberSource {
+  NEW_UNUSED // ขอใช้เลขทะเบียนที่ไม่เคยออกให้รถคันอื่น 500 บาท
+  AUCTION_RESERVED // เลขประมูลหรือชุดสงวน - ขอใช้เลขทะเบียนสงวน 1,500 บาท
+}
+
+model PlateSwap {
+  id           String        @id @default(cuid())
+  kind         PlateSwapKind @default(OLD_NEW)
+  vehicleClass String        @default("CAR") // CAR | MOTO - ตอนนี้รับเฉพาะ CAR (อัตราจักรยานยนต์ยังไม่มี)
+
+  // รถเก่า (กรอกเอง)
+  oldOwnerName   String // ชื่อเจ้าของรถ
+  // ผู้ใช้ 2026-09-23: แยกเลขเครื่องกับเลขตัวถังเป็นคนละช่อง และบังคับกรอกทั้งคู่ (ต่างจาก Vehicle ของรถจดใหม่ที่เลขเครื่องไม่บังคับ)
+  oldEngine      String // เลขเครื่อง
+  oldChassis     String // เลขตัวถัง
+  oldBrand       String // ยี่ห้อ
+  // ทะเบียนแยก 2 ช่องเหมือน Vehicle ของรถจดใหม่ (ผู้ใช้ 2026-09-23): หมวดทะเบียน เช่น "4กข" + เลขทะเบียน เช่น "4444"
+  oldPlateCategory String // หมวดทะเบียนเก่า
+  oldPlateNumber   String // เลขทะเบียนเก่า
+  // ทะเบียนใหม่ที่รถเก่าจะได้รับ - ตอนยื่นอาจยังไม่รู้ กรอกทีหลังได้ และบังคับตอนยืนยันรับเอกสารกลับ
+  newPlateCategory String?
+  newPlateNumber   String?
+
+  // รถใหม่ในฐานข้อมูลรถจดใหม่ที่รับเลขจากรถเก่า (ลิงก์ด้วยเลขตัวถัง) - หน้ายื่นเอกสารของรถคันนั้นจะเห็นเลขสลับ
+  // และกดใช้เลขนี้เป็นเลขที่ขอได้ (ผู้ใช้ 2026-09-23)
+  newVehicleId String?
+
+  submitDate DateTime // วันที่ยื่น
+
+  // ค่าใช้จ่าย - ตัวเลือกที่ผู้ใช้ติ๊ก + snapshot รายการ ณ ตอนบันทึก
+  numberSource    PlateSwapNumberSource
+  buyNormalPlate  Boolean               @default(false) // ค่าแผ่นป้ายทะเบียนรถยนต์ออกใหม่ รับปกติ / ขาว-ดำปกติ 200 บาท
+  buyAuctionPlate Boolean               @default(false) // ค่าแผ่นป้ายประมูล 1,200 บาท (เฉพาะ AUCTION_RESERVED)
+  billItems       Json // [{label, amount}]
+  noBillItems     Json // [{label, amount}] - ลงขัน 200 บาท
+  billTotal       Decimal               @db.Decimal(12, 2)
+  noBillTotal     Decimal               @db.Decimal(12, 2)
+
+  // รับเอกสารกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปใบเสร็จผ่าน ReceiptImage.plateSwapId)
+  returnedDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  newVehicle Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
+  receipts   ReceiptImage[]
+
+  @@index([newVehicleId])
+  @@index([submitDate])
+  @@index([returnedDate])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------
@@ -562,7 +669,32 @@ model YamahaRelocationEntry {
   noBillFee Decimal              @db.Decimal(10, 2) // count x อัตรา No bill ณ ตอนบันทึก
   createdAt DateTime             @default(now())
 
+  attachments YamahaRelocationAttachment[]
+
   @@index([size, date])
+}
+
+// ไฟล์แนบของรายการแจ้งย้ายยามาฮ่า (ผู้ใช้ 2026-09-22: ทุกครั้งที่กรอกจำนวนคันต่อวันต้องแนบ ใบเสร็จ 1 ไฟล์ + Report 1 ไฟล์ เสมอ)
+// ตัวไฟล์อยู่ใน storage เดียวกับรูปใบเสร็จ (ดิสก์เครื่อง/R2) key ขึ้นต้น yamaha-relocation/receipts/ หรือ yamaha-relocation/reports/
+// โหลดไฟล์ผ่าน GET /api/yamaha-relocation/attachments/:id/file
+enum YamahaRelocationAttachmentKind {
+  RECEIPT // ใบเสร็จ
+  REPORT // Report
+}
+
+model YamahaRelocationAttachment {
+  id           String                         @id @default(cuid())
+  entryId      String
+  kind         YamahaRelocationAttachmentKind
+  storageKey   String                         @unique
+  mimeType     String
+  sizeBytes    Int
+  originalName String?
+  createdAt    DateTime                       @default(now())
+
+  entry YamahaRelocationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, kind])
 }
 
 // --- รูปป้ายทะเบียน (หน้ารับป้ายทะเบียน Step 6) ------------------------------------

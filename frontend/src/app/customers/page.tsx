@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, type Customer, type NewCustomerInput } from "@/lib/api";
+import { canCreateCustomer, getCachedUser } from "@/lib/auth";
 
 const EMPTY_FORM: NewCustomerInput = {
   name: "",
@@ -34,6 +35,8 @@ export default function CustomersPage() {
   });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<Customer | null>(null);
+  // เพิ่มลูกค้าได้เฉพาะ ADMIN (ผู้ใช้ 2026-09-22) - backend กัน POST /api/customers อีกชั้น
+  const [canAdd, setCanAdd] = useState(false);
 
   async function loadCustomers() {
     setLoading(true);
@@ -56,6 +59,7 @@ export default function CustomersPage() {
     // Standard fetch-on-mount; loadCustomers sets a loading flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCustomers();
+    setCanAdd(canCreateCustomer(getCachedUser()?.roles ?? []));
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -98,101 +102,103 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <section className="panel">
-        <div
-          className="panel-head"
-          style={{ borderBottom: "1px solid #edf0f5" }}
-        >
-          <h2>เพิ่มลูกค้า</h2>
-          <span className="muted">* จำเป็นต้องกรอก</span>
-        </div>
-        <form className="customer-form" onSubmit={handleSubmit}>
-          <div className="customer-grid">
-            <label className="field">
-              ชื่อลูกค้า *
-              <input
-                value={form.name}
-                maxLength={250}
-                required
-                autoComplete="name"
-                onChange={(e) => updateField("name", e.target.value)}
-              />
-            </label>
-            <label className="field">
-              บริษัท
-              <input
-                value={form.company}
-                maxLength={250}
-                autoComplete="organization"
-                onChange={(e) => updateField("company", e.target.value)}
-              />
-            </label>
-            <label className="field">
-              สาขา
-              <input
-                value={form.branch}
-                maxLength={250}
-                autoComplete="off"
-                onChange={(e) => updateField("branch", e.target.value)}
-              />
-            </label>
-            <label className="field wide">
-              ที่อยู่บริษัท
-              <textarea
-                value={form.address}
-                maxLength={2000}
-                rows={3}
-                autoComplete="street-address"
-                onChange={(e) => updateField("address", e.target.value)}
-              />
-            </label>
-            <label className="field">
-              เลขประจำตัวผู้เสียภาษี
-              <input
-                value={form.taxId}
-                maxLength={13}
-                inputMode="numeric"
-                pattern="[0-9]{13}"
-                title="กรอกตัวเลข 13 หลัก"
-                autoComplete="off"
-                onChange={(e) => updateField("taxId", e.target.value)}
-              />
-            </label>
-            <label className="field">
-              เบอร์โทรศัพท์
-              <input
-                type="tel"
-                value={form.phone}
-                maxLength={250}
-                autoComplete="tel"
-                onChange={(e) => updateField("phone", e.target.value)}
-              />
-            </label>
-            <label className="field">
-              อีเมล
-              <input
-                type="email"
-                value={form.email}
-                maxLength={250}
-                autoComplete="email"
-                onChange={(e) => updateField("email", e.target.value)}
-              />
-            </label>
+      {canAdd && (
+        <section className="panel">
+          <div
+            className="panel-head"
+            style={{ borderBottom: "1px solid #edf0f5" }}
+          >
+            <h2>เพิ่มลูกค้า</h2>
+            <span className="muted">* จำเป็นต้องกรอก</span>
           </div>
-          <div className="form-actions">
-            <button className="primary" type="submit" disabled={saving}>
-              บันทึกข้อมูลลูกค้า
-            </button>
-            <span
-              className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`}
-              role="status"
-              aria-live="polite"
-            >
-              {message.text}
-            </span>
-          </div>
-        </form>
-      </section>
+          <form className="customer-form" onSubmit={handleSubmit}>
+            <div className="customer-grid">
+              <label className="field">
+                ชื่อลูกค้า *
+                <input
+                  value={form.name}
+                  maxLength={250}
+                  required
+                  autoComplete="name"
+                  onChange={(e) => updateField("name", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                บริษัท
+                <input
+                  value={form.company}
+                  maxLength={250}
+                  autoComplete="organization"
+                  onChange={(e) => updateField("company", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                สาขา
+                <input
+                  value={form.branch}
+                  maxLength={250}
+                  autoComplete="off"
+                  onChange={(e) => updateField("branch", e.target.value)}
+                />
+              </label>
+              <label className="field wide">
+                ที่อยู่บริษัท
+                <textarea
+                  value={form.address}
+                  maxLength={2000}
+                  rows={3}
+                  autoComplete="street-address"
+                  onChange={(e) => updateField("address", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                เลขประจำตัวผู้เสียภาษี
+                <input
+                  value={form.taxId}
+                  maxLength={13}
+                  inputMode="numeric"
+                  pattern="[0-9]{13}"
+                  title="กรอกตัวเลข 13 หลัก"
+                  autoComplete="off"
+                  onChange={(e) => updateField("taxId", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                เบอร์โทรศัพท์
+                <input
+                  type="tel"
+                  value={form.phone}
+                  maxLength={250}
+                  autoComplete="tel"
+                  onChange={(e) => updateField("phone", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                อีเมล
+                <input
+                  type="email"
+                  value={form.email}
+                  maxLength={250}
+                  autoComplete="email"
+                  onChange={(e) => updateField("email", e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="form-actions">
+              <button className="primary" type="submit" disabled={saving}>
+                บันทึกข้อมูลลูกค้า
+              </button>
+              <span
+                className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`}
+                role="status"
+                aria-live="polite"
+              >
+                {message.text}
+              </span>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="panel customer-list">
         <div className="panel-head">

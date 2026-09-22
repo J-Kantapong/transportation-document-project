@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, currentVehicleScope, isVehicleInScope, scopeErrorMessage, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OwnerType } from '../generated/prisma/enums.js';
 import { TaxService } from '../tax/tax.service.js';
@@ -46,6 +47,7 @@ export class DocumentSubmissionService {
   private async loadVehicle(vehicleId: string) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ยื่นได้เฉพาะประเภทรถของตัวเอง
     return vehicle;
   }
 
@@ -65,7 +67,14 @@ export class DocumentSubmissionService {
       where: { vehicleId: vehicle.id, status: { in: ACTIVE_SUBMISSION_STATUSES } },
       orderBy: { createdAt: 'desc' },
     });
-    const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null }, submitDate);
+    // งานสลับเลขของรถคันนี้ (ถ้ามี) - ตารางยังไม่ได้รันไมเกรชัน (P2021) ถือว่าไม่มีงานสลับเลข
+    const plateSwap = await this.prisma.plateSwap
+      .findFirst({ where: { newVehicleId: vehicle.id }, orderBy: { createdAt: 'desc' }, select: { returnedDate: true } })
+      .catch((err: { code?: string }) => {
+        if (err?.code === 'P2021') return null;
+        throw err;
+      });
+    const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null, plateSwap }, submitDate);
     if (reason) throw new BadRequestException({ error: reason });
   }
 
@@ -100,9 +109,11 @@ export class DocumentSubmissionService {
     type Computed =
       | { vehicleId: unknown; error: string }
       | { vehicleId: string; fee: ReturnType<typeof computeDocumentFees>; taxInput: Parameters<TaxService['previewMany']>[0][number] };
+    const scope = currentVehicleScope();
     const computed: Computed[] = entries.map((entry) => {
       const vehicle = typeof entry?.vehicleId === 'string' ? byId.get(entry.vehicleId) : undefined;
       if (!vehicle) return { vehicleId: entry?.vehicleId, error: 'ไม่พบข้อมูลรถ' };
+      if (!isVehicleInScope(vehicle.body, scope)) return { vehicleId: vehicle.id, error: scopeErrorMessage(scope) };
       try {
         const options = parseDocumentSubmissionOptions(entry, isMotorcycle(vehicle.body));
         const fee = computeDocumentFees(
@@ -286,6 +297,7 @@ export class DocumentSubmissionService {
           }
         : {}),
       ...(status ? { status } : {}),
+      vehicle: vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
     };
 
     const submissions = await this.prisma.documentSubmission.findMany({
@@ -338,9 +350,10 @@ export class DocumentSubmissionService {
     }
     const submission = await this.prisma.documentSubmission.findUnique({
       where: { id: submissionId },
-      include: { vehicle: { select: { plateCategory: true, plateNumber: true } } },
+      include: { vehicle: { select: { plateCategory: true, plateNumber: true, body: true } } },
     });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body); // STAFF_CAR / STAFF_MOTO รับใบเสร็จได้เฉพาะประเภทรถของตัวเอง
     if (submission.status !== 'PENDING') {
       throw new BadRequestException({ error: 'รายการนี้อัปเดตสถานะไปแล้ว' });
     }

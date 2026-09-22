@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GovTaxRuleStatus } from '../generated/prisma/enums.js';
 import {
@@ -121,8 +122,9 @@ export class TaxService {
   }
 
   async listForVehicle(vehicleId: string) {
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { id: true } });
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { id: true, body: true } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ดูภาษีได้เฉพาะประเภทรถของตัวเอง
     return this.prisma.taxCalculation.findMany({ where: { vehicleId }, orderBy: { createdAt: 'desc' } });
   }
 }

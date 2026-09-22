@@ -1,3 +1,5 @@
+import { getToken, redirectToLogin } from './auth';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
 export interface RowError {
@@ -16,12 +18,18 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // แนบ token ล็อกอินทุกคำขอ (ดู lib/auth.ts) - หน้า login/register ยังไม่มี token ก็ส่งได้ปกติ
+  const token = getToken();
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       // FormData (อัปโหลดรูป) ให้ browser ตั้ง Content-Type multipart เอง
-      headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...init?.headers },
+      headers:
+        init?.body instanceof FormData
+          ? { ...auth, ...(init.headers as Record<string, string> | undefined) }
+          : { 'Content-Type': 'application/json', ...auth, ...(init?.headers as Record<string, string> | undefined) },
     });
   } catch {
     throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
@@ -32,6 +40,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     data = await res.json();
   } catch {
     throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
+  }
+
+  // 401 ระหว่างใช้งาน = token หมดอายุหรือบัญชีถูกระงับ -> กลับไปหน้าล็อกอิน (ยกเว้นตอนกำลังล็อกอินเอง)
+  if (res.status === 401 && !path.startsWith('/api/auth/login')) {
+    redirectToLogin();
+    throw new ApiError('กรุณาเข้าสู่ระบบใหม่');
   }
 
   if (!res.ok) {
@@ -67,6 +81,18 @@ export type OwnerType = 'INDIVIDUAL' | 'JURISTIC';
 export interface FinanceCompany {
   id: string;
   name: string;
+}
+
+// งานสลับเลขที่ผูกกับรถจดใหม่คันหนึ่ง (รถคันนี้รับเลขจากรถเก่า)
+export interface VehiclePlateSwap {
+  id: string;
+  oldOwnerName: string;
+  oldPlateCategory: string;
+  oldPlateNumber: string;
+  newPlateCategory: string | null; // ทะเบียนที่รถเก่าจะได้ - ยังไม่รู้ตอนยื่นงานสลับเลขได้
+  newPlateNumber: string | null;
+  submitDate: string; // YYYY-MM-DD
+  returnedDate: string | null;
 }
 
 export interface Vehicle {
@@ -106,6 +132,9 @@ export interface Vehicle {
   plateNumber: string | null;
   // true = ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ (DocumentSubmission ล่าสุดค้างสถานะ PENDING) - ยื่นซ้ำไม่ได้
   // จนกว่าจะได้รับใบเสร็จหรือยื่นไม่สำเร็จ
+  // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ผู้รับเลขจากรถเก่า (ผู้ใช้ 2026-09-23) - null = ไม่มีงานสลับเลข
+  // หน้ายื่นเอกสาร (Step 4) แสดงทะเบียนที่จะได้จากงานสลับเลข และกดใช้เป็นเลขที่ขอได้ - ดู backend/src/plate-swap/
+  plateSwap: VehiclePlateSwap | null;
   pendingDocumentSubmission: boolean;
 }
 
@@ -447,6 +476,19 @@ export interface InspectionVehicle {
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
 
+// ไฟล์แนบของรายการแจ้งย้ายยามาฮ่า - ทุกรายการต้องมี ใบเสร็จ (RECEIPT) + Report (REPORT) อย่างละ 1 ไฟล์ (รูปหรือ PDF)
+// ตัวไฟล์โหลดด้วย yamahaRelocationAttachmentUrl(id) (ต้องส่ง Authorization - ดู openAuthedFile ใน component)
+export type YamahaRelocationAttachmentKind = 'RECEIPT' | 'REPORT';
+
+export interface YamahaRelocationAttachment {
+  id: string;
+  kind: YamahaRelocationAttachmentKind;
+  mimeType: string;
+  sizeBytes: number;
+  originalName: string | null;
+  createdAt: string;
+}
+
 export interface YamahaRelocationEntry {
   id: string;
   date: string;
@@ -455,7 +497,11 @@ export interface YamahaRelocationEntry {
   billFee: string;
   noBillFee: string;
   createdAt: string;
+  receipt: YamahaRelocationAttachment | null; // null เฉพาะรายการเก่าที่บันทึกก่อนมีไฟล์แนบ
+  report: YamahaRelocationAttachment | null;
 }
+
+export const yamahaRelocationAttachmentUrl = (id: string) => `${API_BASE_URL}/api/yamaha-relocation/attachments/${id}/file`;
 
 export interface YamahaRelocationSummary {
   totalCount: number;
@@ -652,9 +698,14 @@ export const api = {
     request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(
       `/api/yamaha-relocation?size=${size}&month=${month}`,
     ),
-  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number }) =>
-    request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  // multipart: date, size, count + ไฟล์ receipt (ใบเสร็จ) และ report (Report) - backend บังคับทั้ง 2 ไฟล์
+  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number; receipt: File; report: File }) => {
+    const form = new FormData();
+    form.append('date', data.date);
+    form.append('size', data.size);
+    form.append('count', String(data.count));
+    form.append('receipt', data.receipt, data.receipt.name);
+    form.append('report', data.report, data.report.name);
+    return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
+  },
 };

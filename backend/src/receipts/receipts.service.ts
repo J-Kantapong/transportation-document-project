@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
@@ -53,9 +54,10 @@ export class ReceiptsService {
     }
     const submission = await this.prisma.documentSubmission.findUnique({
       where: { id: submissionIdRaw.trim() },
-      select: { id: true, status: true },
+      select: { id: true, status: true, vehicle: { select: { body: true } } },
     });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body); // STAFF_CAR / STAFF_MOTO แนบใบเสร็จได้เฉพาะประเภทรถของตัวเอง
     if (submission.status === 'FAILED') {
       throw new BadRequestException({ error: 'รายการนี้ยื่นไม่สำเร็จ แนบใบเสร็จไม่ได้' });
     }
@@ -74,7 +76,7 @@ export class ReceiptsService {
     if (!chassis) return { submissionId, match: null };
     if (!submissionId) {
       const found = await this.prisma.documentSubmission.findFirst({
-        where: { status: 'PENDING', vehicle: { chassis } },
+        where: { status: 'PENDING', vehicle: { chassis, ...vehicleTypeWhere() } },
         select: { id: true },
       });
       return found ? { submissionId: found.id, match: 'chassis' } : { submissionId: null, match: null };
@@ -94,7 +96,7 @@ export class ReceiptsService {
       submissionIdRaw === undefined || submissionIdRaw === null || submissionIdRaw === '' ? null : await this.assertAttachable(submissionIdRaw);
 
     const now = new Date();
-    const storageKey = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
+    const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
     const extraction = await this.extractor.extract(file.buffer, type.mimeType);
     const matched = await this.matchByChassis(extraction, submissionId);
     await this.storage.put(storageKey, file.buffer, type.mimeType);
@@ -119,10 +121,10 @@ export class ReceiptsService {
     }
   }
 
-  // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ
+  // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ (ไม่รวมใบเสร็จงานสลับเลข ซึ่งผูกกับงานผ่าน plateSwapId)
   async listUnassigned() {
     const receipts = await this.prisma.receiptImage.findMany({
-      where: { submissionId: null },
+      where: { submissionId: null, plateSwapId: null },
       orderBy: { createdAt: 'desc' },
       take: 200,
       select: receiptSelect,
@@ -159,12 +161,14 @@ export class ReceiptsService {
   async remove(id: string) {
     const receipt = await this.prisma.receiptImage.findUnique({
       where: { id },
-      select: { id: true, storageKey: true, submission: { select: { status: true } } },
+      select: { id: true, storageKey: true, plateSwapId: true, submission: { select: { status: true } } },
     });
     if (!receipt) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
     if (receipt.submission?.status === 'RECEIPT_RECEIVED') {
       throw new BadRequestException({ error: 'รายการนี้รับใบเสร็จแล้ว ลบรูปใบเสร็จไม่ได้' });
     }
+    // ใบเสร็จงานสลับเลขลบผ่าน DELETE /api/plate-swaps/:id/receipts/:receiptId (รับเอกสารกลับแล้วห้ามลบ)
+    if (receipt.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข ลบจากหน้างานสลับเลข' });
     await this.prisma.receiptImage.delete({ where: { id } });
     await this.storage.delete(receipt.storageKey).catch(() => undefined);
     return { id };

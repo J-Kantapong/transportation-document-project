@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
@@ -17,6 +18,18 @@ import {
   INSPECTION_VALID_DAYS,
   inspectionValidUntil,
 } from '../document-submission/submission-eligibility.js';
+
+// งานสลับเลขที่ส่งเลขมาให้รถจดใหม่คันหนึ่ง - หน้ายื่นเอกสาร (Step 4) แสดงและกดใช้เป็นเลขที่ขอได้ (ดู backend/src/plate-swap)
+export interface PlateSwapSummary {
+  id: string;
+  oldOwnerName: string;
+  oldPlateCategory: string;
+  oldPlateNumber: string;
+  newPlateCategory: string | null;
+  newPlateNumber: string | null;
+  submitDate: string; // YYYY-MM-DD
+  returnedDate: string | null;
+}
 
 const EDITABLE_VEHICLE_FIELDS = [
   ['date', 'วันที่'],
@@ -253,12 +266,55 @@ export class VehiclesService {
       financeName: vehicle.owner?.financeCompany?.name ?? null,
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
+      // งานสลับเลขที่ส่งเลขมาให้รถคันนี้ - เติมเฉพาะคิว/ค้นหาของหน้ายื่นเอกสาร (ดู attachPlateSwaps) ที่อื่นเป็น null
+      plateSwap: null as PlateSwapSummary | null,
       pendingDocumentSubmission: vehicle.documentSubmissions[0]?.status === 'PENDING',
     };
   }
 
   // รถที่ใช้ในหน้ายื่นเอกสาร (Step 4) - เพิ่มผลตรวจ/วันหมดอายุผลตรวจ เหตุผลที่ยื่นไม่ได้ ณ วันที่ยื่น และครั้งล่าสุดที่
   // ยื่นไม่สำเร็จพร้อมเหตุผล (รถกลับมาทำ Step 4 ใหม่ - คันที่ยื่นค้าง/จดทะเบียนแล้วไม่แสดงเพราะไม่เกี่ยวแล้ว)
+  // งานสลับเลขที่ส่งเลขให้รถแต่ละคัน (ผู้ใช้ 2026-09-23) - ดึงแยกจากคิวรถ ไม่ผูกไว้ใน include ของ Vehicle เพราะถ้า
+  // ฐานข้อมูลยังไม่ได้รันไมเกรชันของตาราง PlateSwap คิวรถทั้งหน้าจะพังไปด้วย (P2021) - ตารางยังไม่มี = ถือว่าไม่มีงานสลับเลข
+  private async plateSwapsByVehicle(vehicleIds: string[]): Promise<Map<string, PlateSwapSummary>> {
+    if (vehicleIds.length === 0) return new Map();
+    try {
+      const swaps = await this.prisma.plateSwap.findMany({
+        where: { newVehicleId: { in: vehicleIds } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          newVehicleId: true,
+          oldOwnerName: true,
+          oldPlateCategory: true,
+          oldPlateNumber: true,
+          newPlateCategory: true,
+          newPlateNumber: true,
+          submitDate: true,
+          returnedDate: true,
+        },
+      });
+      const map = new Map<string, PlateSwapSummary>();
+      for (const swap of swaps) {
+        if (!swap.newVehicleId || map.has(swap.newVehicleId)) continue; // งานล่าสุดของรถคันนั้นเท่านั้น
+        map.set(swap.newVehicleId, {
+          id: swap.id,
+          oldOwnerName: swap.oldOwnerName,
+          oldPlateCategory: swap.oldPlateCategory,
+          oldPlateNumber: swap.oldPlateNumber,
+          newPlateCategory: swap.newPlateCategory,
+          newPlateNumber: swap.newPlateNumber,
+          submitDate: swap.submitDate.toISOString().slice(0, 10),
+          returnedDate: swap.returnedDate?.toISOString().slice(0, 10) ?? null,
+        });
+      }
+      return map;
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2021') return new Map(); // ยังไม่ได้รันไมเกรชัน
+      throw err;
+    }
+  }
+
   private async mapSubmitCandidates(
     vehicles: Array<
       Parameters<VehiclesService['mapVehicleFull']>[0] & {
@@ -279,15 +335,21 @@ export class VehiclesService {
         })
       : [];
     const lastFailedByVehicle = new Map(failed.map((f) => [f.vehicleId, f]));
+    const plateSwaps = await this.plateSwapsByVehicle(vehicles.map((v) => v.id));
     return vehicles.map((vehicle) => {
       const activeSubmissionStatus = vehicle.documentSubmissions[0]?.status ?? null;
       const lastFailed = activeSubmissionStatus ? undefined : lastFailedByVehicle.get(vehicle.id);
       return {
         ...this.mapVehicleFull(vehicle),
+        plateSwap: plateSwaps.get(vehicle.id) ?? null,
+        // รอรับเอกสารกลับของงานสลับเลขอยู่ = ยังยื่นไม่ได้ (ผู้ใช้ 2026-09-23) - ดู getSubmitBlockReason
         inspectionResultDate: vehicle.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
         inspectionValidUntil:
           vehicle.inspectionResult === 'ผ่าน' && vehicle.inspectionResultDate ? inspectionValidUntil(vehicle.inspectionResultDate) : null,
-        submitBlockReason: getSubmitBlockReason({ ...vehicle, activeSubmissionStatus }, submitDate),
+        submitBlockReason: getSubmitBlockReason(
+          { ...vehicle, activeSubmissionStatus, plateSwap: plateSwaps.get(vehicle.id) ?? null },
+          submitDate,
+        ),
         lastFailedSubmission: lastFailed
           ? { submitDate: lastFailed.submitDate.toISOString().slice(0, 10), failRemark: lastFailed.failRemark }
           : null,
@@ -312,6 +374,7 @@ export class VehiclesService {
         inspectionResult: 'ผ่าน',
         inspectionResultDate: { gte: earliestValidPass, lte: submitDate },
         documentSubmissions: { none: { status: { in: ACTIVE_SUBMISSION_STATUSES } } },
+        ...vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
       },
       orderBy: [{ inspectionResultDate: 'asc' }, { date: 'asc' }, { chassis: 'asc' }],
       include: this.vehicleFullInclude,
@@ -336,7 +399,7 @@ export class VehiclesService {
     const trimmed = query.trim();
     if (!trimmed) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { contains: trimmed, mode: 'insensitive' } },
+      where: { chassis: { contains: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 20,
       include: this.vehicleFullInclude,
@@ -352,8 +415,9 @@ export class VehiclesService {
     if (trimmed.length === 0) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถังอย่างน้อย 1 รายการ' });
     if (trimmed.length > MAX_BATCH_SIZE) throw new BadRequestException({ error: `รองรับไม่เกิน ${MAX_BATCH_SIZE} คันต่อครั้ง` });
 
+    // รถนอกขอบเขตประเภท (STAFF_CAR / STAFF_MOTO) ไม่ถูกดึงมา -> ไปอยู่ใน notFound เหมือนไม่มีในระบบ
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { in: trimmed, mode: 'insensitive' } },
+      where: { chassis: { in: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       include: this.vehicleFullInclude,
     });
     const mapped = await this.mapSubmitCandidates(vehicles, submitDate);
@@ -938,6 +1002,7 @@ export class VehiclesService {
 
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertVehicleInScope(vehicle.body); // Step 4 - STAFF_CAR / STAFF_MOTO แก้ได้เฉพาะประเภทรถของตัวเอง
 
     if (ownerIdRaw) {
       const owner = await this.prisma.vehicleOwner.findUnique({ where: { id: ownerIdRaw } });

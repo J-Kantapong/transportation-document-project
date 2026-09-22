@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
@@ -40,7 +41,8 @@ export class BookPhotosService {
   // เงื่อนไขเดียวกับคิวรับเล่มใน ReceivingService: ยังไม่รับเล่ม + การยื่นเอกสารล่าสุด = RECEIPT_RECEIVED
   private async pendingCandidates(): Promise<BookCandidate[]> {
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { bookReceivedDate: null, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } } },
+      // ...vehicleTypeWhere(): STAFF_CAR / STAFF_MOTO จับคู่/ยืนยันรับเล่มได้เฉพาะประเภทรถของตัวเอง
+      where: { bookReceivedDate: null, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } }, ...vehicleTypeWhere() },
       select: { ...candidateSelect, documentSubmissions: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } } },
     });
     return vehicles.filter((v) => v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED');
@@ -58,6 +60,7 @@ export class BookPhotosService {
             where: {
               bookReceivedDate: { not: null },
               OR: [{ chassis: { in: vins, mode: 'insensitive' } }, { plateNumber: { in: numbers } }],
+              ...vehicleTypeWhere(),
             },
             select: candidateSelect,
           })
