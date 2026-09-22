@@ -461,6 +461,19 @@ export interface InspectionVehicle {
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
 
+// ไฟล์แนบของรายการแจ้งย้ายยามาฮ่า - ทุกรายการต้องมี ใบเสร็จ (RECEIPT) + Report (REPORT) อย่างละ 1 ไฟล์ (รูปหรือ PDF)
+// ตัวไฟล์โหลดด้วย yamahaRelocationAttachmentUrl(id) (ต้องส่ง Authorization - ดู openAuthedFile ใน component)
+export type YamahaRelocationAttachmentKind = 'RECEIPT' | 'REPORT';
+
+export interface YamahaRelocationAttachment {
+  id: string;
+  kind: YamahaRelocationAttachmentKind;
+  mimeType: string;
+  sizeBytes: number;
+  originalName: string | null;
+  createdAt: string;
+}
+
 export interface YamahaRelocationEntry {
   id: string;
   date: string;
@@ -469,7 +482,11 @@ export interface YamahaRelocationEntry {
   billFee: string;
   noBillFee: string;
   createdAt: string;
+  receipt: YamahaRelocationAttachment | null; // null เฉพาะรายการเก่าที่บันทึกก่อนมีไฟล์แนบ
+  report: YamahaRelocationAttachment | null;
 }
+
+export const yamahaRelocationAttachmentUrl = (id: string) => `${API_BASE_URL}/api/yamaha-relocation/attachments/${id}/file`;
 
 export interface YamahaRelocationSummary {
   totalCount: number;
@@ -666,9 +683,14 @@ export const api = {
     request<{ entries: YamahaRelocationEntry[]; summary: YamahaRelocationSummary }>(
       `/api/yamaha-relocation?size=${size}&month=${month}`,
     ),
-  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number }) =>
-    request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  // multipart: date, size, count + ไฟล์ receipt (ใบเสร็จ) และ report (Report) - backend บังคับทั้ง 2 ไฟล์
+  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number; receipt: File; report: File }) => {
+    const form = new FormData();
+    form.append('date', data.date);
+    form.append('size', data.size);
+    form.append('count', String(data.count));
+    form.append('receipt', data.receipt, data.receipt.name);
+    form.append('report', data.report, data.report.name);
+    return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
+  },
 };
