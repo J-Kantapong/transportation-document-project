@@ -283,7 +283,8 @@ function parseCSV(text: string): string[][] {
 function lookupId(value: string, rows: Array<{ id: string; name: string }>, label: string): string {
   const exact = rows.filter((r) => r.id === value);
   if (exact.length === 1) return exact[0].id;
-  const matches = rows.filter((r) => r.name === value);
+  const normalizedValue = value.trim().toLowerCase();
+  const matches = rows.filter((r) => r.name.trim().toLowerCase() === normalizedValue);
   if (matches.length === 1) return matches[0].id;
   throw new Error(matches.length ? `ชื่อ${label}ซ้ำ กรุณาใช้รหัสจากรายการอ้างอิง` : `ไม่พบ${label}ในฐานข้อมูล`);
 }
