@@ -32,17 +32,27 @@ export const PLATE_SWAP_CAR_NUMBER_ITEMS: Record<
   },
 };
 
-export const PLATE_SWAP_CAR_NO_BILL_ITEMS: FeeItem[] = [{ label: "ลงขัน", amount: 200 }];
+// ลงขัน 200 + ค่าอากรของรถเก่า 10 บาท (ผู้ใช้ 2026-09-23) - ค่าอากรแยกรายการ ไม่อยู่ในใบเสร็จ แต่นับรวมในยอด No Bill
+export const PLATE_SWAP_CAR_NO_BILL_ITEMS: FeeItem[] = [
+  { label: "ลงขัน", amount: 200 },
+  { label: "ค่าอากร", amount: 10 },
+];
 
 export interface PlateSwapFees {
   billItems: FeeItem[];
   noBillItems: FeeItem[];
   billTotal: number;
-  noBillTotal: number;
-  total: number;
+  noBillTotal: number; // รวมค่าอากรด้วย
+  dutyTotal: number; // ค่าอากรที่แยกออกจากยอดรวม
+  total: number; // Bill + No Bill โดยไม่นับค่าอากร (ผู้ใช้ 2026-09-23)
 }
 
 const sum = (items: FeeItem[]) => items.reduce((acc, item) => acc + item.amount, 0);
+
+export const DUTY_LABEL = "ค่าอากร";
+
+// ค่าอากรของงานหนึ่ง - อ่านจาก snapshot รายการ No Bill ที่บันทึกไว้ ใช้ได้กับงานเก่าแม้อัตราเปลี่ยน
+export const dutyAmountOf = (noBillItems: FeeItem[]) => sum(noBillItems.filter((i) => i.label === DUTY_LABEL));
 
 export function calculatePlateSwapCarFees(options: {
   numberSource: PlateSwapNumberSource;
@@ -56,7 +66,8 @@ export function calculatePlateSwapCarFees(options: {
   const noBillItems = [...PLATE_SWAP_CAR_NO_BILL_ITEMS];
   const billTotal = sum(billItems);
   const noBillTotal = sum(noBillItems);
-  return { billItems, noBillItems, billTotal, noBillTotal, total: billTotal + noBillTotal };
+  const dutyTotal = dutyAmountOf(noBillItems);
+  return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
 }
 
 export const formatBaht = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 });

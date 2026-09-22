@@ -19,7 +19,12 @@ export interface SubmissionEligibilityInput {
   inspectionResultDate: Date | null;
   // สถานะของ DocumentSubmission ที่ยัง active (PENDING/RECEIPT_RECEIVED) - ไม่มี = null
   activeSubmissionStatus: string | null;
+  // งานสลับเลขที่รถคันนี้รอรับเลขอยู่ (ผู้ใช้ 2026-09-23) - ต้องยืนยันรับเอกสารกลับของงานสลับเลขก่อนจึงยื่นได้
+  // ไม่มีงานสลับเลข = undefined/null (รถทั่วไปไม่กระทบ)
+  plateSwap?: { returnedDate: Date | string | null } | null;
 }
+
+export const PLATE_SWAP_PENDING_REASON = 'รถคันนี้รับเลขจากงานสลับเลข - ต้องยืนยันรับเอกสารกลับในหน้างานสลับเลขก่อนจึงจะยื่นเอกสารได้';
 
 // วันสุดท้ายที่ยังยื่นได้ (ค.ศ. YYYY-MM-DD) = วันที่ตรวจผ่าน + 89 วัน
 export function inspectionValidUntil(resultDate: Date): string {
@@ -36,6 +41,9 @@ export function getSubmitBlockReason(vehicle: SubmissionEligibilityInput, submit
   }
   if (!vehicle.transferDone) {
     return 'ยังไม่ผ่านขั้นตอนแจ้งย้าย/ตัดบัญชี';
+  }
+  if (vehicle.plateSwap && !vehicle.plateSwap.returnedDate) {
+    return PLATE_SWAP_PENDING_REASON;
   }
   if (vehicle.inspectionResult !== 'ผ่าน' || !vehicle.inspectionResultDate) {
     if (vehicle.inspectionResult === 'ไม่ผ่าน') return 'ตรวจรถไม่ผ่าน - ต้องส่งตรวจใหม่ให้ผ่านก่อน';

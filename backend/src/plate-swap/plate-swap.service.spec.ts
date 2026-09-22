@@ -8,10 +8,13 @@ function swapRow(overrides: Record<string, unknown> = {}) {
     id: 's1',
     kind: 'OLD_NEW',
     oldOwnerName: 'สมชาย',
+    oldEngine: '2AZ1234567',
     oldChassis: 'MR0FZ29G001234567',
     oldBrand: 'Toyota',
-    oldPlateNumber: 'กข 1234',
-    newPlateNumber: '1กก 9999',
+    oldPlateCategory: 'กข',
+    oldPlateNumber: '1234',
+    newPlateCategory: '1กก',
+    newPlateNumber: '9999',
     submitDate: new Date('2026-09-20T00:00:00.000Z'),
     numberSource: 'NEW_UNUSED',
     buyNormalPlate: false,
@@ -19,7 +22,7 @@ function swapRow(overrides: Record<string, unknown> = {}) {
     billItems: [],
     noBillItems: [],
     billTotal: '575',
-    noBillTotal: '200',
+    noBillTotal: '210',
     returnedDate: null,
     createdAt: new Date('2026-09-20T01:00:00.000Z'),
     newVehicle: null,
@@ -34,7 +37,10 @@ function service(found: unknown) {
   const findUniqueOrThrow = vi.fn().mockImplementation(async () => ({ ...(found as object), returnedDate: new Date('2026-09-22T00:00:00.000Z') }));
   const prisma = {
     plateSwap: { create, update, findUnique: vi.fn().mockResolvedValue(found), findUniqueOrThrow, findMany: vi.fn().mockResolvedValue([]) },
-    vehicle: { findFirst: vi.fn().mockImplementation(async ({ where }) => (where.id === 'v-new' ? { id: 'v-new' } : null)), findMany: vi.fn().mockResolvedValue([]) },
+    vehicle: {
+      findFirst: vi.fn().mockImplementation(async ({ where }) => (where.id === 'v-new' ? { id: 'v-new' } : null)),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     brand: { findFirst: vi.fn().mockImplementation(async ({ where }) => (where.name.equals.toLowerCase() === 'toyota' ? { name: 'Toyota' } : null)) },
     receiptImage: { create: vi.fn(), delete: vi.fn(), findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as PrismaService;
@@ -44,10 +50,13 @@ function service(found: unknown) {
 
 const validDto = {
   oldOwnerName: ' สมชาย ',
+  oldEngine: ' 2AZ1234567 ',
   oldChassis: 'MR0FZ29G001234567',
   oldBrand: 'toyota',
-  oldPlateNumber: 'กข 1234',
-  newPlateNumber: '1กก 9999',
+  oldPlateCategory: 'กข',
+  oldPlateNumber: '1234',
+  newPlateCategory: '1กก',
+  newPlateNumber: '9999',
   newVehicleId: 'v-new',
   submitDate: '2026-09-20',
   numberSource: 'NEW_UNUSED',
@@ -63,15 +72,26 @@ describe('PlateSwapService.create', () => {
     expect(data.oldOwnerName).toBe('สมชาย');
     expect(data.submitDate).toEqual(new Date('2026-09-20T00:00:00.000Z'));
     expect(data.billTotal).toBe(775);
-    expect(data.noBillTotal).toBe(200);
+    expect(data.noBillTotal).toBe(210); // ลงขัน 200 + ค่าอากร 10
     expect(data.newVehicleId).toBe('v-new');
     expect(data.oldBrand).toBe('Toyota');
+    expect(data.oldEngine).toBe('2AZ1234567');
+    expect(data.oldPlateCategory).toBe('กข');
+    expect(data.newPlateCategory).toBe('1กก');
     expect(swap.submitDate).toBe('2026-09-20');
   });
 
   it('ต้องกรอกครบทุกช่องของรถเก่า', async () => {
     const { svc, create } = service(null);
     await expect(svc.create({ ...validDto, oldPlateNumber: '  ' })).rejects.toMatchObject({ response: { error: 'กรุณากรอกเลขทะเบียนเก่า' } });
+    await expect(svc.create({ ...validDto, oldPlateCategory: '' })).rejects.toMatchObject({ response: { error: 'กรุณากรอกหมวดทะเบียนเก่า' } });
+    await expect(svc.create({ ...validDto, oldChassis: '' })).rejects.toMatchObject({ response: { error: 'กรุณากรอกเลขตัวถัง' } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('เลขเครื่องบังคับกรอก (ผู้ใช้ 2026-09-23)', async () => {
+    const { svc, create } = service(null);
+    await expect(svc.create({ ...validDto, oldEngine: '   ' })).rejects.toMatchObject({ response: { error: 'กรุณากรอกเลขเครื่อง' } });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -83,6 +103,21 @@ describe('PlateSwapService.create', () => {
   it('ต้องลิงก์รถใหม่ทุกงาน', async () => {
     const { svc, create } = service(null);
     await expect(svc.create({ ...validDto, newVehicleId: null })).rejects.toMatchObject({ response: { error: expect.stringContaining('กรุณาลิงก์รถใหม่') } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('ทะเบียนใหม่เว้นว่างตอนยื่นได้ (ยังไม่รู้เลข)', async () => {
+    const { svc, create } = service(null);
+    await svc.create({ ...validDto, newPlateCategory: '', newPlateNumber: '' });
+    expect(create.mock.calls[0][0].data.newPlateCategory).toBeNull();
+    expect(create.mock.calls[0][0].data.newPlateNumber).toBeNull();
+  });
+
+  it('ทะเบียนใหม่กรอกครึ่งเดียวไม่ได้', async () => {
+    const { svc, create } = service(null);
+    await expect(svc.create({ ...validDto, newPlateNumber: '' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('ให้ครบทั้งหมวดทะเบียนและเลขทะเบียน') },
+    });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -105,6 +140,20 @@ describe('PlateSwapService.linkNewVehicle', () => {
   });
 });
 
+describe('PlateSwapService.setNewPlate', () => {
+  it('กรอกทะเบียนใหม่ทีหลังได้', async () => {
+    const { svc, update } = service(swapRow({ newPlateCategory: null, newPlateNumber: null }));
+    await svc.setNewPlate('s1', ' 2ขข ', ' 1111 ');
+    expect(update.mock.calls[0][0].data).toEqual({ newPlateCategory: '2ขข', newPlateNumber: '1111' });
+  });
+
+  it('ลบทะเบียนใหม่ของงานที่รับกลับแล้วไม่ได้', async () => {
+    const { svc, update } = service(swapRow({ returnedDate: new Date('2026-09-22T00:00:00.000Z') }));
+    await expect(svc.setNewPlate('s1', '', '')).rejects.toMatchObject({ response: { error: expect.stringContaining('ต้องมีทะเบียนใหม่') } });
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
 describe('PlateSwapService.markReturned', () => {
   it('ต้องแนบรูปใบเสร็จก่อน', async () => {
     const { svc, update } = service(swapRow());
@@ -122,11 +171,28 @@ describe('PlateSwapService.markReturned', () => {
     await expect(svc.markReturned('s1', '2026-09-22')).rejects.toMatchObject({ response: { error: 'งานนี้รับเอกสารกลับแล้ว' } });
   });
 
-  it('มีรูปแล้วบันทึกวันที่รับกลับได้', async () => {
+  it('มีรูปแล้วบันทึกวันที่รับกลับได้ (ใช้ทะเบียนใหม่ที่มีอยู่)', async () => {
     const { svc, update } = service(swapRow({ receipts: [{ id: 'r1', createdAt: new Date() }] }));
     const { swap } = await svc.markReturned('s1', '2026-09-22');
-    expect(update.mock.calls[0][0].data).toEqual({ returnedDate: new Date('2026-09-22T00:00:00.000Z') });
+    expect(update.mock.calls[0][0].data).toEqual({
+      returnedDate: new Date('2026-09-22T00:00:00.000Z'),
+      newPlateCategory: '1กก',
+      newPlateNumber: '9999',
+    });
     expect(swap.returnedDate).toBe('2026-09-22');
+  });
+
+  it('ยังไม่รู้ทะเบียนใหม่ ยืนยันรับกลับไม่ได้', async () => {
+    const { svc, update } = service(swapRow({ newPlateCategory: null, newPlateNumber: null, receipts: [{ id: 'r1', createdAt: new Date() }] }));
+    await expect(svc.markReturned('s1', '2026-09-22')).rejects.toMatchObject({ response: { error: expect.stringContaining('ทะเบียนใหม่') } });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('กรอกทะเบียนใหม่พร้อมยืนยันรับกลับได้', async () => {
+    const { svc, update } = service(swapRow({ newPlateCategory: null, newPlateNumber: null, receipts: [{ id: 'r1', createdAt: new Date() }] }));
+    await svc.markReturned('s1', '2026-09-22', ' 2ขข ', ' 1111 ');
+    expect(update.mock.calls[0][0].data.newPlateCategory).toBe('2ขข');
+    expect(update.mock.calls[0][0].data.newPlateNumber).toBe('1111');
   });
 });
 

@@ -30,10 +30,13 @@ export interface PlateSwapRow {
   id: string;
   kind: PlateSwapKind;
   oldOwnerName: string;
+  oldEngine: string;
   oldChassis: string;
   oldBrand: string;
+  oldPlateCategory: string;
   oldPlateNumber: string;
-  newPlateNumber: string;
+  newPlateCategory: string | null;
+  newPlateNumber: string | null;
   newVehicle: PlateSwapNewVehicle | null;
   submitDate: string; // YYYY-MM-DD
   numberSource: PlateSwapNumberSource;
@@ -51,9 +54,12 @@ export interface PlateSwapRow {
 // Wire shape - ทุกช่องมาจาก JSON ที่ยังไม่ตรวจ จึงเป็น unknown ให้ service ตรวจเอง
 export interface CreatePlateSwapDto {
   oldOwnerName?: unknown;
+  oldEngine?: unknown;
   oldChassis?: unknown;
   oldBrand?: unknown;
+  oldPlateCategory?: unknown;
   oldPlateNumber?: unknown;
+  newPlateCategory?: unknown;
   newPlateNumber?: unknown;
   newVehicleId?: unknown;
   submitDate?: unknown;
@@ -72,6 +78,24 @@ function requiredText(value: unknown, label: string, max = 200): string {
   if (!text) throw new BadRequestException({ error: `กรุณากรอก${label}` });
   if (text.length > max) throw new BadRequestException({ error: `${label}ยาวเกิน ${max} ตัวอักษร` });
   return text;
+}
+
+// ช่องที่ยังไม่รู้ตอนยื่นได้ (เลขทะเบียนใหม่) - ว่างเก็บเป็น null ไม่ใช่สตริงว่าง
+function optionalText(value: unknown, label: string, max = 200): string | null {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return null;
+  if (text.length > max) throw new BadRequestException({ error: `${label}ยาวเกิน ${max} ตัวอักษร` });
+  return text;
+}
+
+// ทะเบียนใหม่ = หมวด + เลข ต้องมาครบคู่ หรือไม่มีเลย (ยังไม่รู้ตอนยื่น) - ห้ามมีแค่ครึ่งเดียว
+function newPlateParts(categoryRaw: unknown, numberRaw: unknown): { category: string | null; number: string | null } {
+  const category = optionalText(categoryRaw, 'หมวดทะเบียนใหม่', 10);
+  const number = optionalText(numberRaw, 'เลขทะเบียนใหม่', 10);
+  if ((category && !number) || (!category && number)) {
+    throw new BadRequestException({ error: 'กรุณากรอกทะเบียนใหม่ให้ครบทั้งหมวดทะเบียนและเลขทะเบียน (หรือเว้นว่างทั้งคู่)' });
+  }
+  return { category, number };
 }
 
 const isNumberSource = (value: unknown): value is PlateSwapNumberSource =>
@@ -104,10 +128,13 @@ export interface SwapRecord {
   id: string;
   kind: PlateSwapKind;
   oldOwnerName: string;
+  oldEngine: string;
   oldChassis: string;
   oldBrand: string;
+  oldPlateCategory: string;
   oldPlateNumber: string;
-  newPlateNumber: string;
+  newPlateCategory: string | null;
+  newPlateNumber: string | null;
   submitDate: Date;
   numberSource: PlateSwapNumberSource;
   buyNormalPlate: boolean;
@@ -136,9 +163,12 @@ export function serializePlateSwap(row: SwapRecord): PlateSwapRow {
     id: row.id,
     kind: row.kind,
     oldOwnerName: row.oldOwnerName,
+    oldEngine: row.oldEngine,
     oldChassis: row.oldChassis,
     oldBrand: row.oldBrand,
+    oldPlateCategory: row.oldPlateCategory,
     oldPlateNumber: row.oldPlateNumber,
+    newPlateCategory: row.newPlateCategory,
     newPlateNumber: row.newPlateNumber,
     newVehicle: row.newVehicle ? toNewVehicle(row.newVehicle) : null,
     submitDate: row.submitDate.toISOString().slice(0, 10),
@@ -202,10 +232,13 @@ export class PlateSwapService {
   async create(dto: CreatePlateSwapDto): Promise<{ swap: PlateSwapRow }> {
     this.assertCarScope();
     const oldOwnerName = requiredText(dto?.oldOwnerName, 'ชื่อเจ้าของรถ');
-    const oldChassis = requiredText(dto?.oldChassis, 'เลขตัวถัง/เลขเครื่อง', 100);
+    const oldEngine = requiredText(dto?.oldEngine, 'เลขเครื่อง', 100);
+    const oldChassis = requiredText(dto?.oldChassis, 'เลขตัวถัง', 100);
     const oldBrand = await this.resolveBrandName(dto?.oldBrand);
-    const oldPlateNumber = requiredText(dto?.oldPlateNumber, 'เลขทะเบียนเก่า', 50);
-    const newPlateNumber = requiredText(dto?.newPlateNumber, 'เลขทะเบียนใหม่', 50);
+    const oldPlateCategory = requiredText(dto?.oldPlateCategory, 'หมวดทะเบียนเก่า', 10);
+    const oldPlateNumber = requiredText(dto?.oldPlateNumber, 'เลขทะเบียนเก่า', 10);
+    // ทะเบียนใหม่ยังไม่รู้ตอนยื่นได้ - ต้องมาทั้งคู่หรือไม่มีเลย
+    const { category: newPlateCategory, number: newPlateNumber } = newPlateParts(dto?.newPlateCategory, dto?.newPlateNumber);
     const submitDateRaw = typeof dto?.submitDate === 'string' ? dto.submitDate.trim() : '';
     if (!isValidDateParam(submitDateRaw)) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (!isNumberSource(dto?.numberSource)) {
@@ -224,9 +257,12 @@ export class PlateSwapService {
         kind: PlateSwapKind.OLD_NEW,
         vehicleClass: 'CAR',
         oldOwnerName,
+        oldEngine,
         oldChassis,
         oldBrand,
+        oldPlateCategory,
         oldPlateNumber,
+        newPlateCategory,
         newPlateNumber,
         newVehicleId,
         submitDate: toUtcDate(submitDateRaw),
@@ -289,15 +325,33 @@ export class PlateSwapService {
     return this.reload(id);
   }
 
-  // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูปก่อน (ผู้ใช้: "รับเอกสารกลับ ... พร้อมถ่ายใบเสร็จแนบ")
-  async markReturned(id: string, returnedDateRaw: unknown): Promise<{ swap: PlateSwapRow }> {
+  // กรอก/แก้เลขทะเบียนใหม่ทีหลัง (ผู้ใช้ 2026-09-23: ตอนยื่นบางทียังไม่รู้เลข ได้มาตอนงานเรียบร้อย)
+  // แก้ได้ตลอดแม้รับเอกสารกลับแล้ว เผื่อกรอกผิด - ลบทิ้งได้เฉพาะก่อนรับเอกสารกลับ
+  async setNewPlate(id: string, categoryRaw: unknown, numberRaw: unknown): Promise<{ swap: PlateSwapRow }> {
+    const existing = await this.findOrThrow(id);
+    const { category: newPlateCategory, number: newPlateNumber } = newPlateParts(categoryRaw, numberRaw);
+    if (!newPlateNumber && existing.returnedDate) {
+      throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว ต้องมีทะเบียนใหม่' });
+    }
+    await this.prisma.plateSwap.update({ where: { id }, data: { newPlateCategory, newPlateNumber } });
+    return this.reload(id);
+  }
+
+  // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูป และรู้เลขทะเบียนใหม่แล้ว (ส่งมาพร้อมกันได้)
+  async markReturned(id: string, returnedDateRaw: unknown, newPlateCategoryRaw?: unknown, newPlateNumberRaw?: unknown): Promise<{ swap: PlateSwapRow }> {
     const existing = await this.findOrThrow(id);
     const dateRaw = typeof returnedDateRaw === 'string' ? returnedDateRaw.trim() : '';
     if (!isValidDateParam(dateRaw)) throw new BadRequestException({ error: 'กรุณาระบุวันที่รับเอกสารกลับให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (existing.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว' });
     if (toUtcDate(dateRaw) < existing.submitDate) throw new BadRequestException({ error: 'วันที่รับเอกสารกลับต้องไม่ก่อนวันที่ยื่น' });
     if (existing.receipts.length === 0) throw new BadRequestException({ error: 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับเอกสารกลับ' });
-    await this.prisma.plateSwap.update({ where: { id }, data: { returnedDate: toUtcDate(dateRaw) } });
+    const parts = newPlateParts(newPlateCategoryRaw, newPlateNumberRaw);
+    const newPlateCategory = parts.category ?? existing.newPlateCategory;
+    const newPlateNumber = parts.number ?? existing.newPlateNumber;
+    if (!newPlateCategory || !newPlateNumber) {
+      throw new BadRequestException({ error: 'กรุณากรอกทะเบียนใหม่ที่ได้รับ (หมวดทะเบียนและเลขทะเบียน) ก่อนยืนยันรับเอกสารกลับ' });
+    }
+    await this.prisma.plateSwap.update({ where: { id }, data: { returnedDate: toUtcDate(dateRaw), newPlateCategory, newPlateNumber } });
     return this.reload(id);
   }
 

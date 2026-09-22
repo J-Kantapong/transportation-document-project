@@ -30,9 +30,15 @@ export class PlateSwapController {
     return this.service.linkNewVehicle(id, body?.newVehicleId);
   }
 
+  // กรอก/แก้ทะเบียนใหม่ทีหลัง (ตอนยื่นอาจยังไม่รู้เลข) - หมวดทะเบียน + เลขทะเบียน
+  @Patch(':id/new-plate')
+  setNewPlate(@Param('id') id: string, @Body() body: { newPlateCategory?: unknown; newPlateNumber?: unknown }) {
+    return this.service.setNewPlate(id, body?.newPlateCategory, body?.newPlateNumber);
+  }
+
   @Patch(':id/return')
-  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown }) {
-    return this.service.markReturned(id, body?.returnedDate);
+  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown }) {
+    return this.service.markReturned(id, body?.returnedDate, body?.newPlateCategory, body?.newPlateNumber);
   }
 
   // multipart/form-data: file = รูปใบเสร็จ

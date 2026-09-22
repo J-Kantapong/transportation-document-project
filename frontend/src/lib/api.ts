@@ -83,6 +83,18 @@ export interface FinanceCompany {
   name: string;
 }
 
+// งานสลับเลขที่ผูกกับรถจดใหม่คันหนึ่ง (รถคันนี้รับเลขจากรถเก่า)
+export interface VehiclePlateSwap {
+  id: string;
+  oldOwnerName: string;
+  oldPlateCategory: string;
+  oldPlateNumber: string;
+  newPlateCategory: string | null; // ทะเบียนที่รถเก่าจะได้ - ยังไม่รู้ตอนยื่นงานสลับเลขได้
+  newPlateNumber: string | null;
+  submitDate: string; // YYYY-MM-DD
+  returnedDate: string | null;
+}
+
 export interface Vehicle {
   id: string;
   date: string;
@@ -120,6 +132,9 @@ export interface Vehicle {
   plateNumber: string | null;
   // true = ยื่นเอกสารไปแล้วและยังรอใบเสร็จอยู่ (DocumentSubmission ล่าสุดค้างสถานะ PENDING) - ยื่นซ้ำไม่ได้
   // จนกว่าจะได้รับใบเสร็จหรือยื่นไม่สำเร็จ
+  // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ผู้รับเลขจากรถเก่า (ผู้ใช้ 2026-09-23) - null = ไม่มีงานสลับเลข
+  // หน้ายื่นเอกสาร (Step 4) แสดงทะเบียนที่จะได้จากงานสลับเลข และกดใช้เป็นเลขที่ขอได้ - ดู backend/src/plate-swap/
+  plateSwap: VehiclePlateSwap | null;
   pendingDocumentSubmission: boolean;
 }
 

@@ -6,7 +6,13 @@ import { api, ApiError, receiptImageUrl } from "@/lib/api";
 import { getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { plateSwapApi, type PlateSwap, type PlateSwapNewVehicle, type PlateSwapStatusFilter } from "@/lib/plate-swap-api";
-import { calculatePlateSwapCarFees, formatBaht, PLATE_SWAP_CAR_NUMBER_ITEMS, type PlateSwapNumberSource } from "@/lib/plate-swap-fee";
+import {
+  calculatePlateSwapCarFees,
+  dutyAmountOf,
+  formatBaht,
+  PLATE_SWAP_CAR_NUMBER_ITEMS,
+  type PlateSwapNumberSource,
+} from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
@@ -59,6 +65,89 @@ function DateTextInput({ value, onChange, label }: { value: string; onChange: (t
 }
 
 const plateText = (v: PlateSwapNewVehicle) => [v.plateCategory, v.plateNumber].filter(Boolean).join(" ");
+
+// บรรทัดย่อยของรถเก่าในตาราง - เลขเครื่องมาก่อนเลขตัวถัง ตามลำดับช่องในฟอร์ม (ผู้ใช้ 2026-09-23)
+const oldVehicleText = (s: PlateSwap) => `${s.oldBrand} · เครื่อง ${s.oldEngine} · ตัวถัง ${s.oldChassis}`;
+
+// ทะเบียนแสดงเป็น "หมวด เลข" (ผู้ใช้ 2026-09-23: เก็บแยก 2 ช่องเหมือนหน้ายื่นเอกสารรถจดใหม่)
+const oldPlateText = (s: PlateSwap) => `${s.oldPlateCategory} ${s.oldPlateNumber}`;
+const newPlateText = (s: PlateSwap) => (s.newPlateCategory && s.newPlateNumber ? `${s.newPlateCategory} ${s.newPlateNumber}` : "");
+
+// เลขทะเบียนใหม่ในตาราง - ตอนยื่นอาจยังไม่รู้ จึงกรอก/แก้ได้จากตรงนี้ (ผู้ใช้ 2026-09-23)
+function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite: boolean; onChange: (swap: PlateSwap) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [category, setCategory] = useState(swap.newPlateCategory ?? "");
+  const [number, setNumber] = useState(swap.newPlateNumber ?? "");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      onChange((await plateSwapApi.setNewPlate(swap.id, category, number)).swap);
+      setEditing(false);
+    } catch (err) {
+      window.alert(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+        <input
+          value={category}
+          onChange={(e) => setCategory(e.target.value.slice(0, 3))}
+          placeholder="4กข"
+          aria-label="หมวดทะเบียนใหม่"
+          className="inspect-input"
+          style={{ width: 62 }}
+        />
+        <input
+          value={number}
+          onChange={(e) => setNumber(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="4444"
+          aria-label="เลขทะเบียนใหม่"
+          inputMode="numeric"
+          className="inspect-input"
+          style={{ width: 70 }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+          }}
+        />
+        <button type="button" className="text-button" disabled={busy} onClick={save}>
+          บันทึก
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => {
+            setCategory(swap.newPlateCategory ?? "");
+            setNumber(swap.newPlateNumber ?? "");
+            setEditing(false);
+          }}
+        >
+          ยกเลิก
+        </button>
+      </div>
+    );
+  }
+
+  const text = newPlateText(swap);
+  return (
+    <div className="sub">
+      {text ? `ใหม่: ${text}` : <span style={{ color: "#bb8527" }}>ยังไม่ได้เลขใหม่</span>}
+      {canWrite && (
+        <button type="button" className="text-button" style={{ paddingLeft: 6 }} onClick={() => setEditing(true)}>
+          {text ? "แก้ไข" : "กรอกเลข"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ค้นรถใหม่ด้วยเลขตัวถังแล้วเลือก 1 คัน (ปุ่มลิงก์ข้อมูลรถในฐานข้อมูลรถจดใหม่)
 function NewVehiclePicker({ onPick, onCancel }: { onPick: (v: PlateSwapNewVehicle) => void; onCancel?: () => void }) {
@@ -144,7 +233,16 @@ function LinkedVehicle({ vehicle }: { vehicle: PlateSwapNewVehicle }) {
 // หน้ายื่น
 // ---------------------------------------------------------------------------------------------
 
-const EMPTY_FORM = { oldOwnerName: "", oldChassis: "", oldBrand: "", oldPlateNumber: "", newPlateNumber: "" };
+const EMPTY_FORM = {
+  oldOwnerName: "",
+  oldEngine: "",
+  oldChassis: "",
+  oldBrand: "",
+  oldPlateCategory: "",
+  oldPlateNumber: "",
+  newPlateCategory: "",
+  newPlateNumber: "",
+};
 
 export function PlateSwapSubmitPage() {
   const canWrite = useCanWrite();
@@ -236,6 +334,8 @@ export function PlateSwapSubmitPage() {
     }
   }
 
+  const replaceSwap = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+
   async function relink(swap: PlateSwap, vehicle: PlateSwapNewVehicle) {
     try {
       const { swap: updated } = await plateSwapApi.linkNewVehicle(swap.id, vehicle.id);
@@ -246,7 +346,7 @@ export function PlateSwapSubmitPage() {
   }
 
   async function remove(swap: PlateSwap) {
-    if (!window.confirm(`ลบงานสลับเลขของ ${swap.oldOwnerName} (${swap.oldPlateNumber})?`)) return;
+    if (!window.confirm(`ลบงานสลับเลขของ ${swap.oldOwnerName} (${oldPlateText(swap)})?`)) return;
     try {
       await plateSwapApi.remove(swap.id);
       setSwaps((prev) => prev.filter((s) => s.id !== swap.id));
@@ -255,10 +355,15 @@ export function PlateSwapSubmitPage() {
     }
   }
 
-  const monthTotals = swaps.reduce((acc, s) => ({ bill: acc.bill + Number(s.billTotal), noBill: acc.noBill + Number(s.noBillTotal) }), {
-    bill: 0,
-    noBill: 0,
-  });
+  // ยอดรวมของเดือน - ค่าอากรแยกออกจาก "รวมทั้งหมด" แต่ยังอยู่ในยอด No Bill (ผู้ใช้ 2026-09-23)
+  const monthTotals = swaps.reduce(
+    (acc, s) => ({
+      bill: acc.bill + Number(s.billTotal),
+      noBill: acc.noBill + Number(s.noBillTotal),
+      duty: acc.duty + dutyAmountOf(s.noBillItems),
+    }),
+    { bill: 0, noBill: 0, duty: 0 },
+  );
 
   return (
     <section className="content">
@@ -271,13 +376,22 @@ export function PlateSwapSubmitPage() {
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
             <h2 style={{ marginTop: 0 }}>รถเก่า</h2>
+            {/* ลำดับช่องตามที่ผู้ใช้กำหนด 2026-09-23: วันที่ยื่น -> ชื่อเจ้าของรถ -> เลขเครื่อง -> เลขตัวถัง -> ยี่ห้อ -> ทะเบียนเก่า/ใหม่ */}
             <div className="customer-grid">
+              <label className="field">
+                วันที่ยื่น *
+                <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
+              </label>
               <label className="field">
                 ชื่อเจ้าของรถ *
                 <input value={form.oldOwnerName} onChange={setField("oldOwnerName")} required />
               </label>
               <label className="field">
-                เลขตัวถัง/เลขเครื่อง *
+                เลขเครื่อง *
+                <input value={form.oldEngine} onChange={setField("oldEngine")} required />
+              </label>
+              <label className="field">
+                เลขตัวถัง *
                 <input value={form.oldChassis} onChange={setField("oldChassis")} required />
               </label>
               <label className="field">
@@ -291,18 +405,49 @@ export function PlateSwapSubmitPage() {
                   ))}
                 </select>
               </label>
-              <label className="field">
-                วันที่ยื่น *
-                <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
-              </label>
-              <label className="field">
-                เลขทะเบียนเก่า *
-                <input value={form.oldPlateNumber} onChange={setField("oldPlateNumber")} required />
-              </label>
-              <label className="field">
-                เลขทะเบียนใหม่ *
-                <input value={form.newPlateNumber} onChange={setField("newPlateNumber")} required />
-              </label>
+              <div className="field">
+                ทะเบียนเก่า *
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    value={form.oldPlateCategory}
+                    onChange={setField("oldPlateCategory")}
+                    maxLength={3}
+                    placeholder="หมวด เช่น 4กข"
+                    aria-label="หมวดทะเบียนเก่า"
+                    required
+                  />
+                  <input
+                    value={form.oldPlateNumber}
+                    onChange={(e) => setForm((prev) => ({ ...prev, oldPlateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    maxLength={4}
+                    inputMode="numeric"
+                    placeholder="เลข เช่น 4444"
+                    aria-label="เลขทะเบียนเก่า"
+                    required
+                  />
+                </div>
+              </div>
+              {/* ผู้ใช้ 2026-09-23: ตอนยื่นบางทียังไม่รู้เลขใหม่ - เว้นว่างได้ แล้วมากรอกตอนรับเอกสารกลับ */}
+              <div className="field">
+                ทะเบียนใหม่ (ยังไม่รู้เว้นว่างได้)
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    value={form.newPlateCategory}
+                    onChange={setField("newPlateCategory")}
+                    maxLength={3}
+                    placeholder="หมวด เช่น 4กข"
+                    aria-label="หมวดทะเบียนใหม่"
+                  />
+                  <input
+                    value={form.newPlateNumber}
+                    onChange={(e) => setForm((prev) => ({ ...prev, newPlateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    maxLength={4}
+                    inputMode="numeric"
+                    placeholder="เลข เช่น 4444"
+                    aria-label="เลขทะเบียนใหม่"
+                  />
+                </div>
+              </div>
             </div>
 
             <h2 style={{ marginTop: 28 }}>รถใหม่ (จากฐานข้อมูลรถจดใหม่) *</h2>
@@ -394,14 +539,35 @@ export function PlateSwapSubmitPage() {
                     ))}
                     <tr>
                       <td>
-                        <strong>รวมทั้งหมด</strong>
+                        <strong>รวม No Bill</strong>
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.total)}</strong>
+                        <strong>{formatBaht(fees.noBillTotal)}</strong>
                       </td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              {/* ยอดรวมสุทธิของงานนี้ (Bill + No Bill) - ผู้ใช้ขอ 2026-09-23 */}
+              <div
+                className="wide"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  padding: "14px 16px",
+                  marginTop: 4,
+                  background: "#f7f9ff",
+                  border: "1px solid #dfe5f0",
+                  borderRadius: 10,
+                  fontSize: 15,
+                }}
+              >
+                <strong>รวมทั้งหมด (Bill + No Bill ไม่รวมค่าอากร)</strong>
+                <span style={{ textAlign: "right" }}>
+                  <strong>{formatBaht(fees.total)} บาท</strong>
+                  <div className="muted">แยกค่าอากร {formatBaht(fees.dutyTotal)} บาท</div>
+                </span>
               </div>
             </div>
 
@@ -445,20 +611,23 @@ export function PlateSwapSubmitPage() {
                     <th>รถใหม่ที่ลิงก์</th>
                     <th>Bill</th>
                     <th>No Bill</th>
+                    <th>ค่าอากร</th>
+                    <th>รวม</th>
                     <th>สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
                 <tbody>
                   {swaps.map((swap) => (
-                    <SubmittedRow key={swap.id} swap={swap} canWrite={!!canWrite} onRelink={relink} onRemove={remove} />
+                    <SubmittedRow key={swap.id} swap={swap} canWrite={!!canWrite} onRelink={relink} onRemove={remove} onPlateChange={replaceSwap} />
                   ))}
                 </tbody>
               </table>
             </div>
             <div style={{ padding: "18px 23px", borderTop: "1px solid #edf0f6", fontSize: 13, color: "#34415a" }}>
               <strong>
-                รวม {swaps.length} คัน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} บาท
+                รวม {swaps.length} คัน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} · ค่าอากร{" "}
+                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill - monthTotals.duty)} บาท
               </strong>
             </div>
           </>
@@ -473,11 +642,13 @@ function SubmittedRow({
   canWrite,
   onRelink,
   onRemove,
+  onPlateChange,
 }: {
   swap: PlateSwap;
   canWrite: boolean;
   onRelink: (swap: PlateSwap, vehicle: PlateSwapNewVehicle) => void;
   onRemove: (swap: PlateSwap) => void;
+  onPlateChange: (swap: PlateSwap) => void;
 }) {
   const [picking, setPicking] = useState(false);
   return (
@@ -485,13 +656,11 @@ function SubmittedRow({
       <td>{isoToDisplayDate(swap.submitDate)}</td>
       <td>
         <div className="job">{swap.oldOwnerName}</div>
-        <div className="sub">
-          {swap.oldBrand} · {swap.oldChassis}
-        </div>
+        <div className="sub">{oldVehicleText(swap)}</div>
       </td>
       <td>
-        <div>{swap.oldPlateNumber}</div>
-        <div className="sub">ใหม่: {swap.newPlateNumber}</div>
+        <div>{oldPlateText(swap)}</div>
+        <NewPlateCell swap={swap} canWrite={canWrite} onChange={onPlateChange} />
       </td>
       <td style={{ whiteSpace: "normal", minWidth: 200 }}>
         {picking ? (
@@ -517,6 +686,11 @@ function SubmittedRow({
       </td>
       <td title={swap.billItems.map((i) => `${i.label} ${formatBaht(i.amount)}`).join("\n")}>{formatBaht(Number(swap.billTotal))}</td>
       <td>{formatBaht(Number(swap.noBillTotal))}</td>
+      <td>{formatBaht(dutyAmountOf(swap.noBillItems))}</td>
+      <td>
+        {/* ยอดรวมไม่นับค่าอากร (ผู้ใช้ 2026-09-23) - ค่าอากรอ่านจาก snapshot รายการ No Bill ของงานนั้น */}
+        <strong>{formatBaht(Number(swap.billTotal) + Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))}</strong>
+      </td>
       <td>
         {swap.returnedDate ? (
           <span className="badge portal-badge-done">รับกลับ {isoToDisplayDate(swap.returnedDate)}</span>
@@ -572,15 +746,19 @@ export function PlateSwapReturnPage() {
 
   const replace = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
 
-  async function confirmReturn(swap: PlateSwap) {
+  async function confirmReturn(swap: PlateSwap, newPlateCategory: string, newPlateNumber: string) {
     if (!returnDate) {
       setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
       return;
     }
+    if (!newPlateCategory || !newPlateNumber) {
+      setMessage({ text: "กรุณากรอกทะเบียนใหม่ที่ได้รับ (หมวดทะเบียนและเลขทะเบียน)", error: true });
+      return;
+    }
     try {
-      await plateSwapApi.markReturned(swap.id, returnDate);
+      await plateSwapApi.markReturned(swap.id, returnDate, newPlateCategory, newPlateNumber);
       setSwaps((prev) => prev.filter((s) => s.id !== swap.id));
-      setMessage({ text: `รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${swap.oldPlateNumber})` });
+      setMessage({ text: `รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${oldPlateText(swap)})` });
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
     }
@@ -669,11 +847,13 @@ function ReturnRow({
   swap: PlateSwap;
   canWrite: boolean;
   onChange: (swap: PlateSwap) => void;
-  onConfirm: (swap: PlateSwap) => void;
+  onConfirm: (swap: PlateSwap, newPlateCategory: string, newPlateNumber: string) => void;
   onMessage: (text: string, error?: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [plateCategoryText, setPlateCategoryText] = useState(swap.newPlateCategory ?? "");
+  const [plateNumberText, setPlateNumberText] = useState(swap.newPlateNumber ?? "");
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -706,13 +886,34 @@ function ReturnRow({
       <td>{isoToDisplayDate(swap.submitDate)}</td>
       <td>
         <div className="job">{swap.oldOwnerName}</div>
-        <div className="sub">
-          {swap.oldBrand} · {swap.oldChassis}
-        </div>
+        <div className="sub">{oldVehicleText(swap)}</div>
       </td>
       <td>
-        <div>{swap.oldPlateNumber}</div>
-        <div className="sub">ใหม่: {swap.newPlateNumber}</div>
+        <div>{oldPlateText(swap)}</div>
+        {/* ผู้ใช้ 2026-09-23: ทะเบียนใหม่ได้มาตอนงานเรียบร้อย จึงกรอกที่หน้านี้ได้เลย (หมวด + เลข) */}
+        {canWrite ? (
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <input
+              value={plateCategoryText}
+              onChange={(e) => setPlateCategoryText(e.target.value.slice(0, 3))}
+              placeholder="4กข"
+              aria-label="หมวดทะเบียนใหม่"
+              className="inspect-input"
+              style={{ width: 62 }}
+            />
+            <input
+              value={plateNumberText}
+              onChange={(e) => setPlateNumberText(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="4444"
+              aria-label="เลขทะเบียนใหม่"
+              inputMode="numeric"
+              className="inspect-input"
+              style={{ width: 70 }}
+            />
+          </div>
+        ) : (
+          <div className="sub">{newPlateText(swap) ? `ใหม่: ${newPlateText(swap)}` : "ยังไม่ได้เลขใหม่"}</div>
+        )}
       </td>
       <td style={{ whiteSpace: "normal" }}>
         {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">ยังไม่ลิงก์</span>}
@@ -756,9 +957,15 @@ function ReturnRow({
             type="button"
             className="primary"
             style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || swap.receipts.length === 0}
-            title={swap.receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(swap)}
+            disabled={busy || swap.receipts.length === 0 || !plateCategoryText.trim() || !plateNumberText.trim()}
+            title={
+              swap.receipts.length === 0
+                ? "แนบรูปใบเสร็จก่อน"
+                : !plateCategoryText.trim() || !plateNumberText.trim()
+                  ? "กรอกทะเบียนใหม่ (หมวดทะเบียนและเลขทะเบียน) ก่อน"
+                  : undefined
+            }
+            onClick={() => onConfirm(swap, plateCategoryText.trim(), plateNumberText.trim())}
           >
             ยืนยันรับกลับ
           </button>
