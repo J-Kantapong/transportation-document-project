@@ -13,9 +13,10 @@ export interface YamahaRelocationFiles {
   report?: UploadedReceiptFile[];
 }
 
+// ใช้ในข้อความ error: "กรุณาแนบไฟล์ใบเสร็จ", "กรุณาแนบไฟล์ Report" (เว้นวรรคก่อนคำอังกฤษ)
 export const ATTACHMENT_LABEL: Record<YamahaRelocationAttachmentKind, string> = {
-  [YamahaRelocationAttachmentKind.RECEIPT]: 'ใบเสร็จ',
-  [YamahaRelocationAttachmentKind.REPORT]: 'Report',
+  [YamahaRelocationAttachmentKind.RECEIPT]: 'ไฟล์ใบเสร็จ',
+  [YamahaRelocationAttachmentKind.REPORT]: 'ไฟล์ Report',
 };
 
 // โฟลเดอร์ใน storage แยกตามชนิดไฟล์แนบ: yamaha-relocation/receipts/ปี/เดือน/uuid.ext, yamaha-relocation/reports/...
@@ -108,10 +109,10 @@ export class YamahaRelocationService {
   private checkFile(kind: YamahaRelocationAttachmentKind, files: UploadedReceiptFile[] | undefined) {
     const label = ATTACHMENT_LABEL[kind];
     const file = files?.[0];
-    if (!file || file.size === 0) throw new BadRequestException({ error: `กรุณาแนบไฟล์${label}` });
-    if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: `ไฟล์${label}ใหญ่เกิน 8MB` });
+    if (!file || file.size === 0) throw new BadRequestException({ error: `กรุณาแนบ${label}` });
+    if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: `${label}ใหญ่เกิน 8MB` });
     const type = detectAttachmentType(file.buffer);
-    if (!type) throw new BadRequestException({ error: `ไฟล์${label}ต้องเป็นรูป JPEG, PNG, WebP หรือ PDF` });
+    if (!type) throw new BadRequestException({ error: `${label}ต้องเป็นรูป JPEG, PNG, WebP หรือ PDF` });
     return { kind, file, type };
   }
 

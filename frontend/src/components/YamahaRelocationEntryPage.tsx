@@ -41,17 +41,29 @@ function formatBytes(n: number): string {
   return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 }
 
+// ต่อคำไทยกับคำอังกฤษให้มีช่องว่าง: "แนบ" + "ใบเสร็จ" = "แนบใบเสร็จ", "แนบ" + "Report" = "แนบ Report"
+function joinLabel(prefix: string, label: string): string {
+  return /^[A-Za-z]/.test(label) ? `${prefix} ${label}` : `${prefix}${label}`;
+}
+
 // ไฟล์อยู่หลัง backend ที่ต้องมี Authorization - <a href> ตรงๆ ส่ง header ไม่ได้ จึงโหลดเป็น blob แล้วเปิดในแท็บใหม่
-// (เปิดแท็บก่อน await เพื่อไม่ให้ browser บล็อก popup)
-async function openAuthedFile(url: string) {
+// (เปิดแท็บก่อน await เพื่อไม่ให้ browser บล็อก popup) ถ้า browser บล็อก popup อยู่ดี ให้ดาวน์โหลดไฟล์แทน
+async function openAuthedFile(url: string, fileName: string) {
   const win = window.open("", "_blank");
   try {
     const token = getToken();
     const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const objectUrl = URL.createObjectURL(await res.blob());
-    if (win) win.location.href = objectUrl;
-    else window.open(objectUrl, "_blank");
+    if (win) {
+      win.location.href = objectUrl;
+    } else {
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch {
     win?.close();
     window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
@@ -61,12 +73,13 @@ async function openAuthedFile(url: string) {
 function AttachmentLink({ attachment }: { attachment: YamahaRelocationAttachment | null }) {
   if (!attachment) return <span className="muted">ไม่มีไฟล์</span>;
   const isPdf = attachment.mimeType === "application/pdf";
+  const fileName = attachment.originalName || `${attachment.kind.toLowerCase()}.${isPdf ? "pdf" : "jpg"}`;
   return (
     <button
       type="button"
       className="text-button"
       title={attachment.originalName ?? undefined}
-      onClick={() => openAuthedFile(yamahaRelocationAttachmentUrl(attachment.id))}
+      onClick={() => openAuthedFile(yamahaRelocationAttachmentUrl(attachment.id), fileName)}
     >
       {isPdf ? "📄" : "🖼️"} เปิดไฟล์
     </button>
@@ -98,7 +111,7 @@ function FileField({ label, file, disabled, onChange }: FileFieldProps) {
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button type="button" style={attachButtonStyle} disabled={disabled} onClick={() => inputRef.current?.click()}>
-          📎 {file ? `เปลี่ยน${label}` : `แนบ${label}`}
+          📎 {joinLabel(file ? "เปลี่ยน" : "แนบ", label)}
         </button>
         {file ? (
           <>
@@ -166,6 +179,12 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   }
 
   const count = parseCount(countText);
+
+  // เลือก/เอาไฟล์ออกแล้วล้างข้อความเตือนเก่า (เช่น "กรุณาแนบไฟล์ใบเสร็จ") ที่ไม่ตรงกับสถานะแล้ว
+  function pickFile(set: (file: File | null) => void, file: File | null) {
+    set(file);
+    setFormMessage({ text: "" });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,8 +268,8 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
             ทุกรายการต้องแนบไฟล์ 2 อย่างเสมอ: 1) ใบเสร็จ 2) Report
           </p>
           <div className="customer-grid">
-            <FileField label="ใบเสร็จ" file={receiptFile} disabled={saving} onChange={setReceiptFile} />
-            <FileField label="Report" file={reportFile} disabled={saving} onChange={setReportFile} />
+            <FileField label="ใบเสร็จ" file={receiptFile} disabled={saving} onChange={(f) => pickFile(setReceiptFile, f)} />
+            <FileField label="Report" file={reportFile} disabled={saving} onChange={(f) => pickFile(setReportFile, f)} />
           </div>
           <div className="form-actions">
             <button className="primary" type="submit" disabled={saving}>

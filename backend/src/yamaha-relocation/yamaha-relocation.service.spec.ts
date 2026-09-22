@@ -60,7 +60,7 @@ describe('YamahaRelocationService.create', () => {
 
   it('ไม่มี Report = ปฏิเสธ ไม่อัปโหลดอะไรเลย', async () => {
     const { svc, storage } = build();
-    await expect(svc.create(dto, { receipt: [jpeg] })).rejects.toMatchObject({ response: { error: 'กรุณาแนบไฟล์Report' } });
+    await expect(svc.create(dto, { receipt: [jpeg] })).rejects.toMatchObject({ response: { error: 'กรุณาแนบไฟล์ Report' } });
     expect(storage.put).not.toHaveBeenCalled();
   });
 
