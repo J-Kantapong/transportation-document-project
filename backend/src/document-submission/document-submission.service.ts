@@ -45,7 +45,7 @@ export class DocumentSubmissionService {
   }
 
   private async loadVehicle(vehicleId: string) {
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id: vehicleId, deletedAt: null } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
     assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ยื่นได้เฉพาะประเภทรถของตัวเอง
     return vehicle;
@@ -101,7 +101,7 @@ export class DocumentSubmissionService {
     }
     const vehicleIds = Array.from(new Set(entries.map((e) => e?.vehicleId).filter((id): id is string => typeof id === 'string')));
     const [vehicles, rules] = await Promise.all([
-      this.prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, include: { owner: true } }),
+      this.prisma.vehicle.findMany({ where: { id: { in: vehicleIds }, deletedAt: null }, include: { owner: true } }),
       this.loadRuleSet(),
     ]);
     const byId = new Map(vehicles.map((v) => [v.id, v]));

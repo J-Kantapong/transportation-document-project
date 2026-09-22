@@ -203,7 +203,7 @@ export class PlateSwapService {
     const chassis = raw.trim();
     if (!chassis) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { contains: chassis, mode: 'insensitive' }, ...vehicleTypeWhere('CAR') },
+      where: { deletedAt: null, chassis: { contains: chassis, mode: 'insensitive' }, ...vehicleTypeWhere('CAR') },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 10,
       select: newVehicleSelect,
@@ -216,7 +216,7 @@ export class PlateSwapService {
     if (typeof raw !== 'string' || !raw.trim()) {
       throw new BadRequestException({ error: 'กรุณาลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (ค้นด้วยเลขตัวถัง)' });
     }
-    const vehicle = await this.prisma.vehicle.findFirst({ where: { id: raw, ...vehicleTypeWhere('CAR') }, select: { id: true } });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id: raw, deletedAt: null, ...vehicleTypeWhere('CAR') }, select: { id: true } });
     if (!vehicle) throw new BadRequestException({ error: 'ไม่พบรถใหม่ที่ลิงก์ในฐานข้อมูลรถจดใหม่ (รถยนต์)' });
     return vehicle.id;
   }

@@ -17,7 +17,7 @@ const ALL_STAFF_READ: UserRole[] = ['ADMIN', 'STAFF_ENTRY', 'STAFF_CAR', 'STAFF_
 
 interface Rule {
   pattern: RegExp; // ทดสอบกับ path (ไม่มี query string, ตัด / ท้ายแล้ว)
-  method?: 'GET'; // ไม่ระบุ = ทุก method
+  method?: 'GET' | 'DELETE'; // ไม่ระบุ = ทุก method
   access: Access;
 }
 
@@ -31,6 +31,10 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   { pattern: /^\/api\/customers$/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api\/customers(\/|$)/, access: ['ADMIN'] },
+  // ลบ/กู้คืนข้อมูลรถ และรายการรถที่ถูกลบ: ADMIN เท่านั้น (ผู้ใช้ 2026-09-23) - ต้องมาก่อนกฎขั้น 1-3 ด้านล่าง
+  { pattern: /^\/api\/vehicles\/deleted$/, access: ['ADMIN'] },
+  { pattern: /^\/api\/vehicles\/[^/]+\/restore$/, access: ['ADMIN'] },
+  { pattern: /^\/api\/vehicles\/[^/]+$/, method: 'DELETE', access: ['ADMIN'] },
   // ขั้น 4-8: ยื่นเอกสาร / ภาษี / ใบเสร็จ / ป้าย / เล่ม / คิวรับของ + งานสลับเลข (ยื่น/รับเอกสารกลับ - กลุ่มเดียวกัน, รถยนต์ = STAFF_CAR)
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps)(\/|$)/, access: SUBMIT },

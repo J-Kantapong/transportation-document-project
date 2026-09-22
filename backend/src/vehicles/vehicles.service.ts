@@ -1,11 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import { currentUser } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
+import { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 import { OWNER_TYPE_CHOICES } from './vehicle-reference-data.js';
 import { OwnerType } from '../generated/prisma/enums.js';
@@ -370,6 +372,7 @@ export class VehiclesService {
     const earliestValidPass = new Date(submitDate.getTime() - (INSPECTION_VALID_DAYS - 1) * DAY_MS);
     const vehicles = await this.prisma.vehicle.findMany({
       where: {
+        deletedAt: null, // รถที่ถูกลบไม่เข้าคิวไหนอีก (ดู deleteVehicle)
         transferDone: true,
         inspectionResult: 'ผ่าน',
         inspectionResultDate: { gte: earliestValidPass, lte: submitDate },
@@ -385,6 +388,7 @@ export class VehiclesService {
 
   async findAll() {
     const vehicles = await this.prisma.vehicle.findMany({
+      where: { deletedAt: null },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 100,
       include: this.vehicleFullInclude,
@@ -399,7 +403,7 @@ export class VehiclesService {
     const trimmed = query.trim();
     if (!trimmed) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { contains: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
+      where: { deletedAt: null, chassis: { contains: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 20,
       include: this.vehicleFullInclude,
@@ -417,7 +421,7 @@ export class VehiclesService {
 
     // รถนอกขอบเขตประเภท (STAFF_CAR / STAFF_MOTO) ไม่ถูกดึงมา -> ไปอยู่ใน notFound เหมือนไม่มีในระบบ
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { in: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
+      where: { deletedAt: null, chassis: { in: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       include: this.vehicleFullInclude,
     });
     const mapped = await this.mapSubmitCandidates(vehicles, submitDate);
@@ -470,7 +474,7 @@ export class VehiclesService {
     }
 
     const existing = await this.prisma.vehicle.findMany({
-      where: { chassis: { in: rows.map((row) => row.chassis) } },
+      where: { deletedAt: null, chassis: { in: rows.map((row) => row.chassis) } },
       select: { chassis: true },
     });
     if (existing.length) {
@@ -504,7 +508,7 @@ export class VehiclesService {
     const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
     if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไข (Remark)' });
 
-    const existing = await this.prisma.vehicle.findUnique({ where: { id }, include: { owner: true } });
+    const existing = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: { owner: true } });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     const row = normalizeVehicleRow(body as unknown as Record<string, unknown>);
@@ -523,7 +527,7 @@ export class VehiclesService {
     if (row.financeId && !financeCompany) throw new BadRequestException({ error: 'ไม่พบไฟแนนซ์ในฐานข้อมูล' });
 
     if (row.chassis !== existing.chassis) {
-      const duplicate = await this.prisma.vehicle.findUnique({ where: { chassis: row.chassis } });
+      const duplicate = await this.prisma.vehicle.findFirst({ where: { chassis: row.chassis, deletedAt: null }, select: { id: true } });
       if (duplicate) throw new ConflictException({ error: 'เลขตัวถังนี้มีอยู่แล้ว' });
     }
 
@@ -564,11 +568,105 @@ export class VehiclesService {
     return { id: updated.id };
   }
 
+  // ลบข้อมูลรถจดใหม่ (ผู้ใช้ 2026-09-23) - ADMIN เท่านั้น (บังคับใน auth/access-policy.ts) ต้องระบุเหตุผลทุกครั้ง
+  // ลบแบบซ่อน: แถวยังอยู่ในฐานข้อมูลแต่ deletedAt ไม่ว่าง จึงหายไปจากทุกหน้าจอและทุกคิว และ ADMIN กู้คืนได้
+  // (ลบจริงไม่ได้เพราะเหตุผลที่ลบต้องตรวจสอบย้อนหลังได้ และแถวที่ผูกอยู่ เช่น ภาษี/ใบเสร็จ/บิล จะขาดไปด้วย)
+  async deleteVehicle(id: string, body: DeleteVehicleDto) {
+    const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่ลบ (Remark)' });
+
+    const existing = await this.prisma.vehicle.findUnique({
+      where: { id },
+      include: {
+        // ทุกสถานะรวมถึง FAILED: ยื่นไปแล้วแม้จะไม่สำเร็จก็ถือว่าเดินงานไปแล้ว ให้แก้ไขข้อมูลแทนการลบ
+        documentSubmissions: { select: { id: true }, take: 1 },
+        invoiceLines: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    if (existing.deletedAt) throw new BadRequestException({ error: 'รถคันนี้ถูกลบไปแล้ว' });
+
+    const blockReason = await this.deleteBlockReason(existing);
+    if (blockReason) throw new BadRequestException({ error: blockReason });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vehicle.update({
+        where: { id },
+        data: { deletedAt: new Date(), deletedReason: remark, deletedById: currentUser()?.id ?? null },
+      });
+      // บันทึกลงประวัติเดียวกับการแก้ไข เพื่อให้ลบ -> กู้คืน -> ลบใหม่ ยังเห็นครบทุกครั้ง (ช่องบน Vehicle เก็บได้แค่ครั้งล่าสุด)
+      await tx.vehicleEditLog.create({
+        data: { vehicleId: id, remark, changes: JSON.stringify({ deleted: { from: null, to: 'ลบข้อมูลรถ' } }) },
+      });
+    });
+
+    return { id, deleted: true };
+  }
+
+  // กู้คืนรถที่ลบไว้ - ADMIN เท่านั้น
+  async restoreVehicle(id: string) {
+    const existing = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    if (!existing.deletedAt) throw new BadRequestException({ error: 'รถคันนี้ไม่ได้ถูกลบอยู่' });
+
+    // เลขตัวถังห้ามซ้ำเฉพาะในกลุ่มคันที่ยังไม่ถูกลบ ระหว่างที่ถูกลบจึงอาจมีคนคีย์เลขเดิมเข้ามาใหม่แล้ว - กู้คืนทับไม่ได้
+    const active = await this.prisma.vehicle.findFirst({ where: { chassis: existing.chassis, deletedAt: null }, select: { id: true } });
+    if (active) {
+      throw new ConflictException({ error: `เลขตัวถัง ${existing.chassis} ถูกบันทึกเข้ามาใหม่แล้ว - กู้คืนคันนี้ไม่ได้` });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vehicle.update({ where: { id }, data: { deletedAt: null, deletedReason: null, deletedById: null } });
+      await tx.vehicleEditLog.create({
+        data: {
+          vehicleId: id,
+          remark: `กู้คืนข้อมูลรถที่ลบไว้ (เหตุผลที่ลบ: ${existing.deletedReason ?? '—'})`,
+          changes: JSON.stringify({ deleted: { from: 'ลบข้อมูลรถ', to: null } }),
+        },
+      });
+    });
+
+    return { id, deleted: false };
+  }
+
+  // รายการรถที่ถูกลบไว้ (100 รายการล่าสุด) - ADMIN เท่านั้น ใช้ตรวจสอบเหตุผลและกู้คืน
+  async findDeleted() {
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: [{ deletedAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+      include: { ...this.vehicleFullInclude, deletedBy: { select: { name: true, displayName: true } } },
+    });
+    return vehicles.map((vehicle) => ({
+      ...this.mapVehicleFull(vehicle),
+      deletedAt: vehicle.deletedAt?.toISOString() ?? null,
+      deletedReason: vehicle.deletedReason,
+      deletedByName: vehicle.deletedBy ? vehicle.deletedBy.displayName || vehicle.deletedBy.name : null,
+    }));
+  }
+
+  // เหตุผลที่ลบรถคันนี้ไม่ได้ (null = ลบได้) - กฎของผู้ใช้ 2026-09-23: ลบได้เฉพาะรถที่ยังไม่เลยขั้นยื่นเอกสาร
+  private async deleteBlockReason(vehicle: { id: string; documentSubmissions: Array<unknown>; invoiceLines: Array<unknown> }): Promise<string | null> {
+    if (vehicle.documentSubmissions.length > 0) {
+      return 'รถคันนี้ยื่นเอกสารจดทะเบียนไปแล้ว - ลบไม่ได้ ถ้าข้อมูลผิดให้ใช้ปุ่มแก้ไขแทน';
+    }
+    if (vehicle.invoiceLines.length > 0) {
+      return 'รถคันนี้ถูกวางบิลแล้ว - ลบไม่ได้';
+    }
+    try {
+      const swap = await this.prisma.plateSwap.findFirst({ where: { newVehicleId: vehicle.id }, select: { id: true } });
+      if (swap) return 'รถคันนี้ถูกผูกเป็นรถใหม่ของงานสลับเลข - ต้องไปแก้งานสลับเลขให้ผูกคันอื่นก่อนจึงจะลบได้';
+    } catch {
+      // ฐานข้อมูลที่ยังไม่ได้รันไมเกรชันตาราง PlateSwap (P2021) - ถือว่าไม่มีงานสลับเลข เหมือน plateSwapsByVehicle()
+    }
+    return null;
+  }
+
   // ทุกคันที่ transferDone = false ไม่จำกัดวันที่รับงาน - ใช้แสดงคิวงานที่ต้องดำเนินการทั้งหมด
   async findPendingTransferNotice() {
     const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { transferDone: false },
+        where: { deletedAt: null, transferDone: false },
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           customer: { select: { name: true } },
@@ -586,7 +684,7 @@ export class VehiclesService {
   async findRecentlyCompletedTransferNotice() {
     const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { transferDone: true },
+        where: { deletedAt: null, transferDone: true },
         orderBy: [{ transferCompletedDate: 'desc' }, { updatedAt: 'desc' }],
         take: 100,
         include: {
@@ -668,7 +766,7 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
     }
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: activeSubmissionsInclude });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: activeSubmissionsInclude });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
     assertNotSubmitted(vehicle);
 
@@ -695,6 +793,7 @@ export class VehiclesService {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
         where: {
+          deletedAt: null,
           transferDone: true,
           OR: [
             { inspectionSentDate: null },
@@ -724,7 +823,7 @@ export class VehiclesService {
   async findPendingInspectionResult() {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { inspectionSentDate: { not: null }, inspectionResultDate: null },
+        where: { deletedAt: null, inspectionSentDate: { not: null }, inspectionResultDate: null },
         orderBy: [{ inspectionSentDate: 'desc' }, { id: 'desc' }],
         include: {
           customer: { select: { name: true } },
@@ -743,7 +842,7 @@ export class VehiclesService {
   async findRecentlyCompletedInspection() {
     const [vehicles, bangkokFees, provinceFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { inspectionResultDate: { not: null } },
+        where: { deletedAt: null, inspectionResultDate: { not: null } },
         orderBy: [{ inspectionResultDate: 'desc' }, { updatedAt: 'desc' }],
         take: 100,
         include: {
@@ -873,7 +972,7 @@ export class VehiclesService {
     }
 
     const [vehicle, bangkokFees, provinceFees] = await Promise.all([
-      this.prisma.vehicle.findUnique({ where: { id }, include: { brand: { select: { name: true } }, ...activeSubmissionsInclude } }),
+      this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: { brand: { select: { name: true } }, ...activeSubmissionsInclude } }),
       this.prisma.feeInspectionBangkok.findMany(),
       this.prisma.feeInspectionProvince.findMany(),
     ]);
@@ -956,7 +1055,7 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน' });
     }
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: activeSubmissionsInclude });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: activeSubmissionsInclude });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
     assertNotSubmitted(vehicle);
     if (result && !vehicle.inspectionSentDate) {
@@ -1000,7 +1099,7 @@ export class VehiclesService {
     }
     const firstRegistrationDate = parseTaxDate(dto?.firstRegistrationDate, 'firstRegistrationDate');
 
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
     assertVehicleInScope(vehicle.body); // Step 4 - STAFF_CAR / STAFF_MOTO แก้ได้เฉพาะประเภทรถของตัวเอง
 

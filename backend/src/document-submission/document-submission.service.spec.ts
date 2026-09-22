@@ -19,7 +19,7 @@ const VEHICLE = {
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   return {
-    vehicle: { findUnique: vi.fn().mockResolvedValue(VEHICLE), update: vi.fn().mockResolvedValue(VEHICLE) },
+    vehicle: { findFirst: vi.fn().mockResolvedValue(VEHICLE), update: vi.fn().mockResolvedValue(VEHICLE) },
     // งานสลับเลขของรถคันนี้ - ไม่มี = รถทั่วไป (ดู assertEligible)
     plateSwap: { findFirst: vi.fn().mockResolvedValue(null) },
     documentSubmission: {
@@ -79,7 +79,7 @@ describe('DocumentSubmissionService.submit - เงื่อนไขการ�
 
   function withVehicle(vehicle: Record<string, unknown>) {
     const prisma = mockPrisma({
-      vehicle: { findUnique: vi.fn().mockResolvedValue({ ...VEHICLE, ...vehicle }), update: vi.fn() },
+      vehicle: { findFirst: vi.fn().mockResolvedValue({ ...VEHICLE, ...vehicle }), update: vi.fn() },
     });
     return { service: new DocumentSubmissionService(prisma, mockTaxService()) };
   }
@@ -186,7 +186,7 @@ describe('DocumentSubmissionService.updateStatus', () => {
     const submissionUpdate = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
     const vehicleUpdate = vi.fn().mockResolvedValue({});
     const prisma = mockPrisma({
-      vehicle: { findUnique: vi.fn(), update: vehicleUpdate },
+      vehicle: { findFirst: vi.fn(), update: vehicleUpdate },
       documentSubmission: { findFirst: vi.fn(), findUnique: vi.fn().mockResolvedValue(submission), create: vi.fn(), update: submissionUpdate },
       $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     });
@@ -276,7 +276,7 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
     const submissionUpdate = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = mockPrisma({
-      vehicle: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+      vehicle: { findFirst: vi.fn(), update: vi.fn().mockResolvedValue({}) },
       documentSubmission: {
         findFirst: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({ id: 'sub1', vehicleId: 'v1', status: 'PENDING', vehicle: { plateCategory: null, plateNumber: null } }),
