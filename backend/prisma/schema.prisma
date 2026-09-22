@@ -71,10 +71,11 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer      Customer? @relation(fields: [customerId], references: [id])
-  approvedBy    User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers User[]    @relation("ApprovedUsers")
-  assignedCases Case[]    @relation("AssignedStaff")
+  customer        Customer? @relation(fields: [customerId], references: [id])
+  approvedBy      User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers   User[]    @relation("ApprovedUsers")
+  assignedCases   Case[]    @relation("AssignedStaff")
+  deletedVehicles Vehicle[] @relation("DeletedVehicles")
 
   @@index([status])
   @@index([customerId])
@@ -118,7 +119,10 @@ model Vehicle {
   id                   String   @id @default(cuid())
   date                 DateTime // วันที่
   customerId           String // ชื่อลูกค้า
-  chassis              String   @unique // เลขตัวถัง
+  // เลขตัวถัง - ไม่ซ้ำเฉพาะในกลุ่มรถที่ยังไม่ถูกลบ (partial unique index "Vehicle_chassis_active_key" ใน
+  // migration 20260923120000) ลบรถทิ้งแล้วคีย์เลขตัวถังเดิมเข้ามาใหม่ได้ - ผู้ใช้ 2026-09-23
+  // Prisma ไม่รองรับ partial unique index จึงไม่มี @unique ที่นี่ - ห้ามใช้ findUnique({ where: { chassis } })
+  chassis              String
   engine               String? // เลขเครื่อง
   brandId              String // ยี่ห้อ
   fuel                 String? // ประเภทเชื้อเพลิง
@@ -178,10 +182,18 @@ model Vehicle {
   // ลูกค้ากดยืนยันรับของใน portal (ดู backend/src/portal) - ไม่บังคับ พนักงานยังปิดงานได้โดยไม่ต้องรอ
   deliveryConfirmedAt DateTime?
 
+  // ลบข้อมูลรถ (soft delete - ผู้ใช้ 2026-09-23): ADMIN เท่านั้น ต้องระบุเหตุผลทุกครั้ง และลบได้เฉพาะรถที่ยัง
+  // ไม่ยื่นเอกสารจดทะเบียน (ดู VehiclesService.deleteVehicle) deletedAt ไม่ว่าง = ถูกลบแล้ว ซ่อนจากทุกหน้าจอ
+  // และทุกคิว แต่ยังอยู่ในฐานข้อมูลและ ADMIN กู้คืนได้ - ทุกครั้งที่ลบ/กู้คืนบันทึกลง VehicleEditLog ด้วย
+  deletedAt     DateTime?
+  deletedReason String? // เหตุผลที่ลบ (Remark) - บังคับกรอกที่ระดับ service
+  deletedById   String? // ผู้ใช้ที่กดลบ
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   customer            Customer             @relation(fields: [customerId], references: [id])
+  deletedBy           User?                @relation("DeletedVehicles", fields: [deletedById], references: [id])
   brand               Brand                @relation(fields: [brandId], references: [id])
   owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
   platePhoto          PlatePhoto?          @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
@@ -196,6 +208,8 @@ model Vehicle {
   @@index([customerId])
   @@index([brandId])
   @@index([ownerId])
+  @@index([chassis])
+  @@index([deletedAt])
 }
 
 // แก้ไขข้อมูลรถจดใหม่หลังบันทึกแล้ว ต้องระบุเหตุผล (remark) ทุกครั้ง - บังคับที่ระดับ service
@@ -604,11 +618,11 @@ model PlateSwap {
   vehicleClass String        @default("CAR") // CAR | MOTO - ตอนนี้รับเฉพาะ CAR (อัตราจักรยานยนต์ยังไม่มี)
 
   // รถเก่า (กรอกเอง)
-  oldOwnerName   String // ชื่อเจ้าของรถ
+  oldOwnerName     String // ชื่อเจ้าของรถ
   // ผู้ใช้ 2026-09-23: แยกเลขเครื่องกับเลขตัวถังเป็นคนละช่อง และบังคับกรอกทั้งคู่ (ต่างจาก Vehicle ของรถจดใหม่ที่เลขเครื่องไม่บังคับ)
-  oldEngine      String // เลขเครื่อง
-  oldChassis     String // เลขตัวถัง
-  oldBrand       String // ยี่ห้อ
+  oldEngine        String // เลขเครื่อง
+  oldChassis       String // เลขตัวถัง
+  oldBrand         String // ยี่ห้อ
   // ทะเบียนแยก 2 ช่องเหมือน Vehicle ของรถจดใหม่ (ผู้ใช้ 2026-09-23): หมวดทะเบียน เช่น "4กข" + เลขทะเบียน เช่น "4444"
   oldPlateCategory String // หมวดทะเบียนเก่า
   oldPlateNumber   String // เลขทะเบียนเก่า

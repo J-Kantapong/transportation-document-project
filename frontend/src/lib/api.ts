@@ -138,6 +138,13 @@ export interface Vehicle {
   pendingDocumentSubmission: boolean;
 }
 
+// รถที่ถูกลบไว้ (ผู้ใช้ 2026-09-23) - ADMIN เท่านั้นที่เรียกดู/กู้คืนได้ ดู backend/src/vehicles/vehicles.service.ts
+export interface DeletedVehicle extends Vehicle {
+  deletedAt: string | null;
+  deletedReason: string | null;
+  deletedByName: string | null; // ชื่อเล่น (ถ้ามี) ของผู้ที่กดลบ
+}
+
 // รถในหน้ายื่นเอกสาร (Step 4) - ดู backend/src/document-submission/submission-eligibility.ts สำหรับกฎ:
 // แจ้งย้าย/ตัดบัญชีเสร็จ + ตรวจผ่านไม่เกิน 90 วัน ณ วันที่ยื่น + ไม่มีรายการที่รอใบเสร็จ/ได้ใบเสร็จแล้ว
 export interface SubmitCandidate extends Vehicle {
@@ -538,6 +545,12 @@ export const api = {
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
   updateVehicle: (id: string, data: Record<string, string>) =>
     request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // ลบข้อมูลรถ (ซ่อน ไม่ลบจริง) / กู้คืน / รายการที่ลบไว้ - ADMIN เท่านั้น ต้องระบุเหตุผลที่ลบทุกครั้ง
+  deleteVehicle: (id: string, remark: string) =>
+    request<{ id: string; deleted: boolean }>(`/api/vehicles/${id}`, { method: 'DELETE', body: JSON.stringify({ remark }) }),
+  restoreVehicle: (id: string) => request<{ id: string; deleted: boolean }>(`/api/vehicles/${id}/restore`, { method: 'POST' }),
+  listDeletedVehicles: () => request<{ vehicles: DeletedVehicle[] }>('/api/vehicles/deleted'),
 
   // Step 4: คิวรถที่ยื่นเอกสารได้ ณ วันที่ยื่น (เรียงจากตรวจผ่านเก่าสุด = ใกล้หมดอายุสุด ก่อน)
   listSubmissionQueue: (submitDate: string) =>
