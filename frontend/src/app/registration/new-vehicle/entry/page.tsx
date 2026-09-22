@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { api, ApiError, type Brand, type Customer, type Vehicle } from "@/lib/api";
-import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
+import { api, ApiError, type Brand, type Customer, type FinanceCompany, type Vehicle } from "@/lib/api";
+import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
+import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
 
 type Tab = "single" | "batch";
@@ -23,9 +24,12 @@ const EMPTY_SINGLE: NormalizedVehicleRow = {
   body: "",
   registrationProvince: "กรุงเทพมหานคร",
   ownerProvince: "",
+  ownerType: "",
+  financeId: "",
 };
 
 // Shared field grid for both the single-entry form and the edit dialog.
+// financeOn = ช่องติ๊ก "ไฟแนนซ์" (เก็บแยกจาก row เพราะติ๊กแล้วยังไม่ได้เลือกบริษัทก็ต้องเห็น dropdown) - ติ๊กแล้วต้องเลือกไฟแนนซ์
 function VehicleFieldsFieldset({
   row,
   dateText,
@@ -33,6 +37,9 @@ function VehicleFieldsFieldset({
   onFieldChange,
   customerOptions,
   brands,
+  financeCompanies,
+  financeOn,
+  onFinanceToggle,
 }: {
   row: NormalizedVehicleRow;
   dateText: string;
@@ -40,6 +47,9 @@ function VehicleFieldsFieldset({
   onFieldChange: <K extends keyof NormalizedVehicleRow>(key: K, value: string) => void;
   customerOptions: Array<{ id: string; label: string }>;
   brands: Brand[];
+  financeCompanies: FinanceCompany[];
+  financeOn: boolean;
+  onFinanceToggle: (checked: boolean) => void;
 }) {
   // CC หรือ น้ำหนัก บังคับตามประเภทรถ + เชื้อเพลิงที่เลือก (ใช้คำนวณภาษี) - ดู requiredSizeField
   const sizeField = requiredSizeField(row.body, row.fuel);
@@ -145,6 +155,38 @@ function VehicleFieldsFieldset({
           ))}
         </select>
       </label>
+      <label className="field">
+        ประเภทเจ้าของรถ *
+        <select required value={row.ownerType} onChange={(e) => onFieldChange("ownerType", e.target.value)}>
+          <option value="">เลือกบุคคลธรรมดา / นิติบุคคล</option>
+          {OWNER_TYPES.map(([code, label]) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="field">
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            style={{ width: 18, height: 18, minHeight: 0, padding: 0, margin: 0 }}
+            checked={financeOn}
+            onChange={(e) => onFinanceToggle(e.target.checked)}
+          />
+          ไฟแนนซ์
+        </label>
+        {financeOn && (
+          <select required value={row.financeId} onChange={(e) => onFieldChange("financeId", e.target.value)} aria-label="เลือกไฟแนนซ์">
+            <option value="">เลือกไฟแนนซ์</option>
+            {financeCompanies.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
     </div>
   );
 }
@@ -163,6 +205,7 @@ const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
   ["จังหวัดที่จดทะเบียน", (v) => v.registrationProvince ?? ""],
   ["สถานะ", (v) => getVehicleStatus(v.registrationProvince ?? "")],
   ["จังหวัดเจ้าของรถ", (v) => v.ownerProvince ?? ""],
+  ["ประเภทเจ้าของรถ", (v) => ownerDisplayLabel(v, v.financeName) ?? ""],
 ];
 
 function parseCSV(text: string): string[][] {
@@ -224,6 +267,7 @@ export default function VehicleEntryPage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [financeCompanies, setFinanceCompanies] = useState<FinanceCompany[]>([]);
   const [lookupReady, setLookupReady] = useState(false);
   const [lookupMessage, setLookupMessage] = useState("กำลังโหลดลูกค้าและยี่ห้อ…");
 
@@ -232,7 +276,14 @@ export default function VehicleEntryPage() {
   const [brandSaving, setBrandSaving] = useState(false);
   const [brandMessage, setBrandMessage] = useState("");
 
+  // "+ เพิ่มไฟแนนซ์" - ฟอร์มย่อยแบบเดียวกับยี่ห้อ (รายชื่อไฟแนนซ์ผู้ใช้กำหนดเอง ไม่มี seed)
+  const [showFinanceForm, setShowFinanceForm] = useState(false);
+  const [financeName, setFinanceName] = useState("");
+  const [financeSaving, setFinanceSaving] = useState(false);
+  const [financeMessage, setFinanceMessage] = useState("");
+
   const [single, setSingle] = useState<NormalizedVehicleRow>({ ...EMPTY_SINGLE, date: todayIso() });
+  const [singleFinanceOn, setSingleFinanceOn] = useState(false);
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const [singleSaving, setSingleSaving] = useState(false);
   const [singleMessage, setSingleMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
@@ -250,6 +301,7 @@ export default function VehicleEntryPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<NormalizedVehicleRow>(EMPTY_SINGLE);
+  const [editFinanceOn, setEditFinanceOn] = useState(false);
   const [editDateText, setEditDateText] = useState("");
   const [editRemark, setEditRemark] = useState("");
   const [editSaving, setEditSaving] = useState(false);
@@ -260,9 +312,10 @@ export default function VehicleEntryPage() {
     setLookupReady(false);
     setLookupMessage("กำลังโหลดลูกค้าและยี่ห้อ…");
     try {
-      const [c, b] = await Promise.all([api.listCustomers(), api.listBrands()]);
+      const [c, b, f] = await Promise.all([api.listCustomers(), api.listBrands(), api.listFinanceCompanies()]);
       setCustomers(c.customers);
       setBrands(b.brands);
+      setFinanceCompanies(f.financeCompanies);
       setLookupReady(true);
       setLookupMessage(
         !c.customers.length
@@ -305,6 +358,17 @@ export default function VehicleEntryPage() {
     setSingle((prev) => ({ ...prev, [key]: value }));
   }
 
+  // เอาติ๊กไฟแนนซ์ออก = ล้างบริษัทที่เลือกไว้ด้วย ไม่งั้นค่าเก่าจะถูกส่งไปทั้งที่ผู้ใช้ไม่เห็น dropdown แล้ว
+  function toggleSingleFinance(checked: boolean) {
+    setSingleFinanceOn(checked);
+    if (!checked) updateSingle("financeId", "");
+  }
+
+  // ติ๊กไฟแนนซ์แล้วต้องเลือกบริษัท - ตรวจฝั่งหน้าจอเพราะ backend รู้แค่ว่า financeId ว่าง (ซึ่งถูกต้องเมื่อไม่ติ๊ก)
+  function financeError(financeOn: boolean, row: NormalizedVehicleRow): string | null {
+    return financeOn && !row.financeId ? "กรุณาเลือกไฟแนนซ์ หรือเอาติ๊กไฟแนนซ์ออก" : null;
+  }
+
   function handleDateTextChange(raw: string) {
     const digits = raw.replace(/\D/g, "").slice(0, 8);
     setDateText(formatDateDigits(digits));
@@ -328,11 +392,32 @@ export default function VehicleEntryPage() {
     }
   }
 
+  async function handleAddFinance(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFinanceSaving(true);
+    setFinanceMessage("");
+    try {
+      const data = await api.createFinanceCompany(financeName);
+      await loadLookups();
+      // เลือกไฟแนนซ์ที่เพิ่งเพิ่มให้ในฟอร์ม Single ทันที (เหมือนยี่ห้อ) และเปิดติ๊กไฟแนนซ์ให้ด้วย
+      setSingleFinanceOn(true);
+      setSingle((s) => ({ ...s, financeId: data.financeCompany.id }));
+      setFinanceName("");
+      setShowFinanceForm(false);
+    } catch (error) {
+      setFinanceMessage(error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setFinanceSaving(false);
+    }
+  }
+
   async function handleSingleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!lookupReady) return;
     const row = normalizeVehicleRow(single);
     const errors = getVehicleRowErrors(row);
+    const finance = financeError(singleFinanceOn, row);
+    if (finance) errors.push(finance);
     if (errors.length) {
       setSingleMessage({ text: errors.join(" · "), error: true });
       return;
@@ -342,6 +427,7 @@ export default function VehicleEntryPage() {
     try {
       await api.createVehicles([row]);
       setSingle({ ...EMPTY_SINGLE, date: todayIso() });
+      setSingleFinanceOn(false);
       setDateText(isoToDisplayDate(todayIso()));
       setSingleMessage({ text: "บันทึกข้อมูลรถเรียบร้อยแล้ว" });
       await loadVehicles();
@@ -378,7 +464,7 @@ export default function VehicleEntryPage() {
         const startRow = range ? range.s.r : 0;
         const endRow = range ? range.e.r : -1;
         const startCol = range ? range.s.c : 0;
-        const colCount = Math.max(12, range ? range.e.c - range.s.c + 1 : 0);
+        const colCount = Math.max(VEHICLE_COLUMNS.length, range ? range.e.c - range.s.c + 1 : 0);
         cells = [];
         for (let r = startRow; r <= endRow; r++) {
           const values: string[] = [];
@@ -429,6 +515,14 @@ export default function VehicleEntryPage() {
           values.brandId = lookupId(values.brandId, brands, "ยี่ห้อ");
         } catch (e) {
           issues.push((e as Error).message);
+        }
+        // ไฟแนนซ์เว้นว่างได้ (= ไม่ติ๊กไฟแนนซ์) ใส่มาแล้วต้องตรงกับชื่อ/รหัสในฐานข้อมูลเหมือนลูกค้า/ยี่ห้อ
+        if (values.financeId) {
+          try {
+            values.financeId = lookupId(values.financeId, financeCompanies, "ไฟแนนซ์");
+          } catch (e) {
+            issues.push((e as Error).message);
+          }
         }
         issues.push(...getVehicleRowErrors(values));
         if (seen.has(values.chassis)) issues.push("เลขตัวถังซ้ำในไฟล์");
@@ -488,6 +582,7 @@ export default function VehicleEntryPage() {
       ["ประเภท", "รหัส", "ชื่อ", "บริษัท", "สาขา"],
       ...customers.map((c) => ["ลูกค้า", c.id, c.name, c.company ?? "", c.branch ?? ""]),
       ...brands.map((b) => ["ยี่ห้อ", b.id, b.name, "", ""]),
+      ...financeCompanies.map((f) => ["ไฟแนนซ์", f.id, f.name, "", ""]),
     ];
     downloadBlob(
       new Blob(["﻿" + rows.map((r) => r.map(quote).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }),
@@ -515,7 +610,11 @@ export default function VehicleEntryPage() {
       body: vehicle.body ?? "",
       registrationProvince: vehicle.registrationProvince ?? "",
       ownerProvince: vehicle.ownerProvince ?? "",
+      // แสดงประเภทที่ผู้ใช้เลือกไว้ (มีไฟแนนซ์ = ผู้เช่าซื้อ) ไม่ใช่ ownerType ดิบที่เป็นไฟแนนซ์ - ดู lib/vehicle-owner.ts
+      ownerType: entryOwnerType(vehicle) ?? "",
+      financeId: vehicle.financeCompanyId ?? "",
     });
+    setEditFinanceOn(Boolean(vehicle.financeCompanyId));
     setEditDateText(isoToDisplayDate(vehicle.date));
     setEditRemark("");
     setEditMessage({ text: "" });
@@ -524,6 +623,11 @@ export default function VehicleEntryPage() {
 
   function updateEditRow<K extends keyof NormalizedVehicleRow>(key: K, value: string) {
     setEditRow((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleEditFinance(checked: boolean) {
+    setEditFinanceOn(checked);
+    if (!checked) updateEditRow("financeId", "");
   }
 
   function handleEditDateTextChange(raw: string) {
@@ -542,6 +646,8 @@ export default function VehicleEntryPage() {
     }
     const row = normalizeVehicleRow(editRow);
     const errors = getVehicleRowErrors(row);
+    const finance = financeError(editFinanceOn, row);
+    if (finance) errors.push(finance);
     if (errors.length) {
       setEditMessage({ text: errors.join(" · "), error: true });
       return;
@@ -596,6 +702,9 @@ export default function VehicleEntryPage() {
         <button className="text-button" onClick={() => setShowBrandForm((v) => !v)}>
           + เพิ่มยี่ห้อ
         </button>
+        <button className="text-button" onClick={() => setShowFinanceForm((v) => !v)}>
+          + เพิ่มไฟแนนซ์
+        </button>
       </div>
 
       {showBrandForm && (
@@ -614,6 +723,26 @@ export default function VehicleEntryPage() {
               บันทึกยี่ห้อ
             </button>
             <span role="status">{brandMessage}</span>
+          </form>
+        </div>
+      )}
+
+      {showFinanceForm && (
+        <div className="panel" style={{ marginBottom: 20 }}>
+          <form className="brand-form" onSubmit={handleAddFinance}>
+            <label className="field">
+              ชื่อไฟแนนซ์
+              <input
+                maxLength={100}
+                required
+                value={financeName}
+                onChange={(e) => setFinanceName(e.target.value)}
+              />
+            </label>
+            <button className="primary" disabled={financeSaving}>
+              บันทึกไฟแนนซ์
+            </button>
+            <span role="status">{financeMessage}</span>
           </form>
         </div>
       )}
@@ -637,6 +766,9 @@ export default function VehicleEntryPage() {
               onFieldChange={updateSingle}
               customerOptions={customerOptions}
               brands={brands}
+              financeCompanies={financeCompanies}
+              financeOn={singleFinanceOn}
+              onFinanceToggle={toggleSingleFinance}
             />
             <div className="form-actions">
               <button type="submit" className="primary" disabled={singleSaving}>
@@ -662,11 +794,13 @@ export default function VehicleEntryPage() {
             <p style={{ lineHeight: 1.9 }}>
               รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 1,000 คันต่อไฟล์ · ไม่เกิน 5 MB
               <br />
-              ใช้ 12 คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
+              ใช้ {VEHICLE_COLUMNS.length} คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
               <br />
-              คอลัมน์ลูกค้าและยี่ห้อใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
+              คอลัมน์ลูกค้า ยี่ห้อ และไฟแนนซ์ใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
               <br />
-              ต้องกรอกทุกคอลัมน์ยกเว้นสี · ขนาด CC บังคับสำหรับ รย.1 ที่ไม่ใช่ไฟฟ้า (BEV) และ รย.12 · น้ำหนักรถบังคับสำหรับ
+              ประเภทเจ้าของรถกรอก บุคคลธรรมดา หรือ นิติบุคคล · ไฟแนนซ์เว้นว่างได้ถ้าไม่ได้ไฟแนนซ์
+              <br />
+              ต้องกรอกทุกคอลัมน์ยกเว้นสีและไฟแนนซ์ · ขนาด CC บังคับสำหรับ รย.1 ที่ไม่ใช่ไฟฟ้า (BEV) และ รย.12 · น้ำหนักรถบังคับสำหรับ
               รย.1 ไฟฟ้า (BEV), รย.2 และ รย.3
             </p>
             <div className="vehicle-tools">
@@ -827,6 +961,9 @@ export default function VehicleEntryPage() {
             onFieldChange={updateEditRow}
             customerOptions={customerOptions}
             brands={brands}
+            financeCompanies={financeCompanies}
+            financeOn={editFinanceOn}
+            onFinanceToggle={toggleEditFinance}
           />
           <label className="field" style={{ marginTop: 20 }}>
             เหตุผลที่แก้ไข (Remark) *

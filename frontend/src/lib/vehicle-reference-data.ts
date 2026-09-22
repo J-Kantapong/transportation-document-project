@@ -46,16 +46,24 @@ export const VEHICLE_COLUMNS = [
   ['body', 'ประเภทรถ'],
   ['registrationProvince', 'จังหวัดที่จดทะเบียน'],
   ['ownerProvince', 'จังหวัดเจ้าของรถ'],
+  // เจ้าของรถ (ผู้ใช้เพิ่ม 2026-09-22): ประเภทเจ้าของรถบังคับเลือก ไฟแนนซ์เว้นว่างได้ (ติ๊กไฟแนนซ์แล้วเลือกบริษัท)
+  // ค่าที่เก็บ: ownerType = INDIVIDUAL | JURISTIC (ไฟล์ Batch พิมพ์ภาษาไทยได้ ดู normalizeVehicleRow),
+  // financeId = รหัส FinanceCompany (ไฟล์ Batch ใช้ชื่อไฟแนนซ์หรือรหัสเหมือนลูกค้า/ยี่ห้อ)
+  ['ownerType', 'ประเภทเจ้าของรถ'],
+  ['financeId', 'ไฟแนนซ์'],
 ] as const;
 
 export type VehicleColumnKey = (typeof VEHICLE_COLUMNS)[number][0];
 
-// Step 4 (ยื่นเอกสารจดทะเบียน): ประเภทเจ้าของรถ - แยกจาก customerId เสมอ (ลูกค้าที่ส่งงาน
-// อาจไม่ใช่เจ้าของรถตามทะเบียน) ตรงกับ backend/src/generated/prisma/enums.js OwnerType
+// ประเภทเจ้าของรถ - เลือกตั้งแต่หน้าเพิ่มข้อมูลรถจดใหม่ (คอลัมน์ ownerType ด้านบน) แล้วหน้ายื่นเอกสาร (Step 4) ใช้ต่อ
+// แยกจาก customerId เสมอ (ลูกค้าที่ส่งงานอาจไม่ใช่เจ้าของรถตามทะเบียน) ตรงกับ backend/src/generated/prisma/enums.js OwnerType
 export const OWNER_TYPES = [
   ['INDIVIDUAL', 'บุคคลธรรมดา'],
   ['JURISTIC', 'นิติบุคคล'],
 ] as const;
+
+// ชื่อเดียวกับฝั่ง backend (vehicle-validation.ts ทั้งสองฝั่งต้องเหมือนกัน)
+export const OWNER_TYPE_CHOICES = OWNER_TYPES;
 
 // Status is derived from จังหวัดที่จดทะเบียน, not stored — Bangkok registrations
 // go through ตัดบัญชี, every other province goes through แจ้งย้าย.

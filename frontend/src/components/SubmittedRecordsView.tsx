@@ -1,13 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { DocumentSubmission, OwnerType } from "@/lib/api";
-import { OWNER_TYPES } from "@/lib/vehicle-reference-data";
+import type { DocumentSubmission } from "@/lib/api";
+import { ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate } from "@/lib/date";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
-
-const OWNER_TYPE_LABEL: Record<OwnerType, string> = Object.fromEntries(OWNER_TYPES) as Record<OwnerType, string>;
 
 function formatMoney(amount: number): string {
   return amount.toLocaleString("th-TH", { maximumFractionDigits: 2 });
@@ -87,9 +85,8 @@ function GroupTable({
                   <td>{r.vehicle.body || "—"}</td>
                   <td>{r.vehicle.customer.name}</td>
                   <td>
-                    {r.vehicle.owner
-                      ? `${r.vehicle.owner.name || "(ไม่มีชื่อ)"} (${OWNER_TYPE_LABEL[r.vehicle.owner.ownerType]})`
-                      : "ยังไม่ระบุ"}
+                    {/* ไฟแนนซ์: owner.name = ชื่อไฟแนนซ์ (เจ้าของตามทะเบียน) จึงแสดง "ประเภทผู้เช่าซื้อ · ไฟแนนซ์ ชื่อ" */}
+                    {ownerDisplayLabel(r.vehicle.owner, r.vehicle.owner?.name) ?? "ยังไม่ระบุ"}
                   </td>
                   {showUrgent && <td>{r.urgent ? <span className="badge warn">ด่วน</span> : "—"}</td>}
                   <td>{r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}</td>

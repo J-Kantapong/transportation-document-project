@@ -1,7 +1,16 @@
 # เพิ่มข้อมูลรถจดใหม่ — Single / Batch
 
+## เจ้าของรถและไฟแนนซ์ (เพิ่ม 2026-09-22 ใน frontend/backend จริง ไม่ได้อยู่ในต้นแบบ)
+- เพิ่ม 2 ช่องต่อจากจังหวัดเจ้าของรถ: `ประเภทเจ้าของรถ` (dropdown บุคคลธรรมดา/นิติบุคคล บังคับเลือก) และช่องติ๊ก `ไฟแนนซ์` ติ๊กแล้วมี dropdown เลือกบริษัทไฟแนนซ์ (บังคับเลือกเมื่อติ๊ก)
+- รายชื่อไฟแนนซ์มาจากตาราง `FinanceCompany` (GET/POST `/api/finance-companies` รับ `{name}` ตอบ `{financeCompany:{id,name}}`) เพิ่มจากปุ่ม "+ เพิ่มไฟแนนซ์" เหมือนยี่ห้อ ไม่มี seed - ผู้ใช้จะให้รายชื่อภายหลัง
+- Batch: คอลัมน์เป็น 14 คอลัมน์ (`ประเภทเจ้าของรถ` พิมพ์ บุคคลธรรมดา/นิติบุคคล หรือ INDIVIDUAL/JURISTIC, `ไฟแนนซ์` ใส่ชื่อ/รหัสไฟแนนซ์หรือเว้นว่าง) หัวตารางเดิม 12 คอลัมน์ใช้ไม่ได้แล้ว ต้องดาวน์โหลดหัวตารางใหม่
+- POST/PATCH `/api/vehicles` รับ `ownerType` และ `financeId` เพิ่มในแต่ละแถว; backend สร้าง `VehicleOwner` ต่อคันเอง (`VehiclesService.ownerDataFor`): ไม่มีไฟแนนซ์ = `ownerType` ตามที่เลือก / มีไฟแนนซ์ = `ownerType` JURISTIC + `isHirePurchaseBusiness` true + `hirerType` = ประเภทที่เลือก + `financeCompanyId` (ตรงกับข้อยกเว้นภาษี รย.1 ในตัวคำนวณภาษี: ไฟแนนซ์ + ผู้เช่าซื้อบุคคลธรรมดา ไม่คูณสอง)
+- GET `/api/vehicles` ตอบเพิ่ม `hirerType`, `financeCompanyId`, `financeName`; หน้าจอใช้ `frontend/src/lib/vehicle-owner.ts` (`entryOwnerType`, `ownerDisplayLabel` เช่น "บุคคลธรรมดา · ไฟแนนซ์ กรุงศรี") แทนการอ่าน `ownerType` ดิบ
+- หน้ายื่นเอกสารจดใหม่ (Step 4) แสดงประเภทเจ้าของรถจากข้อมูลรถอัตโนมัติ ไม่ให้เลือกซ้ำ (แก้ได้ที่ปุ่มแก้ไขในหน้าเพิ่มข้อมูลรถ ซึ่งบันทึกลง VehicleEditLog key `owner`); รถเก่าที่ยังไม่มีเจ้าของยังเลือกในหน้ายื่นได้เหมือนเดิม
+- Migration `20260922100000_add_finance_company` (ตาราง FinanceCompany + VehicleOwner.financeCompanyId) apply บน Neon แล้ว 2026-09-22
+
 ## UI
-- Single: date, customerId, chassis, engine, brandId, fuel, cc, weight, color, body, registrationProvince, ownerProvince
+- Single: date, customerId, chassis, engine, brandId, fuel, cc, weight, color, body, registrationProvince, ownerProvince (+ ownerType, financeId ดูหัวข้อด้านบน)
 - วันที่/ลูกค้า/เลขตัวถัง/ยี่ห้อเป็นช่องบังคับ ช่องอื่นเว้นว่างได้ น้ำหนักเป็นกิโลกรัม
 - Dropdown ลูกค้าใช้ตาราง customers และยี่ห้อใช้ตาราง brands; เพิ่มชื่อยี่ห้อจากฟอร์มย่อยได้ ไม่มีข้อมูล seed
 - จังหวัดทั้งสองช่องใช้ 77 ชื่อรวมกรุงเทพมหานคร จาก https://std.moc.go.th/std/group/28 (ข้อมูลกรมการปกครองที่เผยแพร่โดยกระทรวงพาณิชย์)

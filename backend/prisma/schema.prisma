@@ -429,10 +429,26 @@ model VehicleOwner {
   ownerType              OwnerType
   isHirePurchaseBusiness Boolean    @default(false) // ประกอบธุรกิจเช่าซื้อหรือไม่ - ใช้เฉพาะเมื่อ ownerType = JURISTIC
   hirerType              OwnerType? // ผู้เช่าซื้อรถคันนี้ - null เมื่อไม่ใช่กรณีเช่าซื้อ หรือบริษัทเช่าซื้อใช้รถเอง
+  // ไฟแนนซ์ (หน้าเพิ่มข้อมูลรถจดใหม่ติ๊ก "ไฟแนนซ์" แล้วเลือกบริษัท) - ไฟแนนซ์เป็นเจ้าของรถตามทะเบียน (นิติบุคคลที่ประกอบ
+  // ธุรกิจเช่าซื้อ) ส่วนบุคคลธรรมดา/นิติบุคคลที่ผู้ใช้เลือกในหน้านั้นเก็บเป็น hirerType (ผู้เช่าซื้อ) - ดู VehiclesService.ownerDataFor
+  financeCompanyId       String?
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
 
-  vehicles Vehicle[]
+  financeCompany FinanceCompany? @relation(fields: [financeCompanyId], references: [id])
+  vehicles       Vehicle[]
+
+  @@index([financeCompanyId])
+}
+
+// บริษัทไฟแนนซ์ - รายชื่อผู้ใช้กำหนดเอง เพิ่มได้จากหน้าเพิ่มข้อมูลรถจดใหม่เหมือนยี่ห้อ (ดู backend/src/finance-companies)
+model FinanceCompany {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(1000)
+  createdAt DateTime @default(now())
+
+  owners VehicleOwner[]
 }
 
 // Immutable audit snapshot: การคำนวณใหม่สร้างแถวใหม่เสมอ ไม่ update ของเดิม (เหมือน VehicleEditLog)

@@ -45,6 +45,17 @@ export const VEHICLE_COLUMNS = [
   ['body', 'ประเภทรถ'],
   ['registrationProvince', 'จังหวัดที่จดทะเบียน'],
   ['ownerProvince', 'จังหวัดเจ้าของรถ'],
+  // เจ้าของรถ (ผู้ใช้เพิ่ม 2026-09-22): ประเภทเจ้าของรถบังคับเลือก ไฟแนนซ์เว้นว่างได้ (ติ๊กไฟแนนซ์แล้วเลือกบริษัท)
+  // ค่าที่เก็บ: ownerType = INDIVIDUAL | JURISTIC (ไฟล์ Batch พิมพ์ภาษาไทยได้ ดู normalizeVehicleRow),
+  // financeId = รหัส FinanceCompany (ไฟล์ Batch ใช้ชื่อไฟแนนซ์หรือรหัสเหมือนลูกค้า/ยี่ห้อ)
+  ['ownerType', 'ประเภทเจ้าของรถ'],
+  ['financeId', 'ไฟแนนซ์'],
 ] as const;
 
 export type VehicleColumnKey = (typeof VEHICLE_COLUMNS)[number][0];
+
+// ประเภทเจ้าของรถที่เลือกในหน้าเพิ่มข้อมูลรถจดใหม่ - ตรงกับ enum OwnerType ใน Prisma
+export const OWNER_TYPE_CHOICES = [
+  ['INDIVIDUAL', 'บุคคลธรรมดา'],
+  ['JURISTIC', 'นิติบุคคล'],
+] as const;

@@ -63,6 +63,12 @@ export interface Brand {
 
 export type OwnerType = 'INDIVIDUAL' | 'JURISTIC';
 
+// บริษัทไฟแนนซ์ - GET/POST /api/finance-companies (เพิ่มจากหน้าเพิ่มข้อมูลรถจดใหม่เหมือนยี่ห้อ)
+export interface FinanceCompany {
+  id: string;
+  name: string;
+}
+
 export interface Vehicle {
   id: string;
   date: string;
@@ -85,7 +91,13 @@ export interface Vehicle {
   isFactoryNew: boolean | null;
   ownerId: string | null;
   ownerName: string | null;
+  // เจ้าของรถตามทะเบียน - กรอกตั้งแต่หน้าเพิ่มข้อมูลรถจดใหม่ (ประเภทเจ้าของรถ + ติ๊กไฟแนนซ์) และหน้ายื่นเอกสารใช้ต่อ
+  // ติ๊กไฟแนนซ์: ownerType = JURISTIC (ไฟแนนซ์เป็นเจ้าของ), hirerType = ประเภทที่ผู้ใช้เลือก, financeName = ชื่อไฟแนนซ์
+  // ไม่ติ๊ก: ownerType = ประเภทที่เลือก, hirerType/finance = null - ใช้ helper ใน lib/vehicle-owner.ts แทนการอ่านตรงๆ
   ownerType: OwnerType | null;
+  hirerType: OwnerType | null;
+  financeCompanyId: string | null;
+  financeName: string | null;
   // Step 4: เลขทะเบียนที่ขอ/ได้รับ - mutable, กรอกทีหลังได้ตอนใบเสร็จกรมขนส่งออกเลขให้
   plateCategory: string | null;
   plateNumber: string | null;
@@ -182,7 +194,7 @@ export interface DocumentSubmission {
     plateNumber: string | null;
     customer: { name: string; company: string | null };
     brand: { name: string };
-    owner: { name: string | null; ownerType: OwnerType } | null;
+    owner: { name: string | null; ownerType: OwnerType; hirerType: OwnerType | null; financeCompanyId: string | null } | null;
   };
   receipts?: ReceiptSummary[]; // รูปใบเสร็จที่แนบแล้ว (เก่าสุดก่อน) - มีเฉพาะผลจาก listDocumentSubmissions
 }
@@ -467,6 +479,10 @@ export const api = {
   listBrands: () => request<{ brands: Brand[] }>('/api/brands'),
   createBrand: (name: string) =>
     request<{ brand: Brand }>('/api/brands', { method: 'POST', body: JSON.stringify({ name }) }),
+
+  listFinanceCompanies: () => request<{ financeCompanies: FinanceCompany[] }>('/api/finance-companies'),
+  createFinanceCompany: (name: string) =>
+    request<{ financeCompany: FinanceCompany }>('/api/finance-companies', { method: 'POST', body: JSON.stringify({ name }) }),
 
   listVehicles: () => request<{ vehicles: Vehicle[] }>('/api/vehicles'),
   createVehicles: (vehicles: Record<string, string>[]) =>

@@ -6,6 +6,8 @@ import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
+import { OWNER_TYPE_CHOICES } from './vehicle-reference-data.js';
+import { OwnerType } from '../generated/prisma/enums.js';
 import { TaxService } from '../tax/tax.service.js';
 import { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
 import { parseTaxDate } from '../tax/tax-validation.js';
@@ -30,6 +32,47 @@ const EDITABLE_VEHICLE_FIELDS = [
   ['registrationProvince', 'จังหวัดที่จดทะเบียน'],
   ['ownerProvince', 'จังหวัดเจ้าของรถ'],
 ] as const;
+
+// เจ้าของรถจากหน้าเพิ่มข้อมูลรถจดใหม่ (ownerType + ไฟแนนซ์) - เก็บเป็น VehicleOwner ต่อคัน ไม่แชร์แถวข้ามคัน
+// ไม่ติ๊กไฟแนนซ์: เจ้าของ = ประเภทที่เลือก / ติ๊กไฟแนนซ์: ไฟแนนซ์เป็นเจ้าของตามทะเบียน (นิติบุคคลที่ประกอบธุรกิจเช่าซื้อ)
+// และประเภทที่เลือกกลายเป็นผู้เช่าซื้อ (hirerType) - ตรงกับข้อยกเว้นภาษี รย.1 ใน government-tax-calculator.ts
+// (นิติบุคคลเช่าซื้อ + ผู้เช่าซื้อบุคคลธรรมดา = ไม่คูณสอง)
+interface OwnerData {
+  name: string | null;
+  ownerType: OwnerType;
+  isHirePurchaseBusiness: boolean;
+  hirerType: OwnerType | null;
+  financeCompanyId: string | null;
+}
+
+function ownerDataFor(row: NormalizedVehicleRow, financeName: string | null): OwnerData {
+  const chosen = row.ownerType as OwnerType;
+  if (row.financeId) {
+    return { name: financeName, ownerType: OwnerType.JURISTIC, isHirePurchaseBusiness: true, hirerType: chosen, financeCompanyId: row.financeId };
+  }
+  return { name: null, ownerType: chosen, isHirePurchaseBusiness: false, hirerType: null, financeCompanyId: null };
+}
+
+function ownerTypeLabel(type: string | null | undefined): string {
+  return OWNER_TYPE_CHOICES.find(([code]) => code === type)?.[1] ?? '-';
+}
+
+// ข้อความสำหรับ VehicleEditLog - เทียบเจ้าของเดิมกับใหม่ว่าเปลี่ยนจริงไหม
+function describeOwner(owner: OwnerData | null): string | null {
+  if (!owner) return null;
+  if (owner.financeCompanyId) return `${ownerTypeLabel(owner.hirerType)} · ไฟแนนซ์ ${owner.name ?? ''}`.trim();
+  return ownerTypeLabel(owner.ownerType);
+}
+
+function sameOwner(a: OwnerData | null, b: OwnerData): boolean {
+  return (
+    !!a &&
+    a.ownerType === b.ownerType &&
+    a.isHirePurchaseBusiness === b.isHirePurchaseBusiness &&
+    a.hirerType === b.hirerType &&
+    a.financeCompanyId === b.financeCompanyId
+  );
+}
 
 // ตรวจผ่านวันนี้หรือก่อนหน้านี้ = ผลตรวจหมดอายุแล้ว (ครบ 90 วัน)
 function reinspectionThreshold(): Date {
@@ -112,7 +155,9 @@ export class VehiclesService {
   private readonly vehicleFullInclude = {
     customer: { select: { name: true } },
     brand: { select: { name: true } },
-    owner: { select: { id: true, name: true, ownerType: true } },
+    owner: {
+      select: { id: true, name: true, ownerType: true, hirerType: true, financeCompanyId: true, financeCompany: { select: { name: true } } },
+    },
     // แถวล่าสุดที่ยัง active (PENDING = รอใบเสร็จ / RECEIPT_RECEIVED = จดทะเบียนแล้ว) - มี = ยื่นซ้ำไม่ได้
     // ดู submission-eligibility.ts
     documentSubmissions: {
@@ -143,7 +188,13 @@ export class VehiclesService {
     firstRegistrationDate: Date | null;
     isFactoryNew: boolean | null;
     ownerId: string | null;
-    owner: { name: string | null; ownerType: string } | null;
+    owner: {
+      name: string | null;
+      ownerType: string;
+      hirerType: string | null;
+      financeCompanyId: string | null;
+      financeCompany: { name: string } | null;
+    } | null;
     plateCategory: string | null;
     plateNumber: string | null;
     documentSubmissions: Array<{ status: string }>;
@@ -170,7 +221,12 @@ export class VehiclesService {
       isFactoryNew: vehicle.isFactoryNew,
       ownerId: vehicle.ownerId,
       ownerName: vehicle.owner?.name ?? null,
+      // ownerType = เจ้าของตามทะเบียน (ไฟแนนซ์ = JURISTIC เสมอ) ส่วนประเภทที่ผู้ใช้เลือกในหน้าเพิ่มข้อมูลรถอยู่ที่
+      // hirerType เมื่อมีไฟแนนซ์ - ฝั่ง frontend ใช้ entryOwnerType()/ownerDisplayLabel() ใน lib/vehicle-owner.ts
       ownerType: vehicle.owner?.ownerType ?? null,
+      hirerType: vehicle.owner?.hirerType ?? null,
+      financeCompanyId: vehicle.owner?.financeCompanyId ?? null,
+      financeName: vehicle.owner?.financeCompany?.name ?? null,
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
       pendingDocumentSubmission: vehicle.documentSubmissions[0]?.status === 'PENDING',
@@ -294,12 +350,14 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'รองรับ 1–1,000 รายการต่อครั้ง' });
     }
 
-    const [customers, brands] = await Promise.all([
+    const [customers, brands, financeCompanies] = await Promise.all([
       this.prisma.customer.findMany({ select: { id: true } }),
       this.prisma.brand.findMany({ select: { id: true } }),
+      this.prisma.financeCompany.findMany({ select: { id: true, name: true } }),
     ]);
     const customerIds = new Set(customers.map((c) => c.id));
     const brandIds = new Set(brands.map((b) => b.id));
+    const financeNames = new Map(financeCompanies.map((f) => [f.id, f.name]));
 
     const rowErrors: VehicleRowError[] = [];
     const seenChassis = new Set<string>();
@@ -311,6 +369,7 @@ export class VehiclesService {
 
       if (!customerIds.has(normalized.customerId)) errors.push('ไม่พบลูกค้าในฐานข้อมูล');
       if (!brandIds.has(normalized.brandId)) errors.push('ไม่พบยี่ห้อในฐานข้อมูล');
+      if (normalized.financeId && !financeNames.has(normalized.financeId)) errors.push('ไม่พบไฟแนนซ์ในฐานข้อมูล');
       if (seenChassis.has(normalized.chassis)) errors.push('เลขตัวถังซ้ำในชุดข้อมูล');
       seenChassis.add(normalized.chassis);
 
@@ -339,8 +398,15 @@ export class VehiclesService {
 
     // createMany is one SQL statement instead of one round trip per row - a $transaction of up
     // to MAX_BATCH_SIZE individual .create() calls was blowing past Prisma's 5s default
-    // transaction timeout on batches above ~80 rows against the remote DB.
-    await this.prisma.vehicle.createMany({ data: rows.map((row) => this.toCreateData(row)) });
+    // transaction timeout on batches above ~80 rows against the remote DB. เจ้าของรถ (VehicleOwner)
+    // สร้างก่อนเป็นชุดเดียวด้วย createManyAndReturn เพื่อเอา id มาผูกกับรถแต่ละคัน (ลำดับผลลัพธ์ตรงกับ input)
+    await this.prisma.$transaction(async (tx) => {
+      const owners = await tx.vehicleOwner.createManyAndReturn({
+        data: rows.map((row) => ownerDataFor(row, financeNames.get(row.financeId) ?? null)),
+        select: { id: true },
+      });
+      await tx.vehicle.createMany({ data: rows.map((row, index) => this.toCreateData(row, owners[index].id)) });
+    });
 
     return { count: rows.length };
   }
@@ -350,7 +416,7 @@ export class VehiclesService {
     const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
     if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไข (Remark)' });
 
-    const existing = await this.prisma.vehicle.findUnique({ where: { id } });
+    const existing = await this.prisma.vehicle.findUnique({ where: { id }, include: { owner: true } });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     const row = normalizeVehicleRow(body as unknown as Record<string, unknown>);
@@ -359,19 +425,21 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'กรุณาแก้ไขข้อมูลก่อนบันทึก', errors: [{ row: 1, errors }] });
     }
 
-    const [customer, brand] = await Promise.all([
+    const [customer, brand, financeCompany] = await Promise.all([
       this.prisma.customer.findUnique({ where: { id: row.customerId } }),
       this.prisma.brand.findUnique({ where: { id: row.brandId } }),
+      row.financeId ? this.prisma.financeCompany.findUnique({ where: { id: row.financeId } }) : null,
     ]);
     if (!customer) throw new BadRequestException({ error: 'ไม่พบลูกค้าในฐานข้อมูล' });
     if (!brand) throw new BadRequestException({ error: 'ไม่พบยี่ห้อในฐานข้อมูล' });
+    if (row.financeId && !financeCompany) throw new BadRequestException({ error: 'ไม่พบไฟแนนซ์ในฐานข้อมูล' });
 
     if (row.chassis !== existing.chassis) {
       const duplicate = await this.prisma.vehicle.findUnique({ where: { chassis: row.chassis } });
       if (duplicate) throw new ConflictException({ error: 'เลขตัวถังนี้มีอยู่แล้ว' });
     }
 
-    const data = this.toCreateData(row);
+    const data = this.toCreateData(row, existing.ownerId);
     const changes: Record<string, { from: string | null; to: string | null }> = {};
     for (const [key] of EDITABLE_VEHICLE_FIELDS) {
       const from = diffField((existing as Record<string, unknown>)[key]);
@@ -379,10 +447,30 @@ export class VehiclesService {
       if (from !== to) changes[key] = { from, to };
     }
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.vehicle.update({ where: { id }, data }),
-      this.prisma.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes) } }),
-    ]);
+    // เจ้าของรถเปลี่ยน = สร้าง VehicleOwner แถวใหม่แล้วชี้ไปแทน (ไม่แก้แถวเดิม เพราะ Step 4 tax-input เคยให้เลือกแถวเจ้าของ
+    // ที่มีอยู่ซ้ำข้ามคันได้) - บันทึกลง edit log เป็นข้อความอ่านง่ายใต้ key "owner"
+    const currentOwner: OwnerData | null = existing.owner
+      ? {
+          name: existing.owner.name,
+          ownerType: existing.owner.ownerType,
+          isHirePurchaseBusiness: existing.owner.isHirePurchaseBusiness,
+          hirerType: existing.owner.hirerType,
+          financeCompanyId: existing.owner.financeCompanyId,
+        }
+      : null;
+    const nextOwner = ownerDataFor(row, financeCompany?.name ?? null);
+    const ownerChanged = !sameOwner(currentOwner, nextOwner);
+    if (ownerChanged) changes.owner = { from: describeOwner(currentOwner), to: describeOwner(nextOwner) };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (ownerChanged) {
+        const owner = await tx.vehicleOwner.create({ data: nextOwner, select: { id: true } });
+        data.ownerId = owner.id;
+      }
+      const vehicle = await tx.vehicle.update({ where: { id }, data });
+      await tx.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes) } });
+      return vehicle;
+    });
 
     return { id: updated.id };
   }
@@ -843,8 +931,10 @@ export class VehiclesService {
     return this.taxService.calculateAndSave(id);
   }
 
-  private toCreateData(row: NormalizedVehicleRow) {
+  // ownerId = VehicleOwner ที่สร้างจาก ownerDataFor(row) - ดู createBatch/updateVehicle
+  private toCreateData(row: NormalizedVehicleRow, ownerId: string | null) {
     return {
+      ownerId,
       date: new Date(`${row.date}T00:00:00.000Z`),
       customerId: row.customerId,
       chassis: row.chassis,

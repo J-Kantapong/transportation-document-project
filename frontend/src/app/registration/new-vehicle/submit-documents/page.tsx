@@ -16,11 +16,9 @@ import {
   type TaxBreakdown,
   type Vehicle,
 } from "@/lib/api";
-import { OWNER_TYPES } from "@/lib/vehicle-reference-data";
+import { OWNER_TYPE_LABEL, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { SubmittedRecordsView } from "@/components/SubmittedRecordsView";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
-
-const OWNER_TYPE_LABEL: Record<OwnerType, string> = Object.fromEntries(OWNER_TYPES) as Record<OwnerType, string>;
 
 // รายการที่บันทึกไว้ (ยังไม่ยื่นจริง) เก็บเป็นร่างในเบราว์เซอร์ - รีเฟรชหน้าแล้วไม่หาย ค่าธรรมเนียม/ภาษีคำนวณใหม่
 // ตอนกู้คืนเสมอ ส่วนสิทธิ์การยื่นตรวจซ้ำที่ backend ตอนกดยืนยันยื่นอยู่แล้ว
@@ -59,14 +57,24 @@ const DEFAULT_OPTIONS: DocumentSubmissionOptionsInput = {
   urgent: false,
 };
 
-// ประเภทเจ้าของรถ: ใช้ของเดิมถ้ารถมีบันทึกไว้แล้ว ไม่งั้นปล่อยว่าง ("ยังไม่ระบุ") ให้ผู้ใช้เลือกเอง - ระบบไม่เดาให้
-// (ผู้ใช้เลือกแบบนี้ 2026-09-20) ยื่นไม่ได้จนกว่าจะระบุครบทุกคัน เพราะภาษี รย.1 นิติบุคคลคูณสอง
+// ประเภทเจ้าของรถ: ตั้งแต่ 2026-09-22 กรอกตั้งแต่หน้าเพิ่มข้อมูลรถจดใหม่ (บุคคลธรรมดา/นิติบุคคล + ไฟแนนซ์) หน้านี้จึงแสดง
+// ตามข้อมูลรถโดยไม่ให้เลือกซ้ำ (hasEntryOwner) - รถเก่าที่ยังไม่มีเจ้าของจะเป็น "ยังไม่ระบุ" ให้ผู้ใช้เลือกเองในหน้านี้
+// ระบบไม่เดาให้ (ผู้ใช้เลือกแบบนี้ 2026-09-20) ยื่นไม่ได้จนกว่าจะระบุครบทุกคัน เพราะภาษี รย.1 นิติบุคคลคูณสอง
+function hasEntryOwner(vehicle: Vehicle): boolean {
+  return vehicle.ownerType !== null;
+}
+
 function existingOwnerType(vehicle: Vehicle): OwnerType | undefined {
   return vehicle.ownerType ?? undefined;
 }
 
 function isOwnerUnspecified(entry: { ownerType: OwnerType | undefined; vehicle: Vehicle }): boolean {
   return !entry.ownerType && !entry.vehicle.ownerType;
+}
+
+// ส่ง ownerType ให้ backend เฉพาะรถที่ไม่มีเจ้าของจากหน้าเพิ่มข้อมูลรถ - ไม่งั้น backend จะสร้างเจ้าของแบบไม่มีไฟแนนซ์ทับ
+function ownerTypeForApi(entry: { ownerType: OwnerType | undefined; vehicle: Vehicle }): OwnerType | undefined {
+  return hasEntryOwner(entry.vehicle) ? undefined : entry.ownerType;
 }
 
 function lastFailedOf(vehicle: Vehicle): SubmitCandidate["lastFailedSubmission"] {
@@ -110,8 +118,9 @@ function newDraft(vehicle: Vehicle, submitDate: string): DraftEntry {
 }
 
 function ownerLabel(entry: DraftEntry): string {
-  if (entry.ownerType) return OWNER_TYPE_LABEL[entry.ownerType];
-  return entry.vehicle.ownerType ? `${OWNER_TYPE_LABEL[entry.vehicle.ownerType]} (เดิม)` : "ยังไม่ระบุ";
+  const fromEntry = ownerDisplayLabel(entry.vehicle, entry.vehicle.financeName);
+  if (fromEntry) return fromEntry;
+  return entry.ownerType ? OWNER_TYPE_LABEL[entry.ownerType] : "ยังไม่ระบุ";
 }
 
 function optionsLabel(entry: DraftEntry): string {
@@ -135,7 +144,7 @@ async function priceDrafts(drafts: DraftEntry[]): Promise<{ entries: BatchEntry[
   for (let i = 0; i < drafts.length; i += PREVIEW_CHUNK_SIZE) {
     const chunk = drafts.slice(i, i + PREVIEW_CHUNK_SIZE);
     const { results } = await api.previewDocumentSubmissionBulk(
-      chunk.map((d) => ({ vehicleId: d.vehicle.id, ownerType: d.ownerType, ...d.options })),
+      chunk.map((d) => ({ vehicleId: d.vehicle.id, ownerType: ownerTypeForApi(d), ...d.options })),
     );
     results.forEach((result, index) => {
       const draft = chunk[index];
@@ -523,7 +532,10 @@ export default function SubmitDocumentsPage() {
         cc: selectedVehicle.cc,
         weight: selectedVehicle.weight,
         firstRegistrationDate: null,
-        owner: { ownerType, isHirePurchaseBusiness: false, hirerType: null },
+        // รถที่มีเจ้าของจากหน้าเพิ่มข้อมูลรถส่งข้อมูลไฟแนนซ์/ผู้เช่าซื้อไปด้วย ไม่งั้นไฟแนนซ์ (นิติบุคคล) จะโดนคูณสองทั้งที่เข้าข้อยกเว้น
+        owner: hasEntryOwner(selectedVehicle)
+          ? { ownerType, isHirePurchaseBusiness: Boolean(selectedVehicle.financeCompanyId), hirerType: selectedVehicle.hirerType }
+          : { ownerType, isHirePurchaseBusiness: false, hirerType: null },
       })
       .then((r) => {
         if (!cancelled) setTaxPreview(r);
@@ -673,7 +685,7 @@ export default function SubmitDocumentsPage() {
         submitDate: e.submitDate,
         plateCategory: e.plateCategory,
         plateNumber: e.plateNumber,
-        ownerType: e.ownerType,
+        ownerType: ownerTypeForApi(e),
         ...e.options,
       }));
       const result = await api.createDocumentSubmissionBulk(entries);
@@ -1125,22 +1137,31 @@ export default function SubmitDocumentsPage() {
                 <p className="muted" style={{ marginBottom: 8 }}>
                   ประเภทเจ้าของรถ * (ใช้คำนวณภาษีรถประจำปี)
                 </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className={`filter-chip${ownerType === "INDIVIDUAL" ? " selected" : ""}`}
-                    onClick={() => setOwnerType("INDIVIDUAL")}
-                  >
-                    บุคคลธรรมดา
-                  </button>
-                  <button
-                    type="button"
-                    className={`filter-chip${ownerType === "JURISTIC" ? " selected" : ""}`}
-                    onClick={() => setOwnerType("JURISTIC")}
-                  >
-                    นิติบุคคล
-                  </button>
-                </div>
+                {hasEntryOwner(selectedVehicle) ? (
+                  <>
+                    <span className="badge">{ownerDisplayLabel(selectedVehicle, selectedVehicle.financeName)}</span>
+                    <p className="muted" style={{ marginTop: 6 }}>
+                      ดึงอัตโนมัติจากหน้าเพิ่มข้อมูลรถจดใหม่ - แก้ไขได้ที่หน้านั้น (ปุ่มแก้ไข)
+                    </p>
+                  </>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className={`filter-chip${ownerType === "INDIVIDUAL" ? " selected" : ""}`}
+                      onClick={() => setOwnerType("INDIVIDUAL")}
+                    >
+                      บุคคลธรรมดา
+                    </button>
+                    <button
+                      type="button"
+                      className={`filter-chip${ownerType === "JURISTIC" ? " selected" : ""}`}
+                      onClick={() => setOwnerType("JURISTIC")}
+                    >
+                      นิติบุคคล
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <p className="muted" style={{ marginBottom: 8 }}>
@@ -1409,22 +1430,27 @@ export default function SubmitDocumentsPage() {
                   {selectedBatchEntries.length > 0 ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span className="muted">ตั้งค่า {selectedBatchEntries.length} คันที่เลือก:</span>
-                      <button
-                        type="button"
-                        className="filter-chip"
-                        disabled={applying}
-                        onClick={() => applyToSelected((e) => ({ ...e, ownerType: "INDIVIDUAL" }))}
-                      >
-                        บุคคลธรรมดา
-                      </button>
-                      <button
-                        type="button"
-                        className="filter-chip"
-                        disabled={applying}
-                        onClick={() => applyToSelected((e) => ({ ...e, ownerType: "JURISTIC" }))}
-                      >
-                        นิติบุคคล
-                      </button>
+                      {/* ปุ่มเลือกประเภทเจ้าของรถแสดงเฉพาะเมื่อมีคันที่ยังไม่มีเจ้าของจากหน้าเพิ่มข้อมูลรถ - คันที่มีแล้วไม่ถูกทับ */}
+                      {selectedBatchEntries.some((e) => !hasEntryOwner(e.vehicle)) && (
+                        <>
+                          <button
+                            type="button"
+                            className="filter-chip"
+                            disabled={applying}
+                            onClick={() => applyToSelected((e) => (hasEntryOwner(e.vehicle) ? e : { ...e, ownerType: "INDIVIDUAL" }))}
+                          >
+                            บุคคลธรรมดา
+                          </button>
+                          <button
+                            type="button"
+                            className="filter-chip"
+                            disabled={applying}
+                            onClick={() => applyToSelected((e) => (hasEntryOwner(e.vehicle) ? e : { ...e, ownerType: "JURISTIC" }))}
+                          >
+                            นิติบุคคล
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         className="filter-chip"

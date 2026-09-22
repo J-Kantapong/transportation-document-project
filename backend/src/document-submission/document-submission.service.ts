@@ -301,7 +301,7 @@ export class DocumentSubmissionService {
             plateNumber: true,
             customer: { select: { name: true, company: true } },
             brand: { select: { name: true } },
-            owner: { select: { name: true, ownerType: true } },
+            owner: { select: { name: true, ownerType: true, hirerType: true, financeCompanyId: true } },
           },
         },
         // รูปใบเสร็จที่แนบแล้ว - ตัวรูปโหลดผ่าน GET /api/receipts/:id/image

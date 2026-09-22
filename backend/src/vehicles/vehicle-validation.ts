@@ -1,14 +1,21 @@
 // Ported from prototype/sites-reference/shared/vehicle-data.js (normalizeVehicle / vehicleErrors).
 
-import { FUEL_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey } from './vehicle-reference-data.js';
+import { FUEL_TYPES, OWNER_TYPE_CHOICES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey } from './vehicle-reference-data.js';
 
 export type NormalizedVehicleRow = Record<VehicleColumnKey, string>;
+
+// ประเภทเจ้าของรถรับได้ทั้งรหัส (INDIVIDUAL/JURISTIC) และคำไทย (บุคคลธรรมดา/นิติบุคคล) จากไฟล์ Batch - เก็บเป็นรหัสเสมอ
+function normalizeOwnerType(value: string): string {
+  const match = OWNER_TYPE_CHOICES.find(([code, label]) => code === value.toUpperCase() || label === value);
+  return match ? match[0] : value;
+}
 
 export function normalizeVehicleRow(input: Record<string, unknown>): NormalizedVehicleRow {
   const row = {} as NormalizedVehicleRow;
   for (const [key] of VEHICLE_COLUMNS) {
     row[key] = String(input?.[key] ?? '').trim();
   }
+  row.ownerType = normalizeOwnerType(row.ownerType);
   return row;
 }
 
@@ -56,6 +63,12 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   if (!row.body) errors.push('กรุณาเลือกประเภทรถ');
   if (!row.registrationProvince) errors.push('กรุณาเลือกจังหวัดที่จดทะเบียน');
   if (!row.ownerProvince) errors.push('กรุณาเลือกจังหวัดเจ้าของรถ');
+  // ประเภทเจ้าของรถบังคับเลือกตั้งแต่ตอนเพิ่มข้อมูลรถ - หน้ายื่นเอกสารจดใหม่ใช้ค่านี้ต่อโดยไม่ต้องเลือกซ้ำ (ภาษี รย.1 นิติบุคคลคูณสอง)
+  if (!row.ownerType) {
+    errors.push('กรุณาเลือกประเภทเจ้าของรถ (บุคคลธรรมดา/นิติบุคคล)');
+  } else if (!OWNER_TYPE_CHOICES.some(([code]) => code === row.ownerType)) {
+    errors.push('ประเภทเจ้าของรถต้องเป็น บุคคลธรรมดา หรือ นิติบุคคล');
+  }
   const sizeField = requiredSizeField(row.body, row.fuel);
   if (sizeField === 'cc' && !row.cc) {
     errors.push(`กรุณากรอกขนาด CC (จำเป็นสำหรับ ${row.body} ${row.fuel})`);
