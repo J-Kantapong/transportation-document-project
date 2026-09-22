@@ -12,9 +12,29 @@ datasource db {
   provider = "postgresql"
 }
 
+// บทบาทผู้ใช้ (ผู้ใช้กำหนด 2026-09-22) - คนเดียวถือได้หลายบทบาท (User.roles)
+// ADMIN = เจ้าของ/ผู้ดูแลระบบ ทำได้ทุกอย่าง + อนุมัติผู้ใช้
+// STAFF_ENTRY = พนักงานรับข้อมูลรถ: ขั้น 1-3 (เพิ่มข้อมูลรถ, แจ้งย้าย/ตัดบัญชี, ตรวจรถ) ทุกประเภทรถ
+// STAFF_CAR / STAFF_MOTO = พนักงานยื่นรถยนต์ / จักรยานยนต์: ขั้น 4-8 (ยื่นเอกสาร -> Delivery) เฉพาะประเภทรถของตัวเอง
+//   (แยกจาก Vehicle.body ขึ้นต้น "รย.12-" = จักรยานยนต์ - ดู backend/src/auth/vehicle-scope.ts) ถือทั้งคู่ = เห็นทุกคัน
+// ACCOUNTANT = บัญชี/วางบิล + อ่านข้อมูลงานได้ | DELIVERY = ส่งของ (เห็นเฉพาะหน้า Delivery ไม่เห็นราคา)
+// CUSTOMER = ลูกค้า (portal) เห็นเฉพาะรถของบริษัทที่ผูกไว้ (User.customerId)
 enum UserRole {
   ADMIN
-  STAFF
+  STAFF_ENTRY
+  STAFF_CAR
+  STAFF_MOTO
+  ACCOUNTANT
+  DELIVERY
+  CUSTOMER
+}
+
+// สมัครแล้วเป็น PENDING จนกว่า Admin จะอนุมัติ - ล็อกอินได้เฉพาะ APPROVED
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DISABLED
 }
 
 enum DocumentType {
@@ -34,15 +54,30 @@ enum CaseStatus {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         UserRole @default(STAFF)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String     @id @default(cuid())
+  email            String     @unique // ใช้เป็น username ตอนล็อกอิน (เก็บเป็นตัวพิมพ์เล็ก)
+  passwordHash     String // scrypt (ดู backend/src/auth/password.ts)
+  name             String // ชื่อ-นามสกุล
+  displayName      String? // ชื่อเล่น - ใช้แสดงในหัวใบส่งงาน/ประวัติแก้ไข
+  phone            String?
+  roles            UserRole[] @default([]) // ว่างจนกว่า Admin อนุมัติ (Admin กำหนดตอนอนุมัติ)
+  status           UserStatus @default(PENDING)
+  // ตอนสมัคร: พนักงานเลือกตำแหน่งที่ขอ / ลูกค้ากรอกชื่อบริษัท - Admin ดูประกอบตอนอนุมัติ
+  requestedRole    UserRole? // STAFF_ENTRY | STAFF_CAR | STAFF_MOTO | ACCOUNTANT | DELIVERY | CUSTOMER
+  requestedCompany String? // ลูกค้าพิมพ์ชื่อบริษัท/ร้านตอนสมัคร Admin เลือกผูก customerId ให้ตอนอนุมัติ
+  customerId       String? // ผูกบัญชีลูกค้ากับรายชื่อในฐานข้อมูลลูกค้า (เฉพาะ role CUSTOMER)
+  approvedById     String?
+  approvedAt       DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
-  assignedCases Case[] @relation("AssignedStaff")
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  approvedBy    User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers User[]    @relation("ApprovedUsers")
+  assignedCases Case[]    @relation("AssignedStaff")
+
+  @@index([status])
+  @@index([customerId])
 }
 
 model Customer {
@@ -67,6 +102,7 @@ model Customer {
   requestedCases  Case[]
   serviceFeeRates ServiceFeeRate[]
   invoices        Invoice[]
+  users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
 }
 
 model Brand {
@@ -110,11 +146,11 @@ model Vehicle {
   inspectionSentBillCost Decimal?  @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) 50 บาท - เฉพาะรอบ 2
 
   // Step 3b: ผลตรวจ (เข้าคิวหลังจาก inspectionSentDate ถูกกรอกแล้วเท่านั้น)
-  inspectionResult     String? // 'ผ่าน' | 'ไม่ผ่าน'
-  inspectionResultDate DateTime? // วันที่ทราบผลตรวจ
-  inspectionResultCost Decimal?  @db.Decimal(10, 2) // ราคาตรวจรถ (No bill) ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
-  inspectionResultBillCost Decimal? @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) ณ วันทราบผล - เฉพาะรอบ 2, ตรวจไม่ผ่านเป็น 0
-  inspectionFailRemark String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
+  inspectionResult         String? // 'ผ่าน' | 'ไม่ผ่าน'
+  inspectionResultDate     DateTime? // วันที่ทราบผลตรวจ
+  inspectionResultCost     Decimal?  @db.Decimal(10, 2) // ราคาตรวจรถ (No bill) ณ วันทราบผล - ตรวจไม่ผ่านเป็น 0 (ได้เงินคืน)
+  inspectionResultBillCost Decimal?  @db.Decimal(10, 2) // ค่าตรวจรถ (Bill) ณ วันทราบผล - เฉพาะรอบ 2, ตรวจไม่ผ่านเป็น 0
+  inspectionFailRemark     String? // เหตุผลที่ตรวจไม่ผ่าน - บังคับกรอกเมื่อ inspectionResult = 'ไม่ผ่าน'
 
   // Step 4: ยื่นเอกสารจดทะเบียน - ใช้คำนวณภาษีประจำปี (ดู GovernmentTax*/VehicleOwner/TaxCalculation ด้านล่าง)
   firstRegistrationDate DateTime? // วันจดทะเบียนครั้งแรก - ใช้คำนวณอายุรถและตรวจสอบมาตรการลดภาษี EV ตามช่วงเวลา
@@ -129,16 +165,18 @@ model Vehicle {
 
   // Step 6-8 (หลังได้รับใบเสร็จ): รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - วันที่ไม่ว่าง = ดำเนินการแล้ว
   // (คิวของแต่ละขั้นและเงื่อนไขก่อนหน้าอยู่ใน backend/src/receiving/receiving.service.ts)
-  plateReceivedDate DateTime?
-  platePhotoId      String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
-  bookReceivedDate  DateTime?
-  bookPhotoId       String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
-  deliveredDate     DateTime?
-  deliveryRecipient String? // ผู้รับของ Delivery
-  deliveryNote      String?
+  plateReceivedDate   DateTime?
+  platePhotoId        String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
+  bookReceivedDate    DateTime?
+  bookPhotoId         String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
+  deliveredDate       DateTime?
+  deliveryRecipient   String? // ผู้รับของ Delivery
+  deliveryNote        String?
   // ส่งงาน = ส่งใบเสร็จ + เล่ม (deliveredDate) ป้ายส่งพร้อมกันถ้ารับป้ายแล้ว ถ้าป้ายยังไม่ออกจะส่งตามทีหลัง
   // plateDeliveredDate ว่าง ทั้งที่ deliveredDate ไม่ว่าง = ป้ายค้างส่ง (ดู backend/src/delivery)
-  plateDeliveredDate DateTime?
+  plateDeliveredDate  DateTime?
+  // ลูกค้ากดยืนยันรับของใน portal (ดู backend/src/portal) - ไม่บังคับ พนักงานยังปิดงานได้โดยไม่ต้องรอ
+  deliveryConfirmedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

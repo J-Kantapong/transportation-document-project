@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 // ส่งงานลูกค้า (พนักงาน): ติ๊กคันที่ส่งแล้ว + วันที่ส่ง + ผู้รับ แล้วกดบันทึกครั้งเดียวทั้งชุด - พนักงานไม่เห็นราคา เรื่องบิลอยู่ที่ backend/src/billing
@@ -42,6 +43,7 @@ export class DeliveryService {
           { deliveredDate: null, bookReceivedDate: { not: null }, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } } },
           { deliveredDate: { not: null }, plateDeliveredDate: null },
         ],
+        ...vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
       },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: VEHICLE_INCLUDE,
@@ -52,7 +54,7 @@ export class DeliveryService {
 
   async recent() {
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { deliveredDate: { not: null } },
+      where: { deliveredDate: { not: null }, ...vehicleTypeWhere() },
       orderBy: [{ deliveredDate: 'desc' }, { updatedAt: 'desc' }],
       take: 200,
       include: VEHICLE_INCLUDE,
@@ -73,6 +75,7 @@ export class DeliveryService {
 
     const vehicles = await this.prisma.vehicle.findMany({ where: { id: { in: ids } }, include: VEHICLE_INCLUDE });
     if (vehicles.length !== ids.length) throw bad('ไม่พบข้อมูลรถบางคัน');
+    for (const v of vehicles) assertVehicleInScope(v.body); // STAFF_CAR / STAFF_MOTO ส่งงานได้เฉพาะประเภทรถของตัวเอง
 
     const dateText = `${String(date.getUTCDate()).padStart(2, '0')}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${date.getUTCFullYear()}`;
     const updates = vehicles.map((v) => {

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
@@ -312,6 +313,7 @@ export class VehiclesService {
         inspectionResult: 'ผ่าน',
         inspectionResultDate: { gte: earliestValidPass, lte: submitDate },
         documentSubmissions: { none: { status: { in: ACTIVE_SUBMISSION_STATUSES } } },
+        ...vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
       },
       orderBy: [{ inspectionResultDate: 'asc' }, { date: 'asc' }, { chassis: 'asc' }],
       include: this.vehicleFullInclude,
@@ -336,7 +338,7 @@ export class VehiclesService {
     const trimmed = query.trim();
     if (!trimmed) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { contains: trimmed, mode: 'insensitive' } },
+      where: { chassis: { contains: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 20,
       include: this.vehicleFullInclude,
@@ -352,8 +354,9 @@ export class VehiclesService {
     if (trimmed.length === 0) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถังอย่างน้อย 1 รายการ' });
     if (trimmed.length > MAX_BATCH_SIZE) throw new BadRequestException({ error: `รองรับไม่เกิน ${MAX_BATCH_SIZE} คันต่อครั้ง` });
 
+    // รถนอกขอบเขตประเภท (STAFF_CAR / STAFF_MOTO) ไม่ถูกดึงมา -> ไปอยู่ใน notFound เหมือนไม่มีในระบบ
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { in: trimmed, mode: 'insensitive' } },
+      where: { chassis: { in: trimmed, mode: 'insensitive' }, ...vehicleTypeWhere() },
       include: this.vehicleFullInclude,
     });
     const mapped = await this.mapSubmitCandidates(vehicles, submitDate);
@@ -938,6 +941,7 @@ export class VehiclesService {
 
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertVehicleInScope(vehicle.body); // Step 4 - STAFF_CAR / STAFF_MOTO แก้ได้เฉพาะประเภทรถของตัวเอง
 
     if (ownerIdRaw) {
       const owner = await this.prisma.vehicleOwner.findUnique({ where: { id: ownerIdRaw } });

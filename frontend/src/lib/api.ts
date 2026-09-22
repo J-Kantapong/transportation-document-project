@@ -1,3 +1,5 @@
+import { getToken, redirectToLogin } from './auth';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
 export interface RowError {
@@ -16,12 +18,18 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // แนบ token ล็อกอินทุกคำขอ (ดู lib/auth.ts) - หน้า login/register ยังไม่มี token ก็ส่งได้ปกติ
+  const token = getToken();
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       // FormData (อัปโหลดรูป) ให้ browser ตั้ง Content-Type multipart เอง
-      headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...init?.headers },
+      headers:
+        init?.body instanceof FormData
+          ? { ...auth, ...(init.headers as Record<string, string> | undefined) }
+          : { 'Content-Type': 'application/json', ...auth, ...(init?.headers as Record<string, string> | undefined) },
     });
   } catch {
     throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
@@ -32,6 +40,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     data = await res.json();
   } catch {
     throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
+  }
+
+  // 401 ระหว่างใช้งาน = token หมดอายุหรือบัญชีถูกระงับ -> กลับไปหน้าล็อกอิน (ยกเว้นตอนกำลังล็อกอินเอง)
+  if (res.status === 401 && !path.startsWith('/api/auth/login')) {
+    redirectToLogin();
+    throw new ApiError('กรุณาเข้าสู่ระบบใหม่');
   }
 
   if (!res.ok) {

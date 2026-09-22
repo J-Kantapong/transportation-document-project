@@ -56,7 +56,7 @@ describe('ReceiptsService.upload', () => {
   });
 
   it('แนบกับรายการที่ยื่นไม่สำเร็จไม่ได้', async () => {
-    const { svc } = setup({ id: 's1', status: 'FAILED' });
+    const { svc } = setup({ id: 's1', status: 'FAILED', vehicle: { chassis: 'X', body: null } });
     await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ response: { error: expect.stringContaining('ยื่นไม่สำเร็จ') } });
   });
 

@@ -11,6 +11,7 @@ const ICONS = {
   swap: '<path d="M3 7h17m-4-4 4 4-4 4M21 17H4m4-4-4 4 4 4"/>',
   transfer: '<path d="M14 4H5v16h14v-7M9 9h12m-4-4 4 4-4 4M9 15h4"/>',
   more: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 12h.01M12 12h.01M17 12h.01"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4.5-6.2"/>',
   move: '<path d="M3 6h11v12H3zM14 10h4l3 4v4h-7M7 6V3h6M6 18v2m12-2v2M6 11h5"/>',
 } as const;
 
