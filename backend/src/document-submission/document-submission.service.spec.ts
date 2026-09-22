@@ -20,6 +20,8 @@ const VEHICLE = {
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   return {
     vehicle: { findUnique: vi.fn().mockResolvedValue(VEHICLE), update: vi.fn().mockResolvedValue(VEHICLE) },
+    // งานสลับเลขของรถคันนี้ - ไม่มี = รถทั่วไป (ดู assertEligible)
+    plateSwap: { findFirst: vi.fn().mockResolvedValue(null) },
     documentSubmission: {
       findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn(),
@@ -81,6 +83,30 @@ describe('DocumentSubmissionService.submit - เงื่อนไขการ�
     });
     return { service: new DocumentSubmissionService(prisma, mockTaxService()) };
   }
+
+  // รถที่รับเลขจากงานสลับเลข (ผู้ใช้ 2026-09-23)
+  function withPlateSwap(returnedDate: Date | null) {
+    const create = vi.fn().mockResolvedValue({ id: 'sub1', status: 'PENDING' });
+    const prisma = mockPrisma({
+      plateSwap: { findFirst: vi.fn().mockResolvedValue({ returnedDate }) },
+      documentSubmission: { findFirst: vi.fn().mockResolvedValue(null), findUnique: vi.fn(), create, update: vi.fn() },
+    });
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), create };
+  }
+
+  it('ยื่นไม่ได้ถ้างานสลับเลขยังไม่ได้ยืนยันรับเอกสารกลับ', async () => {
+    const { service, create } = withPlateSwap(null);
+    await expect(service.submit('v1', OPTIONS)).rejects.toMatchObject({
+      response: { error: expect.stringContaining('ยืนยันรับเอกสารกลับ') },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('ยื่นได้เมื่องานสลับเลขรับเอกสารกลับแล้ว', async () => {
+    const { service, create } = withPlateSwap(new Date('2026-09-18T00:00:00.000Z'));
+    await service.submit('v1', OPTIONS);
+    expect(create).toHaveBeenCalled();
+  });
 
   it('ยื่นไม่ได้ถ้ายื่นครั้งล่าสุดยังค้างสถานะ PENDING', async () => {
     const { service, create } = withActiveSubmission('PENDING');

@@ -67,7 +67,14 @@ export class DocumentSubmissionService {
       where: { vehicleId: vehicle.id, status: { in: ACTIVE_SUBMISSION_STATUSES } },
       orderBy: { createdAt: 'desc' },
     });
-    const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null }, submitDate);
+    // งานสลับเลขของรถคันนี้ (ถ้ามี) - ตารางยังไม่ได้รันไมเกรชัน (P2021) ถือว่าไม่มีงานสลับเลข
+    const plateSwap = await this.prisma.plateSwap
+      .findFirst({ where: { newVehicleId: vehicle.id }, orderBy: { createdAt: 'desc' }, select: { returnedDate: true } })
+      .catch((err: { code?: string }) => {
+        if (err?.code === 'P2021') return null;
+        throw err;
+      });
+    const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null, plateSwap }, submitDate);
     if (reason) throw new BadRequestException({ error: reason });
   }
 

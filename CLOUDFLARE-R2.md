@@ -18,9 +18,10 @@
   - ใบเสร็จ `receipts/ปี/เดือน/uuid.jpg`
   - ป้ายทะเบียน `plates/ปี/เดือน/uuid.jpg`
   - เล่มทะเบียน `books/ปี/เดือน/uuid.jpg`
+  - ไฟล์แนบงานแจ้งย้ายยามาฮ่า (เพิ่ม 2026-09-22) `yamaha-relocation/receipts/ปี/เดือน/uuid.ext` (ใบเสร็จ) และ `yamaha-relocation/reports/ปี/เดือน/uuid.ext` (Report) รับรูป JPEG/PNG/WebP หรือ PDF ตาราง `YamahaRelocationAttachment` โหลดผ่าน `GET /api/yamaha-relocation/attachments/:id/file`
   - `R2ReceiptStorage` เก็บบน R2 ผ่าน S3 API (endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, region `auto`)
   - `receiptStorageProvider` เลือกให้อัตโนมัติ: **ตั้ง env R2 ครบ 4 ตัว → ใช้ R2, ว่างทั้ง 4 → ใช้ดิสก์เครื่อง, ตั้งไม่ครบ → backend ไม่ start และแจ้ง error**
-- ทั้ง 3 module (receipts, plate-photos, book-photos) ใช้ provider เดียวกัน
+- ทั้ง 4 module (receipts, plate-photos, book-photos, yamaha-relocation) ใช้ provider เดียวกัน
 - ตารางในฐานข้อมูลเก็บแค่ **key** ของไฟล์ ตัวไฟล์อยู่ใน storage
 - Bucket ต้องเป็น **private** หน้าเว็บโหลดรูปผ่าน backend (`GET /api/.../image`) เท่านั้น ไม่เปิด public URL
 - เมื่อ backend start จะ log บอกว่าใช้ R2 หรือดิสก์เครื่อง
@@ -47,7 +48,7 @@
 | Render service | `transportation-document-backend-dev` | `transportation-document-backend` |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | ค่าเดิม | **ค่าเดียวกับ dev** |
 | `R2_PREFIX` | `dev` | `production` (ทั้งคู่ตั้งไว้ใน `render.yaml` แล้ว) |
-| ไฟล์อยู่ที่ | `dev/receipts/...`, `dev/plates/...`, `dev/books/...` | `production/receipts/...`, `production/plates/...` ฯลฯ |
+| ไฟล์อยู่ที่ | `dev/receipts/...`, `dev/plates/...`, `dev/books/...`, `dev/yamaha-relocation/...` | `production/receipts/...`, `production/plates/...` ฯลฯ |
 | สถานะ | ตั้งค่าแล้ว | รอใส่ค่าใน Render |
 
 - prefix ใส่ที่ชั้น storage (`R2ReceiptStorage`) เท่านั้น ฐานข้อมูลยังเก็บ key แบบไม่มี prefix เหมือนเดิม จึงไม่ต้องแก้ข้อมูลหรือ migration

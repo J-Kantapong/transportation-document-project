@@ -121,10 +121,10 @@ export class ReceiptsService {
     }
   }
 
-  // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ
+  // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ (ไม่รวมใบเสร็จงานสลับเลข ซึ่งผูกกับงานผ่าน plateSwapId)
   async listUnassigned() {
     const receipts = await this.prisma.receiptImage.findMany({
-      where: { submissionId: null },
+      where: { submissionId: null, plateSwapId: null },
       orderBy: { createdAt: 'desc' },
       take: 200,
       select: receiptSelect,
@@ -161,12 +161,14 @@ export class ReceiptsService {
   async remove(id: string) {
     const receipt = await this.prisma.receiptImage.findUnique({
       where: { id },
-      select: { id: true, storageKey: true, submission: { select: { status: true } } },
+      select: { id: true, storageKey: true, plateSwapId: true, submission: { select: { status: true } } },
     });
     if (!receipt) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
     if (receipt.submission?.status === 'RECEIPT_RECEIVED') {
       throw new BadRequestException({ error: 'รายการนี้รับใบเสร็จแล้ว ลบรูปใบเสร็จไม่ได้' });
     }
+    // ใบเสร็จงานสลับเลขลบผ่าน DELETE /api/plate-swaps/:id/receipts/:receiptId (รับเอกสารกลับแล้วห้ามลบ)
+    if (receipt.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข ลบจากหน้างานสลับเลข' });
     await this.prisma.receiptImage.delete({ where: { id } });
     await this.storage.delete(receipt.storageKey).catch(() => undefined);
     return { id };

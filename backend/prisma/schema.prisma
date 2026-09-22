@@ -191,6 +191,7 @@ model Vehicle {
   editLogs            VehicleEditLog[]
   taxCalculations     TaxCalculation[]
   documentSubmissions DocumentSubmission[]
+  plateSwapsAsNew     PlateSwap[] // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ที่รับเลขจากรถเก่า
 
   @@index([customerId])
   @@index([brandId])
@@ -571,9 +572,77 @@ model ReceiptImage {
   extraction       Json? // ผลที่ AI อ่านได้ - รูปแบบจะกำหนดหลังเห็นใบเสร็จจริง
   createdAt        DateTime @default(now())
 
+  // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง
+  plateSwapId String?
+
   submission DocumentSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  plateSwap  PlateSwap?          @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
 
   @@index([submissionId])
+  @@index([plateSwapId])
+}
+
+// --- การสลับเลข (Plate swap) ------------------------------------------------------
+// ผู้ใช้ 2026-09-22: เริ่มจากรถยนต์ แบบ "รถเก่า <-> รถใหม่" ก่อน (รถจักรยานยนต์ และ "รถเก่า <-> รถเก่า" รอเงื่อนไขจากผู้ใช้)
+// หนึ่งแถว = งานสลับเลขของรถเก่า 1 คัน (รถเก่าไม่อยู่ในฐานข้อมูลรถจดใหม่ จึงกรอกข้อมูลเอง) ลิงก์กับรถใหม่ใน
+// ฐานข้อมูลรถจดใหม่ได้ด้วยเลขตัวถัง (newVehicleId) ค่าใช้จ่ายคิดตอนบันทึก (ดู backend/src/plate-swap/plate-swap-fee.ts)
+// แล้วเก็บ snapshot ไว้ใน billItems/noBillItems. ขั้นตอน: ยื่น (submitDate) -> รับเอกสารกลับ (returnedDate + รูปใบเสร็จ)
+enum PlateSwapKind {
+  OLD_NEW // รถเก่า <-> รถใหม่ (รถใหม่จากฐานข้อมูลรถจดใหม่)
+  OLD_OLD // รถเก่า <-> รถเก่า (ยังไม่เปิดใช้ - รอเงื่อนไข)
+}
+
+// ที่มาของเลขทะเบียนใหม่ของรถเก่า - กำหนดรายการค่าธรรมเนียม (Bill) ที่ต่างกัน
+enum PlateSwapNumberSource {
+  NEW_UNUSED // ขอใช้เลขทะเบียนที่ไม่เคยออกให้รถคันอื่น 500 บาท
+  AUCTION_RESERVED // เลขประมูลหรือชุดสงวน - ขอใช้เลขทะเบียนสงวน 1,500 บาท
+}
+
+model PlateSwap {
+  id           String        @id @default(cuid())
+  kind         PlateSwapKind @default(OLD_NEW)
+  vehicleClass String        @default("CAR") // CAR | MOTO - ตอนนี้รับเฉพาะ CAR (อัตราจักรยานยนต์ยังไม่มี)
+
+  // รถเก่า (กรอกเอง)
+  oldOwnerName   String // ชื่อเจ้าของรถ
+  // ผู้ใช้ 2026-09-23: แยกเลขเครื่องกับเลขตัวถังเป็นคนละช่อง และบังคับกรอกทั้งคู่ (ต่างจาก Vehicle ของรถจดใหม่ที่เลขเครื่องไม่บังคับ)
+  oldEngine      String // เลขเครื่อง
+  oldChassis     String // เลขตัวถัง
+  oldBrand       String // ยี่ห้อ
+  // ทะเบียนแยก 2 ช่องเหมือน Vehicle ของรถจดใหม่ (ผู้ใช้ 2026-09-23): หมวดทะเบียน เช่น "4กข" + เลขทะเบียน เช่น "4444"
+  oldPlateCategory String // หมวดทะเบียนเก่า
+  oldPlateNumber   String // เลขทะเบียนเก่า
+  // ทะเบียนใหม่ที่รถเก่าจะได้รับ - ตอนยื่นอาจยังไม่รู้ กรอกทีหลังได้ และบังคับตอนยืนยันรับเอกสารกลับ
+  newPlateCategory String?
+  newPlateNumber   String?
+
+  // รถใหม่ในฐานข้อมูลรถจดใหม่ที่รับเลขจากรถเก่า (ลิงก์ด้วยเลขตัวถัง) - หน้ายื่นเอกสารของรถคันนั้นจะเห็นเลขสลับ
+  // และกดใช้เลขนี้เป็นเลขที่ขอได้ (ผู้ใช้ 2026-09-23)
+  newVehicleId String?
+
+  submitDate DateTime // วันที่ยื่น
+
+  // ค่าใช้จ่าย - ตัวเลือกที่ผู้ใช้ติ๊ก + snapshot รายการ ณ ตอนบันทึก
+  numberSource    PlateSwapNumberSource
+  buyNormalPlate  Boolean               @default(false) // ค่าแผ่นป้ายทะเบียนรถยนต์ออกใหม่ รับปกติ / ขาว-ดำปกติ 200 บาท
+  buyAuctionPlate Boolean               @default(false) // ค่าแผ่นป้ายประมูล 1,200 บาท (เฉพาะ AUCTION_RESERVED)
+  billItems       Json // [{label, amount}]
+  noBillItems     Json // [{label, amount}] - ลงขัน 200 บาท
+  billTotal       Decimal               @db.Decimal(12, 2)
+  noBillTotal     Decimal               @db.Decimal(12, 2)
+
+  // รับเอกสารกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปใบเสร็จผ่าน ReceiptImage.plateSwapId)
+  returnedDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  newVehicle Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
+  receipts   ReceiptImage[]
+
+  @@index([newVehicleId])
+  @@index([submitDate])
+  @@index([returnedDate])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------
