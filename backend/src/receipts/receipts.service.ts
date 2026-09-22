@@ -94,7 +94,7 @@ export class ReceiptsService {
       submissionIdRaw === undefined || submissionIdRaw === null || submissionIdRaw === '' ? null : await this.assertAttachable(submissionIdRaw);
 
     const now = new Date();
-    const storageKey = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
+    const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
     const extraction = await this.extractor.extract(file.buffer, type.mimeType);
     const matched = await this.matchByChassis(extraction, submissionId);
     await this.storage.put(storageKey, file.buffer, type.mimeType);

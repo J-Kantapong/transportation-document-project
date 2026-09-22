@@ -4,7 +4,8 @@ import * as process from 'node:process';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable, Logger, type Provider } from '@nestjs/common';
 
-// ที่เก็บไฟล์รูป (ใบเสร็จ ป้าย เล่มทะเบียน) - ตาราง ReceiptImage/PlatePhoto/BookPhoto เก็บแค่ key; ตัวไฟล์อยู่ที่นี่
+// ที่เก็บไฟล์รูป - ตาราง ReceiptImage/PlatePhoto/BookPhoto เก็บแค่ key; ตัวไฟล์อยู่ที่นี่
+// key แยกโฟลเดอร์ตามประเภท: receipts/ปี/เดือน/uuid.jpg, plates/ปี/เดือน/..., books/ปี/เดือน/... (ทั้งบนดิสก์และใน R2)
 // มี 2 แบบ ใช้ interface เดียวกัน: ดิสก์ในเครื่อง (dev) และ Cloudflare R2 (production) - เลือกอัตโนมัติจาก env
 export const RECEIPT_STORAGE = Symbol('RECEIPT_STORAGE');
 
@@ -14,11 +15,11 @@ export interface ReceiptStorage {
   delete(key: string): Promise<void>;
 }
 
-// เก็บที่ backend/uploads/receipts (อยู่ใน .gitignore) หรือโฟลเดอร์ใน RECEIPT_STORAGE_DIR
+// เก็บที่ backend/uploads (อยู่ใน .gitignore) หรือโฟลเดอร์ใน RECEIPT_STORAGE_DIR → uploads/receipts, uploads/plates, uploads/books
 // ใช้บนเครื่องเท่านั้น - ดิสก์ของ Render ถูกล้างทุกครั้งที่ deploy จึงห้ามใช้ตัวนี้บน production
 @Injectable()
 export class LocalReceiptStorage implements ReceiptStorage {
-  private readonly root = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? 'uploads/receipts');
+  private readonly root = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? 'uploads');
 
   private resolve(key: string): string {
     const full = path.resolve(this.root, key);
@@ -101,7 +102,7 @@ export const receiptStorageProvider: Provider = {
       logger.log(`เก็บรูปที่ Cloudflare R2 bucket "${r2.bucket}"`);
       return new R2ReceiptStorage(r2);
     }
-    logger.log('เก็บรูปในดิสก์เครื่อง (uploads/receipts) - ตั้ง R2_* ใน .env เพื่อใช้ Cloudflare R2');
+    logger.log('เก็บรูปในดิสก์เครื่อง (backend/uploads) - ตั้ง R2_* ใน .env เพื่อใช้ Cloudflare R2');
     return new LocalReceiptStorage();
   },
 };

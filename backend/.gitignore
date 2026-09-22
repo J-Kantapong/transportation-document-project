@@ -6,7 +6,7 @@ dist
 /src/generated/prisma
 *.tsbuildinfo
 
-# รูปใบเสร็จที่เก็บในเครื่อง (LocalReceiptStorage)
+# รูปใบเสร็จ/ป้าย/เล่มที่เก็บในเครื่อง (LocalReceiptStorage): uploads/receipts, uploads/plates, uploads/books
 /uploads
 
 # ผลทดสอบการอ่านใบเสร็จ (มีทะเบียน/เลขตัวถังของลูกค้าจริง)
