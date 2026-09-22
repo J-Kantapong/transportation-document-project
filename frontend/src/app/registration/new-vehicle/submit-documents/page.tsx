@@ -104,6 +104,16 @@ interface BatchEntry {
 
 type DraftEntry = Omit<BatchEntry, "fee" | "taxAmount" | "grandTotal">;
 
+// ค่าอากรอยู่ในรายการ No bill (label ขึ้นต้น "ค่าอากร") - ยอดรวมทั้งหมดในหน้านี้แยกค่าอากรออก แสดงเป็นบรรทัดต่างหาก
+function dutyAmount(fee: FeePreview): number {
+  return fee.noBillItems.filter((item) => item.label.startsWith("ค่าอากร")).reduce((sum, item) => sum + item.amount, 0);
+}
+
+// รวมทั้งหมด (ยังไม่รวมค่าอากร) = Bill + No bill (หักค่าอากร) + ภาษี
+function grandTotalExcludingDuty(fee: FeePreview, taxAmount: number | null): number {
+  return fee.billTotal + fee.noBillTotal - dutyAmount(fee) + (taxAmount ?? 0);
+}
+
 function newDraft(vehicle: Vehicle, submitDate: string): DraftEntry {
   return {
     key: `${vehicle.id}-${Date.now()}-${Math.random()}`,
@@ -157,7 +167,7 @@ async function priceDrafts(drafts: DraftEntry[]): Promise<{ entries: BatchEntry[
         ...draft,
         fee: result.fee,
         taxAmount,
-        grandTotal: result.fee.billTotal + result.fee.noBillTotal + (taxAmount ?? 0),
+        grandTotal: grandTotalExcludingDuty(result.fee, taxAmount),
       });
     });
   }
@@ -578,7 +588,7 @@ export default function SubmitDocumentsPage() {
       submitDate: sessionSubmitDate,
       fee: feePreview,
       taxAmount,
-      grandTotal: feePreview.billTotal + feePreview.noBillTotal + (taxAmount ?? 0),
+      grandTotal: grandTotalExcludingDuty(feePreview, taxAmount),
     };
     setBatch((prev) => (editingKey ? prev.map((e) => (e.key === editingKey ? entry : e)) : [...prev, entry]));
     setSubmitResult(null);
@@ -729,6 +739,7 @@ export default function SubmitDocumentsPage() {
   }, [phase]);
 
   const batchGrandTotal = batch.reduce((sum, e) => sum + e.grandTotal, 0);
+  const batchDutyTotal = batch.reduce((sum, e) => sum + dutyAmount(e.fee), 0);
   const batchTaxPending = batch.filter((e) => e.taxAmount === null).length;
   const ownerUnspecifiedKeys = batch.filter(isOwnerUnspecified).map((e) => e.key);
 
@@ -1362,11 +1373,15 @@ export default function SubmitDocumentsPage() {
                     borderTop: "1px solid #e3e6ee",
                   }}
                 >
-                  <span style={{ fontSize: 14, fontWeight: 500 }}>รวมทั้งหมด</span>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>รวมทั้งหมด (ยังไม่รวมค่าอากร)</span>
                   <span style={{ fontSize: 22, fontWeight: 500, color: "#2854d9" }}>
-                    {formatMoney(feePreview.billTotal + feePreview.noBillTotal + (taxPreview?.amount ?? 0))} บาท
+                    {formatMoney(grandTotalExcludingDuty(feePreview, taxPreview?.amount ?? null))} บาท
                     {!ownerType || taxPreview?.amount === null ? " + ภาษี (รอข้อมูล)" : ""}
                   </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#8a90a2", marginTop: 6 }}>
+                  <span>ค่าอากร (แยกต่างหาก)</span>
+                  <span>{formatMoney(dutyAmount(feePreview))} บาท</span>
                 </div>
               </>
             )}
@@ -1500,7 +1515,7 @@ export default function SubmitDocumentsPage() {
                         <th>เจ้าของรถ</th>
                         <th>ทะเบียนที่ขอ</th>
                         <th>ตัวเลือก</th>
-                        <th style={{ textAlign: "right" }}>รวม (บาท)</th>
+                        <th style={{ textAlign: "right" }}>รวมทั้งหมด (ยังไม่รวมค่าอากร) (บาท)</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -1546,11 +1561,18 @@ export default function SubmitDocumentsPage() {
                   </table>
                 </div>
               </section>
-              <section className="panel" style={{ padding: 22, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>
-                  รวมทั้งหมด ({batch.length} คัน){batchTaxPending > 0 ? ` · ${batchTaxPending} คันยังคำนวณภาษีไม่ได้` : ""}
-                </span>
-                <span style={{ fontSize: 22, fontWeight: 500, color: "#2854d9" }}>{formatMoney(batchGrandTotal)} บาท</span>
+              <section className="panel" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>
+                    รวมทั้งหมด (ยังไม่รวมค่าอากร) ({batch.length} คัน)
+                    {batchTaxPending > 0 ? ` · ${batchTaxPending} คันยังคำนวณภาษีไม่ได้` : ""}
+                  </span>
+                  <span style={{ fontSize: 22, fontWeight: 500, color: "#2854d9" }}>{formatMoney(batchGrandTotal)} บาท</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#8a90a2" }}>
+                  <span>ค่าอากร (แยกต่างหาก)</span>
+                  <span>{formatMoney(batchDutyTotal)} บาท</span>
+                </div>
               </section>
               {ownerUnspecifiedKeys.length > 0 && (
                 <p className="customer-message error" role="alert">
@@ -1600,7 +1622,7 @@ export default function SubmitDocumentsPage() {
         </button>
         <h2>ยืนยันการยื่นเอกสาร</h2>
         <p>
-          คุณแน่ใจหรือไม่ที่จะยื่นเอกสารจดทะเบียนทั้งหมด <strong>{batch.length} คัน</strong> ยอดรวม <strong>{formatMoney(batchGrandTotal)} บาท</strong>
+          คุณแน่ใจหรือไม่ที่จะยื่นเอกสารจดทะเบียนทั้งหมด <strong>{batch.length} คัน</strong> ยอดรวม (ยังไม่รวมค่าอากร) <strong>{formatMoney(batchGrandTotal)} บาท</strong>
         </p>
         <div className="form-actions">
           <button type="button" className="text-button" onClick={() => confirmDialogRef.current?.close()}>
