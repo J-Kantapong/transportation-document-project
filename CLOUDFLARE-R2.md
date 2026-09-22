@@ -25,30 +25,49 @@
 - Bucket ต้องเป็น **private** หน้าเว็บโหลดรูปผ่าน backend (`GET /api/.../image`) เท่านั้น ไม่เปิด public URL
 - เมื่อ backend start จะ log บอกว่าใช้ R2 หรือดิสก์เครื่อง
 
-## ตัวแปร env (ต้องตั้งครบทั้ง 4 ตัว หรือว่างทั้ง 4 ตัว)
+## ตัวแปร env
 
 | ตัวแปร | หาได้จาก |
 |---|---|
 | `R2_ACCOUNT_ID` | Cloudflare dashboard → R2 → แถบด้านขวา (Account ID) |
 | `R2_ACCESS_KEY_ID` | R2 → Manage R2 API Tokens → Create API Token |
 | `R2_SECRET_ACCESS_KEY` | ได้พร้อม Access Key ตอนสร้าง token (แสดงครั้งเดียว ต้องคัดลอกเก็บทันที) |
-| `R2_BUCKET` | ชื่อ bucket ที่สร้างไว้ |
+| `R2_BUCKET` | ชื่อ bucket ที่สร้างไว้ (`transport-photos`) |
+| `R2_PREFIX` | ไม่บังคับ: โฟลเดอร์ของ environment ใน bucket (ดูด้านล่าง) |
 
-สิทธิ์ของ API token: **Object Read & Write** และ scope ให้เฉพาะ bucket นี้
+4 ตัวแรกต้องตั้งครบทั้ง 4 หรือว่างทั้ง 4 ตัว ถ้าตั้งไม่ครบ backend จะไม่ start สิทธิ์ของ API token: **Object Read & Write** และ scope ให้เฉพาะ bucket นี้
 
-## ขั้นตอนตั้งค่า (ยังไม่ได้ทำ – รอผู้ใช้)
+## Dev กับ Production: bucket เดียว แยกโฟลเดอร์ (ผู้ใช้ตัดสินใจ 2026-09-22)
 
-1. Cloudflare dashboard → R2 → **Create bucket** (ตั้งชื่อ เช่น `transportation-photos`) ไม่ต้องเปิด public access
-2. R2 → **Manage R2 API Tokens** → Create API Token → permission Object Read & Write → เลือก bucket → คัดลอก Access Key ID และ Secret Access Key
-3. ทดสอบในเครื่อง: ใส่ค่าทั้ง 4 ใน `backend/.env` แล้วรัน
+ใช้ bucket `transport-photos` และ API token ชุดเดิมทั้ง 2 environment แต่แยกไฟล์ด้วย `R2_PREFIX`
+
+| | Dev | Production |
+|---|---|---|
+| Git branch | `dev` | `master` |
+| Render service | `transportation-document-backend-dev` | `transportation-document-backend` |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | ค่าเดิม | **ค่าเดียวกับ dev** |
+| `R2_PREFIX` | `DEV` | `production` (ทั้งคู่ตั้งไว้ใน `render.yaml` แล้ว) |
+| ไฟล์อยู่ที่ | `DEV/receipts/...`, `DEV/plates/...`, `DEV/books/...` | `production/receipts/...`, `production/plates/...` ฯลฯ |
+| สถานะ | ตั้งค่าแล้ว | รอใส่ค่าใน Render |
+
+- prefix ใส่ที่ชั้น storage (`R2ReceiptStorage`) เท่านั้น ฐานข้อมูลยังเก็บ key แบบไม่มี prefix เหมือนเดิม จึงไม่ต้องแก้ข้อมูลหรือ migration
+- ชื่อโฟลเดอร์ใน R2 แยกตัวพิมพ์เล็ก/ใหญ่ `DEV` กับ `dev` คือคนละโฟลเดอร์
+- ตอนเปลี่ยน dev มาใช้ `DEV/` (2026-09-22) ยังไม่มีรูปที่ root ของ bucket จึงไม่มีไฟล์ต้องย้าย
+- `backend/.env` ในเครื่องตั้ง `R2_PREFIX=DEV` ด้วย (ต่อฐานข้อมูล dev เหมือนกัน)
+- ข้อควรรู้: token เดียวกันแปลว่า backend dev มีสิทธิ์เขียน/ลบไฟล์ในโฟลเดอร์ `production/` ได้ในทางเทคนิค (โค้ดไม่ทำ เพราะใช้ prefix ต่างกัน) ถ้าวันหนึ่งอยากกันให้ขาด ให้ย้าย production ไป bucket แยกพร้อม token ของตัวเอง
+- `render.yaml` ประกาศ `R2_*` ไว้ทั้ง 2 service แล้ว แต่ค่าลับต้องใส่ใน Render dashboard เอง
+
+## ขั้นตอนตั้งค่า Production
+
+1. ทดสอบในเครื่องก่อน: สร้างไฟล์ `backend/.env.production` (อยู่ใน .gitignore แล้ว ไม่ถูก commit) คัดลอก `R2_*` 4 ตัวจาก `backend/.env` แล้วเพิ่ม `R2_PREFIX=production`
 
    ```bash
-   cd backend && node scripts/check-r2.mjs
+   cd backend && node scripts/check-r2.mjs .env.production
    ```
 
-   สคริปต์จะอัปโหลดไฟล์ทดสอบ อ่านกลับ แล้วลบทิ้ง และบอกสาเหตุถ้าเชื่อมต่อไม่ได้ (key ผิด / ชื่อ bucket ผิด / token ไม่มีสิทธิ์)
-4. Render (production) → service backend → **Environment** → เพิ่มตัวแปรทั้ง 4 → redeploy
-5. Dev environment: ปล่อย `R2_*` ว่างไว้ให้เก็บบนดิสก์ Render (หายทุก deploy ซึ่งยอมรับได้สำหรับ dev) หรือถ้าต้องการให้รูปคงอยู่ ให้สร้าง bucket แยกชื่อลงท้าย `-dev`
+   สคริปต์จะอัปโหลดไฟล์ทดสอบไปที่ `production/_check/...` อ่านกลับ แล้วลบทิ้ง
+2. Render → service **`transportation-document-backend`** (ไม่ใช่ `-dev`) → **Environment** → เพิ่ม `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (ค่าเดียวกับ dev) และ `R2_PREFIX` = `production` → **Save only** (ค่าจะมีผลตอน merge `dev` เข้า `master` ครั้งถัดไป)
+3. หลัง deploy production ดู log ของ Render ต้องขึ้นว่า `เก็บรูปที่ Cloudflare R2 bucket "transport-photos" โฟลเดอร์ "production"` แล้วลองอัปโหลดรูป 1 รูปบนเว็บ production และเช็กใน Cloudflare ว่ามีไฟล์ในโฟลเดอร์ `production/`
 
 ## ข้อควรระวัง
 

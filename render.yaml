@@ -1,8 +1,10 @@
 services:
+  # ---- Production: deploys from `master`, uses the Neon `main` branch ----
   - type: web
     name: transportation-document-backend
     runtime: node
     plan: free
+    branch: master
     rootDir: backend
     # preDeployCommand needs a paid plan, so migrations run as part of the build instead.
     buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
@@ -14,3 +16,45 @@ services:
         sync: false # Neon direct connection string (no -pooler) — used by prisma migrate deploy
       - key: FRONTEND_ORIGIN
         sync: false
+      # Cloudflare R2 photo storage (see CLOUDFLARE-R2.md): same bucket and token as dev, files go
+      # under the `production/` folder. Set all four R2_* credentials or none.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false # transport-photos
+      - key: R2_PREFIX
+        value: production
+
+  # ---- Dev: deploys from `dev`, uses the Neon `dev` branch (see DEPLOYMENT.md "Dev environment") ----
+  # Same build, separate database, so schema changes and test data on `dev` never touch production.
+  - type: web
+    name: transportation-document-backend-dev
+    runtime: node
+    plan: free
+    branch: dev
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: DATABASE_URL
+        sync: false # pooled connection string of the Neon *dev* branch
+      - key: DIRECT_URL
+        sync: false # direct connection string of the Neon *dev* branch
+      # Cloudflare R2: same bucket and token as production, files go under the `DEV/` folder.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false # transport-photos
+      - key: R2_PREFIX
+        value: DEV
+      # FRONTEND_ORIGIN is deliberately not set on dev: the backend then allows any origin,
+      # so every Vercel preview URL for the `dev` branch can call it. Set it if you want to
+      # lock dev down to the stable branch URL only.
