@@ -425,7 +425,10 @@ enum OwnerType {
 
 model VehicleOwner {
   id                     String     @id @default(cuid())
+  // ชื่อผู้ถือกรรมสิทธิ์ (เจ้าของตามทะเบียน) - ติ๊กไฟแนนซ์แล้ว = ชื่อไฟแนนซ์อัตโนมัติ ไม่ติ๊ก = ชื่อที่ผู้ใช้กรอกในหน้าเพิ่มข้อมูลรถ
   name                   String?
+  // ชื่อผู้ครอบครอง (ผู้เช่าซื้อ) - กรอกเฉพาะเมื่อติ๊กไฟแนนซ์ (ผู้ใช้เพิ่ม 2026-09-22) ไม่มีไฟแนนซ์ = null
+  hirerName              String?
   ownerType              OwnerType
   isHirePurchaseBusiness Boolean    @default(false) // ประกอบธุรกิจเช่าซื้อหรือไม่ - ใช้เฉพาะเมื่อ ownerType = JURISTIC
   hirerType              OwnerType? // ผู้เช่าซื้อรถคันนี้ - null เมื่อไม่ใช่กรณีเช่าซื้อ หรือบริษัทเช่าซื้อใช้รถเอง

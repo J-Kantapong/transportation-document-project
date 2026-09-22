@@ -26,6 +26,8 @@ const EMPTY_SINGLE: NormalizedVehicleRow = {
   ownerProvince: "",
   ownerType: "",
   financeId: "",
+  ownerName: "",
+  hirerName: "",
 };
 
 // Shared field grid for both the single-entry form and the edit dialog.
@@ -53,6 +55,8 @@ function VehicleFieldsFieldset({
 }) {
   // CC หรือ น้ำหนัก บังคับตามประเภทรถ + เชื้อเพลิงที่เลือก (ใช้คำนวณภาษี) - ดู requiredSizeField
   const sizeField = requiredSizeField(row.body, row.fuel);
+  // ติ๊กไฟแนนซ์: ผู้ถือกรรมสิทธิ์ = ชื่อไฟแนนซ์ที่เลือก (แสดงอย่างเดียว แก้ไม่ได้) และกรอกชื่อผู้ครอบครองแทน
+  const financeLabel = financeCompanies.find((f) => f.id === row.financeId)?.name ?? "";
   return (
     <div className="vehicle-fields">
       <label className="field">
@@ -187,6 +191,35 @@ function VehicleFieldsFieldset({
           </select>
         )}
       </div>
+      {financeOn ? (
+        <>
+          <div className="field">
+            ผู้ถือกรรมสิทธิ์
+            <input value={financeLabel} readOnly placeholder="ชื่อไฟแนนซ์ที่เลือก" aria-label="ผู้ถือกรรมสิทธิ์ (ไฟแนนซ์)" />
+          </div>
+          <label className="field">
+            ชื่อผู้ครอบครอง *
+            <input
+              required
+              maxLength={250}
+              value={row.hirerName}
+              onChange={(e) => onFieldChange("hirerName", e.target.value)}
+              placeholder="ชื่อผู้เช่าซื้อ / ผู้ครอบครองรถ"
+            />
+          </label>
+        </>
+      ) : (
+        <label className="field">
+          ชื่อผู้ถือกรรมสิทธิ์ *
+          <input
+            required
+            maxLength={250}
+            value={row.ownerName}
+            onChange={(e) => onFieldChange("ownerName", e.target.value)}
+            placeholder="ชื่อเจ้าของรถตามทะเบียน"
+          />
+        </label>
+      )}
     </div>
   );
 }
@@ -206,6 +239,8 @@ const VEHICLE_DETAIL_FIELDS: Array<[string, (v: Vehicle) => string]> = [
   ["สถานะ", (v) => getVehicleStatus(v.registrationProvince ?? "")],
   ["จังหวัดเจ้าของรถ", (v) => v.ownerProvince ?? ""],
   ["ประเภทเจ้าของรถ", (v) => ownerDisplayLabel(v, v.financeName) ?? ""],
+  ["ผู้ถือกรรมสิทธิ์", (v) => v.ownerName ?? ""],
+  ["ผู้ครอบครอง", (v) => v.hirerName ?? ""],
 ];
 
 function parseCSV(text: string): string[][] {
@@ -358,10 +393,11 @@ export default function VehicleEntryPage() {
     setSingle((prev) => ({ ...prev, [key]: value }));
   }
 
-  // เอาติ๊กไฟแนนซ์ออก = ล้างบริษัทที่เลือกไว้ด้วย ไม่งั้นค่าเก่าจะถูกส่งไปทั้งที่ผู้ใช้ไม่เห็น dropdown แล้ว
+  // เอาติ๊กไฟแนนซ์ออก = ล้างบริษัทและชื่อผู้ครอบครองที่กรอกไว้ด้วย ไม่งั้นค่าเก่าจะถูกส่งไปทั้งที่ผู้ใช้ไม่เห็นช่องแล้ว
+  // (ชื่อผู้ถือกรรมสิทธิ์ที่กรอกไว้ก่อนติ๊กเก็บไว้ - backend ไม่ใช้เมื่อมีไฟแนนซ์ และจะกลับมาเห็นเมื่อเอาติ๊กออก)
   function toggleSingleFinance(checked: boolean) {
     setSingleFinanceOn(checked);
-    if (!checked) updateSingle("financeId", "");
+    if (!checked) setSingle((prev) => ({ ...prev, financeId: "", hirerName: "" }));
   }
 
   // ติ๊กไฟแนนซ์แล้วต้องเลือกบริษัท - ตรวจฝั่งหน้าจอเพราะ backend รู้แค่ว่า financeId ว่าง (ซึ่งถูกต้องเมื่อไม่ติ๊ก)
@@ -613,6 +649,9 @@ export default function VehicleEntryPage() {
       // แสดงประเภทที่ผู้ใช้เลือกไว้ (มีไฟแนนซ์ = ผู้เช่าซื้อ) ไม่ใช่ ownerType ดิบที่เป็นไฟแนนซ์ - ดู lib/vehicle-owner.ts
       ownerType: entryOwnerType(vehicle) ?? "",
       financeId: vehicle.financeCompanyId ?? "",
+      // รถติดไฟแนนซ์: ownerName ในฐานข้อมูลคือชื่อไฟแนนซ์ ไม่ใช่ค่าที่ผู้ใช้กรอก จึงเว้นว่างไว้เผื่อเอาติ๊กไฟแนนซ์ออกแล้วกรอกใหม่
+      ownerName: vehicle.financeCompanyId ? "" : (vehicle.ownerName ?? ""),
+      hirerName: vehicle.hirerName ?? "",
     });
     setEditFinanceOn(Boolean(vehicle.financeCompanyId));
     setEditDateText(isoToDisplayDate(vehicle.date));
@@ -627,7 +666,7 @@ export default function VehicleEntryPage() {
 
   function toggleEditFinance(checked: boolean) {
     setEditFinanceOn(checked);
-    if (!checked) updateEditRow("financeId", "");
+    if (!checked) setEditRow((prev) => ({ ...prev, financeId: "", hirerName: "" }));
   }
 
   function handleEditDateTextChange(raw: string) {

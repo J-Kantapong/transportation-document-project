@@ -90,7 +90,10 @@ export interface Vehicle {
   firstRegistrationDate: string | null;
   isFactoryNew: boolean | null;
   ownerId: string | null;
+  // ownerName = ชื่อผู้ถือกรรมสิทธิ์ (ติ๊กไฟแนนซ์ = ชื่อไฟแนนซ์อัตโนมัติ / ไม่ติ๊ก = ชื่อที่กรอกในหน้าเพิ่มข้อมูลรถ)
+  // hirerName = ชื่อผู้ครอบครอง กรอกเฉพาะรถติดไฟแนนซ์ (null เมื่อไม่มีไฟแนนซ์)
   ownerName: string | null;
+  hirerName: string | null;
   // เจ้าของรถตามทะเบียน - กรอกตั้งแต่หน้าเพิ่มข้อมูลรถจดใหม่ (ประเภทเจ้าของรถ + ติ๊กไฟแนนซ์) และหน้ายื่นเอกสารใช้ต่อ
   // ติ๊กไฟแนนซ์: ownerType = JURISTIC (ไฟแนนซ์เป็นเจ้าของ), hirerType = ประเภทที่ผู้ใช้เลือก, financeName = ชื่อไฟแนนซ์
   // ไม่ติ๊ก: ownerType = ประเภทที่เลือก, hirerType/finance = null - ใช้ helper ใน lib/vehicle-owner.ts แทนการอ่านตรงๆ

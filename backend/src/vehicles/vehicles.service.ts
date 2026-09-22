@@ -37,8 +37,10 @@ const EDITABLE_VEHICLE_FIELDS = [
 // ไม่ติ๊กไฟแนนซ์: เจ้าของ = ประเภทที่เลือก / ติ๊กไฟแนนซ์: ไฟแนนซ์เป็นเจ้าของตามทะเบียน (นิติบุคคลที่ประกอบธุรกิจเช่าซื้อ)
 // และประเภทที่เลือกกลายเป็นผู้เช่าซื้อ (hirerType) - ตรงกับข้อยกเว้นภาษี รย.1 ใน government-tax-calculator.ts
 // (นิติบุคคลเช่าซื้อ + ผู้เช่าซื้อบุคคลธรรมดา = ไม่คูณสอง)
+// name = ชื่อผู้ถือกรรมสิทธิ์ (ไฟแนนซ์ = ชื่อไฟแนนซ์ / ไม่มีไฟแนนซ์ = ชื่อที่ผู้ใช้กรอก) hirerName = ชื่อผู้ครอบครอง (เฉพาะไฟแนนซ์)
 interface OwnerData {
   name: string | null;
+  hirerName: string | null;
   ownerType: OwnerType;
   isHirePurchaseBusiness: boolean;
   hirerType: OwnerType | null;
@@ -48,9 +50,16 @@ interface OwnerData {
 function ownerDataFor(row: NormalizedVehicleRow, financeName: string | null): OwnerData {
   const chosen = row.ownerType as OwnerType;
   if (row.financeId) {
-    return { name: financeName, ownerType: OwnerType.JURISTIC, isHirePurchaseBusiness: true, hirerType: chosen, financeCompanyId: row.financeId };
+    return {
+      name: financeName,
+      hirerName: row.hirerName,
+      ownerType: OwnerType.JURISTIC,
+      isHirePurchaseBusiness: true,
+      hirerType: chosen,
+      financeCompanyId: row.financeId,
+    };
   }
-  return { name: null, ownerType: chosen, isHirePurchaseBusiness: false, hirerType: null, financeCompanyId: null };
+  return { name: row.ownerName, hirerName: null, ownerType: chosen, isHirePurchaseBusiness: false, hirerType: null, financeCompanyId: null };
 }
 
 function ownerTypeLabel(type: string | null | undefined): string {
@@ -60,13 +69,17 @@ function ownerTypeLabel(type: string | null | undefined): string {
 // ข้อความสำหรับ VehicleEditLog - เทียบเจ้าของเดิมกับใหม่ว่าเปลี่ยนจริงไหม
 function describeOwner(owner: OwnerData | null): string | null {
   if (!owner) return null;
-  if (owner.financeCompanyId) return `${ownerTypeLabel(owner.hirerType)} · ไฟแนนซ์ ${owner.name ?? ''}`.trim();
-  return ownerTypeLabel(owner.ownerType);
+  if (owner.financeCompanyId) {
+    return `${ownerTypeLabel(owner.hirerType)} · ไฟแนนซ์ ${owner.name ?? ''} · ผู้ครอบครอง ${owner.hirerName ?? ''}`.trim();
+  }
+  return `${ownerTypeLabel(owner.ownerType)} · ผู้ถือกรรมสิทธิ์ ${owner.name ?? ''}`.trim();
 }
 
 function sameOwner(a: OwnerData | null, b: OwnerData): boolean {
   return (
     !!a &&
+    a.name === b.name &&
+    a.hirerName === b.hirerName &&
     a.ownerType === b.ownerType &&
     a.isHirePurchaseBusiness === b.isHirePurchaseBusiness &&
     a.hirerType === b.hirerType &&
@@ -156,7 +169,15 @@ export class VehiclesService {
     customer: { select: { name: true } },
     brand: { select: { name: true } },
     owner: {
-      select: { id: true, name: true, ownerType: true, hirerType: true, financeCompanyId: true, financeCompany: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        hirerName: true,
+        ownerType: true,
+        hirerType: true,
+        financeCompanyId: true,
+        financeCompany: { select: { name: true } },
+      },
     },
     // แถวล่าสุดที่ยัง active (PENDING = รอใบเสร็จ / RECEIPT_RECEIVED = จดทะเบียนแล้ว) - มี = ยื่นซ้ำไม่ได้
     // ดู submission-eligibility.ts
@@ -190,6 +211,7 @@ export class VehiclesService {
     ownerId: string | null;
     owner: {
       name: string | null;
+      hirerName: string | null;
       ownerType: string;
       hirerType: string | null;
       financeCompanyId: string | null;
@@ -220,7 +242,9 @@ export class VehiclesService {
       firstRegistrationDate: vehicle.firstRegistrationDate?.toISOString().slice(0, 10) ?? null,
       isFactoryNew: vehicle.isFactoryNew,
       ownerId: vehicle.ownerId,
+      // ownerName = ชื่อผู้ถือกรรมสิทธิ์ (ไฟแนนซ์ = ชื่อไฟแนนซ์) hirerName = ชื่อผู้ครอบครอง (มีเฉพาะรถติดไฟแนนซ์)
       ownerName: vehicle.owner?.name ?? null,
+      hirerName: vehicle.owner?.hirerName ?? null,
       // ownerType = เจ้าของตามทะเบียน (ไฟแนนซ์ = JURISTIC เสมอ) ส่วนประเภทที่ผู้ใช้เลือกในหน้าเพิ่มข้อมูลรถอยู่ที่
       // hirerType เมื่อมีไฟแนนซ์ - ฝั่ง frontend ใช้ entryOwnerType()/ownerDisplayLabel() ใน lib/vehicle-owner.ts
       ownerType: vehicle.owner?.ownerType ?? null,
@@ -452,6 +476,7 @@ export class VehiclesService {
     const currentOwner: OwnerData | null = existing.owner
       ? {
           name: existing.owner.name,
+          hirerName: existing.owner.hirerName,
           ownerType: existing.owner.ownerType,
           isHirePurchaseBusiness: existing.owner.isHirePurchaseBusiness,
           hirerType: existing.owner.hirerType,

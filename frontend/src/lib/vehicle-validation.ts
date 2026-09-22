@@ -70,6 +70,13 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   } else if (!OWNER_TYPE_CHOICES.some(([code]) => code === row.ownerType)) {
     errors.push('ประเภทเจ้าของรถต้องเป็น บุคคลธรรมดา หรือ นิติบุคคล');
   }
+  // ชื่อเจ้าของรถ: มีไฟแนนซ์ = ผู้ถือกรรมสิทธิ์คือไฟแนนซ์ (ชื่อมาจากตาราง FinanceCompany) จึงบังคับกรอกชื่อผู้ครอบครองแทน
+  // ไม่มีไฟแนนซ์ = บังคับกรอกชื่อผู้ถือกรรมสิทธิ์ (ชื่อผู้ครอบครองไม่ใช้ - backend ไม่เก็บ)
+  if (row.financeId) {
+    if (!row.hirerName) errors.push('กรุณากรอกชื่อผู้ครอบครอง (รถติดไฟแนนซ์)');
+  } else if (!row.ownerName) {
+    errors.push('กรุณากรอกชื่อผู้ถือกรรมสิทธิ์');
+  }
   const sizeField = requiredSizeField(row.body, row.fuel);
   if (sizeField === 'cc' && !row.cc) {
     errors.push(`กรุณากรอกขนาด CC (จำเป็นสำหรับ ${row.body} ${row.fuel})`);

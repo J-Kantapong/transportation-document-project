@@ -50,6 +50,10 @@ export const VEHICLE_COLUMNS = [
   // financeId = รหัส FinanceCompany (ไฟล์ Batch ใช้ชื่อไฟแนนซ์หรือรหัสเหมือนลูกค้า/ยี่ห้อ)
   ['ownerType', 'ประเภทเจ้าของรถ'],
   ['financeId', 'ไฟแนนซ์'],
+  // ชื่อเจ้าของรถ (ผู้ใช้เพิ่ม 2026-09-22): ไม่ติ๊กไฟแนนซ์ = กรอก ชื่อผู้ถือกรรมสิทธิ์ (บังคับ) / ติ๊กไฟแนนซ์ = ผู้ถือกรรมสิทธิ์
+  // เป็นชื่อไฟแนนซ์อัตโนมัติ (คอลัมน์นี้เว้นว่างได้) และกรอก ชื่อผู้ครอบครอง (บังคับ) แทน - ดู getVehicleRowErrors
+  ['ownerName', 'ชื่อผู้ถือกรรมสิทธิ์'],
+  ['hirerName', 'ชื่อผู้ครอบครอง'],
 ] as const;
 
 export type VehicleColumnKey = (typeof VEHICLE_COLUMNS)[number][0];
