@@ -98,7 +98,7 @@ export default function CustomersPage() {
       <div className="heading">
         <div>
           <h1>ฐานข้อมูลลูกค้า</h1>
-          <p>จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ test auto deploy</p>
+          <p>จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ</p>
         </div>
       </div>
 

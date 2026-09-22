@@ -15,6 +15,4 @@ export class CustomersController {
   create(@Body() body: CreateCustomerDto) {
     return this.customersService.create(body);
   }
-
-  // test for auto deploy (attempt 2, after fixing Render's GitHub App install)
 }
