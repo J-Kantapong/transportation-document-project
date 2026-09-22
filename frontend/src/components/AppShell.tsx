@@ -188,7 +188,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               พื้นที่ทำงาน &nbsp;/&nbsp; <b>{breadcrumbLabel(pathname)}</b>
             </div>
           </div>
-          {user?.customerName ? <span className="status-badge">{user.customerName}</span> : <span className="demo">ต้นแบบ UI</span>}
+          {/* มุมขวาบน (ผู้ใช้ 2026-09-23): ลูกค้าเห็นชื่อบริษัทที่ผูกไว้ ไม่มีบริษัท (พนักงาน) เห็นชื่อ-นามสกุลของตัวเอง
+              คนละป้ายกัน - ชื่อบริษัทเป็นป้ายสีน้ำเงิน (status-badge) ส่วนชื่อผู้ใช้เป็นป้ายสีเทา (user-badge) */}
+          {user &&
+            (user.customerName ? (
+              <span className="status-badge">{user.customerName}</span>
+            ) : (
+              <span className="user-badge">{user.name}</span>
+            ))}
         </header>
         {blocked ? (
           <div className="content">
