@@ -177,7 +177,7 @@ export class PortalService {
 
   async vehicles(customerId: string | null): Promise<{ vehicles: PortalVehicle[] }> {
     const rows = await this.prisma.vehicle.findMany({
-      where: { customerId: this.requireCustomer(customerId) },
+      where: { customerId: this.requireCustomer(customerId), deletedAt: null }, // รถที่ถูกลบไม่แสดงในพอร์ทัลลูกค้า
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       select: VEHICLE_SELECT,
     });
@@ -187,7 +187,7 @@ export class PortalService {
   async confirmDelivery(customerId: string | null, vehicleId: string): Promise<{ vehicle: PortalVehicle }> {
     const owner = this.requireCustomer(customerId);
     // where ด้วย customerId ด้วย - รถของบริษัทอื่นตอบ "ไม่พบ" เหมือนไม่มีอยู่
-    const vehicle = await this.prisma.vehicle.findFirst({ where: { id: vehicleId, customerId: owner }, select: VEHICLE_SELECT });
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id: vehicleId, customerId: owner, deletedAt: null }, select: VEHICLE_SELECT });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
     if (!vehicle.deliveredDate) throw new BadRequestException({ error: 'รถคันนี้ยังไม่ได้ส่งมอบ' });
     if (vehicle.deliveryConfirmedAt) return { vehicle: mapVehicle(vehicle) };

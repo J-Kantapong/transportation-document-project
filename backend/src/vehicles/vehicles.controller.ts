@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import type { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
+import type { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import type { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
@@ -39,9 +40,26 @@ export class VehiclesController {
     return this.vehiclesService.lookupByChassis(chassisList, typeof body?.submitDate === 'string' ? body.submitDate : undefined);
   }
 
+  // รถที่ถูกลบไว้ + กู้คืน (ADMIN เท่านั้น - ดู auth/access-policy.ts) ต้องประกาศก่อน ':id' ไม่งั้นถูกจับเป็น id
+  @Get('deleted')
+  async findDeleted() {
+    return { vehicles: await this.vehiclesService.findDeleted() };
+  }
+
+  @Post(':id/restore')
+  restoreVehicle(@Param('id') id: string) {
+    return this.vehiclesService.restoreVehicle(id);
+  }
+
   @Patch(':id')
   updateVehicle(@Param('id') id: string, @Body() body: UpdateVehicleDto) {
     return this.vehiclesService.updateVehicle(id, body);
+  }
+
+  // ลบข้อมูลรถ (ซ่อน) - ต้องส่งเหตุผล (remark) มาด้วยทุกครั้ง
+  @Delete(':id')
+  deleteVehicle(@Param('id') id: string, @Body() body: DeleteVehicleDto) {
+    return this.vehiclesService.deleteVehicle(id, body);
   }
 
   @Get('transfer-notice/pending')

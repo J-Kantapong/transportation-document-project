@@ -49,7 +49,7 @@ export class VehiclePhotosService {
     const chassis = raw.trim();
     if (!chassis) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { chassis: { contains: chassis, mode: 'insensitive' }, ...vehicleTypeWhere() },
+      where: { deletedAt: null, chassis: { contains: chassis, mode: 'insensitive' }, ...vehicleTypeWhere() },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: MAX_RESULTS,
       select: {

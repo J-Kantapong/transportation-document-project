@@ -181,6 +181,11 @@ export function canCreateCustomer(roles: UserRole[]): boolean {
   return roles.includes('ADMIN');
 }
 
+// ลบ/กู้คืนข้อมูลรถจดใหม่: ADMIN เท่านั้น (ผู้ใช้ 2026-09-23) - backend กันอีกชั้นใน access-policy.ts
+export function canDeleteVehicle(roles: UserRole[]): boolean {
+  return roles.includes('ADMIN');
+}
+
 export function displayName(user: AuthUser | null): string {
   if (!user) return '';
   return user.displayName || user.name;

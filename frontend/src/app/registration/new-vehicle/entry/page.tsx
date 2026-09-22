@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { api, ApiError, type Brand, type Customer, type FinanceCompany, type Vehicle } from "@/lib/api";
+import { api, ApiError, type Brand, type Customer, type DeletedVehicle, type FinanceCompany, type Vehicle } from "@/lib/api";
+import { canDeleteVehicle, getCachedUser } from "@/lib/auth";
 import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
@@ -344,6 +345,21 @@ export default function VehicleEntryPage() {
   const [editMessage, setEditMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
   const editDialogRef = useRef<HTMLDialogElement>(null);
 
+  // ลบข้อมูลรถ (ผู้ใช้ 2026-09-23): ADMIN เท่านั้น ต้องระบุเหตุผลทุกครั้ง - ลบแล้วซ่อนไว้ ไม่หายจากฐานข้อมูล
+  // และกู้คืนได้จากรายการ "รถที่ลบแล้ว" ด้านล่าง (backend กันสิทธิ์อีกชั้นใน auth/access-policy.ts)
+  const [canDelete, setCanDelete] = useState(false);
+  const [deleting, setDeleting] = useState<Vehicle | null>(null);
+  const [deleteRemark, setDeleteRemark] = useState("");
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedVehicles, setDeletedVehicles] = useState<DeletedVehicle[]>([]);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [deletedMessage, setDeletedMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
   async function loadLookups() {
     setLookupReady(false);
     setLookupMessage("กำลังโหลดลูกค้าและยี่ห้อ…");
@@ -378,11 +394,27 @@ export default function VehicleEntryPage() {
     }
   }
 
+  // รายการรถที่ถูกลบไว้ (ADMIN เท่านั้น) - โหลดเมื่อกดเปิดดูและหลังลบ/กู้คืนทุกครั้ง
+  async function loadDeletedVehicles() {
+    setDeletedLoading(true);
+    setDeletedMessage({ text: "" });
+    try {
+      const data = await api.listDeletedVehicles();
+      setDeletedVehicles(data.vehicles);
+    } catch (error) {
+      setDeletedMessage({ text: error instanceof ApiError ? error.message : "โหลดรายการรถที่ลบแล้วไม่สำเร็จ", error: true });
+    } finally {
+      setDeletedLoading(false);
+    }
+  }
+
   useEffect(() => {
     // Standard fetch-on-mount; both loaders set a loading flag before their first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadLookups();
     loadVehicles();
+    // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect ไม่ใช่ตอน useState (แบบเดียวกับหน้าฐานข้อมูลลูกค้า)
+    setCanDelete(canDeleteVehicle(getCachedUser()?.roles ?? []));
   }, []);
 
   const customerOptions = useMemo(
@@ -709,6 +741,58 @@ export default function VehicleEntryPage() {
     }
   }
 
+  // เปิดกล่องยืนยันการลบ - เหตุผล (Remark) บังคับกรอก ไม่งั้นปุ่มลบกดไม่ได้
+  function openDelete(vehicle: Vehicle) {
+    setDeleting(vehicle);
+    setDeleteRemark("");
+    setDeleteMessage({ text: "" });
+    deleteDialogRef.current?.showModal();
+  }
+
+  async function handleDeleteSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!deleting) return;
+    const remark = deleteRemark.trim();
+    if (!remark) {
+      setDeleteMessage({ text: "กรุณาระบุเหตุผลที่ลบ (Remark) ก่อนลบ", error: true });
+      return;
+    }
+    setDeleteSaving(true);
+    setDeleteMessage({ text: "กำลังลบ…" });
+    try {
+      await api.deleteVehicle(deleting.id, remark);
+      deleteDialogRef.current?.close();
+      setDeleting(null);
+      await loadVehicles();
+      if (showDeleted) await loadDeletedVehicles();
+    } catch (error) {
+      setDeleteMessage({ text: error instanceof ApiError ? error.message : "ลบไม่สำเร็จ", error: true });
+    } finally {
+      setDeleteSaving(false);
+    }
+  }
+
+  async function handleRestore(vehicle: DeletedVehicle) {
+    if (!window.confirm(`กู้คืนรถเลขตัวถัง ${vehicle.chassis} กลับเข้ารายการ?`)) return;
+    setRestoringId(vehicle.id);
+    setDeletedMessage({ text: "" });
+    try {
+      await api.restoreVehicle(vehicle.id);
+      await Promise.all([loadVehicles(), loadDeletedVehicles()]);
+    } catch (error) {
+      setDeletedMessage({ text: error instanceof ApiError ? error.message : "กู้คืนไม่สำเร็จ", error: true });
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  // เปิด/ปิดรายการรถที่ลบแล้ว - โหลดข้อมูลตอนกดเปิดครั้งแรก
+  function toggleDeletedList() {
+    const next = !showDeleted;
+    setShowDeleted(next);
+    if (next) loadDeletedVehicles();
+  }
+
   const batchHasErrors = batchRows.some((r) => r.issues.length > 0);
 
   return (
@@ -914,9 +998,19 @@ export default function VehicleEntryPage() {
       <section className="panel customer-list">
         <div className="panel-head">
           <h2>รถจดใหม่ที่บันทึกแล้ว</h2>
-          <button className="text-button" onClick={loadVehicles}>
-            โหลดรายการใหม่
-          </button>
+          <div>
+            {canDelete && (
+              <>
+                <button className="text-button" onClick={toggleDeletedList}>
+                  {showDeleted ? "ซ่อนรายการที่ลบแล้ว" : "รายการที่ลบแล้ว"}
+                </button>
+                {" · "}
+              </>
+            )}
+            <button className="text-button" onClick={loadVehicles}>
+              โหลดรายการใหม่
+            </button>
+          </div>
         </div>
         <p style={{ padding: "0 24px 12px", fontSize: 12 }}>แสดง 100 รายการล่าสุด</p>
         {vehiclesLoading ? (
@@ -958,6 +1052,14 @@ export default function VehicleEntryPage() {
                       <button className="text-button" onClick={() => openEdit(v)}>
                         แก้ไข
                       </button>
+                      {canDelete && (
+                        <>
+                          {" · "}
+                          <button className="text-button danger" onClick={() => openDelete(v)}>
+                            ลบ
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -966,6 +1068,108 @@ export default function VehicleEntryPage() {
           </div>
         )}
       </section>
+
+      {canDelete && showDeleted && (
+        <section className="panel customer-list" style={{ marginTop: 24 }}>
+          <div className="panel-head">
+            <h2>รถที่ลบแล้ว</h2>
+            <button className="text-button" onClick={loadDeletedVehicles}>
+              โหลดรายการใหม่
+            </button>
+          </div>
+          <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
+            แสดง 100 รายการล่าสุด - ข้อมูลยังอยู่ในระบบ กดกู้คืนเพื่อนำกลับเข้ารายการได้
+          </p>
+          {deletedMessage.text && (
+            <p className={`customer-message${deletedMessage.error ? " error" : ""}`} style={{ padding: "0 24px 12px" }} role="alert">
+              {deletedMessage.text}
+            </p>
+          )}
+          {deletedLoading ? (
+            <div className="empty-customers">กำลังโหลดรายการรถที่ลบแล้ว…</div>
+          ) : !deletedVehicles.length ? (
+            <div className="empty-customers">ยังไม่มีรถที่ถูกลบ</div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่ลบ</th>
+                    <th>ชื่อลูกค้า</th>
+                    <th>เลขตัวถัง</th>
+                    <th>ยี่ห้อ</th>
+                    <th>เหตุผลที่ลบ</th>
+                    <th>ผู้ลบ</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deletedVehicles.map((v) => (
+                    <tr key={v.id}>
+                      <td>{v.deletedAt ? isoToDisplayDate(v.deletedAt.slice(0, 10)) : "—"}</td>
+                      <td>{v.customerName}</td>
+                      <td>{v.chassis}</td>
+                      <td>{v.brandName}</td>
+                      <td style={{ whiteSpace: "normal", minWidth: 220 }}>{v.deletedReason || "—"}</td>
+                      <td>{v.deletedByName || "—"}</td>
+                      <td>
+                        <button className="text-button" disabled={restoringId === v.id} onClick={() => handleRestore(v)}>
+                          {restoringId === v.id ? "กำลังกู้คืน…" : "กู้คืน"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      <dialog
+        ref={deleteDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) deleteDialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => deleteDialogRef.current?.close()}>
+          ×
+        </button>
+        <h2>ลบข้อมูลรถจดใหม่</h2>
+        {deleting && (
+          <>
+            <p style={{ margin: "0 0 4px" }}>
+              เลขตัวถัง <strong>{deleting.chassis}</strong> · {deleting.customerName} · {deleting.brandName}
+            </p>
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#5a6885" }}>
+              รถคันนี้จะหายไปจากทุกรายการและทุกคิวงาน แต่ข้อมูลยังเก็บไว้ในระบบ ผู้ดูแลระบบกู้คืนได้จากรายการ &quot;รถที่ลบแล้ว&quot;
+            </p>
+            <form onSubmit={handleDeleteSubmit}>
+              <label className="field" style={{ marginTop: 16 }}>
+                เหตุผลที่ลบ (Remark) *
+                <textarea
+                  required
+                  maxLength={500}
+                  value={deleteRemark}
+                  onChange={(e) => setDeleteRemark(e.target.value)}
+                  placeholder="ระบุเหตุผลที่ลบรถคันนี้ - จำเป็นต้องกรอกทุกครั้ง"
+                />
+              </label>
+              <div className="form-actions" style={{ marginTop: 16 }}>
+                <button type="submit" className="primary danger" disabled={deleteSaving || !deleteRemark.trim()}>
+                  ลบข้อมูลรถ
+                </button>
+                <span
+                  className={`customer-message${deleteMessage.error ? " error" : deleteMessage.text ? " success" : ""}`}
+                  role="status"
+                >
+                  {deleteMessage.text}
+                </span>
+              </div>
+            </form>
+          </>
+        )}
+      </dialog>
 
       <dialog
         ref={dialogRef}
