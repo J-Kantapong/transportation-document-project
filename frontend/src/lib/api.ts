@@ -589,8 +589,11 @@ export interface TaxRenewalVehicleHit {
 }
 
 export interface TaxRenewalInput {
+  submitDate?: string; // วันที่ยื่นงาน - บังคับตอนบันทึก (preview ไม่ใช้)
   vehicleId?: string | null;
   customerId?: string | null;
+  chassis?: string; // บังคับเมื่อกรอกรถเอง - รถที่เลือกจากระบบใช้เลขตัวถังของ Vehicle
+  engine?: string | null;
   plateCategory?: string;
   plateNumber?: string;
   registrationProvince?: string | null;
@@ -621,6 +624,9 @@ export interface TaxRenewal {
   id: string;
   vehicleId: string | null;
   customerId: string | null;
+  submitDate: string;
+  chassis: string;
+  engine: string | null;
   plateCategory: string;
   plateNumber: string;
   vehicleType: string;

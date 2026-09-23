@@ -27,6 +27,8 @@ const toJson = (value: unknown) => JSON.parse(JSON.stringify(value)) as object;
 interface ParsedVehicleInfo {
   vehicleId: string | null;
   customerId: string | null;
+  chassis: string;
+  engine: string | null;
   plateCategory: string;
   plateNumber: string;
   registrationProvince: string | null;
@@ -58,6 +60,8 @@ export class TaxRenewalService {
       return {
         vehicleId: null,
         customerId: parseText(body.customerId, 'ลูกค้า', false, 50),
+        chassis: parseText(body.chassis, 'เลขตัวถัง', true, 50)!,
+        engine: parseText(body.engine, 'เลขเครื่อง', false, 50),
         plateCategory: parseText(body.plateCategory, 'หมวดทะเบียน', true, 20)!,
         plateNumber: parseText(body.plateNumber, 'เลขทะเบียน', true, 20)!,
         registrationProvince: parseText(body.registrationProvince, 'จังหวัดที่จดทะเบียน', false),
@@ -87,6 +91,9 @@ export class TaxRenewalService {
     return {
       vehicleId: vehicle.id,
       customerId: vehicle.customerId,
+      // รถในระบบมีเลขตัวถังเสมอ ส่วนทะเบียนอาจยังว่างถ้ายังไม่ได้รับป้าย - หน้าเว็บจะให้กรอกเพิ่มเอง
+      chassis: vehicle.chassis,
+      engine: vehicle.engine ?? parseText(body.engine, 'เลขเครื่อง', false, 50),
       plateCategory: vehicle.plateCategory ?? parseText(body.plateCategory, 'หมวดทะเบียน', true, 20)!,
       plateNumber: vehicle.plateNumber ?? parseText(body.plateNumber, 'เลขทะเบียน', true, 20)!,
       registrationProvince: vehicle.registrationProvince,
@@ -140,6 +147,8 @@ export class TaxRenewalService {
   async create(body: Record<string, unknown>) {
     const info = await this.resolveVehicleInfo(body);
     const inspectionConfirmed = Boolean(body.inspectionConfirmed);
+    // วันที่ยื่นงาน - เป็นข้อมูลของงาน ไม่ใช่ของรถ จึงไม่อยู่ใน resolveVehicleInfo และไม่มีผลกับยอดภาษี
+    const submitDate = parseDate(body.submitDate, 'วันที่ยื่นงาน', true);
     // คิด ณ วันที่ชำระถ้ามี ไม่งั้นใช้วันนี้เพื่อดูว่าต้องตรวจสภาพไหม (ยอดเงินยัง snapshot ไม่ได้จนกว่าจะชำระ)
     const paymentDate = parseDate(body.paymentDate, 'วันที่ชำระ');
     const tax = await this.computeTax(info, paymentDate ?? new Date(), { inspectionConfirmed });
@@ -150,6 +159,7 @@ export class TaxRenewalService {
     return this.prisma.taxRenewal.create({
       data: {
         ...info,
+        submitDate,
         inspectionRequired: tax.inspectionRequired,
         inspectionConfirmed,
         insuranceConfirmed: Boolean(body.insuranceConfirmed),
@@ -269,6 +279,8 @@ export class TaxRenewalService {
       const info: ParsedVehicleInfo = {
         vehicleId: existing.vehicleId,
         customerId: existing.customerId,
+        chassis: existing.chassis,
+        engine: existing.engine,
         plateCategory: existing.plateCategory,
         plateNumber: existing.plateNumber,
         registrationProvince: existing.registrationProvince,

@@ -51,6 +51,10 @@ export function parseFuel(raw: unknown): string {
 }
 
 export function parseOwnerType(raw: unknown): OwnerType {
+  // บังคับกรอกเสมอ (ผู้ใช้กำหนด 2026-09-23) - ไม่มีค่าเริ่มต้นเป็นบุคคลธรรมดา
+  if (raw === null || raw === undefined || raw === '') {
+    throw new BadRequestException({ error: 'กรุณาระบุประเภทเจ้าของรถ' });
+  }
   if (raw !== OwnerType.INDIVIDUAL && raw !== OwnerType.JURISTIC) {
     throw new BadRequestException({ error: 'ประเภทเจ้าของรถต้องเป็น INDIVIDUAL หรือ JURISTIC' });
   }

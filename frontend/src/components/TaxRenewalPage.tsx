@@ -9,14 +9,17 @@ import {
   type TaxRenewalPreview,
   type TaxRenewalVehicleHit,
 } from "@/lib/api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate } from "@/lib/date";
+import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { FUEL_TYPES, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
 
 type Source = "VEHICLE" | "MANUAL";
 
 interface FormState {
+  submitDate: string; // วันที่ยื่นงาน - ตั้งต้นเป็นวันที่ทำรายการ
   source: Source;
   vehicleId: string;
+  chassis: string;
+  engine: string;
   plateCategory: string;
   plateNumber: string;
   vehicleType: string;
@@ -24,7 +27,8 @@ interface FormState {
   cc: string;
   weight: string;
   firstRegistrationDate: string;
-  ownerType: "INDIVIDUAL" | "JURISTIC";
+  // "" = ยังไม่ได้เลือก - ประเภทเจ้าของรถบังคับกรอกเสมอ จึงไม่ตั้งค่าเริ่มต้นเป็นบุคคลธรรมดาให้เงียบๆ
+  ownerType: "" | "INDIVIDUAL" | "JURISTIC";
   ownerName: string;
   taxExpiryDate: string;
   paymentDate: string;
@@ -34,8 +38,11 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  submitDate: "",
   source: "VEHICLE",
   vehicleId: "",
+  chassis: "",
+  engine: "",
   plateCategory: "",
   plateNumber: "",
   vehicleType: "",
@@ -43,7 +50,7 @@ const EMPTY: FormState = {
   cc: "",
   weight: "",
   firstRegistrationDate: "",
-  ownerType: "INDIVIDUAL",
+  ownerType: "",
   ownerName: "",
   taxExpiryDate: "",
   paymentDate: "",
@@ -52,7 +59,11 @@ const EMPTY: FormState = {
   skipContribution: false,
 };
 
-const baht = (n: number | string | null | undefined) =>
+// ฟอร์มเปล่าพร้อมใช้ - วันที่ยื่นงานตั้งต้นเป็นวันที่ทำรายการ (อ่านตอนเปิดฟอร์ม ไม่ใช่ตอน import
+// ไม่งั้นแท็บที่เปิดค้างข้ามวันจะยังได้วันเก่า)
+const freshForm = (): FormState => ({ ...EMPTY, submitDate: isoToDisplayDate(todayIso()) });
+
+const baht =(n: number | string | null | undefined) =>
   n === null || n === undefined ? "-" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ช่องวันที่เก็บเป็นข้อความ วว/ดด/ปปปป ตามทั้งระบบ (ดู lib/date.ts) - แปลงเป็น ISO ตอนส่ง backend
@@ -60,6 +71,7 @@ const toIso = (text: string) => displayDateToIso(text.replace(/\D/g, ""));
 
 function toInput(form: FormState): TaxRenewalInput {
   const shared = {
+    submitDate: toIso(form.submitDate),
     taxExpiryDate: toIso(form.taxExpiryDate),
     paymentDate: toIso(form.paymentDate) || null,
     inspectionConfirmed: form.inspectionConfirmed,
@@ -76,10 +88,15 @@ function toInput(form: FormState): TaxRenewalInput {
       fuel: form.fuel || undefined,
       cc: form.cc || null,
       weight: form.weight || null,
-      ownerType: form.ownerType,
+      ownerType: form.ownerType || undefined,
+      // รถที่ยังไม่ได้รับป้ายไม่มีทะเบียนในระบบ - ส่งค่าที่กรอกเสริมไป (backend ใช้ของ Vehicle ก่อนเสมอ)
+      plateCategory: form.plateCategory || undefined,
+      plateNumber: form.plateNumber || undefined,
     };
   return {
     ...shared,
+    chassis: form.chassis,
+    engine: form.engine || null,
     plateCategory: form.plateCategory,
     plateNumber: form.plateNumber,
     vehicleType: form.vehicleType,
@@ -87,7 +104,7 @@ function toInput(form: FormState): TaxRenewalInput {
     cc: form.cc || null,
     weight: form.weight || null,
     firstRegistrationDate: toIso(form.firstRegistrationDate),
-    ownerType: form.ownerType,
+    ownerType: form.ownerType || undefined,
     ownerName: form.ownerName || null,
   };
 }
@@ -97,6 +114,9 @@ function toInput(form: FormState): TaxRenewalInput {
 function missingVehicleFields(v: TaxRenewalVehicleHit | null): Array<keyof FormState> {
   if (!v) return [];
   const missing: Array<keyof FormState> = [];
+  // หมวด/เลขทะเบียนบังคับเสมอ รถที่ยังไม่ได้รับป้ายจึงต้องกรอกเองก่อนบันทึก (เลขตัวถังรถในระบบมีเสมอ)
+  if (!v.plateCategory) missing.push("plateCategory");
+  if (!v.plateNumber) missing.push("plateNumber");
   if (!v.firstRegistrationDate) missing.push("firstRegistrationDate");
   if (!v.fuel) missing.push("fuel");
   if (!v.ownerType) missing.push("ownerType");
@@ -121,11 +141,19 @@ function readyForPreview(form: FormState, selected: TaxRenewalVehicleHit | null)
       f === "firstRegistrationDate" ? Boolean(toIso(form.firstRegistrationDate)) : Boolean(form[f]),
     );
   }
-  return Boolean(form.vehicleType && form.fuel && toIso(form.firstRegistrationDate) && form.plateNumber);
+  return Boolean(
+    form.chassis &&
+      form.plateCategory &&
+      form.plateNumber &&
+      form.vehicleType &&
+      form.fuel &&
+      form.ownerType &&
+      toIso(form.firstRegistrationDate),
+  );
 }
 
 export function TaxRenewalPage() {
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>(freshForm);
   const [selectedVehicle, setSelectedVehicle] = useState<TaxRenewalVehicleHit | null>(null);
   const [rows, setRows] = useState<TaxRenewal[]>([]);
   const [preview, setPreview] = useState<TaxRenewalPreview | null>(null);
@@ -186,7 +214,7 @@ export function TaxRenewalPage() {
     setMessage("");
     try {
       await api.createTaxRenewal(toInput(form));
-      setForm(EMPTY);
+      setForm(freshForm());
       setSelectedVehicle(null);
       setPreview(null);
       setMessage("บันทึกงานต่อภาษีแล้ว");
@@ -217,6 +245,13 @@ export function TaxRenewalPage() {
           <h2>เพิ่มงานต่อภาษี</h2>
         </div>
         <form onSubmit={submit} style={{ padding: "0 23px 24px" }}>
+          {/* วันที่ยื่นงาน - ข้อมูลของงาน ไม่ใช่ของรถ จึงอยู่เหนือแท็บเลือกรถ */}
+          <div className="vehicle-fields" style={{ marginBottom: 18 }}>
+            <label className="field">
+              <span>วันที่ยื่นงาน *</span>
+              <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
+            </label>
+          </div>
           <div className="vehicle-tabs" style={{ marginBottom: 22 }}>
             {(["VEHICLE", "MANUAL"] as const).map((s) => (
               <button
@@ -250,12 +285,34 @@ export function TaxRenewalPage() {
             ) : (
               <>
                 <label className="field">
-                  <span>หมวดทะเบียน</span>
-                  <input value={form.plateCategory} onChange={(e) => set("plateCategory", e.target.value)} required />
+                  <span>เลขตัวถัง *</span>
+                  <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} required />
                 </label>
                 <label className="field">
-                  <span>เลขทะเบียน</span>
-                  <input value={form.plateNumber} onChange={(e) => set("plateNumber", e.target.value)} required />
+                  <span>เลขเครื่อง</span>
+                  <input value={form.engine} onChange={(e) => set("engine", e.target.value)} />
+                </label>
+                <label className="field">
+                  <span>หมวดทะเบียน *</span>
+                  <input
+                    value={form.plateCategory}
+                    onChange={(e) => set("plateCategory", e.target.value)}
+                    placeholder="4กข"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>เลขทะเบียน *</span>
+                  <input
+                    value={form.plateNumber}
+                    onChange={(e) => set("plateNumber", e.target.value)}
+                    placeholder="4444"
+                    required
+                  />
+                </label>
+                <label className="field wide">
+                  <span>ชื่อเจ้าของรถ</span>
+                  <input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
                 </label>
                 <label className="field">
                   <span>ประเภทรถ</span>
@@ -296,22 +353,42 @@ export function TaxRenewalPage() {
                   />
                 </label>
                 <label className="field">
-                  <span>ประเภทเจ้าของรถ</span>
+                  <span>ประเภทเจ้าของรถ *</span>
                   <select
                     value={form.ownerType}
                     onChange={(e) => set("ownerType", e.target.value as FormState["ownerType"])}
+                    required
                   >
+                    <option value="">เลือกประเภทเจ้าของรถ</option>
                     <option value="INDIVIDUAL">บุคคลธรรมดา</option>
                     <option value="JURISTIC">นิติบุคคล</option>
                   </select>
                 </label>
-                <label className="field wide">
-                  <span>ชื่อเจ้าของรถ</span>
-                  <input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
-                </label>
               </>
             )}
 
+            {missing.includes("plateCategory") && (
+              <label className="field">
+                <span>หมวดทะเบียน *</span>
+                <input
+                  value={form.plateCategory}
+                  onChange={(e) => set("plateCategory", e.target.value)}
+                  placeholder="4กข"
+                  required
+                />
+              </label>
+            )}
+            {missing.includes("plateNumber") && (
+              <label className="field">
+                <span>เลขทะเบียน *</span>
+                <input
+                  value={form.plateNumber}
+                  onChange={(e) => set("plateNumber", e.target.value)}
+                  placeholder="4444"
+                  required
+                />
+              </label>
+            )}
             {missing.includes("firstRegistrationDate") && (
               <label className="field">
                 <span>วันจดทะเบียนครั้งแรก</span>
@@ -354,11 +431,13 @@ export function TaxRenewalPage() {
             )}
             {missing.includes("ownerType") && (
               <label className="field">
-                <span>ประเภทเจ้าของรถ</span>
+                <span>ประเภทเจ้าของรถ *</span>
                 <select
                   value={form.ownerType}
                   onChange={(e) => set("ownerType", e.target.value as FormState["ownerType"])}
+                  required
                 >
+                  <option value="">เลือกประเภทเจ้าของรถ</option>
                   <option value="INDIVIDUAL">บุคคลธรรมดา</option>
                   <option value="JURISTIC">นิติบุคคล</option>
                 </select>

@@ -848,7 +848,13 @@ model TaxRenewal {
   vehicleId  String? // รถในฐานข้อมูลรถจดใหม่ (ถ้ามี)
   customerId String?
 
+  submitDate DateTime // วันที่ยื่นงาน (ผู้ใช้เพิ่ม 2026-09-23) - ฟอร์มตั้งค่าเริ่มต้นเป็นวันที่ทำรายการ
+
   // ข้อมูลรถ ณ ตอนบันทึก - ดึงจาก Vehicle ถ้าลิงก์ไว้ ไม่งั้นกรอกเอง
+  // เลขตัวถัง/หมวด/เลขทะเบียน บังคับเสมอ (ผู้ใช้กำหนด 2026-09-23) เลขเครื่องกรอกหรือไม่ก็ได้
+  // ไม่ @unique เพราะรถคันเดิมต่อภาษีได้ทุกปี
+  chassis               String // เลขตัวถัง
+  engine                String? // เลขเครื่อง
   plateCategory         String // หมวดทะเบียน
   plateNumber           String // เลขทะเบียน
   registrationProvince  String?
