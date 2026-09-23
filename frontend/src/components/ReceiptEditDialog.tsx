@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { receiptImageUrl, type DocumentSubmission, type ReceiptSummary } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
 import { isoToDisplayDate } from "@/lib/date";
 
 // Popup แก้ข้อมูลที่ AI กรอกให้ในหน้ารับใบเสร็จ: รูปใบเสร็จขนาดใหญ่อยู่ข้างช่องกรอก ให้พนักงานเทียบทีละช่อง
@@ -98,14 +99,12 @@ export function ReceiptEditButton(props: Props) {
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: "1 1 420px", minWidth: 0 }}>
             {imageId ? (
-              <a href={receiptImageUrl(imageId)} target="_blank" rel="noreferrer" title="เปิดรูปเต็มในแท็บใหม่">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={receiptImageUrl(imageId)}
-                  alt="ใบเสร็จ"
-                  style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", border: "1px solid #e4e9f1", borderRadius: 8, background: "#f7f8fb" }}
-                />
-              </a>
+              <AuthedImage
+                src={receiptImageUrl(imageId)}
+                alt="ใบเสร็จ"
+                style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", border: "1px solid #e4e9f1", borderRadius: 8, background: "#f7f8fb" }}
+                linkTitle="เปิดรูปเต็มในแท็บใหม่"
+              />
             ) : (
               <div className="empty-customers">ยังไม่มีรูปใบเสร็จ</div>
             )}

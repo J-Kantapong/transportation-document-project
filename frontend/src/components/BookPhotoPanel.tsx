@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, bookPhotoImageUrl, type BookPhotoBook, type BookPhotoList, type BookPhotoVehicle } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
@@ -305,14 +306,13 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {data.photos.map((photo) => (
                 <div key={photo.id} style={{ display: "flex", gap: 12, padding: 10, borderRadius: 10, border: "1px solid #dfe5f0", flexWrap: compact ? "wrap" : "nowrap" }}>
-                  <a href={bookPhotoImageUrl(photo.id)} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-                    <img
+                  <div style={{ flexShrink: 0 }}>
+                    <AuthedImage
                       src={bookPhotoImageUrl(photo.id)}
                       alt="รูปเล่มทะเบียน"
                       style={{ width: compact ? "100%" : 220, maxHeight: 220, objectFit: "contain", borderRadius: 6, display: "block", background: "#f3f5f9" }}
                     />
-                  </a>
+                  </div>
                   <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
                     {photo.error ? (
                       <div style={{ ...STATUS.bad, padding: "8px 10px", borderRadius: 8 }}>{photo.error} - ลบแล้วถ่ายใหม่</div>
