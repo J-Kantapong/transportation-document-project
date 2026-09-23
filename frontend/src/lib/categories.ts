@@ -12,9 +12,10 @@ export interface RegistrationCategory {
 export const REGISTRATION_CATEGORIES: RegistrationCategory[] = [
   { title: "จดทะเบียนรถใหม่", icon: "car", href: "/registration/new-vehicle", color: "#2854d9", bg: "#edf2ff" },
   { title: "การสลับเลข", icon: "swap", href: "/registration/plate-swap", color: "#7560c7", bg: "#f2eeff" },
-  { title: "การโอน", icon: "transfer", href: "/registration/transfer", color: "#228d91", bg: "#eaf7f7" },
-  { title: "อื่นๆ", icon: "more", href: "/registration/other", color: "#738197", bg: "#f0f3f7" },
+  { title: "งานโอน", icon: "transfer", href: "/registration/transfer", color: "#228d91", bg: "#eaf7f7" },
+  { title: "ต่อภาษี", icon: "card", href: "/registration/tax-renewal", color: "#2f8a5b", bg: "#eaf7f0" },
   { title: "งานแจ้งย้ายยามาฮ่า", icon: "move", href: "/registration/yamaha-relocation", color: "#bd8131", bg: "#fff5e8" },
+  { title: "อื่นๆ", icon: "more", href: "/registration/other", color: "#738197", bg: "#f0f3f7" },
 ];
 
 export interface RegistrationSubtask {

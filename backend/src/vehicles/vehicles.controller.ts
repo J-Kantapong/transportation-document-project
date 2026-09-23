@@ -3,6 +3,7 @@ import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import type { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
+import type { CorrectInspectionResultDto } from './dto/correct-inspection-result.dto.js';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import type { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import type { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
@@ -100,6 +101,12 @@ export class VehiclesController {
   @Patch(':id/inspection-result')
   async updateInspectionResult(@Param('id') id: string, @Body() body: UpdateInspectionResultDto) {
     return { vehicle: await this.vehiclesService.updateInspectionResult(id, body) };
+  }
+
+  // แก้ไขผลตรวจที่บันทึกไปแล้ว (ต้องมีเหตุผลที่แก้) - สิทธิ์เท่ากับขั้น 1-3 คือ ADMIN + STAFF_ENTRY
+  @Patch(':id/inspection-result-correction')
+  async correctInspectionResult(@Param('id') id: string, @Body() body: CorrectInspectionResultDto) {
+    return { vehicle: await this.vehiclesService.correctInspectionResult(id, body) };
   }
 
   @Patch(':id/tax-input')

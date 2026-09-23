@@ -6,6 +6,7 @@ import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
+import { CorrectInspectionResultDto } from './dto/correct-inspection-result.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
@@ -1075,6 +1076,69 @@ export class VehiclesService {
         inspectionFailRemark: result === 'ไม่ผ่าน' ? remark : null,
       },
     });
+
+    return {
+      id: updated.id,
+      inspectionResult: updated.inspectionResult,
+      inspectionResultDate: updated.inspectionResultDate?.toISOString().slice(0, 10) ?? null,
+      inspectionResultCost: updated.inspectionResultCost,
+      inspectionResultBillCost: updated.inspectionResultBillCost,
+      inspectionFailRemark: updated.inspectionFailRemark,
+    };
+  }
+
+  // Step 3b (แก้ไข): แก้ผลตรวจที่บันทึกไปแล้ว เช่น บันทึกว่าผ่านไปแล้วแต่จริงๆ ตรวจไม่ผ่าน (ผู้ใช้ 2026-09-23)
+  // ต่างจาก updateInspectionResult ตรงที่ต้องมีผลตรวจเดิมอยู่แล้ว และต้องระบุเหตุผลที่แก้ (เก็บลง VehicleEditLog)
+  // แก้เป็น "ไม่ผ่าน" แล้วรถจะกลับเข้าคิวส่งตรวจเอง (ดู findPendingInspectionSend) เหมือนบันทึกไม่ผ่านตามปกติ
+  async correctInspectionResult(id: string, dto: CorrectInspectionResultDto) {
+    const result = typeof dto?.result === 'string' ? dto.result.trim() : '';
+    const resultDateRaw = typeof dto?.resultDate === 'string' ? dto.resultDate.trim() : '';
+    const failRemark = typeof dto?.failRemark === 'string' ? dto.failRemark.trim() : '';
+    const remark = typeof dto?.remark === 'string' ? dto.remark.trim() : '';
+
+    if (!INSPECTION_RESULTS.includes(result as (typeof INSPECTION_RESULTS)[number])) {
+      throw new BadRequestException({ error: 'ผลตรวจไม่ถูกต้อง' });
+    }
+    if (!resultDateRaw || !isValidDateParam(resultDateRaw)) {
+      throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+    }
+    if (result === 'ไม่ผ่าน' && !failRemark) {
+      throw new BadRequestException({ error: 'กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน' });
+    }
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไขผลตรวจ' });
+
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: activeSubmissionsInclude });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertNotSubmitted(vehicle);
+    if (!vehicle.inspectionResult || !vehicle.inspectionResultDate) {
+      throw new BadRequestException({ error: 'รถคันนี้ยังไม่มีผลตรวจที่บันทึกไว้ - ใช้หน้าบันทึกผลตรวจแทน' });
+    }
+
+    const data = {
+      inspectionResult: result,
+      inspectionResultDate: new Date(`${resultDateRaw}T00:00:00.000Z`),
+      // ค่าใช้จ่ายคงที่ แก้จากหน้าจอไม่ได้ - กติกาเดียวกับตอนบันทึกผลตรวจครั้งแรก
+      inspectionResultCost: result === 'ไม่ผ่าน' ? '0' : vehicle.inspectionSentCost,
+      inspectionResultBillCost: vehicle.inspectionSentBillCost == null ? null : result === 'ไม่ผ่าน' ? '0' : vehicle.inspectionSentBillCost,
+      inspectionFailRemark: result === 'ไม่ผ่าน' ? failRemark : null,
+    };
+    const changes: Record<string, { from: string | null; to: string | null }> = {};
+    for (const [key, value] of Object.entries(data)) {
+      const from = diffField((vehicle as Record<string, unknown>)[key]);
+      const to = diffField(value);
+      if (from !== to) changes[key] = { from, to };
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.vehicle.update({ where: { id }, data }),
+      this.prisma.vehicleEditLog.create({
+        data: {
+          vehicleId: id,
+          remark: `แก้ไขผลตรวจ (${vehicle.inspectionResult} → ${result}): ${remark}`,
+          changes: JSON.stringify(changes),
+        },
+      }),
+    ]);
 
     return {
       id: updated.id,
