@@ -17,6 +17,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { ReceiptsModule } from './receipts/receipts.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
 import { TaxModule } from './tax/tax.module.js';
+import { TaxRenewalModule } from './tax-renewal/tax-renewal.module.js';
 import { VehicleOwnersModule } from './vehicle-owners/vehicle-owners.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.module.js';
@@ -31,6 +32,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BrandsModule,
     FinanceCompaniesModule,
     TaxModule,
+    TaxRenewalModule,
     VehicleOwnersModule,
     VehiclesModule,
     YamahaRelocationModule,

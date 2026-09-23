@@ -527,6 +527,119 @@ export interface NewCustomerInput {
   email: string;
 }
 
+// --- ต่อภาษี ---------------------------------------------------------------------
+export interface TaxRenewalFeeItem {
+  label: string;
+  amount: number;
+}
+
+// หนึ่งรอบปีภาษี - ค้างหลายปีจะมีหลายรอบ แต่ละรอบมีส่วนลดอายุรถและเงินเพิ่มของตัวเอง
+export interface TaxRenewalCycle {
+  dueDate: string;
+  vehicleYear: number;
+  annualVehicleTax: number;
+  ageDiscountRate: number;
+  lateMonths: number;
+  lateFee: number;
+}
+
+export interface TaxRenewalTax {
+  registrationCode: string;
+  taxMethod: string;
+  vehicleYear: number;
+  vehicleAgeYears: number;
+  annualVehicleTax: number;
+  lateMonths: number;
+  lateFee: number;
+  inspectionRequired: boolean;
+  taxCycleCount: number;
+  cycles: TaxRenewalCycle[];
+  grandTotal: number;
+  warnings: string[];
+  calculationDetails: Array<{ label: string; formula?: string; amount?: number }>;
+}
+
+export interface TaxRenewalPreview {
+  tax: TaxRenewalTax;
+  fees: {
+    billItems: TaxRenewalFeeItem[];
+    noBillItems: TaxRenewalFeeItem[];
+    billTotal: number;
+    noBillTotal: number;
+    total: number;
+  };
+}
+
+// ผลค้นหารถมาต่อภาษี (เลขตัวถัง / เลขเครื่อง / เลขทะเบียน / ชื่อลูกค้า / ผู้ถือกรรมสิทธิ์ / ผู้ครอบครอง)
+export interface TaxRenewalVehicleHit {
+  id: string;
+  chassis: string;
+  engine: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  body: string | null;
+  fuel: string | null;
+  cc: number | null;
+  weight: number | null;
+  firstRegistrationDate: string | null;
+  ownerType: "INDIVIDUAL" | "JURISTIC" | null;
+  ownerName: string | null; // ผู้ถือกรรมสิทธิ์ - ติดไฟแนนซ์ = ชื่อไฟแนนซ์
+  hirerName: string | null; // ผู้ครอบครอง - null เมื่อไม่มีไฟแนนซ์
+  customerName: string | null;
+}
+
+export interface TaxRenewalInput {
+  vehicleId?: string | null;
+  customerId?: string | null;
+  plateCategory?: string;
+  plateNumber?: string;
+  registrationProvince?: string | null;
+  vehicleType?: string;
+  fuel?: string;
+  cc?: string | number | null;
+  weight?: string | number | null;
+  firstRegistrationDate?: string;
+  ownerType?: 'INDIVIDUAL' | 'JURISTIC';
+  ownerName?: string | null;
+  taxExpiryDate: string;
+  inspectionConfirmed?: boolean;
+  insuranceConfirmed?: boolean;
+  skipContribution?: boolean;
+  paymentDate?: string | null;
+}
+
+export interface TaxRenewalUpdateInput {
+  inspectionConfirmed?: boolean;
+  insuranceConfirmed?: boolean;
+  skipContribution?: boolean;
+  paymentDate?: string | null;
+  receivedDate?: string | null;
+  deliveredDate?: string | null;
+}
+
+export interface TaxRenewal {
+  id: string;
+  vehicleId: string | null;
+  customerId: string | null;
+  plateCategory: string;
+  plateNumber: string;
+  vehicleType: string;
+  fuel: string;
+  firstRegistrationDate: string;
+  taxExpiryDate: string;
+  ownerName: string | null;
+  inspectionRequired: boolean;
+  inspectionConfirmed: boolean;
+  insuranceConfirmed: boolean;
+  paymentDate: string | null;
+  receivedDate: string | null;
+  deliveredDate: string | null;
+  skipContribution: boolean;
+  billTotal: string | null;
+  noBillTotal: string | null;
+  customer?: { id: string; name: string; company: string | null } | null;
+}
+
 export const api = {
   listCustomers: () => request<{ customers: Customer[] }>('/api/customers'),
   createCustomer: (data: NewCustomerInput) =>
@@ -721,4 +834,15 @@ export const api = {
     form.append('report', data.report, data.report.name);
     return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
   },
+
+  // ต่อภาษี - preview คิดยอดสดให้ฟอร์ม (ไม่บันทึก), PATCH ใช้เติมวันที่/ติ๊กทีหลังจากหน้ารายการ
+  listTaxRenewals: () => request<TaxRenewal[]>('/api/tax-renewals'),
+  searchTaxRenewalVehicles: (q: string) =>
+    request<{ vehicles: TaxRenewalVehicleHit[] }>(`/api/tax-renewals/vehicle-search?q=${encodeURIComponent(q)}`),
+  previewTaxRenewal: (data: TaxRenewalInput) =>
+    request<TaxRenewalPreview>('/api/tax-renewals/preview', { method: 'POST', body: JSON.stringify(data) }),
+  createTaxRenewal: (data: TaxRenewalInput) =>
+    request<TaxRenewal>('/api/tax-renewals', { method: 'POST', body: JSON.stringify(data) }),
+  updateTaxRenewal: (id: string, data: TaxRenewalUpdateInput) =>
+    request<TaxRenewal>(`/api/tax-renewals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
