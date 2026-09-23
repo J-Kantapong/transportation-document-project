@@ -759,6 +759,18 @@ export const api = {
       >;
     }>(`/api/vehicles/${id}/inspection-result`, { method: 'PATCH', body: JSON.stringify(data) }),
 
+  // แก้ไขผลตรวจที่บันทึกไปแล้ว - remark = เหตุผลที่แก้ (บังคับ, เก็บลงประวัติการแก้ไข), failRemark = เหตุผลที่ตรวจไม่ผ่าน
+  correctInspectionResult: (
+    id: string,
+    data: { result: string; resultDate: string; failRemark: string | null; remark: string },
+  ) =>
+    request<{
+      vehicle: Pick<
+        InspectionVehicle,
+        'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionResultBillCost' | 'inspectionFailRemark'
+      >;
+    }>(`/api/vehicles/${id}/inspection-result-correction`, { method: 'PATCH', body: JSON.stringify(data) }),
+
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort) - RECEIVED ต้องแนบรูปแล้ว, FAILED ต้องมี failRemark,
   // CARRY = ย้ายไป "ค้างจากใบก่อน"
   saveReceiptCheck: (receivedDate: string, entries: ReceiptCheckEntry[]) =>

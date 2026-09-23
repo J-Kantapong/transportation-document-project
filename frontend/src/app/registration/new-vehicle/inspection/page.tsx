@@ -48,6 +48,15 @@ interface SendRowState {
   message: { text: string; error?: boolean };
 }
 
+// แก้ไขผลตรวจของรถที่ตรวจเสร็จไปแล้ว 1 คัน (เปิดทีละคันใน dialog)
+interface EditResultState {
+  vehicle: InspectionVehicle;
+  result: ResultType;
+  dateText: string;
+  failRemarkText: string;
+  remarkText: string; // เหตุผลที่แก้ไข - บังคับกรอก
+}
+
 interface ResultRowState {
   selectedResult: ResultType | null;
   dateText: string;
@@ -636,11 +645,13 @@ function CompletedInspectionPanel({
   loading,
   error,
   onOpenDetail,
+  onEditResult,
 }: {
   vehicles: InspectionVehicle[];
   loading: boolean;
   error: string;
   onOpenDetail: (v: InspectionVehicle) => void;
+  onEditResult: (v: InspectionVehicle) => void;
 }) {
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
@@ -694,6 +705,10 @@ function CompletedInspectionPanel({
                       <button className="text-button" onClick={() => onOpenDetail(v)}>
                         ดูข้อมูล
                       </button>
+                      {/* บันทึกผลตรวจผิด (เช่น ผ่าน ทั้งที่จริงไม่ผ่าน) แก้ได้ที่นี่ - ต้องระบุเหตุผลที่แก้ */}
+                      <button className="text-button" onClick={() => onEditResult(v)}>
+                        แก้ไขผลตรวจ
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -736,6 +751,12 @@ export default function InspectionPage() {
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<InspectionVehicle | null>(null);
+
+  // แก้ไขผลตรวจที่บันทึกไปแล้ว (ต้องระบุเหตุผลที่แก้ - backend เก็บลงประวัติการแก้ไขของรถคันนั้น)
+  const editDialogRef = useRef<HTMLDialogElement>(null);
+  const [editResult, setEditResult] = useState<EditResultState | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editMessage, setEditMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
   // พิมพ์ใบรายการรถส่งตรวจ (PDF) - เฉพาะรถส่งตรวจนอกที่รอผล รถที่เอามาตรวจเองไม่ต้องพิมพ์
   const sentOutPendingVehicles = pendingResultVehicles.filter((v) => v.inspectionSentType !== "เอารถมาตรวจเอง");
@@ -1029,6 +1050,59 @@ export default function InspectionPage() {
     dialogRef.current?.showModal();
   }
 
+  function openEditResult(vehicle: InspectionVehicle) {
+    setEditResult({
+      vehicle,
+      result: vehicle.inspectionResult === "ไม่ผ่าน" ? "ไม่ผ่าน" : "ผ่าน",
+      dateText: vehicle.inspectionResultDate ? isoToDisplayDate(vehicle.inspectionResultDate) : "",
+      failRemarkText: vehicle.inspectionFailRemark ?? "",
+      remarkText: "",
+    });
+    setEditMessage({ text: "" });
+    editDialogRef.current?.showModal();
+  }
+
+  function patchEditResult(patch: Partial<EditResultState>) {
+    setEditResult((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function handleSaveEditResult() {
+    if (!editResult) return;
+    const digits = editResult.dateText.replace(/\D/g, "");
+    const dateIso = digits ? displayDateToIso(digits) : "";
+    if (!dateIso) {
+      setEditMessage({ text: "วันที่ไม่ถูกต้อง", error: true });
+      return;
+    }
+    if (editResult.result === "ไม่ผ่าน" && !editResult.failRemarkText.trim()) {
+      setEditMessage({ text: "กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน", error: true });
+      return;
+    }
+    if (!editResult.remarkText.trim()) {
+      setEditMessage({ text: "กรุณาระบุเหตุผลที่แก้ไขผลตรวจ", error: true });
+      return;
+    }
+
+    setEditSaving(true);
+    setEditMessage({ text: "กำลังบันทึก…" });
+    try {
+      await api.correctInspectionResult(editResult.vehicle.id, {
+        result: editResult.result,
+        resultDate: dateIso,
+        failRemark: editResult.result === "ไม่ผ่าน" ? editResult.failRemarkText.trim() : null,
+        remark: editResult.remarkText.trim(),
+      });
+      editDialogRef.current?.close();
+      setEditResult(null);
+      // แก้เป็นไม่ผ่านแล้วรถกลับเข้าคิวส่งตรวจ จึงโหลดใหม่ทุกลิสต์
+      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
+    } catch (err) {
+      setEditMessage({ text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   function openPrintDialog() {
     setPrintHeader(loadPrintHeader());
     // ค่าเริ่มต้น = วันที่ส่งตรวจล่าสุด (รายการที่เพิ่งส่งไป) - เลือก "ทั้งหมด" ได้
@@ -1144,7 +1218,13 @@ export default function InspectionPage() {
             />
           )}
 
-          <CompletedInspectionPanel vehicles={completedVehicles} loading={completedLoading} error={completedError} onOpenDetail={openDetail} />
+          <CompletedInspectionPanel
+            vehicles={completedVehicles}
+            loading={completedLoading}
+            error={completedError}
+            onOpenDetail={openDetail}
+            onEditResult={openEditResult}
+          />
         </>
       )}
 
@@ -1168,6 +1248,89 @@ export default function InspectionPage() {
                 </div>
               ))}
             </dl>
+          </>
+        )}
+      </dialog>
+
+      {/* แก้ไขผลตรวจที่บันทึกไปแล้ว - ค่าใช้จ่ายคงที่ตามผลตรวจใหม่ (ไม่ผ่าน = 0 ได้เงินคืน) แก้จากหน้าจอไม่ได้ */}
+      <dialog
+        ref={editDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) editDialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
+          ×
+        </button>
+        {editResult && (
+          <>
+            <h2>แก้ไขผลตรวจ</h2>
+            <p className="muted" style={{ marginTop: -8, fontSize: 13 }}>
+              {editResult.vehicle.chassis} · {editResult.vehicle.customerName} · {editResult.vehicle.brandName} · {roundLabel(editResult.vehicle)}
+            </p>
+            <div style={{ display: "grid", gap: 16 }}>
+              <div className="inspect-row-checks">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={editResult.result === "ผ่าน"}
+                    onChange={() => patchEditResult({ result: "ผ่าน" })}
+                  />
+                  ผ่าน
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={editResult.result === "ไม่ผ่าน"}
+                    onChange={() => patchEditResult({ result: "ไม่ผ่าน" })}
+                  />
+                  ไม่ผ่าน
+                </label>
+              </div>
+              <label className="field">
+                วันที่ทราบผล
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="วว/ดด/ปปปป"
+                  value={editResult.dateText}
+                  onChange={(e) => patchEditResult({ dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                />
+              </label>
+              {editResult.result === "ไม่ผ่าน" && (
+                <label className="field">
+                  Remark (เหตุผลที่ตรวจไม่ผ่าน)
+                  <input
+                    type="text"
+                    placeholder="เช่น เลขตัวรถผิด"
+                    value={editResult.failRemarkText}
+                    onChange={(e) => patchEditResult({ failRemarkText: e.target.value })}
+                  />
+                </label>
+              )}
+              <label className="field">
+                เหตุผลที่แก้ไข (บังคับ)
+                <input
+                  type="text"
+                  placeholder="เช่น บันทึกผลตรวจผิด"
+                  value={editResult.remarkText}
+                  onChange={(e) => patchEditResult({ remarkText: e.target.value })}
+                />
+              </label>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                ราคาตรวจรถ (No bill) {bahtText(resultDefaultCost(editResult.vehicle, editResult.result))} · ค่าตรวจรถ (Bill){" "}
+                {bahtText(resultDefaultBillCost(editResult.vehicle, editResult.result))}
+                {editResult.result === "ไม่ผ่าน" && " — รถจะกลับเข้าคิวส่งตรวจใหม่"}
+              </p>
+              {editMessage.text && (
+                <div className={`customer-message${editMessage.error ? " error" : " success"}`} role="status">
+                  {editMessage.text}
+                </div>
+              )}
+              <button className="primary" style={{ justifySelf: "end" }} disabled={editSaving} onClick={handleSaveEditResult}>
+                บันทึกการแก้ไข
+              </button>
+            </div>
           </>
         )}
       </dialog>
