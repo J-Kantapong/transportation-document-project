@@ -28,7 +28,8 @@ export class TaxService {
   // Prisma.Decimal ไม่ใช่ string | number โดยตรง - แปลงเป็น string ตรงนี้ทีเดียว (ไม่ให้
   // government-tax-calculator.ts ต้องรู้จัก Prisma.Decimal) toNumber()/toMicroBaht() ใน
   // calculator รับ string ได้อยู่แล้ว
-  private async loadRuleSet(): Promise<GovernmentTaxRuleSet> {
+  // public: งานต่อภาษี (src/tax-renewal) ใช้ชุดอัตราเดียวกันนี้ ห้ามโหลดแยกเอง
+  async loadRuleSet(): Promise<GovernmentTaxRuleSet> {
     const verified = { active: true, status: GovTaxRuleStatus.VERIFIED } as const;
     const [ccBrackets, weightBrackets, evIncentives, motorcycleFlat] = await Promise.all([
       this.prisma.governmentTaxCcBracket.findMany({ where: verified }),

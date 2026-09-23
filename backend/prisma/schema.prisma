@@ -102,6 +102,7 @@ model Customer {
   vehicles        Vehicle[]
   requestedCases  Case[]
   serviceFeeRates ServiceFeeRate[]
+  taxRenewals     TaxRenewal[]
   invoices        Invoice[]
   users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
 }
@@ -204,6 +205,7 @@ model Vehicle {
   taxCalculations     TaxCalculation[]
   documentSubmissions DocumentSubmission[]
   plateSwapsAsNew     PlateSwap[] // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ที่รับเลขจากรถเก่า
+  taxRenewals         TaxRenewal[]
 
   @@index([customerId])
   @@index([brandId])
@@ -830,4 +832,68 @@ model InvoiceLine {
 
   @@index([invoiceId])
   @@index([vehicleId])
+}
+
+// --- ต่อภาษี (annual tax renewal) ------------------------------------------------
+// หนึ่งแถว = งานต่อภาษีหนึ่งคันหนึ่งรอบ ผูกกับ Vehicle ของงานจดใหม่ได้ (vehicleId) หรือกรอกเองทั้งหมด
+// สำหรับรถที่ไม่ได้อยู่ในระบบ - ข้อมูลรถถูก snapshot ลงแถวนี้เสมอ เพื่อให้ยอดภาษีย้อนหลังไม่เพี้ยน
+// แม้ Vehicle จะถูกแก้ภายหลัง
+//
+// ยอดเงินคำนวณตอนบันทึกการชำระ (paymentDate) ด้วย src/tax-renewal/vehicle-tax-calculator.ts แล้ว
+// snapshot ลง billItems/noBillItems/taxBreakdown - ก่อนชำระจะยังว่างอยู่ หน้าเว็บคิดสดให้ดูได้
+// Bill = ภาษีรถประจำปี + เงินเพิ่มกรณีล่าช้า / No Bill = ลงขัน (รถยนต์ 20, จักรยานยนต์ 10 - ติ๊กงดได้)
+model TaxRenewal {
+  id String @id @default(cuid())
+
+  vehicleId  String? // รถในฐานข้อมูลรถจดใหม่ (ถ้ามี)
+  customerId String?
+
+  submitDate DateTime // วันที่ยื่นงาน (ผู้ใช้เพิ่ม 2026-09-23) - ฟอร์มตั้งค่าเริ่มต้นเป็นวันที่ทำรายการ
+
+  // ข้อมูลรถ ณ ตอนบันทึก - ดึงจาก Vehicle ถ้าลิงก์ไว้ ไม่งั้นกรอกเอง
+  // เลขตัวถัง/หมวด/เลขทะเบียน บังคับเสมอ (ผู้ใช้กำหนด 2026-09-23) เลขเครื่องกรอกหรือไม่ก็ได้
+  // ไม่ @unique เพราะรถคันเดิมต่อภาษีได้ทุกปี
+  chassis               String // เลขตัวถัง
+  engine                String? // เลขเครื่อง
+  plateCategory         String // หมวดทะเบียน
+  plateNumber           String // เลขทะเบียน
+  registrationProvince  String?
+  vehicleType           String // ประเภทรถ (รย.1-.., รย.12-..)
+  fuel                  String // ประเภทเชื้อเพลิง
+  cc                    Decimal?  @db.Decimal(10, 2)
+  weight                Decimal?  @db.Decimal(10, 2)
+  firstRegistrationDate DateTime // ใช้คำนวณส่วนลดอายุรถและเงื่อนไขตรวจสภาพ
+  ownerType             OwnerType
+  ownerName             String?
+
+  taxExpiryDate DateTime // วันครบกำหนดภาษีของรอบที่ต่อ
+
+  // ตรวจความครบของเอกสาร - ร้านไม่ได้รับตรวจสภาพเอง แค่ติ๊กยืนยันว่ามีใบมาแล้ว
+  inspectionRequired  Boolean @default(false) // ระบบคำนวณให้ (ครบ 7 ปี / รย.12 ครบ 5 ปี / ค้างภาษีเกิน 1 ปี)
+  inspectionConfirmed Boolean @default(false) // มีใบตรวจ ตรอ. แล้ว
+  insuranceConfirmed  Boolean @default(false) // มี พ.ร.บ. แล้ว
+
+  // ยื่นชำระภาษี
+  paymentDate      DateTime?
+  skipContribution Boolean   @default(false) // ไม่มีค่าลงขันสำหรับงานนี้
+
+  billItems    Json? // [{label, amount}] - ภาษี + เงินเพิ่ม
+  noBillItems  Json? // [{label, amount}] - ลงขัน
+  billTotal    Decimal? @db.Decimal(12, 2)
+  noBillTotal  Decimal? @db.Decimal(12, 2)
+  taxBreakdown Json? // ใบคำนวณเต็มจาก calculateVehicleTax (cycles + calculationDetails + warnings)
+
+  receivedDate  DateTime? // รับป้ายภาษี/ใบเสร็จ
+  deliveredDate DateTime? // คืนเอกสารให้ลูกค้า
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle  Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([vehicleId])
+  @@index([customerId])
+  @@index([taxExpiryDate])
+  @@index([paymentDate])
 }
