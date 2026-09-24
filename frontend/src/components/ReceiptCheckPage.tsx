@@ -82,13 +82,11 @@ function CompareBadge({ s, amountText }: { s: DocumentSubmission; amountText: st
 
 type Ai = Extract<NonNullable<ReceiptSummary["extraction"]>, { reading: unknown }>;
 
-// ผลอ่านล่าสุดของรถคันนี้ (รูปที่แนบทีหลังถือเป็นรูปที่ถูกต้องกว่า) - ไม่เอารูปที่เลขตัวถังเป็นของรถคันอื่น
-// มากรอกทะเบียน/ยอดให้ ไม่งั้นรถจะได้ทะเบียนของคันอื่นถ้าพนักงานไม่ทันเห็นคำเตือน
+// ผลอ่านล่าสุดของรถคันนี้ (รูปที่แนบทีหลังถือเป็นรูปที่ถูกต้องกว่า) - เลือกรูปที่เลขตัวถังตรงก่อน
+// มีแต่รูปที่เลขตัวถังไม่ตรง (AI มักอ่านตกไปหลักเดียว) ก็ใช้รูปนั้น - ตอนบันทึกจะให้พนักงานยืนยันอีกที
 function latestAi(list: ReceiptSummary[] | undefined): Ai | null {
-  for (const r of [...(list ?? [])].reverse()) {
-    if (r.extraction && "reading" in r.extraction && r.extraction.match !== "chassis-mismatch") return r.extraction as Ai;
-  }
-  return null;
+  const reads = [...(list ?? [])].reverse().flatMap((r) => (r.extraction && "reading" in r.extraction ? [r.extraction as Ai] : []));
+  return reads.find((e) => e.match !== "chassis-mismatch") ?? reads[0] ?? null;
 }
 
 // รูปที่แนบกับรถคันนี้แต่เลขตัวถังในใบเสร็จเป็นของคันอื่น - ต้องลบก่อนบันทึก
@@ -135,7 +133,9 @@ function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
       u.includes("chassis"),
       ai.match === "chassis-near"
         ? `เลขตัวถังในใบเสร็จ (${r.chassis}) ต่างจากรถคันนี้เล็กน้อย - เทียบกับรูปว่าเป็นคันเดียวกัน`
-        : ai.checks.chassisValid
+        : ai.match === "chassis-mismatch"
+          ? `เลขตัวถังในใบเสร็จ (${r.chassis}) ไม่ตรงกับรถคันนี้ - เทียบกับรูปว่าเป็นคันเดียวกัน`
+          : ai.checks.chassisValid
           ? null
           : "เลขตัวถังไม่ผ่านการตรวจ check digit",
     ),
@@ -147,7 +147,9 @@ const CHECK_STYLE = { border: "2px solid #e0a31a", background: "#fff8e6" };
 
 // เทียบรายการบนใบเสร็จกับ Bill ที่ระบบคำนวณ: แยกภาษีกับค่าธรรมเนียม + บอกสาเหตุที่น่าจะเป็น (แบบ ข - แก้ข้อมูลรถ)
 function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string, wrong: Ai[], reviewed = false): string[] {
-  const lines: string[] = wrong.map((w) => `มีรูปใบเสร็จของรถคันอื่นแนบอยู่ (เลขตัวถัง ${w.reading.chassis}) - ลบรูปนั้นก่อนบันทึก`);
+  const lines: string[] = wrong.map(
+    (w) => `เลขตัวถังในใบเสร็จ (${w.reading.chassis}) ไม่ตรงกับรถคันนี้ (${s.vehicle.chassis}) - เทียบกับรูป AI อาจอ่านผิด ถ้าแนบผิดคันให้ลบรูป`,
+  );
   if (!ai) return lines;
   // ทะเบียนที่กรอกไว้ตอนยื่น (Step 4) ไม่ตรงกับใบเสร็จ = พนักงานกรอกผิดตอนยื่น - บันทึกจะใช้ตามใบเสร็จ
   const r = ai.reading;
@@ -359,11 +361,14 @@ export function ReceiptCheckPage() {
 
     const entries: ReceiptCheckEntry[] = [];
     const errors: Record<string, string> = {};
+    const mismatched: string[] = [];
     for (const s of activeRows) {
       const input = inputs[s.id];
       if (hasPhoto(s.id)) {
-        if (wrongCarReceipts(receipts[s.id]).length > 0) errors[s.id] = "มีรูปใบเสร็จของรถคันอื่นแนบอยู่ - ลบรูปนั้นก่อนบันทึก";
-        else if (!input.plateCategory.trim() || !input.plateNumber.trim()) errors[s.id] = "กรอกหมวดและเลขทะเบียนตามใบเสร็จ";
+        // AI อ่านเลขตัวถังตกหล่น/เพี้ยนได้ - เตือนแล้วให้พนักงานยืนยัน ไม่บล็อก (เดิมบล็อกจนบันทึกไม่ได้เลย)
+        const wrong = wrongCarReceipts(receipts[s.id]);
+        if (wrong.length > 0) mismatched.push(`${s.vehicle.chassis} ← ใบเสร็จอ่านได้ ${wrong.map((w) => w.reading.chassis).join(", ")}`);
+        if (!input.plateCategory.trim() || !input.plateNumber.trim()) errors[s.id] = "กรอกหมวดและเลขทะเบียนตามใบเสร็จ";
         else if (input.amountText.trim() && !AMOUNT_RE.test(input.amountText.trim())) errors[s.id] = "ยอดใบเสร็จต้องเป็นตัวเลข";
         else
           entries.push({
@@ -387,6 +392,13 @@ export function ReceiptCheckPage() {
       return setMessage({ text: `แก้ไข ${Object.keys(errors).length} คันที่ขึ้นสีแดงก่อนบันทึก`, error: true });
     }
     if (entries.length === 0) return setMessage({ text: "ยังไม่มีอะไรให้บันทึก - แนบรูปใบเสร็จหรือเลือกสาเหตุก่อน", error: true });
+    if (
+      mismatched.length > 0 &&
+      !window.confirm(
+        `เลขตัวถังในใบเสร็จไม่ตรงกับรถ ${mismatched.length} คัน:\n\n${mismatched.join("\n")}\n\nเทียบกับรูปแล้วเป็นใบเสร็จของคันนั้นจริง (AI อ่านผิด) ใช่ไหม?`,
+      )
+    )
+      return;
 
     const got = entries.filter((e) => e.action === "RECEIVED").length;
     const failed = entries.filter((e) => e.action === "FAILED").length;
