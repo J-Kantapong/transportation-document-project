@@ -273,7 +273,8 @@ export type ReceiptExtraction = (
   | { error: string }
 ) & {
   // chassis = ระบบจับคู่กับรถให้จากเลขตัวถัง / chassis-mismatch = เลขตัวถังในใบเสร็จไม่ตรงกับรถที่แนบ
-  match?: "chassis" | "chassis-mismatch" | null;
+  // chassis-near = เลขตัวถังใกล้เคียงรถคันนี้ (เลขท้าย 6 ตัวตรง, 11 ตัวแรกต่างไม่เกิน 2) - AI น่าจะอ่านเพี้ยน ให้เช็กกับรูป
+  match?: "chassis" | "chassis-near" | "chassis-mismatch" | null;
 };
 
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;

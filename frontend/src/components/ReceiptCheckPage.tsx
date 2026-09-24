@@ -124,7 +124,15 @@ function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
       u.includes("total") || u.includes("items"),
       ai.checks.itemsSumMatchesTotal ? null : "รายการในใบเสร็จรวมกันไม่เท่ายอดรวม",
     ),
-    chassis: reason(!r.chassis, u.includes("chassis"), ai.checks.chassisValid ? null : "เลขตัวถังไม่ผ่านการตรวจ check digit"),
+    chassis: reason(
+      !r.chassis,
+      u.includes("chassis"),
+      ai.match === "chassis-near"
+        ? `เลขตัวถังในใบเสร็จ (${r.chassis}) ต่างจากรถคันนี้เล็กน้อย - เทียบกับรูปว่าเป็นคันเดียวกัน`
+        : ai.checks.chassisValid
+          ? null
+          : "เลขตัวถังไม่ผ่านการตรวจ check digit",
+    ),
     receiptNo: reason(!r.receiptNo, u.includes("receiptNo"), ai.checks.receiptNoValid ? null : "รูปแบบไม่ใช่ ตัวเลข/ตัวเลข"),
   };
 }
@@ -586,6 +594,7 @@ export function ReceiptCheckPage() {
                             <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
                               เลขที่ {ai.reading.receiptNo ?? "?"} · {ai.reading.date ? isoToDisplayDate(ai.reading.date) : "?"}
                               {ai.match === "chassis" && " · จับคู่ด้วยเลขตัวถัง"}
+                              {ai.match === "chassis-near" && " · จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
                             </div>
                           )}
                           {active && (
