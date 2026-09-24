@@ -42,10 +42,10 @@ function service(found: unknown) {
       findMany: vi.fn().mockResolvedValue([]),
     },
     brand: { findFirst: vi.fn().mockImplementation(async ({ where }) => (where.name.equals.toLowerCase() === 'toyota' ? { name: 'Toyota' } : null)) },
-    receiptImage: { create: vi.fn(), delete: vi.fn(), findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
+    receiptImage: { create: vi.fn(), delete: vi.fn(), findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaService;
   const storage: ReceiptStorage = { put: vi.fn(), get: vi.fn(), delete: vi.fn() };
-  return { svc: new PlateSwapService(prisma, storage), create, update, prisma };
+  return { svc: new PlateSwapService(prisma, storage), create, update, prisma, storage };
 }
 
 const validDto = {
@@ -201,5 +201,26 @@ describe('PlateSwapService.remove', () => {
     const { svc, update } = service(swapRow({ returnedDate: new Date('2026-09-21T00:00:00.000Z') }));
     await expect(svc.remove('s1')).rejects.toMatchObject({ response: { error: expect.stringContaining('ลบไม่ได้') } });
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('PlateSwapService.addReceipt - กันรูปซ้ำ', () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  const file = { buffer: JPEG, size: JPEG.length, originalname: 'r.jpg' };
+
+  it('รูปใหม่ = เก็บพร้อม hash', async () => {
+    const { svc, prisma } = service(swapRow());
+    await svc.addReceipt('s1', file);
+    const data = vi.mocked(prisma.receiptImage.create).mock.calls[0][0].data as { contentHash?: string; plateSwapId?: string };
+    expect(data.plateSwapId).toBe('s1');
+    expect(data.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('รูปเดียวกับใบเสร็จที่มีอยู่แล้ว (ตารางเดียวกับใบเสร็จ Step 5) = "อัพโหลดไปแล้ว" ไม่เก็บไฟล์', async () => {
+    const { svc, prisma, storage } = service(swapRow());
+    vi.mocked(prisma.receiptImage.findUnique).mockResolvedValueOnce({ id: 'r0' } as never);
+    await expect(svc.addReceipt('s1', file)).rejects.toMatchObject({ status: 409, response: { error: 'รูปนี้อัพโหลดไปแล้ว' } });
+    expect(storage.put).not.toHaveBeenCalled();
+    expect(prisma.receiptImage.create).not.toHaveBeenCalled();
   });
 });
