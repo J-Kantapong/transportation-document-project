@@ -182,7 +182,7 @@ export class OverviewService {
           status: 'RECEIPT_RECEIVED',
           receiptAmount: { not: null },
           taxAmount: { not: null },
-          receiptReceivedDate: { gte: toDate(addDays(asOf, -(SERIES_DAYS - 1))), lte: day },
+          receiptDate: { gte: toDate(addDays(asOf, -(SERIES_DAYS - 1))), lte: day }, // วันที่ในใบเสร็จ (ผู้ใช้ 2026-09-25)
           vehicle: live,
         },
         select: { receiptAmount: true, billFeeTotal: true, taxAmount: true },
@@ -212,7 +212,7 @@ export class OverviewService {
           documentSubmissions: {
             orderBy: { createdAt: 'desc' },
             take: 1,
-            select: { status: true, submitDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true },
+            select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true },
           },
           plateSwapsAsNew: { where: { returnedDate: null }, take: 1, select: { id: true } },
           invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
@@ -247,7 +247,7 @@ export class OverviewService {
           plateDeliveredDate: true,
         },
       }),
-      this.prisma.documentSubmission.findMany({ where: { status: 'RECEIPT_RECEIVED', receiptReceivedDate: day, vehicle: live }, select: { vehicle: bodyOf } }),
+      this.prisma.documentSubmission.findMany({ where: { status: 'RECEIPT_RECEIVED', receiptDate: day, vehicle: live }, select: { vehicle: bodyOf } }),
       this.prisma.invoiceLine.findMany({ where: { invoice: { status: { not: 'VOID' }, issueDate: day } }, select: { body: true } }),
       // --- งานอื่นที่ค้าง ---
       this.prisma.plateSwap.findMany({

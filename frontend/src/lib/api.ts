@@ -221,7 +221,8 @@ export interface DocumentSubmission {
   taxAmount: string | null;
   createdAt: string;
   updatedAt: string;
-  receiptReceivedDate: string | null;
+  receiptReceivedDate: string | null; // วันที่ได้ใบเสร็จกลับมาถึงออฟฟิศ
+  receiptDate: string | null; // วันที่ที่พิมพ์บนใบเสร็จ (วันที่ทางการ) - null = รายการก่อน 2026-09-25
   receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
   receiptNo: string | null; // เลขที่ใบเสร็จ (AI กรอกให้ พนักงานแก้ได้)
   failRemark: string | null; // เหตุผลที่ยื่นไม่สำเร็จ - มีเฉพาะ status FAILED
@@ -290,7 +291,7 @@ export type ReceiptExtraction = (
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
 
 export type ReceiptCheckEntry =
-  | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string; receiptNo?: string }
+  | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string; receiptNo?: string; receiptDate?: string }
   | { submissionId: string; action: 'FAILED'; failRemark: string }
   | { submissionId: string; action: 'CARRY' };
 
@@ -783,6 +784,13 @@ export const api = {
         'id' | 'inspectionResult' | 'inspectionResultDate' | 'inspectionResultCost' | 'inspectionResultBillCost' | 'inspectionFailRemark'
       >;
     }>(`/api/vehicles/${id}/inspection-result-correction`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // แก้วันที่ในใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ค.ศ. YYYY-MM-DD)
+  updateReceiptDate: (submissionId: string, receiptDate: string) =>
+    request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/receipt-date`, {
+      method: 'PATCH',
+      body: JSON.stringify({ receiptDate }),
+    }),
 
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort) - RECEIVED ต้องแนบรูปแล้ว, FAILED ต้องมี failRemark,
   // CARRY = ย้ายไป "ค้างจากใบก่อน"

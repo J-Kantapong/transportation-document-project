@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
-import { checkReading, isNearChassis, type ReceiptReading } from './receipt-extraction.js';
+import { checkReading, isNearChassis, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
 import type { ReceiptStorage } from './receipt-storage.js';
 import { ReceiptsService, detectImageType } from './receipts.service.js';
 
@@ -30,6 +30,16 @@ function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { c
   } as unknown as PrismaService;
   return { svc: new ReceiptsService(prisma, storage, extractor), storage, create };
 }
+
+describe('normalizeReceiptDate', () => {
+  it('ใบเสร็จเป็น พ.ศ.: ค.ศ. คงเดิม · พ.ศ. ที่ AI ไม่ได้แปลงลบ 543 · วันที่ไม่มีจริงเป็น null', () => {
+    expect(normalizeReceiptDate('2026-09-23')).toBe('2026-09-23');
+    expect(normalizeReceiptDate('2569-09-23')).toBe('2026-09-23');
+    expect(normalizeReceiptDate('2569-02-30')).toBeNull();
+    expect(normalizeReceiptDate('23/09/2569')).toBeNull();
+    expect(normalizeReceiptDate(null)).toBeNull();
+  });
+});
 
 describe('detectImageType', () => {
   it('ดูชนิดจาก byte แรก ไม่ใช่นามสกุล', () => {

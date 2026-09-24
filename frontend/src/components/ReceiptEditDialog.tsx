@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { receiptImageUrl, type DocumentSubmission, type ReceiptSummary } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
-import { isoToDisplayDate } from "@/lib/date";
+import { formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 
 // Popup แก้ข้อมูลที่ AI กรอกให้ในหน้ารับใบเสร็จ: รูปใบเสร็จขนาดใหญ่อยู่ข้างช่องกรอก ให้พนักงานเทียบทีละช่อง
 // ช่องที่ AI ไม่แน่ใจ/อ่านไม่ออก/ตรวจอัตโนมัติไม่ผ่าน ขึ้นสีเหลืองพร้อมเหตุผล - กดยืนยันแล้วถือว่าคนตรวจแล้ว (ReceiptCheckPage เลิก highlight)
@@ -13,10 +13,11 @@ export interface EditValues {
   plateCategory: string;
   plateNumber: string;
   receiptNo: string;
+  receiptDate: string; // วันที่ในใบเสร็จ วว/ดด/ปปปป
   amountText: string;
 }
 
-export type FieldFlags = Record<"plate" | "receiptNo" | "total" | "chassis", string | null>; // null = ไม่ต้องเช็ก, ข้อความ = เหตุผล
+export type FieldFlags = Record<"plate" | "receiptNo" | "total" | "chassis" | "date", string | null>; // null = ไม่ต้องเช็ก, ข้อความ = เหตุผล
 
 interface Props {
   submission: DocumentSubmission;
@@ -55,6 +56,7 @@ export function ReceiptEditButton(props: Props) {
       plateCategory: draft.plateCategory.trim(),
       plateNumber: draft.plateNumber.trim(),
       receiptNo: draft.receiptNo.trim(),
+      receiptDate: draft.receiptDate.trim(),
       amountText: draft.amountText.trim(),
     });
     dialogRef.current?.close();
@@ -162,6 +164,18 @@ export function ReceiptEditButton(props: Props) {
               {props.highlight && <Flag text={props.flags.receiptNo} />}
             </label>
             <label className="field">
+              วันที่ในใบเสร็จ
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="วว/ดด/ปปปป"
+                value={draft.receiptDate}
+                onChange={(e) => setDraft({ ...draft, receiptDate: formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                style={{ width: 180, ...hl(props.flags.date) }}
+              />
+              {props.highlight && <Flag text={props.flags.date} />}
+            </label>
+            <label className="field">
               ยอดใบเสร็จ (รวมเป็นเงินทั้งสิ้น)
               <input
                 type="text"
@@ -178,7 +192,9 @@ export function ReceiptEditButton(props: Props) {
                 {props.aiChassis && props.aiChassis !== s.vehicle.chassis && <div style={{ color: "#b43434" }}>ไม่ตรงกับรถคันนี้ ({s.vehicle.chassis})</div>}
                 {props.highlight && <Flag text={props.flags.chassis} />}
               </div>
-              <div>วันที่ในใบเสร็จ: {props.aiDate ? isoToDisplayDate(props.aiDate) : "?"}</div>
+              <div>
+                AI อ่านวันที่ได้: {props.aiDate ? isoToDisplayDate(props.aiDate) : "?"} · วันที่ยื่น {isoToDisplayDate(s.submitDate.slice(0, 10))}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
               <button type="button" className="primary" onClick={save}>

@@ -6,6 +6,7 @@ import {
   RECEIPT_READING_PROMPT,
   ReceiptReadingSchema,
   checkReading,
+  normalizeReceiptDate,
   normalizeUncertainFields,
   type ReceiptChecks,
   type ReceiptReading,
@@ -78,7 +79,11 @@ export class ClaudeReceiptExtractor implements ReceiptExtractor {
       const parsed = response.parsed_output;
       if (!parsed) return { error: 'AI ตอบกลับในรูปแบบที่อ่านไม่ได้' };
       // AI เรียกชื่อช่องไม่ตรงลิสต์ได้ - กรองทิ้งตรงนี้ ไม่ให้กระทบช่องอื่นที่อ่านถูกแล้ว
-      const reading: ReceiptReading = { ...parsed, uncertainFields: normalizeUncertainFields(parsed.uncertainFields) };
+      const reading: ReceiptReading = {
+        ...parsed,
+        date: normalizeReceiptDate(parsed.date), // ใบเสร็จเป็น พ.ศ. - ถ้า AI ไม่ได้แปลงมา แปลงเป็น ค.ศ. ตรงนี้
+        uncertainFields: normalizeUncertainFields(parsed.uncertainFields),
+      };
       return {
         reading,
         checks: checkReading(reading),

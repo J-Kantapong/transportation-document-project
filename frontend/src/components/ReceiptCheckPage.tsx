@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigits, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
@@ -53,6 +53,8 @@ interface RowInput {
   plateNumber: string;
   amountText: string;
   receiptNo: string;
+  // วันที่ในใบเสร็จ (วว/ดด/ปปปป) - วันที่ทางการ แยกจากวันที่รับใบเสร็จ (ผู้ใช้ 2026-09-25) AI กรอกให้ ว่าง = backend ใช้วันที่ยื่น
+  receiptDate: string;
   reason: string; // "" = ยังไม่รู้สาเหตุ (ค้างไว้)
   otherText: string;
   reviewed: boolean; // พนักงานกดยืนยันใน popup แล้วว่าตรงกับรูป -> เลิก highlight ช่องที่ AI ไม่แน่ใจ
@@ -63,6 +65,7 @@ const billOf = (s: DocumentSubmission) => (s.taxAmount === null ? null : Number(
 const AMOUNT_RE = /^\d+(\.\d{1,2})?$/;
 // รูปแบบที่เห็นบนใบเสร็จจริง 69/0035358 - ไม่ล็อก prefix/จำนวนหลัก (ปี พ.ศ. เปลี่ยนทุกปี) แค่เตือน ไม่บล็อก
 const RECEIPT_NO_RE = /^\d+\/\d+$/;
+const toIso = (display: string) => displayDateToIso(display.replace(/\D/g, ""));
 
 function CompareBadge({ s, amountText }: { s: DocumentSubmission; amountText: string }) {
   const text = amountText.trim();
@@ -111,12 +114,13 @@ function latestAiError(list: ReceiptSummary[] | undefined): string | null {
   return last && "error" in last ? last.error : null;
 }
 
-const NO_FLAGS: FieldFlags = { plate: null, total: null, chassis: null, receiptNo: null };
+const NO_FLAGS: FieldFlags = { plate: null, total: null, chassis: null, receiptNo: null, date: null };
 
 // ช่องที่ต้องให้คนเช็ก (ค่า = เหตุผลที่แสดงใน popup): AI อ่านไม่ออก, AI บอกเองว่าไม่มั่นใจ หรือการตรวจอัตโนมัติไม่ผ่าน
 // พนักงานกดยืนยันใน popup แล้ว (reviewed) = เลิก highlight ของแถวนั้น
-function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
+function needsCheck(s: DocumentSubmission, ai: Ai | null, reviewed = false): FieldFlags {
   if (!ai || reviewed) return NO_FLAGS;
+  const submitDate = s.submitDate.slice(0, 10);
   const r = ai.reading;
   const u = r.uncertainFields;
   const reason = (unreadable: boolean, uncertain: boolean, checkFailed: string | null) =>
@@ -140,6 +144,12 @@ function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
           : "เลขตัวถังไม่ผ่านการตรวจ check digit",
     ),
     receiptNo: reason(!r.receiptNo, u.includes("receiptNo"), ai.checks.receiptNoValid ? null : "รูปแบบไม่ใช่ ตัวเลข/ตัวเลข"),
+    // กรมขนส่งออกใบเสร็จวันที่ยื่น (59/59 ใบ 2026-09-25) - ไม่ตรงวันที่ยื่นน่าจะ AI อ่านผิด
+    date: reason(
+      !r.date,
+      u.includes("date"),
+      r.date && r.date !== submitDate ? `ไม่ตรงกับวันที่ยื่น (${isoToDisplayDate(submitDate)}) - เทียบกับรูป` : null,
+    ),
   };
 }
 
@@ -157,8 +167,14 @@ function aiFindingLines(s: DocumentSubmission, ai: Ai | null, amountText: string
   if (v.plateCategory && v.plateNumber && r.plateCategory && r.plateNumber && (v.plateCategory !== r.plateCategory || v.plateNumber !== r.plateNumber)) {
     lines.push(`ทะเบียนตอนยื่น ${v.plateCategory} ${v.plateNumber} ไม่ตรงกับใบเสร็จ ${r.plateCategory} ${r.plateNumber} - บันทึกแล้วจะใช้ตามใบเสร็จ`);
   }
-  const check = needsCheck(ai, reviewed);
-  const toCheck = [check.plate && "ทะเบียน", check.receiptNo && "เลขที่ใบเสร็จ", check.total && "ยอดเงิน", check.chassis && "เลขตัวถัง"].filter(Boolean);
+  const check = needsCheck(s, ai, reviewed);
+  const toCheck = [
+    check.plate && "ทะเบียน",
+    check.receiptNo && "เลขที่ใบเสร็จ",
+    check.date && "วันที่ในใบเสร็จ",
+    check.total && "ยอดเงิน",
+    check.chassis && "เลขตัวถัง",
+  ].filter(Boolean);
   if (toCheck.length) lines.push(`เช็กกับรูปอีกครั้ง: ${toCheck.join(", ")}`);
 
   const amount = AMOUNT_RE.test(amountText.trim()) ? Number(amountText.trim()) : null;
@@ -211,6 +227,7 @@ function withAi(input: RowInput, ai: Ai | null): RowInput {
     plateNumber: r.plateNumber ?? input.plateNumber,
     amountText: r.total !== null ? String(r.total) : input.amountText,
     receiptNo: r.receiptNo ?? input.receiptNo,
+    receiptDate: r.date ? isoToDisplayDate(r.date) : input.receiptDate,
   };
 }
 
@@ -218,6 +235,74 @@ function StatusText({ s }: { s: DocumentSubmission }) {
   if (s.status === "RECEIPT_RECEIVED") return <span className="badge done">ได้ใบเสร็จแล้ว</span>;
   if (s.status === "FAILED") return <span className="badge warn">ยื่นไม่สำเร็จ: {s.failRemark || "—"}</span>;
   return <span className="badge">ย้ายไปค้างจากใบก่อนแล้ว</span>;
+}
+
+// ช่องวันที่ในใบเสร็จในตาราง "ได้ใบเสร็จแล้ว" พร้อมปุ่มแก้ (ผู้ใช้ 2026-09-25) - พิมพ์ปี พ.ศ. ได้ แปลงเป็น ค.ศ. ให้
+function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (receiptDate: string) => void }) {
+  const current = s.receiptDate ? isoToDisplayDate(s.receiptDate.slice(0, 10)) : "";
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(current);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    const iso = toIso(text);
+    if (!iso) return setError("วันที่ไม่ถูกต้อง - ใส่เป็น DD/MM/YYYY เช่น 23/09/2026");
+    setSaving(true);
+    try {
+      const updated = await api.updateReceiptDate(s.id, iso);
+      onSaved(updated.receiptDate ?? `${iso}T00:00:00.000Z`);
+      setEditing(false);
+      setError("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", whiteSpace: "nowrap" }}>
+        {current || "—"}
+        <button
+          type="button"
+          className="text-button"
+          style={{ fontSize: 12, padding: 0 }}
+          onClick={() => {
+            setText(current);
+            setError("");
+            setEditing(true);
+          }}
+        >
+          ✎ แก้
+        </button>
+      </span>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="วว/ดด/ปปปป"
+          value={text}
+          onChange={(e) => setText(formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+          aria-label="แก้วันที่ในใบเสร็จ"
+          style={{ width: 110 }}
+          autoFocus
+        />
+        <button type="button" className="primary" style={{ padding: "6px 10px", fontSize: 12 }} disabled={saving} onClick={save}>
+          {saving ? "…" : "บันทึก"}
+        </button>
+        <button type="button" className="text-button" style={{ fontSize: 12 }} disabled={saving} onClick={() => setEditing(false)}>
+          ยกเลิก
+        </button>
+      </div>
+      {error && <span style={{ fontSize: 11, color: "#b43434" }}>{error}</span>}
+    </div>
+  );
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" }) {
@@ -239,7 +324,9 @@ export function ReceiptCheckPage() {
   const [receipts, setReceipts] = useState<Record<string, ReceiptSummary[]>>({});
   const [inputs, setInputs] = useState<Record<string, RowInput>>({});
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [dateText, setDateText] = useState(isoToDisplayDate(todayIso()));
+  // วันที่รับใบเสร็จ: เหมือนหน้ารับป้าย/รับเล่ม - เติมอัตโนมัติเป็นวันที่บันทึก (วันนี้) null = ยังไม่แก้เอง พนักงานแก้เป็นวันอื่นได้
+  const [editedDate, setEditedDate] = useState<string | null>(null);
+  const dateText = editedDate ?? isoToDisplayDate(todayIso());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -264,7 +351,7 @@ export function ReceiptCheckPage() {
           p.submissions.map((s) => [
             s.id,
             withAi(
-              { plateCategory: s.vehicle.plateCategory ?? "", plateNumber: s.vehicle.plateNumber ?? "", amountText: "", receiptNo: "", reason: "", otherText: "", reviewed: false },
+              { plateCategory: s.vehicle.plateCategory ?? "", plateNumber: s.vehicle.plateNumber ?? "", amountText: "", receiptNo: "", receiptDate: isoToDisplayDate(s.submitDate.slice(0, 10)), reason: "", otherText: "", reviewed: false },
               latestAi(s.receipts),
             ),
           ]),
@@ -370,6 +457,7 @@ export function ReceiptCheckPage() {
         if (wrong.length > 0) mismatched.push(`${s.vehicle.chassis} ← ใบเสร็จอ่านได้ ${wrong.map((w) => w.reading.chassis).join(", ")}`);
         if (!input.plateCategory.trim() || !input.plateNumber.trim()) errors[s.id] = "กรอกหมวดและเลขทะเบียนตามใบเสร็จ";
         else if (input.amountText.trim() && !AMOUNT_RE.test(input.amountText.trim())) errors[s.id] = "ยอดใบเสร็จต้องเป็นตัวเลข";
+        else if (input.receiptDate.trim() && !toIso(input.receiptDate)) errors[s.id] = "วันที่ในใบเสร็จไม่ถูกต้อง - ใส่เป็น DD/MM/YYYY เช่น 23/09/2026";
         else
           entries.push({
             submissionId: s.id,
@@ -378,6 +466,7 @@ export function ReceiptCheckPage() {
             plateNumber: input.plateNumber.trim(),
             receiptAmount: input.amountText.trim() || undefined,
             receiptNo: input.receiptNo.trim() || undefined,
+            receiptDate: toIso(input.receiptDate) ?? undefined,
           });
       } else if (input.reason) {
         const remark = input.reason === "อื่นๆ" ? input.otherText.trim() : input.reason;
@@ -418,6 +507,7 @@ export function ReceiptCheckPage() {
       } else {
         await loadAll();
         setOpenKey(null);
+        setEditedDate(null); // รอบถัดไปกลับไปใช้วันที่บันทึกอัตโนมัติ
         setMessage({ text: `บันทึกแล้ว - ${summary.replace(/\n/g, " · ")}` });
       }
     } catch (err) {
@@ -430,7 +520,7 @@ export function ReceiptCheckPage() {
   const sheetTitle = (sh: Sheet) => `${isoToDisplayDate(sh.date)} · ${sh.label} · ${sh.owner}`;
 
   return (
-    <section className="content">
+    <section className="content content-wide">
       <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← จดทะเบียนรถใหม่
       </Link>
@@ -463,17 +553,27 @@ export function ReceiptCheckPage() {
             {label}
           </button>
         ))}
-        <label className="field" style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 8 }}>
-          วันที่รับใบเสร็จ
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <span>วันที่รับใบเสร็จ</span>
           <input
             type="text"
             inputMode="numeric"
             placeholder="วว/ดด/ปปปป"
             value={dateText}
-            onChange={(e) => setDateText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+            onChange={(e) => setEditedDate(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
             style={{ width: 120 }}
           />
         </label>
+        {editedDate === null ? (
+          <span className="customer-message">อัตโนมัติ = วันที่บันทึก (วันนี้)</span>
+        ) : (
+          <button type="button" className="text-button" onClick={() => setEditedDate(null)}>
+            กลับไปใช้วันนี้
+          </button>
+        )}
       </div>
 
       {message.text && (
@@ -571,18 +671,16 @@ export function ReceiptCheckPage() {
               onAssigned={addReceipt}
             />
 
+            {/* ตารางแบบกระชับ (ผู้ใช้ 2026-09-25: ไม่ต้องเลื่อนขวา) - ข้อมูลเท่าเดิม แต่ซ้อนเป็นบรรทัดในช่องเดียวกัน */}
             <div className="table-wrap" style={{ marginTop: 16 }}>
-              <table>
+              <table className="receipt-check-table">
                 <thead>
                   <tr>
-                    <th>{openSheet.key === CARRIED_KEY ? "วันที่ยื่น" : "ลำดับ"}</th>
-                    <th>เลขตัวรถ</th>
-                    <th>รูปใบเสร็จ</th>
-                    <th>เลขทะเบียน (หมวด / เลข)</th>
-                    <th>เลขที่ใบเสร็จ</th>
-                    <th>Bill</th>
-                    <th>ยอดใบเสร็จ</th>
-                    <th>สถานะ</th>
+                    <th style={{ width: 44 }}>{openSheet.key === CARRIED_KEY ? "วันที่ยื่น" : "ลำดับ"}</th>
+                    <th>รถ / รูปใบเสร็จ</th>
+                    <th>ข้อมูลตามใบเสร็จ</th>
+                    <th>ยอดเงิน</th>
+                    <th>ตรวจ / แก้ไข</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -593,20 +691,19 @@ export function ReceiptCheckPage() {
                     const rowError = rowErrors[s.id];
                     const ai = latestAi(receipts[s.id]);
                     const wrong = wrongCarReceipts(receipts[s.id]);
-                    const check = needsCheck(ai, input?.reviewed);
+                    const check = needsCheck(s, ai, input?.reviewed);
                     const aiError = photo && !ai ? latestAiError(receipts[s.id]) : null;
                     const bill = billOf(s);
+                    const editable = active && input;
                     return (
                       <tr key={s.id} style={active && !photo ? { background: "#fffaf0" } : !active ? { opacity: 0.6 } : undefined}>
                         <td>{openSheet.key === CARRIED_KEY ? isoToDisplayDate(s.submitDate.slice(0, 10)) : i + 1}</td>
                         <td>
                           <div style={{ fontFamily: "monospace" }}>{s.vehicle.chassis}</div>
-                          <div style={{ fontSize: 11, color: "#8a94a6" }}>
+                          <div style={{ fontSize: 11, color: "#8a94a6", marginBottom: 6 }}>
                             {s.vehicle.brand.name}
                             {openSheet.key === CARRIED_KEY ? ` · ${s.vehicle.customer.name}` : ""}
                           </div>
-                        </td>
-                        <td>
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={active ? (rid) => removeReceipt(s.id, rid) : undefined} />
                           {active && (() => {
                             const dup = duplicateOf(receipts[s.id]);
@@ -614,9 +711,8 @@ export function ReceiptCheckPage() {
                           })()}
                           {active && ai && (
                             <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
-                              เลขที่ {ai.reading.receiptNo ?? "?"} · {ai.reading.date ? isoToDisplayDate(ai.reading.date) : "?"}
-                              {ai.match === "chassis" && " · จับคู่ด้วยเลขตัวถัง"}
-                              {ai.match === "chassis-near" && " · จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
+                              {ai.match === "chassis" && "จับคู่ด้วยเลขตัวถัง"}
+                              {ai.match === "chassis-near" && "จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
                             </div>
                           )}
                           {active && (
@@ -629,86 +725,102 @@ export function ReceiptCheckPage() {
                           )}
                         </td>
                         <td>
-                          {active && input ? (
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <input
-                                type="text"
-                                placeholder="8ขก"
-                                maxLength={3}
-                                value={input.plateCategory}
-                                onChange={(e) => patchInput(s.id, { plateCategory: e.target.value.slice(0, 3) })}
-                                aria-label="หมวดทะเบียน"
-                                style={{ width: 62, ...(check.plate ? CHECK_STYLE : {}) }}
-                              />
+                          <div className="receipt-fields">
+                            <span>ทะเบียน</span>
+                            {editable ? (
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <input
+                                  type="text"
+                                  placeholder="8ขก"
+                                  maxLength={3}
+                                  value={input.plateCategory}
+                                  onChange={(e) => patchInput(s.id, { plateCategory: e.target.value.slice(0, 3) })}
+                                  aria-label="หมวดทะเบียน"
+                                  style={{ width: 58, ...(check.plate ? CHECK_STYLE : {}) }}
+                                />
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="3484"
+                                  maxLength={4}
+                                  value={input.plateNumber}
+                                  onChange={(e) => patchInput(s.id, { plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                                  aria-label="เลขทะเบียน"
+                                  style={{ width: 62, ...(check.plate ? CHECK_STYLE : {}) }}
+                                />
+                              </div>
+                            ) : (
+                              <span>{s.vehicle.plateCategory && s.vehicle.plateNumber ? `${s.vehicle.plateCategory} ${s.vehicle.plateNumber}` : "—"}</span>
+                            )}
+                            <span>เลขที่</span>
+                            {editable ? (
+                              <div>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="69/0035358"
+                                  maxLength={30}
+                                  value={input.receiptNo}
+                                  onChange={(e) => patchInput(s.id, { receiptNo: e.target.value.replace(/[^\d/]/g, "") })}
+                                  aria-label="เลขที่ใบเสร็จ"
+                                  style={{ width: 126, ...(check.receiptNo ? CHECK_STYLE : {}) }}
+                                />
+                                {input.receiptNo.trim() && !RECEIPT_NO_RE.test(input.receiptNo.trim()) && (
+                                  <div style={{ marginTop: 4 }}>
+                                    <span className="badge warn">รูปแบบไม่ใช่ ตัวเลข/ตัวเลข</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span>{s.receiptNo || "—"}</span>
+                            )}
+                            <span>วันที่</span>
+                            {editable ? (
                               <input
                                 type="text"
                                 inputMode="numeric"
-                                placeholder="3484"
-                                maxLength={4}
-                                value={input.plateNumber}
-                                onChange={(e) => patchInput(s.id, { plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-                                aria-label="เลขทะเบียน"
-                                style={{ width: 66, ...(check.plate ? CHECK_STYLE : {}) }}
+                                placeholder="วว/ดด/ปปปป"
+                                value={input.receiptDate}
+                                onChange={(e) => patchInput(s.id, { receiptDate: formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                                aria-label="วันที่ในใบเสร็จ"
+                                style={{ width: 126, ...(check.date ? CHECK_STYLE : {}) }}
                               />
-                            </div>
-                          ) : s.vehicle.plateCategory && s.vehicle.plateNumber ? (
-                            `${s.vehicle.plateCategory} ${s.vehicle.plateNumber}`
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td>
-                          {active && input ? (
-                            <>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="69/0035358"
-                                maxLength={30}
-                                value={input.receiptNo}
-                                onChange={(e) => patchInput(s.id, { receiptNo: e.target.value.replace(/[^\d/]/g, "") })}
-                                aria-label="เลขที่ใบเสร็จ"
-                                style={{ width: 110, ...(check.receiptNo ? CHECK_STYLE : {}) }}
-                              />
-                              {input.receiptNo.trim() && !RECEIPT_NO_RE.test(input.receiptNo.trim()) && (
-                                <div style={{ marginTop: 4 }}>
-                                  <span className="badge warn">รูปแบบไม่ใช่ ตัวเลข/ตัวเลข</span>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            s.receiptNo || "—"
-                          )}
-                        </td>
-                        <td>
-                          <div>{bill === null ? "—" : money(bill)}</div>
-                          <div style={{ fontSize: 11, color: "#8a94a6" }}>
-                            ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
+                            ) : (
+                              <span>{s.receiptDate ? isoToDisplayDate(s.receiptDate.slice(0, 10)) : "—"}</span>
+                            )}
                           </div>
                         </td>
                         <td>
-                          {active && input ? (
-                            <>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="ยอดรวม"
-                                value={input.amountText}
-                                onChange={(e) => patchInput(s.id, { amountText: e.target.value })}
-                                aria-label="ยอดใบเสร็จ"
-                                style={{ width: 96, ...(check.total ? CHECK_STYLE : {}) }}
-                              />
-                              <div style={{ marginTop: 4 }}>
-                                <CompareBadge s={s} amountText={input.amountText} />
+                          <div className="receipt-fields">
+                            <span>Bill</span>
+                            <div>
+                              <div>{bill === null ? "—" : money(bill)}</div>
+                              <div style={{ fontSize: 11, color: "#8a94a6" }}>
+                                ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
                               </div>
-                            </>
-                          ) : s.receiptAmount !== null ? (
-                            money(Number(s.receiptAmount))
-                          ) : (
-                            "—"
-                          )}
+                            </div>
+                            <span>ใบเสร็จ</span>
+                            {editable ? (
+                              <div>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="ยอดรวม"
+                                  value={input.amountText}
+                                  onChange={(e) => patchInput(s.id, { amountText: e.target.value })}
+                                  aria-label="ยอดใบเสร็จ"
+                                  style={{ width: 96, ...(check.total ? CHECK_STYLE : {}) }}
+                                />
+                                <div style={{ marginTop: 4 }}>
+                                  <CompareBadge s={s} amountText={input.amountText} />
+                                </div>
+                              </div>
+                            ) : (
+                              <span>{s.receiptAmount !== null ? money(Number(s.receiptAmount)) : "—"}</span>
+                            )}
+                          </div>
                         </td>
-                        <td style={{ minWidth: 210 }}>
+                        <td style={{ minWidth: 200 }}>
                           {!active ? (
                             <StatusText s={s} />
                           ) : photo ? (
@@ -753,7 +865,7 @@ export function ReceiptCheckPage() {
                                 receipts={receipts[s.id] ?? []}
                                 imageId={latestAiImageId(receipts[s.id])}
                                 values={input}
-                                flags={needsCheck(ai)}
+                                flags={needsCheck(s, ai)}
                                 highlight={!input.reviewed}
                                 aiChassis={ai?.reading.chassis ?? null}
                                 aiDate={ai?.reading.date ?? null}
@@ -774,15 +886,19 @@ export function ReceiptCheckPage() {
               </table>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+            {/* ปุ่มบันทึกติดขอบล่างจอ - ตรวจแถวไหนอยู่ก็กดยืนยันได้โดยไม่ต้องเลื่อนลงไปท้ายตาราง */}
+            <div className="receipt-save-bar">
               <span className="customer-message" style={{ fontSize: 13 }}>
                 {openSheet.key === CARRIED_KEY
                   ? "คันที่ยังรอใบเสร็จจะอยู่ในรายการนี้ต่อ"
                   : "คันที่ไม่มีใบเสร็จและยังไม่ทราบสาเหตุ จะย้ายไป \"ค้างจากใบก่อน\""}
               </span>
-              <button type="button" className="primary" disabled={saving} onClick={handleSave}>
-                {saving ? "กำลังบันทึก…" : openSheet.key === CARRIED_KEY ? "บันทึกรายการค้าง" : `บันทึกใบยื่นนี้ (ได้ใบเสร็จ ${activeRows.filter((s) => hasPhoto(s.id)).length} คัน)`}
-              </button>
+              <span style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <span>วันที่รับใบเสร็จ {dateText}</span>
+                <button type="button" className="primary" disabled={saving} onClick={handleSave}>
+                  {saving ? "กำลังบันทึก…" : openSheet.key === CARRIED_KEY ? "บันทึกรายการค้าง" : `บันทึกใบยื่นนี้ (ได้ใบเสร็จ ${activeRows.filter((s) => hasPhoto(s.id)).length} คัน)`}
+                </button>
+              </span>
             </div>
           </div>
         </section>
@@ -796,7 +912,7 @@ export function ReceiptCheckPage() {
           <div className="empty-customers">ยังไม่มีรายการที่ได้ใบเสร็จ</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="receipt-check-table">
               <thead>
                 <tr>
                   <th>วันที่ยื่นเอกสาร</th>
@@ -804,6 +920,7 @@ export function ReceiptCheckPage() {
                   <th>เลขตัวถัง</th>
                   <th>ทะเบียน</th>
                   <th>เลขที่ใบเสร็จ</th>
+                  <th>วันที่ในใบเสร็จ</th>
                   <th>วันที่รับใบเสร็จ</th>
                   <th>รูปใบเสร็จ</th>
                   <th>Bill</th>
@@ -822,6 +939,12 @@ export function ReceiptCheckPage() {
                         <td>{s.vehicle.chassis}</td>
                         <td>{s.vehicle.plateCategory && s.vehicle.plateNumber ? `${s.vehicle.plateCategory} ${s.vehicle.plateNumber}` : "—"}</td>
                         <td>{s.receiptNo || "—"}</td>
+                        <td>
+                          <ReceiptDateCell
+                            s={s}
+                            onSaved={(receiptDate) => setCompleted((prev) => prev.map((c) => (c.id === s.id ? { ...c, receiptDate } : c)))}
+                          />
+                        </td>
                         <td>{s.receiptReceivedDate ? isoToDisplayDate(s.receiptReceivedDate.slice(0, 10)) : "—"}</td>
                         <td>{(receipts[s.id] ?? []).length ? <ReceiptThumbs receipts={receipts[s.id]} /> : "—"}</td>
                         <td>{bill === null ? "—" : money(bill)}</td>
