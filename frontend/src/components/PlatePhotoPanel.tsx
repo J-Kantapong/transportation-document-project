@@ -158,7 +158,7 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
         const image = await compressReceiptImage(file);
         merge(await api.uploadPlatePhoto(image, compressedFileName(file), kind), false);
       } catch (err) {
-        failed.push(errorText(err));
+        failed.push(`${file.name}: ${errorText(err)}`);
       }
     }
     setProgress("");
@@ -251,7 +251,8 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
       status = vehicleIds.length > 1 ? "ทะเบียนนี้มีหลายคัน / ใกล้เคียงหลายคัน - เลือกคันที่ถูก" : "อ่านได้ไม่ตรงเป๊ะ (ต่างกัน 1 ตัว) - ดูรูปแล้วติ๊กถ้าใช่คันนี้";
     } else if (kind === "received") {
       const v = vehicleById.get(vehicleIds[0]);
-      status = `รับป้ายคันนี้ไปแล้ว${v?.plateReceivedDate ? ` (${isoToDisplayDate(v.plateReceivedDate)})` : ""}`;
+      style = STATUS.warn; // รูปซ้ำ - ป้ายคันนี้ยืนยันรับไปแล้ว
+      status = `⚠️ รูปซ้ำ: รับป้ายคันนี้ไปแล้ว${v?.plateReceivedDate ? ` (${isoToDisplayDate(v.plateReceivedDate)})` : ""}`;
     } else if (kind === "none") {
       style = STATUS.bad;
       status = "ไม่พบรถที่รอรับป้ายทะเบียนนี้ (ยังไม่ได้บันทึกใบเสร็จ หรือ AI อ่านผิด)";

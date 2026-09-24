@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { BOOK_READER, type BookExtraction, type BookReader } from './book-reader.js';
 import { matchBook, normChassis, type BookCandidate, type BookMatch, type ReadBook } from './book-reading.js';
@@ -100,6 +101,10 @@ export class BookPhotosService {
     const type = detectImageType(file.buffer);
     if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
 
+    // ตรวจรูปซ้ำก่อนส่งให้ AI อ่าน
+    const contentHash = contentHashOf(file.buffer);
+    if (await this.prisma.bookPhoto.findUnique({ where: { contentHash }, select: { id: true } })) throw duplicateUpload();
+
     const now = new Date();
     const storageKey = `books/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
     const extraction = await this.reader.read(file.buffer, type.mimeType);
@@ -108,6 +113,7 @@ export class BookPhotosService {
       const photo = await this.prisma.bookPhoto.create({
         data: {
           storageKey,
+          contentHash,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
@@ -119,6 +125,7 @@ export class BookPhotosService {
       return this.withMatches([photo]);
     } catch (err) {
       await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
       throw err;
     }
   }

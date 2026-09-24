@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { YamahaRelocationAttachmentKind, YamahaRelocationSize } from '../generated/prisma/enums.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { calculateYamahaRelocationFees } from './yamaha-relocation-fee.js';
 import { CreateYamahaRelocationEntryDto } from './dto/create-yamaha-relocation-entry.dto.js';
 
@@ -135,12 +136,23 @@ export class YamahaRelocationService {
       this.checkFile(YamahaRelocationAttachmentKind.REPORT, files?.report),
     ];
 
+    // กันไฟล์ซ้ำ: ใบเสร็จกับ Report ต้องคนละไฟล์ และทั้งคู่ต้องไม่เคยแนบกับรายการไหนมาก่อน
+    const hashes = checked.map((c) => contentHashOf(c.file.buffer));
+    if (hashes[0] === hashes[1]) throw duplicateUpload('ไฟล์ใบเสร็จกับไฟล์ Report เป็นไฟล์เดียวกัน');
+    const dupes = await this.prisma.yamahaRelocationAttachment.findMany({ where: { contentHash: { in: hashes } }, select: { contentHash: true } });
+    const dupe = checked.find((_, i) => dupes.some((d) => d.contentHash === hashes[i]));
+    if (dupe) {
+      const label = ATTACHMENT_LABEL[dupe.kind];
+      throw duplicateUpload(`${label}${/[A-Za-z]$/.test(label) ? ' ' : ''}นี้อัพโหลดไปแล้ว`); // "ไฟล์ Report นี้..." เว้นวรรคหลังคำอังกฤษ
+    }
+
     const { billFee, noBillFee } = calculateYamahaRelocationFees(dto.size, count);
 
     const now = new Date();
     const ym = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-    const uploads = checked.map((c) => ({
+    const uploads = checked.map((c, i) => ({
       kind: c.kind,
+      contentHash: hashes[i],
       storageKey: `${STORAGE_FOLDER[c.kind]}/${ym}/${randomUUID()}.${c.type.ext}`,
       mimeType: c.type.mimeType,
       sizeBytes: c.file.size,
@@ -162,8 +174,9 @@ export class YamahaRelocationService {
           billFee,
           noBillFee,
           attachments: {
-            create: uploads.map(({ kind, storageKey, mimeType, sizeBytes, originalName }) => ({
+            create: uploads.map(({ kind, contentHash, storageKey, mimeType, sizeBytes, originalName }) => ({
               kind,
+              contentHash,
               storageKey,
               mimeType,
               sizeBytes,
@@ -177,6 +190,7 @@ export class YamahaRelocationService {
     } catch (err) {
       // อัปโหลด/บันทึกไม่สำเร็จ -> ลบไฟล์ที่ขึ้นไปแล้วทิ้ง ไม่ให้เป็นขยะใน R2
       await Promise.allSettled(stored.map((key) => this.storage.delete(key)));
+      if (isContentHashConflict(err)) throw duplicateUpload('ไฟล์นี้อัพโหลดไปแล้ว');
       throw err;
     }
   }
