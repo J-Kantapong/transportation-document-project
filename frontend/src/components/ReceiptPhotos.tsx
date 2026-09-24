@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
 // รูปใบเสร็จในหน้ารับใบเสร็จ: แนบทีละแถว (ReceiptAttachButton) หรืออัปโหลดหลายใบแล้วจับคู่กับรถ (ReceiptBatchPanel)
@@ -29,14 +30,12 @@ export function ReceiptThumbs({ receipts, onDelete }: { receipts: ReceiptSummary
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       {receipts.map((r, i) => (
         <div key={r.id} style={{ position: "relative" }}>
-          <a href={receiptImageUrl(r.id)} target="_blank" rel="noreferrer" title={`ดูใบเสร็จรูปที่ ${i + 1}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-            <img
-              src={receiptImageUrl(r.id)}
-              alt={`ใบเสร็จรูปที่ ${i + 1}`}
-              style={{ width: 44, height: 58, objectFit: "cover", borderRadius: 4, border: "1px solid #dfe5f0", display: "block" }}
-            />
-          </a>
+          <AuthedImage
+            src={receiptImageUrl(r.id)}
+            alt={`ใบเสร็จรูปที่ ${i + 1}`}
+            style={{ width: 44, height: 58, objectFit: "cover", borderRadius: 4, border: "1px solid #dfe5f0", display: "block" }}
+            linkTitle={`ดูใบเสร็จรูปที่ ${i + 1}`}
+          />
           {onDelete && (
             <button
               type="button"
@@ -235,14 +234,11 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                 const cardOptions = chosen && !options.includes(chosen) ? [chosen, ...options] : options;
                 return (
                 <div key={r.id} style={{ width: 220, border: "1px solid #dfe5f0", borderRadius: 8, padding: 10 }}>
-                  <a href={receiptImageUrl(r.id)} target="_blank" rel="noreferrer">
-                    {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-                    <img
-                      src={receiptImageUrl(r.id)}
-                      alt={r.originalName ?? "ใบเสร็จ"}
-                      style={{ width: "100%", height: 150, objectFit: "cover", objectPosition: "top", borderRadius: 4, display: "block" }}
-                    />
-                  </a>
+                  <AuthedImage
+                    src={receiptImageUrl(r.id)}
+                    alt={r.originalName ?? "ใบเสร็จ"}
+                    style={{ width: "100%", height: 150, objectFit: "cover", objectPosition: "top", borderRadius: 4, display: "block" }}
+                  />
                   {r.originalName && (
                     <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.originalName}>
                       {r.originalName}

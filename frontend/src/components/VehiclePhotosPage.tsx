@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { ApiError, bookPhotoImageUrl, platePhotoImageUrl, receiptImageUrl } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
 import { isoToDisplayDate } from "@/lib/date";
 import { type VehiclePhotos, vehiclePhotosApi } from "@/lib/vehicle-photos-api";
 
@@ -17,12 +18,7 @@ const STATUS_LABEL: Record<string, string> = {
 const thumbStyle = { width: 96, height: 128, objectFit: "cover", borderRadius: 6, border: "1px solid #dfe5f0", display: "block" } as const;
 
 function Thumb({ src, alt }: { src: string; alt: string }) {
-  return (
-    <a href={src} target="_blank" rel="noreferrer" title="เปิดรูปเต็ม">
-      {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-      <img src={src} alt={alt} style={thumbStyle} />
-    </a>
-  );
+  return <AuthedImage src={src} alt={alt} style={thumbStyle} linkTitle="เปิดรูปเต็ม" />;
 }
 
 function Group({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
