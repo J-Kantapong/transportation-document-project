@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -189,9 +190,19 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const count = parseCount(countText);
 
   // เลือก/เอาไฟล์ออกแล้วล้างข้อความเตือนเก่า (เช่น "กรุณาแนบไฟล์ใบเสร็จ") ที่ไม่ตรงกับสถานะแล้ว
-  function pickFile(set: (file: File | null) => void, file: File | null) {
-    set(file);
+  // ไฟล์เป็นรูป (ไม่ใช่ PDF) -> ย่อก่อนเก็บ เหมือนช่องแนบรูปอื่นๆ ในระบบ (ไม่มีการอ่านด้วย AI ตรงนี้ ย่อได้เต็มที่)
+  async function pickFile(set: (file: File | null) => void, file: File | null) {
     setFormMessage({ text: "" });
+    if (!file || !file.type.startsWith("image/")) {
+      set(file);
+      return;
+    }
+    try {
+      const blob = await compressReceiptImage(file);
+      set(new File([blob], compressedFileName(file), { type: "image/jpeg" }));
+    } catch {
+      set(file); // ย่อไม่สำเร็จ (ไฟล์เปิดไม่ได้) - ใช้ไฟล์เดิม ให้ backend/ผู้ใช้เห็น error ตอนบันทึกแทน
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
