@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
+import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 interface RowState {
@@ -56,6 +57,7 @@ function PendingVehicleTable({
   onSelectAll,
   bulkSaving,
   highlightDate,
+  canEdit,
 }: {
   vehicles: TransferNoticeVehicle[];
   rows: Record<string, RowState>;
@@ -65,8 +67,10 @@ function PendingVehicleTable({
   onSelectAll: (done: boolean) => void;
   bulkSaving: boolean;
   highlightDate?: string;
+  canEdit: (v: TransferNoticeVehicle) => boolean;
 }) {
-  const allSelected = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.done);
+  const editable = vehicles.filter(canEdit);
+  const allSelected = editable.length > 0 && editable.every((v) => rows[v.id]?.done);
 
   return (
     <div className="table-wrap">
@@ -82,7 +86,7 @@ function PendingVehicleTable({
             <th>สถานะ</th>
             <th>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "inherit" }}>
-                <input type="checkbox" checked={allSelected} onChange={(e) => onSelectAll(e.target.checked)} />
+                <input type="checkbox" checked={allSelected} disabled={!editable.length} onChange={(e) => onSelectAll(e.target.checked)} />
                 ดำเนินการแล้ว
               </label>
             </th>
@@ -96,6 +100,7 @@ function PendingVehicleTable({
             const row = rows[v.id];
             if (!row) return null;
             const isBacklog = highlightDate !== undefined && v.date !== highlightDate;
+            const readOnly = !canEdit(v);
             return (
               <tr key={v.id} className={isBacklog ? "row-backlog" : undefined} title={isBacklog ? "งานค้าง: ไม่ใช่วันที่รับงานที่เลือก" : undefined}>
                 <td>{isoToDisplayDate(v.date) || v.date}</td>
@@ -109,6 +114,7 @@ function PendingVehicleTable({
                   <input
                     type="checkbox"
                     checked={row.done}
+                    disabled={readOnly}
                     onChange={(e) => onDoneChange(v.id, e.target.checked)}
                     aria-label="ดำเนินการแล้ว"
                   />
@@ -119,6 +125,7 @@ function PendingVehicleTable({
                     inputMode="numeric"
                     placeholder="วว/ดด/ปปปป"
                     value={row.completedDateText}
+                    disabled={readOnly}
                     onChange={(e) =>
                       patchRow(v.id, { completedDateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
                     }
@@ -131,15 +138,20 @@ function PendingVehicleTable({
                     min={0}
                     step="any"
                     value={row.costText}
+                    disabled={readOnly}
                     onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                     style={{ width: 90 }}
                   />
                   {v.suggestedCost && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {v.suggestedCost} บาท</div>}
                 </td>
                 <td>
-                  <button className="text-button" disabled={row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                    บันทึก
-                  </button>
+                  {readOnly ? (
+                    <span className="muted" style={{ fontSize: 11 }}>ดูอย่างเดียว</span>
+                  ) : (
+                    <button className="text-button" disabled={row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                      บันทึก
+                    </button>
+                  )}
                   {row.message.text && (
                     <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
                       {row.message.text}
@@ -171,6 +183,10 @@ export default function TransferNoticePage() {
   const [completedVehicles, setCompletedVehicles] = useState<TransferNoticeVehicle[]>([]);
   const [completedLoading, setCompletedLoading] = useState(true);
   const [completedError, setCompletedError] = useState("");
+
+  // บันทึกได้ทุกคัน = ADMIN/STAFF_ENTRY, STAFF_MOTO เฉพาะจักรยานยนต์, บทบาทอื่นดูอย่างเดียว (backend กันอีกชั้น)
+  const [roles, setRoles] = useState<UserRole[]>([]);
+  const canEdit = (v: TransferNoticeVehicle) => canEditTransferNotice(roles, v.body);
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<TransferNoticeVehicle | null>(null);
@@ -210,6 +226,7 @@ export default function TransferNoticePage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPending();
     loadCompleted();
+    setRoles(getCachedUser()?.roles ?? []);
   }, []);
 
   function handleDateTextChange(raw: string) {
@@ -232,7 +249,7 @@ export default function TransferNoticePage() {
     const today = isoToDisplayDate(todayIso());
     setRows((prev) => {
       const next = { ...prev };
-      for (const v of vehicles) {
+      for (const v of vehicles.filter(canEdit)) {
         const row = next[v.id];
         next[v.id] = { ...row, done, completedDateText: done && !row.completedDateText ? today : row.completedDateText };
       }
@@ -268,7 +285,8 @@ export default function TransferNoticePage() {
     }
   }
 
-  async function handleSaveAll(vehicles: TransferNoticeVehicle[]) {
+  async function handleSaveAll(shown: TransferNoticeVehicle[]) {
+    const vehicles = shown.filter(canEdit);
     if (bulkSaving || !vehicles.length) return;
     const parsed: Array<{ id: string; done: boolean; completedDateIso: string; cost: string }> = [];
     for (const v of vehicles) {
@@ -329,7 +347,7 @@ export default function TransferNoticePage() {
                 {bulkMessage.text}
               </span>
             )}
-            <button className="primary" disabled={bulkSaving || !pendingVehicles.length} onClick={() => handleSaveAll(pendingVehicles)}>
+            <button className="primary" disabled={bulkSaving || !pendingVehicles.some(canEdit)} onClick={() => handleSaveAll(pendingVehicles)}>
               บันทึกทั้งหมด
             </button>
             <button className="text-button" onClick={loadPending}>
@@ -356,6 +374,7 @@ export default function TransferNoticePage() {
             onSelectAll={(done) => handleSelectAll(pendingVehicles, done)}
             bulkSaving={bulkSaving}
             highlightDate={dateIso}
+            canEdit={canEdit}
           />
         )}
       </div>
@@ -369,7 +388,7 @@ export default function TransferNoticePage() {
                 {bulkMessage.text}
               </span>
             )}
-            <button className="primary" disabled={bulkSaving || !byDateVehicles.length} onClick={() => handleSaveAll(byDateVehicles)}>
+            <button className="primary" disabled={bulkSaving || !byDateVehicles.some(canEdit)} onClick={() => handleSaveAll(byDateVehicles)}>
               บันทึกทั้งหมด
             </button>
             <button className="text-button" onClick={loadPending}>
@@ -408,6 +427,7 @@ export default function TransferNoticePage() {
             onSave={handleSave}
             onSelectAll={(done) => handleSelectAll(byDateVehicles, done)}
             bulkSaving={bulkSaving}
+            canEdit={canEdit}
           />
         )}
       </div>

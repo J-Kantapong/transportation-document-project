@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError, type Brand, type Customer, type DeletedVehicle, type FinanceCompany, type Vehicle } from "@/lib/api";
-import { canDeleteVehicle, getCachedUser } from "@/lib/auth";
+import { canDeleteVehicle, canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
@@ -348,6 +348,7 @@ export default function VehicleEntryPage() {
   // ลบข้อมูลรถ (ผู้ใช้ 2026-09-23): ADMIN เท่านั้น ต้องระบุเหตุผลทุกครั้ง - ลบแล้วซ่อนไว้ ไม่หายจากฐานข้อมูล
   // และกู้คืนได้จากรายการ "รถที่ลบแล้ว" ด้านล่าง (backend กันสิทธิ์อีกชั้นใน auth/access-policy.ts)
   const [canDelete, setCanDelete] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   const [deleting, setDeleting] = useState<Vehicle | null>(null);
   const [deleteRemark, setDeleteRemark] = useState("");
   const [deleteSaving, setDeleteSaving] = useState(false);
@@ -415,6 +416,8 @@ export default function VehicleEntryPage() {
     loadVehicles();
     // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect ไม่ใช่ตอน useState (แบบเดียวกับหน้าฐานข้อมูลลูกค้า)
     setCanDelete(canDeleteVehicle(getCachedUser()?.roles ?? []));
+    // แก้ไขรถที่บันทึกแล้ว: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน PATCH อยู่แล้ว - ซ่อนปุ่มให้กลุ่มอื่น)
+    setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
 
   const customerOptions = useMemo(
@@ -1048,10 +1051,14 @@ export default function VehicleEntryPage() {
                       <button className="text-button" onClick={() => openDetail(v)}>
                         ดูข้อมูล
                       </button>
-                      {" · "}
-                      <button className="text-button" onClick={() => openEdit(v)}>
-                        แก้ไข
-                      </button>
+                      {canEdit && (
+                        <>
+                          {" · "}
+                          <button className="text-button" onClick={() => openEdit(v)}>
+                            แก้ไข
+                          </button>
+                        </>
+                      )}
                       {canDelete && (
                         <>
                           {" · "}

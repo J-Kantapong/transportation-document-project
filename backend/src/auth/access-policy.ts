@@ -5,7 +5,7 @@ import type { UserRole } from '../generated/prisma/enums.js';
 // - ADMIN ทำได้ทุกอย่าง
 // - STAFF_ENTRY ขั้น 1-3 (เพิ่มข้อมูลรถ/แจ้งย้าย/ตรวจรถ + ข้อมูลอ้างอิง ยี่ห้อ/ไฟแนนซ์/เจ้าของรถ/ยามาฮ่า) ทุกประเภทรถ
 // - STAFF_CAR / STAFF_MOTO ขั้น 4-8 (ยื่นเอกสาร/ใบเสร็จ/ป้าย/เล่ม/Delivery) - ประเภทรถกรองเพิ่มใน vehicle-scope.ts
-//   และอ่านข้อมูลขั้น 1-3 ได้ (read-only)
+//   และอ่านข้อมูลขั้น 1-3 ได้ (read-only) ยกเว้น STAFF_MOTO บันทึกขั้น 2 แจ้งย้าย/ตัดบัญชีของจักรยานยนต์ได้ (ผู้ใช้ 2026-09-24)
 // - ACCOUNTANT วางบิล + อ่านข้อมูลงานทุกขั้นได้ | DELIVERY เฉพาะ /api/delivery | CUSTOMER เฉพาะ /api/portal
 // - ฐานข้อมูลลูกค้า: พนักงานทุกกลุ่มอ่านได้ เพิ่มได้เฉพาะ ADMIN
 export type Access = 'PUBLIC' | 'ANY_USER' | UserRole[];
@@ -44,6 +44,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/vehicles\/(submission-queue|search|lookup-by-chassis|document-submission|receiving)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, access: SUBMIT },
+  // ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24) - service กรองประเภทรถอีกชั้น
+  { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice$/, access: [...ENTRY, 'STAFF_MOTO'] },
   // ขั้น 1-3 + ข้อมูลอ้างอิง: ทุกกลุ่มอ่านได้ เขียนได้เฉพาะ STAFF_ENTRY
   { pattern: /^\/api(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api(\/|$)/, access: ENTRY },

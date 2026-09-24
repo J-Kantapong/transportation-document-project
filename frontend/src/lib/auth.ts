@@ -4,6 +4,7 @@
 // ตารางสิทธิ์ของหน้าอยู่ล่างสุด - ต้องตรงกับ backend/src/auth/access-policy.ts
 
 // STAFF_ENTRY = ขั้น 1-3 ทุกประเภทรถ | STAFF_CAR / STAFF_MOTO = ขั้น 4-8 เฉพาะรถยนต์ / จักรยานยนต์ (ผู้ใช้ 2026-09-22)
+// + STAFF_MOTO บันทึกขั้น 2 แจ้งย้าย/ตัดบัญชีของจักรยานยนต์ได้ด้วย (ผู้ใช้ 2026-09-24)
 export type UserRole = 'ADMIN' | 'STAFF_ENTRY' | 'STAFF_CAR' | 'STAFF_MOTO' | 'ACCOUNTANT' | 'DELIVERY' | 'CUSTOMER';
 export type UserStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISABLED';
 
@@ -171,6 +172,13 @@ const FALLBACK_ROLES: UserRole[] = ALL_STAFF;
 // หน้าขั้น 1-3 บันทึกได้เฉพาะ STAFF_ENTRY (ใช้ซ่อนปุ่ม/แจ้งอ่านอย่างเดียว)
 export function canEditEntrySteps(roles: UserRole[]): boolean {
   return roles.some((r) => ENTRY_STAFF.includes(r));
+}
+
+// ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24)
+// สำเนาของ canEditTransferNotice ใน backend/src/auth/vehicle-scope.ts
+export function canEditTransferNotice(roles: UserRole[], body: string | null): boolean {
+  if (canEditEntrySteps(roles)) return true;
+  return roles.includes('STAFF_MOTO') && Boolean(body?.startsWith('รย.12-'));
 }
 
 export function canAccessPage(pathname: string, roles: UserRole[]): boolean {
