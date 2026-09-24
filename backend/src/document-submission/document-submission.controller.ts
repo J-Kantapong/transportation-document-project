@@ -40,17 +40,24 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.saveReceiptCheck(body);
   }
 
+  // แก้วันที่ในใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ปุ่มแก้ในตาราง "ได้ใบเสร็จแล้ว") - แก้ได้เฉพาะช่องนี้
+  @Patch('document-submission/:id/receipt-date')
+  updateReceiptDate(@Param('id') id: string, @Body() body: { receiptDate?: unknown }) {
+    return this.documentSubmissionService.updateReceiptDate(id, body?.receiptDate);
+  }
+
   @Patch('document-submission/:id/status')
   updateStatus(
     @Param('id') id: string,
     @Body()
-    body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; failRemark?: unknown },
+    body: { status?: unknown; receivedDate?: unknown; plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; receiptDate?: unknown; failRemark?: unknown },
   ) {
     return this.documentSubmissionService.updateStatus(id, body?.status, body?.receivedDate, {
       plateCategory: body?.plateCategory,
       plateNumber: body?.plateNumber,
       receiptAmount: body?.receiptAmount,
       receiptNo: body?.receiptNo,
+      receiptDate: body?.receiptDate,
       failRemark: body?.failRemark,
     });
   }

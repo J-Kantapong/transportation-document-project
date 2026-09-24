@@ -4,12 +4,15 @@ import { useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage } from "@/lib/api";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { AuthedImage } from "@/components/AuthedImage";
+import { isoToDisplayDate } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { uploadReceiptsInBackground, usePendingReceipts } from "@/lib/receipt-upload";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
 // บอกผลทันทีหลังถ่าย เพราะคนถ่ายยังมีใบเสร็จอยู่ในมือ - อ่านไม่ออกก็ถ่ายใหม่ได้เลย
+// หน้าตาเหมือนหน้าถ่ายรูปป้าย/เล่ม (ผู้ใช้ 2026-09-25) - ไม่มีช่องวันที่: วันที่ในใบเสร็จมาจากที่ AI อ่าน
+// ส่วนวันที่รับใบเสร็จตั้งตอนออฟฟิศบันทึกใบยื่นในหน้ารับใบเสร็จ
 
 // เลือกจากคลังภาพ (หลายรูป) = ส่งแล้วให้ AI อ่านเบื้องหลัง (reading) คนส่งปิดหน้าไปทำอย่างอื่นได้
 type ShotStatus = "reading" | "matched" | "unmatched" | "unreadable" | "duplicate";
@@ -50,7 +53,6 @@ export function ReceiptCapturePage() {
   const [shots, setShots] = useState<Shot[]>([]); // ใหม่สุดอยู่บน - เฉพาะที่ส่งในรอบนี้
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
-
   const addShot = (receipt: ReceiptImage) => setShots((prev) => [toShot(receipt), ...prev]);
   const pendingIds = shots.filter((s) => s.status === "reading").map((s) => s.receipt.id);
   usePendingReceipts(pendingIds, (read) => {
@@ -109,86 +111,96 @@ export function ReceiptCapturePage() {
 
   return (
     <section className="content">
-      <div style={{ maxWidth: 520, margin: "0 auto" }}>
-        <h1 style={{ fontSize: 22, marginBottom: 6 }}>ถ่ายใบเสร็จ</h1>
-        <p className="customer-message" style={{ marginBottom: 16 }}>
-          วางใบเสร็จให้เต็มจอ ตัวหนังสือชัด ไม่มีเงาทับ - ถ่ายทีละใบ ระบบจะอ่านและจับคู่กับรถให้เอง
-        </p>
-
-        {/* capture="environment" = เปิดกล้องหลังทันที ไม่ต้องผ่านหน้าเลือกไฟล์ */}
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
-        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleGallery(e.target.files)} />
-
-        <button
-          type="button"
-          className="primary"
-          disabled={busy}
-          onClick={() => cameraRef.current?.click()}
-          style={{ width: "100%", justifyContent: "center", minHeight: 64, fontSize: 19 }}
-        >
-          {busy ? progress : shots.length === 0 ? "📷 ถ่ายใบเสร็จ" : "📷 ถ่ายใบต่อไป"}
-        </button>
-        <div style={{ textAlign: "center", marginTop: 8 }}>
-          <button type="button" className="text-button" disabled={busy} onClick={() => galleryRef.current?.click()}>
-            หรือเลือกรูปที่ถ่ายไว้แล้วจากคลังภาพ
-          </button>
-        </div>
-
-        {error && (
-          <div className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-            {error}
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 22, marginBottom: 14 }}>ถ่ายรูปใบเสร็จ</h1>
+        <section className="panel" style={{ marginTop: 0 }}>
+          <div className="panel-head">
+            <h2>ถ่ายรูปใบเสร็จ - ระบบอ่านและจับคู่ให้</h2>
           </div>
-        )}
+          <div style={{ padding: "0 23px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="customer-message" style={{ margin: 0 }}>
+              วางใบเสร็จให้เต็มจอ ตัวหนังสือชัด ไม่มีเงาทับ - ถ่ายทีละใบ ระบบจะอ่านและจับคู่กับรถที่รอใบเสร็จให้เอง
+            </p>
 
-        {shots.length > 0 && (
-          <div className="customer-message" role="status" style={{ marginTop: 16, fontWeight: 600 }}>
-            รอบนี้ส่งแล้ว {shots.length} ใบ
-            {count("reading") > 0 && ` · กำลังอ่าน ${count("reading")}`} · จับคู่แล้ว {count("matched")} · รอจับคู่ {count("unmatched")} · อ่านไม่ออก{" "}
-            {count("unreadable")}
-            {count("duplicate") > 0 && ` · อาจซ้ำ ${count("duplicate")}`}
-          </div>
-        )}
-        {count("reading") > 0 && !busy && (
-          <div className="customer-message" style={{ marginTop: 8 }}>
-            ส่งรูปครบแล้ว ปิดหน้านี้ไปทำอย่างอื่นได้เลย ระบบอ่านและจับคู่ต่อเอง - ใบที่อ่านไม่ออกหรือจับคู่ไม่ได้จะไปรอที่หน้ารับใบเสร็จ
-          </div>
-        )}
+            {/* capture="environment" = เปิดกล้องหลังทันที ไม่ต้องผ่านหน้าเลือกไฟล์ */}
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
+            <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleGallery(e.target.files)} />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => cameraRef.current?.click()}
+                style={{ width: "100%", justifyContent: "center", minHeight: 60, fontSize: 18 }}
+              >
+                {busy ? progress : shots.length === 0 ? "📷 ถ่ายรูปใบเสร็จ" : "📷 ถ่ายใบต่อไป"}
+              </button>
+              <button type="button" className="text-button" disabled={busy} onClick={() => galleryRef.current?.click()}>
+                เลือกรูปจากเครื่อง (หลายรูปได้)
+              </button>
+            </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-          {shots.map((shot) => {
-            const style = STATUS_STYLE[shot.status];
-            const extraction = shot.receipt.extraction;
-            const reading = extraction && "reading" in extraction ? extraction.reading : null;
-            return (
-              <div key={shot.receipt.id} style={{ display: "flex", gap: 12, padding: 10, borderRadius: 10, border: "1px solid #dfe5f0", background: style.background }}>
-                <div style={{ flexShrink: 0 }}>
-                  <AuthedImage
-                    src={receiptImageUrl(shot.receipt.id)}
-                    alt="ใบเสร็จที่ส่งแล้ว"
-                    style={{ width: 64, height: 86, objectFit: "cover", objectPosition: "top", borderRadius: 6, display: "block" }}
-                  />
-                </div>
-                <div style={{ minWidth: 0, flex: 1, fontSize: 14, lineHeight: 1.6 }}>
-                  <div style={{ color: style.color, fontWeight: 600 }}>
-                    {style.icon} {shot.text}
-                  </div>
-                  {reading && (
-                    <div style={{ color: "#3c4a63", wordBreak: "break-all" }}>
-                      ทะเบียน {reading.plateCategory ?? "?"} {reading.plateNumber ?? "?"} · รวม {reading.total?.toLocaleString("th-TH") ?? "?"} บาท
-                      <br />
-                      ตัวถัง {reading.chassis ?? "อ่านไม่ออก"}
-                    </div>
-                  )}
-                  {shot.status !== "matched" && shot.status !== "reading" && (
-                    <button type="button" className="text-button" disabled={busy} onClick={() => retake(shot)} style={{ paddingLeft: 0, fontSize: 14 }}>
-                      ลบแล้วถ่ายใหม่
-                    </button>
-                  )}
-                </div>
+            {error && (
+              <div className="customer-message error" role="alert">
+                {error}
               </div>
-            );
-          })}
-        </div>
+            )}
+
+            {shots.length > 0 && (
+              <div className="customer-message" role="status" style={{ fontWeight: 600 }}>
+                รอบนี้ส่งแล้ว {shots.length} ใบ
+                {count("reading") > 0 && ` · กำลังอ่าน ${count("reading")}`} · จับคู่แล้ว {count("matched")} · รอจับคู่ {count("unmatched")} · อ่านไม่ออก{" "}
+                {count("unreadable")}
+                {count("duplicate") > 0 && ` · อาจซ้ำ ${count("duplicate")}`}
+              </div>
+            )}
+            {count("reading") > 0 && !busy && (
+              <div className="customer-message">
+                ส่งรูปครบแล้ว ปิดหน้านี้ไปทำอย่างอื่นได้เลย ระบบอ่านและจับคู่ต่อเอง - ใบที่อ่านไม่ออกหรือจับคู่ไม่ได้จะไปรอที่หน้ารับใบเสร็จ
+              </div>
+            )}
+
+            {shots.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {shots.map((shot) => {
+                  const style = STATUS_STYLE[shot.status];
+                  const extraction = shot.receipt.extraction;
+                  const reading = extraction && "reading" in extraction ? extraction.reading : null;
+                  return (
+                    <div key={shot.receipt.id} style={{ display: "flex", gap: 12, padding: 10, borderRadius: 10, border: "1px solid #dfe5f0", background: style.background }}>
+                      <div style={{ flexShrink: 0 }}>
+                        <AuthedImage
+                          src={receiptImageUrl(shot.receipt.id)}
+                          alt="ใบเสร็จที่ส่งแล้ว"
+                          style={{ width: 64, height: 86, objectFit: "cover", objectPosition: "top", borderRadius: 6, display: "block" }}
+                        />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1, fontSize: 14, lineHeight: 1.6 }}>
+                        <div style={{ color: style.color, fontWeight: 600 }}>
+                          {style.icon} {shot.text}
+                        </div>
+                        {reading && (
+                          <div style={{ color: "#3c4a63", wordBreak: "break-all" }}>
+                            ทะเบียน {reading.plateCategory ?? "?"} {reading.plateNumber ?? "?"} · รวม {reading.total?.toLocaleString("th-TH") ?? "?"} บาท
+                            <br />
+                            ตัวถัง {reading.chassis ?? "อ่านไม่ออก"}
+                            <br />
+                            วันที่ในใบเสร็จ {reading.date ? isoToDisplayDate(reading.date) : "อ่านไม่ออก"}
+                          </div>
+                        )}
+                        {shot.status !== "matched" && shot.status !== "reading" && (
+                          <button type="button" className="text-button" disabled={busy} onClick={() => retake(shot)} style={{ paddingLeft: 0, fontSize: 14 }}>
+                            ลบแล้วถ่ายใหม่
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </section>
   );

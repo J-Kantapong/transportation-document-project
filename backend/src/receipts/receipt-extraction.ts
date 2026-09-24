@@ -45,6 +45,17 @@ export function normalizeUncertainFields(raw: string[]): ReceiptField[] {
   return [...out];
 }
 
+// ใบเสร็จกรมขนส่งพิมพ์วันที่เป็น พ.ศ. (เช่น 23 กันยายน 2569) - prompt สั่งให้ AI แปลงเป็น ค.ศ. แล้ว
+// แต่กันไว้อีกชั้น: ปีตั้งแต่ 2400 ถือเป็น พ.ศ. ลบ 543 · รูปแบบผิดหรือวันที่ไม่มีจริง = null (ให้คนกรอกตามรูป)
+export function normalizeReceiptDate(raw: string | null): string | null {
+  const match = raw ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim()) : null;
+  if (!match) return null;
+  const year = Number(match[1]) >= 2400 ? Number(match[1]) - 543 : Number(match[1]);
+  const iso = `${year}-${match[2]}-${match[3]}`;
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
 export interface ReceiptChecks {
   chassisValid: boolean; // VIN 17 ตัว ไม่มี I O Q
   receiptNoValid: boolean; // ตัวเลข/ตัวเลข - ไม่ล็อกว่าขึ้นต้น 69 (ผู้ใช้: น่าจะเป็นปี พ.ศ. เปลี่ยนทุกปี)

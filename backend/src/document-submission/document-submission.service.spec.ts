@@ -244,7 +244,7 @@ describe('DocumentSubmissionService.updateStatus', () => {
     expect(vehicleUpdate).not.toHaveBeenCalled();
     expect(submissionUpdate).toHaveBeenCalledWith({
       where: { id: 'sub1' },
-      data: { status: 'FAILED', receiptReceivedDate: null, failRemark: 'เอกสารไม่ครบ' },
+      data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, failRemark: 'เอกสารไม่ครบ' },
     });
   });
 
@@ -279,7 +279,13 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
       vehicle: { findFirst: vi.fn(), update: vi.fn().mockResolvedValue({}) },
       documentSubmission: {
         findFirst: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue({ id: 'sub1', vehicleId: 'v1', status: 'PENDING', vehicle: { plateCategory: null, plateNumber: null } }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sub1',
+          vehicleId: 'v1',
+          status: 'PENDING',
+          submitDate: new Date('2026-09-19T00:00:00.000Z'),
+          vehicle: { plateCategory: null, plateNumber: null },
+        }),
         create: vi.fn(),
         update: submissionUpdate,
         updateMany,
@@ -308,6 +314,20 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
     });
     expect(res.succeeded).toEqual(['sub1']);
     expect(submissionUpdate.mock.calls[0][0].data).toMatchObject({ status: 'RECEIPT_RECEIVED', receiptAmount: 1955 });
+    // ไม่ได้ส่งวันที่ในใบเสร็จมา = ใช้วันที่ยื่น · วันที่รับ = วันที่ของหน้า
+    expect(submissionUpdate.mock.calls[0][0].data.receiptDate.toISOString().slice(0, 10)).toBe('2026-09-19');
+    expect(submissionUpdate.mock.calls[0][0].data.receiptReceivedDate.toISOString().slice(0, 10)).toBe('2026-09-20');
+  });
+
+  it('เก็บวันที่ในใบเสร็จแยกจากวันที่รับใบเสร็จ', async () => {
+    const { service, submissionUpdate } = setup(1);
+    await service.saveReceiptCheck({
+      receivedDate: '2026-09-25',
+      entries: [{ submissionId: 'sub1', action: 'RECEIVED', plateCategory: '8ขก', plateNumber: '3484', receiptDate: '2026-09-22' }],
+    });
+    const data = submissionUpdate.mock.calls[0][0].data;
+    expect(data.receiptDate.toISOString().slice(0, 10)).toBe('2026-09-22');
+    expect(data.receiptReceivedDate.toISOString().slice(0, 10)).toBe('2026-09-25');
   });
 
   it('ยื่นไม่สำเร็จเก็บสาเหตุ / ค้างไว้ย้ายไปค้างจากใบก่อน', async () => {
@@ -319,5 +339,45 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
     const carried = await service.saveReceiptCheck({ entries: [{ submissionId: 'sub2', action: 'CARRY' }] });
     expect(carried.succeeded).toEqual(['sub2']);
     expect(updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'sub2', status: 'PENDING' } });
+  });
+});
+
+describe('DocumentSubmissionService.updateReceiptDate - แก้วันที่ในใบเสร็จย้อนหลัง', () => {
+  function setup(status: string) {
+    const update = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
+    const prisma = mockPrisma({
+      documentSubmission: { findUnique: vi.fn().mockResolvedValue({ status, vehicle: { body: 'รย.12-รถจักรยานยนต์' } }), update },
+    });
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), update };
+  }
+
+  it('ได้ใบเสร็จแล้ว: บันทึกวันที่ใหม่อย่างเดียว', async () => {
+    const { service, update } = setup('RECEIPT_RECEIVED');
+    await service.updateReceiptDate('sub1', '2026-09-22');
+    expect(update.mock.calls[0][0].data).toEqual({ receiptDate: new Date('2026-09-22T00:00:00.000Z') });
+  });
+
+  it('ยังไม่ได้ใบเสร็จ หรือวันที่ผิดรูปแบบ แก้ไม่ได้', async () => {
+    await expect(setup('PENDING').service.updateReceiptDate('sub1', '2026-09-22')).rejects.toThrow();
+    await expect(setup('RECEIPT_RECEIVED').service.updateReceiptDate('sub1', '2026/09/22')).rejects.toThrow();
+  });
+});
+
+describe('DocumentSubmissionService.updateReceiptDate - รูปแบบวันที่', () => {
+  function setup() {
+    const update = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
+    const prisma = mockPrisma({
+      documentSubmission: { findUnique: vi.fn().mockResolvedValue({ status: 'RECEIPT_RECEIVED', vehicle: { body: 'รย.1-รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน' } }), update },
+    });
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), update };
+  }
+
+  it('รับ DD-MM-YYYY / DD/MM/YYYY / ปี พ.ศ. และแจ้ง error เป็น DD/MM/YYYY', async () => {
+    const { service, update } = setup();
+    await service.updateReceiptDate('sub1', '23-09-2026');
+    await service.updateReceiptDate('sub1', '23/09/2569');
+    const saved = update.mock.calls.map((c) => c[0].data.receiptDate.toISOString().slice(0, 10));
+    expect(saved).toEqual(['2026-09-23', '2026-09-23']);
+    await expect(service.updateReceiptDate('sub1', '31-02-2026')).rejects.toMatchObject({ response: { error: expect.stringContaining('DD/MM/YYYY') } });
   });
 });

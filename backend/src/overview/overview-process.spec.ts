@@ -31,6 +31,7 @@ const passed = (resultIso: string) =>
 const sub = (status: string, o: Partial<NonNullable<OpenVehicle['latestSubmission']>> = {}) => ({
   status,
   submitDate: d('2026-09-10'),
+  receiptDate: null,
   receiptReceivedDate: status === 'RECEIPT_RECEIVED' ? d('2026-09-15') : null,
   failRemark: null,
   receiptCarriedAt: null,
@@ -87,6 +88,13 @@ describe('waitsFor - ขั้นที่รถค้างอยู่', () =>
       'billing',
     ]);
     expect(stages({ ...base, bookReceivedDate: d('2026-09-18'), plateReceivedDate: d('2026-09-18'), deliveredDate: d('2026-09-20'), plateDeliveredDate: d('2026-09-20'), billed: true })).toEqual([]);
+  });
+
+  it('รอป้าย/เล่มนับจากวันที่ในใบเสร็จ (ไม่มีค่อยใช้วันที่รับใบเสร็จ)', () => {
+    const since = (o: Partial<NonNullable<OpenVehicle['latestSubmission']>>) =>
+      waitsFor({ ...passed('2026-09-01'), latestSubmission: sub('RECEIPT_RECEIVED', o) }, TODAY).map((w) => w.since);
+    expect(since({ receiptDate: d('2026-09-10') })).toEqual(['2026-09-10', '2026-09-10']);
+    expect(since({})).toEqual(['2026-09-15', '2026-09-15']);
   });
 });
 

@@ -315,3 +315,17 @@ th.num-col{text-align:right}
 .stuck-reason{white-space:normal;min-width:220px;max-width:340px;line-height:1.6}
 .stuck-more{padding:12px 23px 18px}
 .exec-panel .inspect-filter{padding:0 23px 16px}
+/* หน้ารับใบเสร็จ: ตารางใบยื่นแบบกระชับให้พอดีหน้าจอ (ข้อมูลซ้อนบรรทัดในช่อง ไม่ต้องเลื่อนขวา) */
+.receipt-check-table{white-space:normal}
+.receipt-check-table th,.receipt-check-table td{padding:10px 12px;vertical-align:top}
+.receipt-fields{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+.receipt-fields>span:nth-child(odd){font-size:12px;color:#8a94a6;white-space:nowrap}
+.receipt-save-bar{position:sticky;bottom:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:12px 0;background:#fff;border-top:1px solid #dfe5f0;box-shadow:0 -6px 12px -8px rgba(15,23,42,.18)}
+/* หน้าที่ตารางกว้าง (หน้ารับใบเสร็จ) ใช้ความกว้างเต็มจอ ไม่จำกัด 1450px */
+.content.content-wide{max-width:none}
+/* จอกว้าง: ช่องข้อมูลใบเสร็จ/ยอดเงินเรียงเป็นแถวเดียว ใช้พื้นที่ทางขวา (ผู้ใช้ 2026-09-25) - จอแคบกว่านี้ยังซ้อนบรรทัด */
+@media (min-width:1700px){
+.receipt-fields{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:max-content;align-items:start}
+.receipt-fields>span:nth-child(odd){padding-top:7px}
+.receipt-fields>span:nth-child(odd):not(:first-child){margin-left:14px}
+}

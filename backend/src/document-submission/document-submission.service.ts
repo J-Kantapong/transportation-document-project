@@ -27,6 +27,24 @@ function toRows(rows: Array<{ key: string; amount: unknown }>): FeeParamRow[] {
   return rows.map((r) => ({ key: r.key, amount: r.amount === null ? null : Number(r.amount) }));
 }
 
+// วันที่ในใบเสร็จ: รับ DD/MM/YYYY (หรือ DD-MM-YYYY) ตามที่ผู้ใช้อ่าน และ YYYY-MM-DD ที่หน้าเว็บส่ง
+// ปีตั้งแต่ 2400 = พ.ศ. (ใบเสร็จพิมพ์ปี พ.ศ.) แปลงเป็น ค.ศ. ให้ · error แจ้งรูปแบบ DD/MM/YYYY ตรงกับช่องกรอก (ผู้ใช้ 2026-09-25)
+function parseReceiptDate(raw: unknown): Date {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  const dmy = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(text);
+  const iso = dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : text;
+  const year = Number(iso.slice(0, 4));
+  const ce = year >= 2400 ? `${year - 543}${iso.slice(4)}` : iso;
+  try {
+    const date = parseSubmitDate(ce);
+    // Date.parse เลื่อนวันที่ไม่มีจริงไปเดือนถัดไป (31-02 -> 03-03) - เทียบกลับให้ตรงเป๊ะ
+    if (date.toISOString().slice(0, 10) !== ce) throw new Error('invalid date');
+    return date;
+  } catch {
+    throw new BadRequestException({ error: 'วันที่ในใบเสร็จต้องเป็น DD/MM/YYYY ที่ถูกต้อง เช่น 23/09/2026' });
+  }
+}
+
 @Injectable()
 export class DocumentSubmissionService {
   constructor(
@@ -335,7 +353,7 @@ export class DocumentSubmissionService {
     submissionId: string,
     statusRaw: unknown,
     receivedDateRaw?: unknown,
-    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; failRemark?: unknown } = {},
+    extras: { plateCategory?: unknown; plateNumber?: unknown; receiptAmount?: unknown; receiptNo?: unknown; receiptDate?: unknown; failRemark?: unknown } = {},
   ) {
     if (statusRaw !== 'RECEIPT_RECEIVED' && statusRaw !== 'FAILED') {
       throw new BadRequestException({ error: 'status ต้องเป็น RECEIPT_RECEIVED หรือ FAILED' });
@@ -364,7 +382,7 @@ export class DocumentSubmissionService {
       if (!failRemark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่ยื่นไม่สำเร็จ' });
       return this.prisma.documentSubmission.update({
         where: { id: submissionId },
-        data: { status: 'FAILED', receiptReceivedDate: null, failRemark },
+        data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, failRemark },
       });
     }
 
@@ -377,15 +395,34 @@ export class DocumentSubmissionService {
     assertPlateFormat(plateCategory, plateNumber);
     const receiptAmount = parseReceiptAmount(extras.receiptAmount);
     const receiptNo = parseReceiptNo(extras.receiptNo);
+    // วันที่ในใบเสร็จ: กรมขนส่งออกใบเสร็จวันที่ยื่น (ข้อมูลจริง 59/59 ใบ 2026-09-25) - ไม่ได้ส่งมาใช้วันที่ยื่น
+    const receiptDate =
+      extras.receiptDate === undefined || extras.receiptDate === null || extras.receiptDate === '' ? submission.submitDate : parseReceiptDate(extras.receiptDate);
 
     const [, updated] = await this.prisma.$transaction([
       this.prisma.vehicle.update({ where: { id: submission.vehicleId }, data: { plateCategory, plateNumber } }),
       this.prisma.documentSubmission.update({
         where: { id: submissionId },
-        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptAmount, receiptNo },
+        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptDate, receiptAmount, receiptNo },
       }),
     ]);
     return updated;
+  }
+
+  // แก้วันที่ในใบเสร็จย้อนหลัง (ผู้ใช้ 2026-09-25) - เฉพาะรายการที่ได้ใบเสร็จแล้ว, รับ ค.ศ. YYYY-MM-DD
+  // ไม่แตะสถานะหรือช่องอื่น (สถานะยังเปลี่ยนได้ครั้งเดียวตาม updateStatus)
+  async updateReceiptDate(submissionId: string, receiptDateRaw: unknown) {
+    const receiptDate = parseReceiptDate(receiptDateRaw);
+    const submission = await this.prisma.documentSubmission.findUnique({
+      where: { id: submissionId },
+      select: { status: true, vehicle: { select: { body: true } } },
+    });
+    if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body);
+    if (submission.status !== 'RECEIPT_RECEIVED') {
+      throw new BadRequestException({ error: 'แก้วันที่ในใบเสร็จได้เฉพาะรายการที่ได้ใบเสร็จแล้ว' });
+    }
+    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { receiptDate } });
   }
 
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort - คันที่พลาดคืนเหตุผลกลับไป คันอื่นบันทึกต่อ)
@@ -415,6 +452,7 @@ export class DocumentSubmissionService {
             plateNumber: entry.plateNumber,
             receiptAmount: entry.receiptAmount,
             receiptNo: entry.receiptNo,
+            receiptDate: entry.receiptDate,
           });
         } else if (entry?.action === 'FAILED') {
           await this.updateStatus(submissionId, 'FAILED', undefined, { failRemark: entry.failRemark });

@@ -552,7 +552,8 @@ model DocumentSubmission {
   vehicleId           String
   submitDate          DateTime // วันที่ยื่นเอกสาร (ล็อกจากวันที่ตั้งไว้ตอนเริ่ม session ฝั่ง UI)
   status              String    @default("PENDING") // PENDING | RECEIPT_RECEIVED | FAILED - มี PENDING/RECEIPT_RECEIVED = ยื่นซ้ำไม่ได้ (RECEIPT_RECEIVED = จดทะเบียนแล้ว ตลอดไป)
-  receiptReceivedDate DateTime? // วันที่ได้รับใบเสร็จ (ตั้งตอน status -> RECEIPT_RECEIVED)
+  receiptReceivedDate DateTime? // วันที่ได้รับใบเสร็จ = วันที่ของกลับมาถึงออฟฟิศ (ตั้งตอน status -> RECEIPT_RECEIVED) ใช้ดูว่ารอนานเท่าไร
+  receiptDate         DateTime? // วันที่ที่พิมพ์บนใบเสร็จ (ผู้ใช้ 2026-09-25: วันที่ทางการ) - AI อ่านให้ พนักงานแก้ได้ ไม่มีใช้วันที่ยื่น (NULL = รายการก่อนมีช่องนี้)
   receiptAmount       Decimal?  @db.Decimal(12, 2) // ยอดที่เห็นบนใบเสร็จจริง (พนักงานกรอก) - เทียบกับ Bill = billFeeTotal + taxAmount
   receiptNo           String? // เลขที่ใบเสร็จ ("เลขที่" มุมขวาบน เช่น 69/0035358) - AI กรอกให้ พนักงานแก้ได้ ใช้เรียงตอนไปห้องรับป้าย
   failRemark          String? // เหตุผลที่ยื่นไม่สำเร็จ - บังคับกรอกตอน status -> FAILED แล้วรถกลับไปทำ Step 4 ใหม่ได้

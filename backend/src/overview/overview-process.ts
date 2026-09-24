@@ -64,6 +64,7 @@ export interface OpenVehicle {
   latestSubmission: {
     status: string;
     submitDate: Date;
+    receiptDate: Date | null; // วันที่ในใบเสร็จ - ภาพรวมนับขั้นรับใบเสร็จจากวันนี้ (ผู้ใช้ 2026-09-25)
     receiptReceivedDate: Date | null;
     failRemark: string | null;
     receiptCarriedAt: Date | null;
@@ -88,7 +89,8 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
     const unknown = sub.receiptCarriedAt !== null;
     waits.push(wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null]));
   } else if (sub?.status === 'RECEIPT_RECEIVED') {
-    const receiptDate = iso(sub.receiptReceivedDate ?? sub.submitDate);
+    // รายการก่อนมีช่องวันที่ในใบเสร็จ (ยังไม่ backfill) ใช้วันที่รับใบเสร็จ แล้วค่อยวันที่ยื่น
+    const receiptDate = iso(sub.receiptDate ?? sub.receiptReceivedDate ?? sub.submitDate);
     if (!v.plateReceivedDate) waits.push(wait('plate', receiptDate));
     if (!v.bookReceivedDate) waits.push(wait('book', receiptDate));
     // ส่งงานได้เมื่อได้ใบเสร็จ + รับเล่มแล้ว (ป้ายส่งตามทีหลังได้) - ดู delivery.service.ts

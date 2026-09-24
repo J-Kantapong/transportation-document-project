@@ -21,6 +21,14 @@ export function formatDateDigits(digits: string): string {
   return [d, m, y].filter(Boolean).join("/");
 }
 
+// ช่องวันที่ที่พนักงานกรอกตามเอกสารราชการ (เช่น ใบเสร็จกรมขนส่งพิมพ์ 23 กันยายน 2569): พิมพ์ปี พ.ศ. ครบ 8 หลักแล้ว
+// แปลงเป็น ค.ศ. ให้ทันที (ปีตั้งแต่ 2400 = พ.ศ. ลบ 543) - คืนค่าเป็นรูปแบบ วว/ดด/ปปปป เหมือน formatDateDigits
+export function formatDateDigitsCe(digits: string): string {
+  const year = Number(digits.slice(4, 8));
+  if (digits.length === 8 && year >= 2400) return formatDateDigits(`${digits.slice(0, 4)}${year - 543}`);
+  return formatDateDigits(digits);
+}
+
 // new Date(...).toISOString() throws on an out-of-range calendar date (e.g. month 17)
 // instead of returning an invalid date, so callers must check getTime() first.
 function isoIfValid(iso: string): string {
