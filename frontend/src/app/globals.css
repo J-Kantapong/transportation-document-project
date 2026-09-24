@@ -28,6 +28,9 @@ main{margin-left:246px}
 header{height:84px;background:white;border-bottom:1px solid #e6eaf1;padding:0 40px;display:flex;align-items:center;justify-content:space-between;font-size:14px}
 .breadcrumb{color:#929baa}
 .breadcrumb b{color:#46526a;font-weight:500}
+.breadcrumb a{color:inherit;text-decoration:none;border-radius:4px}
+.breadcrumb a:hover{color:#2854d9;text-decoration:underline;text-underline-offset:3px}
+.breadcrumb a:hover b{color:#2854d9}
 .status-badge{padding:4px 11px;background:#edf2ff;color:#2854d9;border:1px solid #d7e2ff;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
 .user-badge{padding:4px 11px;background:#f2f4f8;color:#55617a;border:1px solid #e2e7f0;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
 .content{max-width:1450px;margin:auto;padding:34px 40px}
