@@ -1,14 +1,14 @@
 import { vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
-import { checkReading, type ReceiptReading } from './receipt-extraction.js';
+import { checkReading, isNearChassis, type ReceiptReading } from './receipt-extraction.js';
 import type { ReceiptStorage } from './receipt-storage.js';
 import { ReceiptsService, detectImageType } from './receipts.service.js';
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const file = (buffer = JPEG) => ({ buffer, size: buffer.length, originalname: 'receipt.jpg' });
 
-function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null, dups: { saved?: unknown; image?: unknown; byChassis?: unknown } = {}) {
+function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null, dups: { saved?: unknown; image?: unknown; byChassis?: unknown } = {}, nearCandidates: unknown[] = []) {
   const storage = { put: vi.fn().mockResolvedValue(undefined), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) } satisfies ReceiptStorage;
   const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data }));
   const prisma = {
@@ -18,6 +18,7 @@ function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { c
       findFirst: vi.fn().mockImplementation(async ({ where }) =>
         where.receiptNo ? (dups.saved ?? null) : where.OR ? (dups.byChassis ?? null) : pendingByChassis,
       ),
+      findMany: vi.fn().mockResolvedValue(nearCandidates),
     },
     receiptImage: {
       create,
@@ -148,6 +149,42 @@ describe('ReceiptsService.upload - จับคู่ด้วยเลขตั
     const data = create.mock.calls[0][0].data;
     expect(data.submissionId).toBe('s1');
     expect(data.extraction.match).toBe('chassis-mismatch');
+  });
+
+  // เคสจริง 2026-09-24: AI อ่าน MLTZT1509TX007960 เป็น METZT1509TX007960
+  const MOTO_READ = { ...READING, chassis: 'METZT1509TX007960' };
+  const moto = (id: string, chassis: string) => ({ id, vehicle: { chassis } });
+
+  it('อัปโหลดหลายใบ: ไม่ตรงเป๊ะแต่ใกล้เคียงคันเดียว -> แนบให้ พร้อมให้เช็ก', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(MOTO_READ), null, {}, [moto('s7', 'MLTZT1509TX007960')]);
+    await svc.upload(file());
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBe('s7');
+    expect(data.extraction.match).toBe('chassis-near');
+  });
+
+  it('อัปโหลดหลายใบ: ใกล้เคียงหลายคัน -> ไม่เดา รอจับคู่', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(MOTO_READ), null, {}, [moto('s7', 'MLTZT1509TX007960'), moto('s8', 'MXTZT1509TX007960')]);
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.submissionId).toBeNull();
+  });
+
+  it('แนบในแถว: เลขตัวถังใกล้เคียงกับรถคันนั้น -> ไม่นับเป็นรถคันอื่น', async () => {
+    const { svc, create } = setup({ id: 's1', status: 'PENDING', vehicle: { chassis: 'MLTZT1509TX007960' } }, null, aiReading(MOTO_READ));
+    await svc.upload(file(), 's1');
+    expect(create.mock.calls[0][0].data.extraction.match).toBe('chassis-near');
+  });
+});
+
+describe('isNearChassis', () => {
+  it('11 ตัวแรกต่างได้ไม่เกิน 2 ตัว เลขท้าย 6 ตัวต้องตรง', () => {
+    expect(isNearChassis('METZT1509TX007960', 'MLTZT1509TX007960')).toBe(true);
+    expect(isNearChassis('MEXZT1509TX007960', 'MLTZT1509TX007960')).toBe(true);
+    expect(isNearChassis('MEXYT1509TX007960', 'MLTZT1509TX007960')).toBe(false);
+    // รถล็อตเดียวกันเลขเรียงกัน - อ่านเลขท้ายผิดตัวเดียวก็เป็นคนละคัน
+    expect(isNearChassis('MLTZT1509TX007966', 'MLTZT1509TX007960')).toBe(false);
+    expect(isNearChassis('MLTZT1509TX007960', 'MLTZT1509TX007960')).toBe(false);
+    expect(isNearChassis('MLTZT1509TX00796', 'MLTZT1509TX007960')).toBe(false);
   });
 });
 

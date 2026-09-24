@@ -23,6 +23,8 @@ function toShot(receipt: ReceiptImage): Shot {
   if (!extraction) return { receipt, status: "unmatched", text: "ส่งแล้ว - รอออฟฟิศจับคู่กับรถ" };
   if ("error" in extraction) return { receipt, status: "unreadable", text: `${extraction.error} - ลองถ่ายใหม่ให้ชัดขึ้น` };
   if (extraction.duplicate) return { receipt, status: "duplicate", text: receiptDuplicateText(extraction.duplicate) };
+  if (receipt.submissionId && extraction.match === "chassis-near")
+    return { receipt, status: "matched", text: "จับคู่กับรถให้แล้ว (เลขตัวถังอ่านเพี้ยนเล็กน้อย - ออฟฟิศจะเช็กอีกครั้ง)" };
   if (receipt.submissionId) return { receipt, status: "matched", text: "จับคู่กับรถให้แล้ว" };
   // ไม่มีเลขตัวถัง = ระบบจับคู่ให้ไม่ได้แน่ๆ -> นับเป็นอ่านไม่ออก ให้คนถ่ายถ่ายใหม่ตอนใบเสร็จยังอยู่ในมือ
   if (!extraction.reading.chassis) return { receipt, status: "unreadable", text: "อ่านเลขตัวถังไม่ออก - ลองถ่ายใหม่ให้ชัดขึ้น" };

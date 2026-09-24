@@ -62,6 +62,23 @@ export function checkReading(r: ReceiptReading): ReceiptChecks {
   };
 }
 
+// เลขตัวถังที่ AI อ่านเพี้ยนเล็กน้อยแต่น่าจะเป็นรถคันเดียวกัน (ผู้ใช้เลือก 2026-09-24 จากเคส METZT... อ่านจาก MLTZT...)
+// - เลขท้าย 6 ตัว (เลขลำดับรถ) ต้องตรงเป๊ะ: รถล็อตเดียวกันเลขตัวถังเรียงกัน (...960, ...961) อ่านผิดตรงนี้ = คนละคัน
+// - 11 ตัวแรก (รหัสผู้ผลิต/รุ่น ซึ่งทั้งล็อตเหมือนกัน) ต่างกันได้ไม่เกิน 2 ตัว
+export const CHASSIS_SERIAL_LENGTH = 6;
+const CHASSIS_PREFIX_MAX_DIFF = 2;
+
+export function isNearChassis(read: string, actual: string): boolean {
+  const a = read.trim().toUpperCase();
+  const b = actual.trim().toUpperCase();
+  if (a.length !== 17 || b.length !== 17 || a === b) return false;
+  const prefix = 17 - CHASSIS_SERIAL_LENGTH;
+  if (a.slice(prefix) !== b.slice(prefix)) return false;
+  let diff = 0;
+  for (let i = 0; i < prefix; i++) if (a[i] !== b[i]) diff++;
+  return diff <= CHASSIS_PREFIX_MAX_DIFF;
+}
+
 export const RECEIPT_READING_PROMPT = `รูปนี้คือใบเสร็จรับเงินของกรมการขนส่งทางบก (รถ 1 คันต่อ 1 ใบ) อ่านข้อมูลตามที่พิมพ์ไว้จริง:
 - receiptNo: เลขหลังคำว่า "เลขที่" มุมขวาบน (รูปแบบเช่น 69/0035358) ไม่ใช่เลขตัวใหญ่ที่ขึ้นต้นด้วย C มุมซ้ายบน
 - date: วันที่หลังคำว่า "วันที่" แปลงจาก พ.ศ. เป็น ค.ศ. (ลบ 543) รูปแบบ YYYY-MM-DD

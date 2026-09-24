@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
+import { CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
 
@@ -16,6 +17,8 @@ export interface ReceiptDuplicate {
 }
 
 const isoDate = (d: Date | null | undefined) => d?.toISOString().slice(0, 10) ?? null;
+
+type ReceiptMatch = 'chassis' | 'chassis-near' | 'chassis-mismatch' | null;
 
 // ไฟล์จาก multer (memory storage) - ใช้แค่ฟิลด์เหล่านี้
 export interface UploadedReceiptFile {
@@ -79,11 +82,13 @@ export class ReceiptsService {
   // จับคู่ด้วยเลขตัวถังที่ AI อ่านได้:
   // - อัปโหลดหลายใบ (ไม่ระบุรถ): หารถที่รอใบเสร็จซึ่งเลขตัวถังตรงเป๊ะ -> แนบให้เลย (match = 'chassis')
   // - แนบในแถวของรถ: เลขตัวถังในใบเสร็จไม่ตรงกับรถคันนั้น -> เตือน (match = 'chassis-mismatch') แต่ยังแนบตามที่พนักงานเลือก
+  // - ไม่ตรงเป๊ะแต่ใกล้เคียง (isNearChassis) = AI อ่านเพี้ยน -> match = 'chassis-near' หน้าเว็บให้เช็กเลขตัวถังกับรูป
+  //   อัปโหลดหลายใบ: แนบให้เฉพาะเมื่อมีรถที่รอใบเสร็จ (PENDING และยังไม่มีรูปใบเสร็จ) ใกล้เคียงแค่คันเดียว
   // ไม่มีผลอ่าน/อ่านเลขตัวถังไม่ได้ = ไม่จับคู่ให้ (match = null)
   private async matchByChassis(
     extraction: ReceiptExtraction | null,
     submissionId: string | null,
-  ): Promise<{ submissionId: string | null; match: 'chassis' | 'chassis-mismatch' | null }> {
+  ): Promise<{ submissionId: string | null; match: ReceiptMatch }> {
     const chassis = extraction && 'reading' in extraction ? extraction.reading.chassis?.trim().toUpperCase() : undefined;
     if (!chassis) return { submissionId, match: null };
     if (!submissionId) {
@@ -91,10 +96,22 @@ export class ReceiptsService {
         where: { status: 'PENDING', vehicle: { chassis, ...vehicleTypeWhere() } },
         select: { id: true },
       });
-      return found ? { submissionId: found.id, match: 'chassis' } : { submissionId: null, match: null };
+      if (found) return { submissionId: found.id, match: 'chassis' };
+      if (chassis.length !== 17) return { submissionId: null, match: null };
+      const candidates = await this.prisma.documentSubmission.findMany({
+        where: {
+          status: 'PENDING',
+          receipts: { none: {} },
+          vehicle: { chassis: { endsWith: chassis.slice(-CHASSIS_SERIAL_LENGTH), mode: 'insensitive' }, ...vehicleTypeWhere() },
+        },
+        select: { id: true, vehicle: { select: { chassis: true } } },
+      });
+      const near = candidates.filter((c) => isNearChassis(chassis, c.vehicle.chassis));
+      return near.length === 1 ? { submissionId: near[0].id, match: 'chassis-near' } : { submissionId: null, match: null };
     }
     const target = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId }, select: { vehicle: { select: { chassis: true } } } });
-    return { submissionId, match: target && target.vehicle.chassis.toUpperCase() !== chassis ? 'chassis-mismatch' : null };
+    if (!target || target.vehicle.chassis.toUpperCase() === chassis) return { submissionId, match: null };
+    return { submissionId, match: isNearChassis(chassis, target.vehicle.chassis) ? 'chassis-near' : 'chassis-mismatch' };
   }
 
   // หาใบเสร็จที่ซ้ำจากข้อมูลที่ AI อ่าน (selfId = รูปนี้เอง ไม่นับ) - ไม่มีผลอ่าน = ไม่รู้ ไม่เตือน
