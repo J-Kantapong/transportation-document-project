@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
 
@@ -93,6 +94,11 @@ function latestAi(list: ReceiptSummary[] | undefined): Ai | null {
 // รูปที่แนบกับรถคันนี้แต่เลขตัวถังในใบเสร็จเป็นของคันอื่น - ต้องลบก่อนบันทึก
 function wrongCarReceipts(list: ReceiptSummary[] | undefined): Ai[] {
   return (list ?? []).flatMap((r) => (r.extraction && "reading" in r.extraction && r.extraction.match === "chassis-mismatch" ? [r.extraction as Ai] : []));
+}
+
+// รูปของรถคันนี้ที่ AI อ่านแล้วอาจซ้ำกับใบเสร็จที่มีอยู่ (เตือนอย่างเดียว)
+function duplicateOf(list: ReceiptSummary[] | undefined) {
+  return (list ?? []).map((r) => r.extraction?.duplicate).find(Boolean) ?? null;
 }
 
 // รูปที่ใช้เปิดใน popup: รูปที่ AI อ่าน (ตัวเดียวกับ latestAi) ไม่มีก็ใช้รูปล่าสุด
@@ -582,6 +588,10 @@ export function ReceiptCheckPage() {
                         </td>
                         <td>
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={active ? (rid) => removeReceipt(s.id, rid) : undefined} />
+                          {active && (() => {
+                            const dup = duplicateOf(receipts[s.id]);
+                            return dup && <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
+                          })()}
                           {active && ai && (
                             <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
                               เลขที่ {ai.reading.receiptNo ?? "?"} · {ai.reading.date ? isoToDisplayDate(ai.reading.date) : "?"}

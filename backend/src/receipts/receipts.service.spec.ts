@@ -8,13 +8,20 @@ import { ReceiptsService, detectImageType } from './receipts.service.js';
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const file = (buffer = JPEG) => ({ buffer, size: buffer.length, originalname: 'receipt.jpg' });
 
-function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null) {
+function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null, dups: { saved?: unknown; image?: unknown; byChassis?: unknown } = {}) {
   const storage = { put: vi.fn().mockResolvedValue(undefined), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) } satisfies ReceiptStorage;
   const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data }));
   const prisma = {
-    documentSubmission: { findUnique: vi.fn().mockResolvedValue(submission), findFirst: vi.fn().mockResolvedValue(pendingByChassis) },
+    documentSubmission: {
+      findUnique: vi.fn().mockResolvedValue(submission),
+      // findDuplicate ค้นด้วย receiptNo / OR (รถมีใบเสร็จแล้ว) - matchByChassis ค้นรถที่รอใบเสร็จ
+      findFirst: vi.fn().mockImplementation(async ({ where }) =>
+        where.receiptNo ? (dups.saved ?? null) : where.OR ? (dups.byChassis ?? null) : pendingByChassis,
+      ),
+    },
     receiptImage: {
       create,
+      findFirst: vi.fn().mockResolvedValue(dups.image ?? null),
       findUnique: vi.fn().mockResolvedValue(receipt),
       update: vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data })),
       delete: vi.fn().mockResolvedValue(receipt),
@@ -141,6 +148,46 @@ describe('ReceiptsService.upload - จับคู่ด้วยเลขตั
     const data = create.mock.calls[0][0].data;
     expect(data.submissionId).toBe('s1');
     expect(data.extraction.match).toBe('chassis-mismatch');
+  });
+});
+
+describe('ReceiptsService.upload - เตือนใบเสร็จซ้ำจากข้อมูลที่ AI อ่าน', () => {
+  it('ไม่ซ้ำ = duplicate เป็น null', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(READING), { id: 's9' });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toBeNull();
+  });
+
+  it('เลขที่ใบเสร็จตรงกับที่ยืนยันไว้แล้ว -> เตือน และไม่แนบให้อัตโนมัติ (รอในถาด)', async () => {
+    const saved = { receiptReceivedDate: new Date('2026-09-10T00:00:00Z'), vehicle: { chassis: 'LS6CME0P7TC914754' } };
+    const { svc, create } = setup(undefined, null, aiReading(READING), { id: 's9' }, { saved });
+    await svc.upload(file());
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBeNull();
+    expect(data.extraction.duplicate).toEqual({ by: 'receiptNo', receiptNo: '69/0035358', chassis: 'LS6CME0P7TC914754', receivedDate: '2026-09-10' });
+  });
+
+  it('เลขที่ใบเสร็จตรงกับรูปอื่นที่อัปโหลดไว้ (ยังไม่จับคู่) -> เตือน ใช้เลขตัวถังจากผลอ่านของรูปนั้น', async () => {
+    const image = { extraction: { reading: { chassis: 'LS6CME0P7TC914754' } }, submission: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { image });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toMatchObject({ by: 'receiptNo', chassis: 'LS6CME0P7TC914754', receivedDate: null });
+  });
+
+  it('รถคันนี้มีใบเสร็จแล้ว (เลขตัวถัง) -> เตือน', async () => {
+    const byChassis = { receiptNo: '69/0000001', receiptReceivedDate: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { byChassis });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toEqual({ by: 'chassis', receiptNo: '69/0000001', chassis: 'LS6CME0P7TC914754', receivedDate: null });
+  });
+
+  it('แนบในแถวรถแล้วซ้ำ -> ยังแนบตามที่พนักงานเลือก แต่เตือน', async () => {
+    const byChassis = { receiptNo: null, receiptReceivedDate: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { byChassis });
+    await svc.upload(file(), 's1');
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBe('s1');
+    expect(data.extraction.duplicate).toMatchObject({ by: 'chassis' });
   });
 });
 

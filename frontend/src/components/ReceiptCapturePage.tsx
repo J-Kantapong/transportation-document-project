@@ -4,12 +4,13 @@ import { useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage } from "@/lib/api";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { AuthedImage } from "@/components/AuthedImage";
+import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
 // บอกผลทันทีหลังถ่าย เพราะคนถ่ายยังมีใบเสร็จอยู่ในมือ - อ่านไม่ออกก็ถ่ายใหม่ได้เลย
 
-type ShotStatus = "matched" | "unmatched" | "unreadable";
+type ShotStatus = "matched" | "unmatched" | "unreadable" | "duplicate";
 
 interface Shot {
   receipt: ReceiptImage;
@@ -21,6 +22,7 @@ function toShot(receipt: ReceiptImage): Shot {
   const extraction = receipt.extraction;
   if (!extraction) return { receipt, status: "unmatched", text: "ส่งแล้ว - รอออฟฟิศจับคู่กับรถ" };
   if ("error" in extraction) return { receipt, status: "unreadable", text: `${extraction.error} - ลองถ่ายใหม่ให้ชัดขึ้น` };
+  if (extraction.duplicate) return { receipt, status: "duplicate", text: receiptDuplicateText(extraction.duplicate) };
   if (receipt.submissionId) return { receipt, status: "matched", text: "จับคู่กับรถให้แล้ว" };
   // ไม่มีเลขตัวถัง = ระบบจับคู่ให้ไม่ได้แน่ๆ -> นับเป็นอ่านไม่ออก ให้คนถ่ายถ่ายใหม่ตอนใบเสร็จยังอยู่ในมือ
   if (!extraction.reading.chassis) return { receipt, status: "unreadable", text: "อ่านเลขตัวถังไม่ออก - ลองถ่ายใหม่ให้ชัดขึ้น" };
@@ -31,6 +33,7 @@ const STATUS_STYLE: Record<ShotStatus, { icon: string; color: string; background
   matched: { icon: "✅", color: "#23825f", background: "#edf8f3" },
   unmatched: { icon: "⚠️", color: "#bb8527", background: "#fff8e6" },
   unreadable: { icon: "❌", color: "#b43434", background: "#fdeeee" },
+  duplicate: { icon: "⚠️", color: "#b45309", background: "#fff1e0" },
 };
 
 const errorText = (err: unknown) => (err instanceof ApiError || err instanceof Error ? err.message : "ส่งรูปไม่สำเร็จ");
@@ -114,6 +117,7 @@ export function ReceiptCapturePage() {
         {shots.length > 0 && (
           <div className="customer-message" role="status" style={{ marginTop: 16, fontWeight: 600 }}>
             รอบนี้ส่งแล้ว {shots.length} ใบ · จับคู่แล้ว {count("matched")} · รอจับคู่ {count("unmatched")} · อ่านไม่ออก {count("unreadable")}
+            {count("duplicate") > 0 && ` · อาจซ้ำ ${count("duplicate")}`}
           </div>
         )}
 

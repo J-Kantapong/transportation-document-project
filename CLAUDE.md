@@ -44,6 +44,11 @@ This private repository is the shared development surface for the user, Claude C
   upload endpoint answers 409 `{ error: 'รูปนี้อัพโหลดไปแล้ว' }` (Yamaha: `ไฟล์ใบเสร็จนี้…` / `ไฟล์ Report นี้…`, and ใบเสร็จ =
   Report is rejected) before storing the file or calling the AI. Receipts from step 5 and plate swaps share one table,
   so a photo used as either counts. Deleting a photo frees its hash. Helper: `backend/src/receipts/upload-hash.ts`.
+  On top of that, a *warning only* (user's choice, AI can misread) from what the AI read: a step-5 receipt whose
+  เลขที่ใบเสร็จ matches a saved `DocumentSubmission.receiptNo` or another photo's reading, or whose chassis already has a
+  receipt / is RECEIPT_RECEIVED, gets `extraction.duplicate` (`ReceiptsService.findDuplicate`, re-checked on assign);
+  batch uploads with a duplicate are not auto-attached. Plate/book photos use their existing `received` match, now
+  styled as a "รูปซ้ำ" warning. Needs `ANTHROPIC_API_KEY`, so it does nothing where AI reading is off.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)

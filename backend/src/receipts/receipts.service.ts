@@ -6,6 +6,17 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
 
+// ใบเสร็จที่ AI อ่านได้ซ้ำกับที่มีในระบบแล้ว (ผู้ใช้ 2026-09-24: เตือน ไม่บล็อก เพราะ AI อ่านผิดได้) เก็บใน extraction.duplicate
+// receiptNo = เลขที่ใบเสร็จตรงกับใบที่บันทึก/อัปโหลดไว้แล้ว · chassis = รถคันนี้มีรูปใบเสร็จแล้วหรือรับใบเสร็จแล้ว (รถ 1 คันต่อใบเสร็จ 1 ใบ)
+export interface ReceiptDuplicate {
+  by: 'receiptNo' | 'chassis';
+  receiptNo: string | null;
+  chassis: string | null;
+  receivedDate: string | null; // YYYY-MM-DD = รถคันนั้นรับใบเสร็จแล้ว (Step 5)
+}
+
+const isoDate = (d: Date | null | undefined) => d?.toISOString().slice(0, 10) ?? null;
+
 // ไฟล์จาก multer (memory storage) - ใช้แค่ฟิลด์เหล่านี้
 export interface UploadedReceiptFile {
   buffer: Buffer;
@@ -86,6 +97,50 @@ export class ReceiptsService {
     return { submissionId, match: target && target.vehicle.chassis.toUpperCase() !== chassis ? 'chassis-mismatch' : null };
   }
 
+  // หาใบเสร็จที่ซ้ำจากข้อมูลที่ AI อ่าน (selfId = รูปนี้เอง ไม่นับ) - ไม่มีผลอ่าน = ไม่รู้ ไม่เตือน
+  // ไม่กรองตามประเภทรถของผู้ใช้: ใบเสร็จซ้ำกับรถประเภทอื่นก็ยังเป็นใบซ้ำ
+  private async findDuplicate(extraction: ReceiptExtraction | null, selfId: string | null): Promise<ReceiptDuplicate | null> {
+    if (!extraction || !('reading' in extraction)) return null;
+    const receiptNo = extraction.reading.receiptNo?.trim();
+    const chassis = extraction.reading.chassis?.trim().toUpperCase();
+    const notSelf = selfId ? { id: { not: selfId } } : {};
+
+    if (receiptNo && /^\d+\/\d+$/.test(receiptNo)) {
+      // เลขที่ใบเสร็จที่พนักงานยืนยันแล้วใน Step 5 ก่อน แล้วจึงเลขที่ AI อ่านจากรูปอื่น (ไม่รวมใบเสร็จงานสลับเลข)
+      const saved = await this.prisma.documentSubmission.findFirst({
+        where: { receiptNo, status: { not: 'FAILED' } },
+        select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } },
+      });
+      if (saved) return { by: 'receiptNo', receiptNo, chassis: saved.vehicle.chassis, receivedDate: isoDate(saved.receiptReceivedDate) };
+      const image = await this.prisma.receiptImage.findFirst({
+        where: { ...notSelf, plateSwapId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
+        select: { extraction: true, submission: { select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } } } },
+      });
+      if (image) {
+        const read = image.extraction as { reading?: { chassis?: string | null } } | null;
+        return {
+          by: 'receiptNo',
+          receiptNo,
+          chassis: image.submission?.vehicle.chassis ?? read?.reading?.chassis ?? null,
+          receivedDate: isoDate(image.submission?.receiptReceivedDate),
+        };
+      }
+    }
+
+    if (chassis && chassis.length === 17) {
+      const submission = await this.prisma.documentSubmission.findFirst({
+        where: {
+          vehicle: { chassis: { equals: chassis, mode: 'insensitive' }, deletedAt: null },
+          OR: [{ status: 'RECEIPT_RECEIVED' }, { status: 'PENDING', receipts: { some: notSelf } }],
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { receiptNo: true, receiptReceivedDate: true },
+      });
+      if (submission) return { by: 'chassis', receiptNo: submission.receiptNo, chassis, receivedDate: isoDate(submission.receiptReceivedDate) };
+    }
+    return null;
+  }
+
   // submissionId ไม่ส่ง = อัปโหลดแบบหลายใบ (มี AI จะจับคู่ด้วยเลขตัวถังให้ ไม่งั้นรอพนักงานจับคู่)
   async upload(file: UploadedReceiptFile | undefined, submissionIdRaw?: unknown) {
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปใบเสร็จ' });
@@ -101,7 +156,9 @@ export class ReceiptsService {
     const now = new Date();
     const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
     const extraction = await this.extractor.extract(file.buffer, type.mimeType);
-    const matched = await this.matchByChassis(extraction, submissionId);
+    const duplicate = await this.findDuplicate(extraction, null);
+    // อัปโหลดหลายใบแล้วเจอใบซ้ำ -> ไม่แนบให้อัตโนมัติ รอในถาดพร้อมคำเตือน ให้พนักงานดูแล้วลบ (แนบในแถวรถ = แนบตามที่เลือก แต่เตือน)
+    const matched = duplicate && !submissionId ? { submissionId: null, match: null } : await this.matchByChassis(extraction, submissionId);
     await this.storage.put(storageKey, file.buffer, type.mimeType);
     try {
       const receipt = await this.prisma.receiptImage.create({
@@ -113,7 +170,7 @@ export class ReceiptsService {
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
           extractionSource: this.extractor.source,
-          ...(extraction ? { extraction: { ...extraction, match: matched.match } as object } : {}),
+          ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}),
         },
         select: receiptSelect,
       });
@@ -162,9 +219,10 @@ export class ReceiptsService {
     // พนักงานจับคู่เอง - เช็กเลขตัวถังที่ AI อ่านได้กับรถที่เลือกอีกรอบ
     const extraction = existing.extraction as ReceiptExtraction | null;
     const matched = await this.matchByChassis(extraction, submissionId);
+    const duplicate = await this.findDuplicate(extraction, id); // เช็กใหม่ - ใบเดิมอาจถูกลบไปแล้ว
     const receipt = await this.prisma.receiptImage.update({
       where: { id },
-      data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match } as object } : {}) },
+      data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}) },
       select: receiptSelect,
     });
     return { receipt };

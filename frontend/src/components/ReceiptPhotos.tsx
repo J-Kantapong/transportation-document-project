@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 
 // รูปใบเสร็จในหน้ารับใบเสร็จ: แนบทีละแถว (ReceiptAttachButton) หรืออัปโหลดหลายใบแล้วจับคู่กับรถ (ReceiptBatchPanel)
 // ตอนนี้ยังไม่ได้เปิดใช้ AI อ่านใบเสร็จ - เก็บรูปอย่างเดียว พนักงานกรอกยอด/ทะเบียนเอง
@@ -94,6 +95,7 @@ export function ReceiptAttachButton({
       const extraction = last?.extraction;
       if (!extraction) onMessage("แนบรูปแล้ว (ยังไม่ได้เปิดใช้ AI อ่าน - กรอกทะเบียนและยอดเอง)");
       else if ("error" in extraction) onMessage(`แนบรูปแล้ว แต่${extraction.error} - กรอกเอง`, true);
+      else if (extraction.duplicate) onMessage(receiptDuplicateText(extraction.duplicate), true);
       else if (extraction.match === "chassis-mismatch") onMessage(`เลขตัวถังในใบเสร็จ (${extraction.reading.chassis}) ไม่ตรงกับรถคันนี้ - ตรวจว่าแนบผิดคันหรือไม่`, true);
       else onMessage("");
     } catch (err) {
@@ -244,7 +246,10 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                       {r.originalName}
                     </div>
                   )}
-                  {r.extraction && "reading" in r.extraction && (
+                  {r.extraction?.duplicate && (
+                    <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 2 }}>⚠️ {receiptDuplicateText(r.extraction.duplicate)}</div>
+                  )}
+                  {r.extraction && "reading" in r.extraction && !r.extraction.duplicate && (
                     <div style={{ fontSize: 11, color: "#bb8527", marginTop: 2 }}>
                       AI อ่านเลขตัวถัง {r.extraction.reading.chassis ?? "ไม่ออก"} - ไม่พบรถที่รอใบเสร็จ
                     </div>

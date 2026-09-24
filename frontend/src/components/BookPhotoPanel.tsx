@@ -177,7 +177,8 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
       status = vehicleIds.length > 1 ? "ตรงได้หลายคัน - เลือกคันที่ถูก" : "อ่านได้ไม่ตรงเป๊ะ - ดูรูปแล้วติ๊กถ้าใช่คันนี้";
     } else if (kind === "received") {
       const v = vehicleById.get(vehicleIds[0]);
-      status = `รับเล่มคันนี้ไปแล้ว${v?.bookReceivedDate ? ` (${isoToDisplayDate(v.bookReceivedDate)})` : ""}`;
+      style = STATUS.warn; // รูปซ้ำ - เล่มคันนี้ยืนยันรับไปแล้ว
+      status = `⚠️ รูปซ้ำ: รับเล่มคันนี้ไปแล้ว${v?.bookReceivedDate ? ` (${isoToDisplayDate(v.bookReceivedDate)})` : ""}`;
     } else if (kind === "none") {
       style = STATUS.bad;
       status = "ไม่พบรถที่รอรับเล่มนี้ (ยังไม่ได้บันทึกใบเสร็จ หรือ AI อ่านผิด)";

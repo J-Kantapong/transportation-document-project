@@ -265,6 +265,14 @@ export interface ReceiptReading {
   uncertainFields: string[]; // ช่องที่ AI ไม่มั่นใจ: receiptNo | date | plate | chassis | weightKg | items | total
 }
 
+// ใบเสร็จที่ AI อ่านได้ซ้ำกับที่มีในระบบ: receiptNo = เลขที่ใบเสร็จซ้ำ · chassis = รถคันนี้มีใบเสร็จแล้ว (เตือน ไม่บล็อก)
+export interface ReceiptDuplicate {
+  by: "receiptNo" | "chassis";
+  receiptNo: string | null;
+  chassis: string | null;
+  receivedDate: string | null; // YYYY-MM-DD
+}
+
 export type ReceiptExtraction = (
   | {
       reading: ReceiptReading;
@@ -274,6 +282,7 @@ export type ReceiptExtraction = (
 ) & {
   // chassis = ระบบจับคู่กับรถให้จากเลขตัวถัง / chassis-mismatch = เลขตัวถังในใบเสร็จไม่ตรงกับรถที่แนบ
   match?: "chassis" | "chassis-mismatch" | null;
+  duplicate?: ReceiptDuplicate | null; // ไม่มี = รูปก่อน 2026-09-24
 };
 
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
