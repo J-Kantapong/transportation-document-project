@@ -805,197 +805,202 @@ export default function VehicleEntryPage() {
       </Link>
       <h1 tabIndex={-1}>เพิ่มข้อมูลรถจดใหม่</h1>
 
-      <div className="vehicle-tabs" role="tablist" aria-label="วิธีเพิ่มข้อมูลรถ">
-        <button
-          className={`vehicle-tab${tab === "single" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={tab === "single"}
-          onClick={() => setTab("single")}
-        >
-          Single · เพิ่มทีละคัน
-        </button>
-        <button
-          className={`vehicle-tab${tab === "batch" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={tab === "batch"}
-          onClick={() => setTab("batch")}
-        >
-          Batch · นำเข้าไฟล์
-        </button>
-      </div>
-
-      <div className="vehicle-tools">
-        <span role="status">{lookupMessage}</span>
-        <button className="text-button" onClick={loadLookups}>
-          โหลดลูกค้า / ยี่ห้อใหม่
-        </button>
-        <button className="text-button" onClick={() => setShowBrandForm((v) => !v)}>
-          + เพิ่มยี่ห้อ
-        </button>
-        <button className="text-button" onClick={() => setShowFinanceForm((v) => !v)}>
-          + เพิ่มไฟแนนซ์
-        </button>
-      </div>
-
-      {showBrandForm && (
-        <div className="panel" style={{ marginBottom: 20 }}>
-          <form className="brand-form" onSubmit={handleAddBrand}>
-            <label className="field">
-              ชื่อยี่ห้อ
-              <input
-                maxLength={100}
-                required
-                value={brandName}
-                onChange={(e) => setBrandName(e.target.value)}
-              />
-            </label>
-            <button className="primary" disabled={brandSaving}>
-              บันทึกยี่ห้อ
-            </button>
-            <span role="status">{brandMessage}</span>
-          </form>
-        </div>
-      )}
-
-      {showFinanceForm && (
-        <div className="panel" style={{ marginBottom: 20 }}>
-          <form className="brand-form" onSubmit={handleAddFinance}>
-            <label className="field">
-              ชื่อไฟแนนซ์
-              <input
-                maxLength={100}
-                required
-                value={financeName}
-                onChange={(e) => setFinanceName(e.target.value)}
-              />
-            </label>
-            <button className="primary" disabled={financeSaving}>
-              บันทึกไฟแนนซ์
-            </button>
-            <span role="status">{financeMessage}</span>
-          </form>
-        </div>
-      )}
-
-      {tab === "single" && (
-        <section role="tabpanel" className="panel">
-          <div className="panel-head">
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <h2>ข้อมูลรถจดใหม่</h2>
-              <span className="status-badge" role="status">
-                สถานะ: {getVehicleStatus(single.registrationProvince)}
-              </span>
-            </div>
-            <span className="muted">* จำเป็นต้องกรอก</span>
-          </div>
-          <form className="customer-form" onSubmit={handleSingleSubmit}>
-            <VehicleFieldsFieldset
-              row={single}
-              dateText={dateText}
-              onDateTextChange={handleDateTextChange}
-              onFieldChange={updateSingle}
-              customerOptions={customerOptions}
-              brands={brands}
-              financeCompanies={financeCompanies}
-              financeOn={singleFinanceOn}
-              onFinanceToggle={toggleSingleFinance}
-            />
-            <div className="form-actions">
-              <button type="submit" className="primary" disabled={singleSaving}>
-                บันทึกข้อมูลรถ
-              </button>
-              <span
-                className={`customer-message${singleMessage.error ? " error" : singleMessage.text ? " success" : ""}`}
-                role="status"
-              >
-                {singleMessage.text}
-              </span>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {tab === "batch" && (
-        <section role="tabpanel" className="panel">
-          <div className="panel-head">
-            <h2>นำเข้าข้อมูลรถจากไฟล์</h2>
-          </div>
-          <div className="customer-form">
-            <p style={{ lineHeight: 1.9 }}>
-              รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 1,000 คันต่อไฟล์ · ไม่เกิน 5 MB
-              <br />
-              ใช้ {VEHICLE_COLUMNS.length} คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
-              <br />
-              คอลัมน์ลูกค้า ยี่ห้อ และไฟแนนซ์ใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
-              <br />
-              ประเภทเจ้าของรถกรอก บุคคลธรรมดา หรือ นิติบุคคล · ไฟแนนซ์เว้นว่างได้ถ้าไม่ได้ไฟแนนซ์
-              <br />
-              ต้องกรอกทุกคอลัมน์ยกเว้นสีและไฟแนนซ์ · ขนาด CC บังคับสำหรับ รย.1 ที่ไม่ใช่ไฟฟ้า (BEV) และ รย.12 · น้ำหนักรถบังคับสำหรับ
-              รย.1 ไฟฟ้า (BEV), รย.2 และ รย.3
-            </p>
-            <div className="vehicle-tools">
-              <button type="button" className="text-button" onClick={downloadVehicleCsvTemplate}>
-                ดาวน์โหลดหัวตาราง CSV
-              </button>
-              <button type="button" className="text-button" onClick={downloadLookupCsv}>
-                ดาวน์โหลดรหัสลูกค้า / ยี่ห้อ
-              </button>
-            </div>
-            <label className="file-zone">
-              เลือกไฟล์ Excel หรือ CSV
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.csv"
-                disabled={batchBusy || !lookupReady}
-                onChange={handleFileChange}
-              />
-            </label>
-            <div className="customer-message" style={{ margin: "18px 0" }} role="status">
-              {batchMessage.text && <span className={batchMessage.error ? "error" : "success"}>{batchMessage.text}</span>}
-            </div>
-            {batchRows.length > 0 && (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>แถว</th>
-                      <th>ชื่อลูกค้า</th>
-                      <th>เลขตัวถัง</th>
-                      <th>ยี่ห้อ</th>
-                      <th>ประเภทเชื้อเพลิง</th>
-                      <th>ประเภทรถ</th>
-                      <th>ผลตรวจสอบ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batchRows.map((row) => (
-                      <tr key={row.sourceRow}>
-                        <td>{row.sourceRow}</td>
-                        <td>{customerNameById.get(row.customerId) ?? row.customerId}</td>
-                        <td>{row.chassis}</td>
-                        <td>{brandNameById.get(row.brandId) ?? row.brandId}</td>
-                        <td>{row.fuel}</td>
-                        <td>{row.body}</td>
-                        <td className={row.issues.length ? "import-error" : "import-ok"}>
-                          {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+      {/* เพิ่มรถ/ยี่ห้อ/ไฟแนนซ์: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน POST อยู่แล้ว) - กลุ่มอื่นเห็นแค่รายการรถ */}
+      {canEdit && (
+        <>
+          <div className="vehicle-tabs" role="tablist" aria-label="วิธีเพิ่มข้อมูลรถ">
             <button
-              className="primary"
-              style={{ marginTop: 22 }}
-              disabled={!batchRows.length || batchHasErrors || batchBusy}
-              onClick={handleBatchSave}
+              className={`vehicle-tab${tab === "single" ? " selected" : ""}`}
+              role="tab"
+              aria-selected={tab === "single"}
+              onClick={() => setTab("single")}
             >
-              บันทึกรายการที่ตรวจสอบแล้ว
+              Single · เพิ่มทีละคัน
+            </button>
+            <button
+              className={`vehicle-tab${tab === "batch" ? " selected" : ""}`}
+              role="tab"
+              aria-selected={tab === "batch"}
+              onClick={() => setTab("batch")}
+            >
+              Batch · นำเข้าไฟล์
             </button>
           </div>
-        </section>
+
+          <div className="vehicle-tools">
+            <span role="status">{lookupMessage}</span>
+            <button className="text-button" onClick={loadLookups}>
+              โหลดลูกค้า / ยี่ห้อใหม่
+            </button>
+            <button className="text-button" onClick={() => setShowBrandForm((v) => !v)}>
+              + เพิ่มยี่ห้อ
+            </button>
+            <button className="text-button" onClick={() => setShowFinanceForm((v) => !v)}>
+              + เพิ่มไฟแนนซ์
+            </button>
+          </div>
+
+          {showBrandForm && (
+            <div className="panel" style={{ marginBottom: 20 }}>
+              <form className="brand-form" onSubmit={handleAddBrand}>
+                <label className="field">
+                  ชื่อยี่ห้อ
+                  <input
+                    maxLength={100}
+                    required
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                  />
+                </label>
+                <button className="primary" disabled={brandSaving}>
+                  บันทึกยี่ห้อ
+                </button>
+                <span role="status">{brandMessage}</span>
+              </form>
+            </div>
+          )}
+
+          {showFinanceForm && (
+            <div className="panel" style={{ marginBottom: 20 }}>
+              <form className="brand-form" onSubmit={handleAddFinance}>
+                <label className="field">
+                  ชื่อไฟแนนซ์
+                  <input
+                    maxLength={100}
+                    required
+                    value={financeName}
+                    onChange={(e) => setFinanceName(e.target.value)}
+                  />
+                </label>
+                <button className="primary" disabled={financeSaving}>
+                  บันทึกไฟแนนซ์
+                </button>
+                <span role="status">{financeMessage}</span>
+              </form>
+            </div>
+          )}
+
+          {tab === "single" && (
+            <section role="tabpanel" className="panel">
+              <div className="panel-head">
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <h2>ข้อมูลรถจดใหม่</h2>
+                  <span className="status-badge" role="status">
+                    สถานะ: {getVehicleStatus(single.registrationProvince)}
+                  </span>
+                </div>
+                <span className="muted">* จำเป็นต้องกรอก</span>
+              </div>
+              <form className="customer-form" onSubmit={handleSingleSubmit}>
+                <VehicleFieldsFieldset
+                  row={single}
+                  dateText={dateText}
+                  onDateTextChange={handleDateTextChange}
+                  onFieldChange={updateSingle}
+                  customerOptions={customerOptions}
+                  brands={brands}
+                  financeCompanies={financeCompanies}
+                  financeOn={singleFinanceOn}
+                  onFinanceToggle={toggleSingleFinance}
+                />
+                <div className="form-actions">
+                  <button type="submit" className="primary" disabled={singleSaving}>
+                    บันทึกข้อมูลรถ
+                  </button>
+                  <span
+                    className={`customer-message${singleMessage.error ? " error" : singleMessage.text ? " success" : ""}`}
+                    role="status"
+                  >
+                    {singleMessage.text}
+                  </span>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {tab === "batch" && (
+            <section role="tabpanel" className="panel">
+              <div className="panel-head">
+                <h2>นำเข้าข้อมูลรถจากไฟล์</h2>
+              </div>
+              <div className="customer-form">
+                <p style={{ lineHeight: 1.9 }}>
+                  รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 1,000 คันต่อไฟล์ · ไม่เกิน 5 MB
+                  <br />
+                  ใช้ {VEHICLE_COLUMNS.length} คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
+                  <br />
+                  คอลัมน์ลูกค้า ยี่ห้อ และไฟแนนซ์ใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
+                  <br />
+                  ประเภทเจ้าของรถกรอก บุคคลธรรมดา หรือ นิติบุคคล · ไฟแนนซ์เว้นว่างได้ถ้าไม่ได้ไฟแนนซ์
+                  <br />
+                  ต้องกรอกทุกคอลัมน์ยกเว้นสีและไฟแนนซ์ · ขนาด CC บังคับสำหรับ รย.1 ที่ไม่ใช่ไฟฟ้า (BEV) และ รย.12 · น้ำหนักรถบังคับสำหรับ
+                  รย.1 ไฟฟ้า (BEV), รย.2 และ รย.3
+                </p>
+                <div className="vehicle-tools">
+                  <button type="button" className="text-button" onClick={downloadVehicleCsvTemplate}>
+                    ดาวน์โหลดหัวตาราง CSV
+                  </button>
+                  <button type="button" className="text-button" onClick={downloadLookupCsv}>
+                    ดาวน์โหลดรหัสลูกค้า / ยี่ห้อ
+                  </button>
+                </div>
+                <label className="file-zone">
+                  เลือกไฟล์ Excel หรือ CSV
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.csv"
+                    disabled={batchBusy || !lookupReady}
+                    onChange={handleFileChange}
+                  />
+                </label>
+                <div className="customer-message" style={{ margin: "18px 0" }} role="status">
+                  {batchMessage.text && <span className={batchMessage.error ? "error" : "success"}>{batchMessage.text}</span>}
+                </div>
+                {batchRows.length > 0 && (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>แถว</th>
+                          <th>ชื่อลูกค้า</th>
+                          <th>เลขตัวถัง</th>
+                          <th>ยี่ห้อ</th>
+                          <th>ประเภทเชื้อเพลิง</th>
+                          <th>ประเภทรถ</th>
+                          <th>ผลตรวจสอบ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchRows.map((row) => (
+                          <tr key={row.sourceRow}>
+                            <td>{row.sourceRow}</td>
+                            <td>{customerNameById.get(row.customerId) ?? row.customerId}</td>
+                            <td>{row.chassis}</td>
+                            <td>{brandNameById.get(row.brandId) ?? row.brandId}</td>
+                            <td>{row.fuel}</td>
+                            <td>{row.body}</td>
+                            <td className={row.issues.length ? "import-error" : "import-ok"}>
+                              {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <button
+                  className="primary"
+                  style={{ marginTop: 22 }}
+                  disabled={!batchRows.length || batchHasErrors || batchBusy}
+                  onClick={handleBatchSave}
+                >
+                  บันทึกรายการที่ตรวจสอบแล้ว
+                </button>
+              </div>
+            </section>
+          )}
+        </>
       )}
 
       <section className="panel customer-list">
