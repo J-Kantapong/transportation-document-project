@@ -176,6 +176,48 @@ describe('ReceiptsService.upload - จับคู่ด้วยเลขตั
   });
 });
 
+describe('ReceiptsService.upload - อ่านเบื้องหลัง (background)', () => {
+  // findUnique: เช็ก hash ซ้ำ -> readOne โหลดรูป -> ก่อนบันทึกผล (ดูว่าพนักงานจับคู่เองไปแล้วหรือยัง)
+  function backgroundSetup(extractor: ReceiptExtractor, submissionIdWhileReading: string | null = null) {
+    const ctx = setup(undefined, null, extractor, { id: 's9' });
+    const prisma = (ctx.svc as unknown as { prisma: { receiptImage: Record<string, ReturnType<typeof vi.fn>> } }).prisma;
+    prisma.receiptImage.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ storageKey: 'k', mimeType: 'image/jpeg', readPending: true })
+      .mockResolvedValueOnce({ submissionId: submissionIdWhileReading });
+    vi.mocked(ctx.storage.get).mockResolvedValue(JPEG);
+    return { ...ctx, update: prisma.receiptImage.update };
+  }
+
+  it('ตอบทันทีโดยยังไม่อ่าน แล้ว AI อ่านและจับคู่ให้ทีหลัง', async () => {
+    const extract = vi.fn(aiReading(READING).extract);
+    const { svc, create, update } = backgroundSetup({ source: 'claude-sonnet-5', extract });
+    const { receipt } = await svc.upload(file(), undefined, '1');
+    expect(create.mock.calls[0][0].data).toMatchObject({ readPending: true, submissionId: null });
+    expect(create.mock.calls[0][0].data.extraction).toBeUndefined();
+    expect(receipt).toMatchObject({ readPending: true });
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][0].data).toMatchObject({ readPending: false, submissionId: 's9', extraction: { match: 'chassis' } });
+  });
+
+  it('พนักงานจับคู่เองระหว่างรออ่าน -> คงรถที่เลือกไว้', async () => {
+    const { svc, update } = backgroundSetup(aiReading(READING), 's1');
+    await svc.upload(file(), undefined, '1');
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].data.submissionId).toBe('s1');
+  });
+
+  it('ไม่มี AI หรือแนบในแถวรถ -> ไม่ใช้แบบเบื้องหลัง', async () => {
+    const { svc, create } = setup();
+    await svc.upload(file(), undefined, '1');
+    expect(create.mock.calls[0][0].data.readPending).toBe(false);
+    const withAi = setup(undefined, null, aiReading(READING));
+    await withAi.svc.upload(file(), 's1', '1');
+    expect(withAi.create.mock.calls[0][0].data).toMatchObject({ readPending: false, submissionId: 's1' });
+  });
+});
+
 describe('isNearChassis', () => {
   it('11 ตัวแรกต่างได้ไม่เกิน 2 ตัว เลขท้าย 6 ตัวต้องตรง', () => {
     expect(isNearChassis('METZT1509TX007960', 'MLTZT1509TX007960')).toBe(true);

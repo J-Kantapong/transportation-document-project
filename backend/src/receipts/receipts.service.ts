@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
+import type { RequestUser } from '../auth/auth.types.js';
+import { currentUser, requestContext } from '../auth/request-context.js';
 import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
@@ -39,8 +41,15 @@ const receiptSelect = {
   originalName: true,
   extractionSource: true,
   extraction: true,
+  readPending: true,
   createdAt: true,
 } as const;
+
+// อ่านใบเสร็จเบื้องหลัง (ผู้ใช้ 2026-09-25): เลือกรูปหลายใบ -> เก็บรูปแล้วตอบทันที ให้ AI อ่านทีหลังทีละไม่เกินเท่านี้
+// ถ่ายทีละใบจากกล้องยังอ่านทันทีเหมือนเดิม เพราะคนถ่ายต้องรู้ผลตอนใบเสร็จยังอยู่ในมือ
+const READ_CONCURRENCY = 3;
+
+const isTrue = (v: unknown) => v === true || v === 'true' || v === '1';
 
 // ดูชนิดไฟล์จาก byte แรกของไฟล์ ไม่เชื่อ mimetype/นามสกุลที่ browser ส่งมา - รับเฉพาะรูป JPEG/PNG/WebP
 export function detectImageType(buf: Buffer): { mimeType: string; ext: string } | null {
@@ -55,12 +64,94 @@ export function detectImageType(buf: Buffer): { mimeType: string; ext: string } 
 }
 
 @Injectable()
-export class ReceiptsService {
+export class ReceiptsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(ReceiptsService.name);
+  private readonly readQueue: Array<{ id: string; user: RequestUser | null }> = [];
+  private reading = 0;
+  private finishing: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(RECEIPT_STORAGE) private readonly storage: ReceiptStorage,
     @Inject(RECEIPT_EXTRACTOR) private readonly extractor: ReceiptExtractor,
   ) {}
+
+  // server รีสตาร์ทระหว่างอ่าน -> รูปที่ค้างสถานะรออ่านอยู่ในฐานข้อมูล อ่านต่อตอนเปิดใหม่
+  // ปิด AI ไปแล้ว (ไม่มี ANTHROPIC_API_KEY) -> เลิกรอ ให้พนักงานจับคู่เองเหมือนรูปที่ไม่มี AI
+  async onApplicationBootstrap() {
+    if (this.extractor.source === 'NONE') {
+      await this.prisma.receiptImage.updateMany({ where: { readPending: true }, data: { readPending: false } });
+      return;
+    }
+    const pending = await this.prisma.receiptImage.findMany({ where: { readPending: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+    for (const { id } of pending) this.enqueueRead(id, null);
+  }
+
+  // user = คนที่อัปโหลด: จับคู่อัตโนมัติเฉพาะรถประเภทที่คนนั้นดูแล เหมือนตอนอ่านทันที (null = ไม่จำกัด เช่นอ่านต่อหลังรีสตาร์ท)
+  private enqueueRead(id: string, user: RequestUser | null) {
+    this.readQueue.push({ id, user });
+    this.pumpReads();
+  }
+
+  private pumpReads() {
+    while (this.reading < READ_CONCURRENCY && this.readQueue.length > 0) {
+      const job = this.readQueue.shift()!;
+      this.reading++;
+      requestContext
+        .run({ user: job.user }, () => this.readOne(job.id))
+        .catch((err: unknown) => this.logger.error(`อ่านใบเสร็จ ${job.id} ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`))
+        .finally(() => {
+          this.reading--;
+          this.pumpReads();
+        });
+    }
+  }
+
+  private async readOne(id: string) {
+    const row = await this.prisma.receiptImage.findUnique({ where: { id }, select: { storageKey: true, mimeType: true, readPending: true } });
+    if (!row?.readPending) return; // ลบไปแล้ว หรืออ่านไปแล้ว
+    let extraction: ReceiptExtraction | null;
+    try {
+      extraction = await this.extractor.extract(await this.storage.get(row.storageKey), row.mimeType);
+    } catch {
+      extraction = { error: 'อ่านรูปไม่สำเร็จ' };
+    }
+    await this.serialize(async () => {
+      const current = await this.prisma.receiptImage.findUnique({ where: { id }, select: { submissionId: true } });
+      if (!current) return; // ลบไปแล้วระหว่างรออ่าน
+      const duplicate = await this.findDuplicate(extraction, id);
+      // พนักงานจับคู่เองระหว่างรออ่าน -> คงรถที่เลือกไว้ แค่เช็กเลขตัวถัง · ใบซ้ำ -> ไม่แนบให้อัตโนมัติ (เหมือน upload)
+      const matched = current.submissionId
+        ? await this.matchByChassis(extraction, current.submissionId)
+        : duplicate
+          ? { submissionId: null, match: null }
+          : await this.matchByChassis(extraction, null);
+      await this.prisma.receiptImage.update({
+        where: { id },
+        data: {
+          readPending: false,
+          submissionId: matched.submissionId,
+          ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}),
+        },
+      });
+    });
+  }
+
+  // ตรวจซ้ำ + จับคู่ + บันทึก ทำทีละใบ (AI อ่านพร้อมกันได้): รูปใบเสร็จใบเดียวกันสองรูปที่อ่านเสร็จพร้อมกันจะได้เห็นกัน
+  // และไม่ทับรถที่พนักงานจับคู่เอง (assign ก็ผ่านตรงนี้) - backend มี process เดียว ล็อกในหน่วยความจำพอ
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.finishing.then(fn, fn);
+    this.finishing = run.catch(() => undefined);
+    return run;
+  }
+
+  // GET /api/receipts?ids=a,b - หน้าเว็บถามผลของรูปที่ส่งไปอ่านเบื้องหลัง
+  async findByIds(idsRaw: unknown) {
+    const ids = typeof idsRaw === 'string' ? [...new Set(idsRaw.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 200) : [];
+    if (ids.length === 0) return { receipts: [] };
+    const receipts = await this.prisma.receiptImage.findMany({ where: { id: { in: ids } }, select: receiptSelect });
+    return { receipts };
+  }
 
   // แนบรูปได้เฉพาะรายการที่ยังรอใบเสร็จหรือรับใบเสร็จแล้ว - ยื่นไม่สำเร็จ (FAILED) ไม่มีใบเสร็จ
   private async assertAttachable(submissionIdRaw: unknown): Promise<string> {
@@ -159,7 +250,8 @@ export class ReceiptsService {
   }
 
   // submissionId ไม่ส่ง = อัปโหลดแบบหลายใบ (มี AI จะจับคู่ด้วยเลขตัวถังให้ ไม่งั้นรอพนักงานจับคู่)
-  async upload(file: UploadedReceiptFile | undefined, submissionIdRaw?: unknown) {
+  // background = เก็บรูปแล้วตอบทันที (readPending) AI อ่าน/จับคู่ทีหลัง - ใช้ได้เฉพาะแบบหลายใบที่เปิด AI
+  async upload(file: UploadedReceiptFile | undefined, submissionIdRaw?: unknown, backgroundRaw?: unknown) {
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปใบเสร็จ' });
     if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: 'ไฟล์รูปใหญ่เกิน 8MB' });
     const type = detectImageType(file.buffer);
@@ -172,7 +264,8 @@ export class ReceiptsService {
 
     const now = new Date();
     const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
-    const extraction = await this.extractor.extract(file.buffer, type.mimeType);
+    const background = !submissionId && isTrue(backgroundRaw) && this.extractor.source !== 'NONE';
+    const extraction = background ? null : await this.extractor.extract(file.buffer, type.mimeType);
     const duplicate = await this.findDuplicate(extraction, null);
     // อัปโหลดหลายใบแล้วเจอใบซ้ำ -> ไม่แนบให้อัตโนมัติ รอในถาดพร้อมคำเตือน ให้พนักงานดูแล้วลบ (แนบในแถวรถ = แนบตามที่เลือก แต่เตือน)
     const matched = duplicate && !submissionId ? { submissionId: null, match: null } : await this.matchByChassis(extraction, submissionId);
@@ -187,10 +280,12 @@ export class ReceiptsService {
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
           extractionSource: this.extractor.source,
+          readPending: background,
           ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}),
         },
         select: receiptSelect,
       });
+      if (background) this.enqueueRead(receipt.id, currentUser());
       return { receipt };
     } catch (err) {
       // บันทึกลงฐานข้อมูลไม่สำเร็จ - ลบไฟล์ทิ้งไม่ให้ค้างโดยไม่มีแถวอ้างถึง
@@ -230,6 +325,10 @@ export class ReceiptsService {
   }
 
   async assign(id: string, submissionIdRaw: unknown) {
+    return this.serialize(() => this.assignNow(id, submissionIdRaw));
+  }
+
+  private async assignNow(id: string, submissionIdRaw: unknown) {
     const existing = await this.prisma.receiptImage.findUnique({ where: { id }, select: { id: true, extraction: true } });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
     const submissionId = await this.assertAttachable(submissionIdRaw);

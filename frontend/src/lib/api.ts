@@ -249,6 +249,7 @@ export interface ReceiptImage {
   originalName: string | null;
   extractionSource: string; // NONE = ยังไม่ได้ใช้ AI อ่าน | model id
   extraction: ReceiptExtraction | null;
+  readPending: boolean; // true = อัปโหลดหลายใบแล้ว AI ยังอ่านอยู่เบื้องหลัง (ถามผลด้วย getReceipts)
   createdAt: string;
 }
 
@@ -789,12 +790,15 @@ export const api = {
       body: JSON.stringify({ receivedDate, entries }),
     }),
 
-  uploadReceipt: (image: Blob, fileName: string, submissionId?: string) => {
+  // background = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (ใช้กับการเลือกหลายรูปที่ไม่ระบุรถ)
+  uploadReceipt: (image: Blob, fileName: string, submissionId?: string, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
     if (submissionId) form.append('submissionId', submissionId);
+    if (background) form.append('background', '1');
     return request<{ receipt: ReceiptImage }>('/api/receipts', { method: 'POST', body: form });
   },
+  getReceipts: (ids: string[]) => request<{ receipts: ReceiptImage[] }>(`/api/receipts?ids=${ids.map(encodeURIComponent).join(',')}`),
   listUnassignedReceipts: () => request<{ receipts: ReceiptImage[] }>('/api/receipts/unassigned'),
   assignReceipt: (id: string, submissionId: string) =>
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),

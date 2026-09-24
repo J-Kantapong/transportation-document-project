@@ -5,12 +5,14 @@ import { ApiError, api, receiptImageUrl, type ReceiptImage } from "@/lib/api";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { AuthedImage } from "@/components/AuthedImage";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
+import { uploadReceiptsInBackground, usePendingReceipts } from "@/lib/receipt-upload";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
 // บอกผลทันทีหลังถ่าย เพราะคนถ่ายยังมีใบเสร็จอยู่ในมือ - อ่านไม่ออกก็ถ่ายใหม่ได้เลย
 
-type ShotStatus = "matched" | "unmatched" | "unreadable" | "duplicate";
+// เลือกจากคลังภาพ (หลายรูป) = ส่งแล้วให้ AI อ่านเบื้องหลัง (reading) คนส่งปิดหน้าไปทำอย่างอื่นได้
+type ShotStatus = "reading" | "matched" | "unmatched" | "unreadable" | "duplicate";
 
 interface Shot {
   receipt: ReceiptImage;
@@ -19,6 +21,7 @@ interface Shot {
 }
 
 function toShot(receipt: ReceiptImage): Shot {
+  if (receipt.readPending) return { receipt, status: "reading", text: "ส่งแล้ว - ระบบกำลังอ่าน" };
   const extraction = receipt.extraction;
   if (!extraction) return { receipt, status: "unmatched", text: "ส่งแล้ว - รอออฟฟิศจับคู่กับรถ" };
   if ("error" in extraction) return { receipt, status: "unreadable", text: `${extraction.error} - ลองถ่ายใหม่ให้ชัดขึ้น` };
@@ -32,6 +35,7 @@ function toShot(receipt: ReceiptImage): Shot {
 }
 
 const STATUS_STYLE: Record<ShotStatus, { icon: string; color: string; background: string }> = {
+  reading: { icon: "⏳", color: "#4a5a78", background: "#f4f6fa" },
   matched: { icon: "✅", color: "#23825f", background: "#edf8f3" },
   unmatched: { icon: "⚠️", color: "#bb8527", background: "#fff8e6" },
   unreadable: { icon: "❌", color: "#b43434", background: "#fdeeee" },
@@ -47,24 +51,44 @@ export function ReceiptCapturePage() {
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
 
-  async function handleFiles(files: FileList | null) {
+  const addShot = (receipt: ReceiptImage) => setShots((prev) => [toShot(receipt), ...prev]);
+  const pendingIds = shots.filter((s) => s.status === "reading").map((s) => s.receipt.id);
+  usePendingReceipts(pendingIds, (read) => {
+    const byId = new Map(read.map((r) => [r.id, r]));
+    setShots((prev) => prev.map((s) => (byId.has(s.receipt.id) ? toShot(byId.get(s.receipt.id)!) : s)));
+  });
+
+  // ถ่ายจากกล้อง (ทีละใบ) = อ่านทันที คนถ่ายรู้ผลตอนใบเสร็จยังอยู่ในมือ
+  async function handleCamera(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setError("");
+    setProgress("กำลังส่งและอ่านใบเสร็จ…");
+    try {
+      const image = await compressReceiptImage(file);
+      addShot((await api.uploadReceipt(image, compressedFileName(file))).receipt);
+    } catch (err) {
+      setError(`ส่งไม่สำเร็จ - ${errorText(err)}`);
+    }
+    setProgress("");
+    if (cameraRef.current) cameraRef.current.value = "";
+  }
+
+  // เลือกจากคลังภาพ (หลายรูป) = ส่งพร้อมกันหลายรูป ไม่รอ AI อ่าน
+  async function handleGallery(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError("");
     const list = Array.from(files);
     const failed: string[] = [];
-    for (const [i, file] of list.entries()) {
-      setProgress(list.length > 1 ? `กำลังส่งและอ่านใบเสร็จ ${i + 1}/${list.length}…` : "กำลังส่งและอ่านใบเสร็จ…");
-      try {
-        const image = await compressReceiptImage(file);
-        const { receipt } = await api.uploadReceipt(image, compressedFileName(file));
-        setShots((prev) => [toShot(receipt), ...prev]);
-      } catch (err) {
-        failed.push(`${file.name}: ${errorText(err)}`);
-      }
-    }
+    setProgress(`กำลังส่งรูป 0/${list.length}…`);
+    await uploadReceiptsInBackground(
+      list,
+      addShot,
+      (file, err) => failed.push(`${file.name}: ${errorText(err)}`),
+      (done) => setProgress(`กำลังส่งรูป ${done}/${list.length}…`),
+    );
     setProgress("");
     if (failed.length) setError(`ส่งไม่สำเร็จ ${failed.length} รูป - ${failed.join(" · ")}`);
-    if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
   }
 
@@ -92,8 +116,8 @@ export function ReceiptCapturePage() {
         </p>
 
         {/* capture="environment" = เปิดกล้องหลังทันที ไม่ต้องผ่านหน้าเลือกไฟล์ */}
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleFiles(e.target.files)} />
-        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
+        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleGallery(e.target.files)} />
 
         <button
           type="button"
@@ -118,8 +142,15 @@ export function ReceiptCapturePage() {
 
         {shots.length > 0 && (
           <div className="customer-message" role="status" style={{ marginTop: 16, fontWeight: 600 }}>
-            รอบนี้ส่งแล้ว {shots.length} ใบ · จับคู่แล้ว {count("matched")} · รอจับคู่ {count("unmatched")} · อ่านไม่ออก {count("unreadable")}
+            รอบนี้ส่งแล้ว {shots.length} ใบ
+            {count("reading") > 0 && ` · กำลังอ่าน ${count("reading")}`} · จับคู่แล้ว {count("matched")} · รอจับคู่ {count("unmatched")} · อ่านไม่ออก{" "}
+            {count("unreadable")}
             {count("duplicate") > 0 && ` · อาจซ้ำ ${count("duplicate")}`}
+          </div>
+        )}
+        {count("reading") > 0 && !busy && (
+          <div className="customer-message" style={{ marginTop: 8 }}>
+            ส่งรูปครบแล้ว ปิดหน้านี้ไปทำอย่างอื่นได้เลย ระบบอ่านและจับคู่ต่อเอง - ใบที่อ่านไม่ออกหรือจับคู่ไม่ได้จะไปรอที่หน้ารับใบเสร็จ
           </div>
         )}
 
@@ -148,7 +179,7 @@ export function ReceiptCapturePage() {
                       ตัวถัง {reading.chassis ?? "อ่านไม่ออก"}
                     </div>
                   )}
-                  {shot.status !== "matched" && (
+                  {shot.status !== "matched" && shot.status !== "reading" && (
                     <button type="button" className="text-button" disabled={busy} onClick={() => retake(shot)} style={{ paddingLeft: 0, fontSize: 14 }}>
                       ลบแล้วถ่ายใหม่
                     </button>

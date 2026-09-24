@@ -592,6 +592,7 @@ model ReceiptImage {
   contentHash      String?  @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   extractionSource String   @default("NONE") // NONE = ยังไม่ได้ใช้ AI อ่าน | model id ของ AI ที่อ่าน
   extraction       Json? // ผลที่ AI อ่านได้ - รูปแบบจะกำหนดหลังเห็นใบเสร็จจริง
+  readPending      Boolean  @default(false) // true = อัปโหลดหลายใบแล้วรอ AI อ่านเบื้องหลัง (ReceiptsService.enqueueRead)
   createdAt        DateTime @default(now())
 
   // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง

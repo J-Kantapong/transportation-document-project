@@ -49,6 +49,13 @@ This private repository is the shared development surface for the user, Claude C
   receipt / is RECEIPT_RECEIVED, gets `extraction.duplicate` (`ReceiptsService.findDuplicate`, re-checked on assign);
   batch uploads with a duplicate are not auto-attached. Plate/book photos use their existing `received` match, now
   styled as a "รูปซ้ำ" warning. Needs `ANTHROPIC_API_KEY`, so it does nothing where AI reading is off.
+- Background receipt reading (added 2026-09-25): a camera shot on the capture page is still read immediately (the
+  photographer needs the result while holding the receipt), but picking several receipts from the gallery (capture
+  page and the "เลือกรูปหลายใบ" tray) uploads 4 at a time with `background=1`: `POST /api/receipts` stores the file,
+  sets `ReceiptImage.readPending` and answers at once; `ReceiptsService` reads up to 3 at a time in-process, then
+  runs duplicate check + chassis match + save one at a time (manual assign goes through the same lock, and a
+  staff-chosen vehicle is kept). Pending rows are re-queued on boot (cleared if AI is off). The page polls
+  `GET /api/receipts?ids=a,b` (`frontend/src/lib/receipt-upload.ts`). Only for uploads with no `submissionId`.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, ReceiptsService, type UploadedReceiptFile } from './receipts.service.js';
 
@@ -7,10 +7,16 @@ export class ReceiptsController {
   constructor(private readonly receiptsService: ReceiptsService) {}
 
   // multipart/form-data: file = รูปใบเสร็จ, submissionId (ไม่บังคับ) = รายการที่ยื่นเอกสาร
+  // background=1 (ไม่ระบุรถเท่านั้น) = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง - ดูผลด้วย GET /api/receipts?ids=
   @Post()
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
-  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { submissionId?: unknown }) {
-    return this.receiptsService.upload(file, body?.submissionId);
+  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { submissionId?: unknown; background?: unknown }) {
+    return this.receiptsService.upload(file, body?.submissionId, body?.background);
+  }
+
+  @Get()
+  findByIds(@Query('ids') ids: unknown) {
+    return this.receiptsService.findByIds(ids);
   }
 
   @Get('unassigned')
