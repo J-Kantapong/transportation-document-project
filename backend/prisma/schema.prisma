@@ -77,6 +77,7 @@ model User {
   assignedCases   Case[]           @relation("AssignedStaff")
   deletedVehicles Vehicle[]        @relation("DeletedVehicles")
   vehicleEdits    VehicleEditLog[] @relation("VehicleEdits")
+  deliverySlips   DeliverySlip[]   @relation("DeliverySlips")
 
   @@index([status])
   @@index([customerId])
@@ -105,6 +106,7 @@ model Customer {
   serviceFeeRates ServiceFeeRate[]
   taxRenewals     TaxRenewal[]
   invoices        Invoice[]
+  deliverySlips   DeliverySlip[]
   users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
 }
 
@@ -207,6 +209,7 @@ model Vehicle {
   documentSubmissions DocumentSubmission[]
   plateSwapsAsNew     PlateSwap[] // งานสลับเลขที่รถคันนี้เป็น "รถใหม่" ที่รับเลขจากรถเก่า
   taxRenewals         TaxRenewal[]
+  deliverySlipItems   DeliverySlipItem[]
 
   @@index([customerId])
   @@index([brandId])
@@ -795,6 +798,50 @@ model ServiceFeeRate {
 // ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
 // invoiceNo พิมพ์เอง (ช่วงแรกล้อเลขกับ Google Sheet "Invoice Tradeinter") ห้ามซ้ำ
 // status: ISSUED (วางบิลแล้ว รอรับเงิน) -> PAID (รับเงินแล้ว) | VOID (ยกเลิก - รถกลับเข้าคิวรอวางบิล)
+// --- ใบส่งงาน Delivery (ผู้ใช้ 2026-09-25) -------------------------------------------
+// กดบันทึกส่งงาน 1 ครั้ง = 1 ใบ (ลูกค้าเดียว ผู้รับคนเดียว วันเดียว) พิมพ์ให้ผู้รับเซ็น และใช้ทำรายงานส่งงานย้อนหลัง
+// แต่ละคันบอกแยกว่ารอบนี้ส่งอะไร (ใบเสร็จ / เล่ม / ป้าย) - ส่งป้ายตามทีหลังเป็นอีกใบที่มีแค่ป้าย
+// วันที่/ผู้รับบน Vehicle (deliveredDate, plateDeliveredDate ...) ยังเป็นสถานะปัจจุบันที่คิวและบัญชีใช้เหมือนเดิม
+// ใบของการส่งก่อนมีตารางนี้ถูกสร้างย้อนหลังจาก Vehicle ใน migration 20260925200000_add_delivery_slips
+model DeliverySlip {
+  id          String   @id @default(cuid())
+  slipNo      Int      @unique @default(autoincrement()) // เลขที่ใบ แสดงเป็น DL-00001
+  customerId  String
+  date        DateTime // วันที่ส่ง
+  recipient   String // ผู้รับที่ลูกค้า
+  note        String?
+  createdById String? // พนักงานที่กดบันทึก (null = สร้างย้อนหลัง / นอกคำขอ HTTP)
+  createdAt   DateTime @default(now())
+
+  customer  Customer           @relation(fields: [customerId], references: [id])
+  createdBy User?              @relation("DeliverySlips", fields: [createdById], references: [id], onDelete: SetNull)
+  items     DeliverySlipItem[]
+
+  @@index([customerId])
+  @@index([date])
+}
+
+model DeliverySlipItem {
+  id        String  @id @default(cuid())
+  slipId    String
+  vehicleId String
+  receipt   Boolean // ส่งใบเสร็จรอบนี้
+  book      Boolean // ส่งเล่มทะเบียนรอบนี้
+  plate     Boolean // ส่งป้ายรอบนี้
+  // snapshot ตอนส่ง - พิมพ์ใบซ้ำภายหลังได้ตรงกับที่ส่งจริง
+  chassis   String
+  brandName String
+  body      String?
+  plateText String // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
+  receiptNo String?
+
+  slip    DeliverySlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
+  vehicle Vehicle      @relation(fields: [vehicleId], references: [id])
+
+  @@index([slipId])
+  @@index([vehicleId])
+}
+
 model Invoice {
   id               String    @id @default(cuid())
   invoiceNo        String    @unique

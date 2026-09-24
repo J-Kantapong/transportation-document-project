@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { currentUser } from '../auth/request-context.js';
+import { assertVehicleInScope, isVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 // ส่งงานลูกค้า (พนักงาน): ติ๊กคันที่ส่งแล้ว + วันที่ส่ง + ผู้รับ แล้วกดบันทึกครั้งเดียวทั้งชุด - พนักงานไม่เห็นราคา เรื่องบิลอยู่ที่ backend/src/billing
@@ -18,7 +19,24 @@ const VEHICLE_INCLUDE = {
   invoiceLines: { where: { invoice: { status: { not: 'VOID' } } }, select: { invoice: { select: { invoiceNo: true } } } },
 } as const;
 
+const SLIP_INCLUDE = {
+  customer: { select: { id: true, name: true, company: true, branch: true, address: true, phone: true } },
+  createdBy: { select: { name: true, displayName: true } },
+  items: true,
+} as const;
+
 const bad = (error: string) => new BadRequestException({ error });
+
+const plateTextOf = (v: { plateCategory: string | null; plateNumber: string | null }) =>
+  v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '';
+
+function parseOptionalIsoDate(raw: unknown, label: string): Date | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
+    throw bad(`${label}ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง`);
+  }
+  return new Date(`${raw}T00:00:00.000Z`);
+}
 
 function parseIsoDate(raw: unknown): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
@@ -76,6 +94,8 @@ export class DeliveryService {
     const vehicles = await this.prisma.vehicle.findMany({ where: { id: { in: ids } }, include: VEHICLE_INCLUDE });
     if (vehicles.length !== ids.length) throw bad('ไม่พบข้อมูลรถบางคัน');
     for (const v of vehicles) assertVehicleInScope(v.body); // STAFF_CAR / STAFF_MOTO ส่งงานได้เฉพาะประเภทรถของตัวเอง
+    // บันทึก 1 ครั้ง = ใบส่งงาน 1 ใบของลูกค้ารายเดียว (ผู้รับคนเดียว)
+    if (new Set(vehicles.map((v) => v.customer.id)).size > 1) throw bad('ส่งงานได้ครั้งละ 1 ลูกค้า');
 
     const dateText = `${String(date.getUTCDate()).padStart(2, '0')}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${date.getUTCFullYear()}`;
     const updates = vehicles.map((v) => {
@@ -97,13 +117,105 @@ export class DeliveryService {
         data: { deliveredDate: date, deliveryRecipient: recipient, deliveryNote: note, plateDeliveredDate: kind === 'FULL' ? date : null },
       });
     });
-    await this.prisma.$transaction(updates);
+    // ใบส่งงาน: บอกแยกรายคันว่ารอบนี้ส่งอะไร (ผู้ใช้ 2026-09-25)
+    const slip = this.prisma.deliverySlip.create({
+      data: {
+        customerId: vehicles[0].customer.id,
+        date,
+        recipient,
+        note,
+        createdById: currentUser()?.id ?? null,
+        items: {
+          create: vehicles.map((v) => {
+            const kind = deliveryKind(v);
+            return {
+              vehicleId: v.id,
+              receipt: kind !== 'PLATE_ONLY',
+              book: kind !== 'PLATE_ONLY',
+              plate: kind !== 'NO_PLATE',
+              chassis: v.chassis,
+              brandName: v.brand.name,
+              body: v.body,
+              plateText: plateTextOf(v),
+              receiptNo: v.documentSubmissions[0]?.receiptNo ?? null,
+            };
+          }),
+        },
+      },
+      select: { id: true, slipNo: true },
+    });
+    const results = await this.prisma.$transaction([...updates, slip]);
+    const created = results[results.length - 1] as { id: string; slipNo: number };
 
     const kinds = vehicles.map((v) => deliveryKind(v));
     return {
+      slipId: created.id,
+      slipNo: created.slipNo,
       delivered: kinds.filter((k) => k === 'FULL' || k === 'NO_PLATE').length,
       plateOnly: kinds.filter((k) => k === 'PLATE_ONLY').length,
       platePending: kinds.filter((k) => k === 'NO_PLATE').length,
+    };
+  }
+
+  // รายงานส่งงานย้อนหลัง: ใบส่งงานตามช่วงวันที่ส่ง (และลูกค้า) - STAFF_CAR / STAFF_MOTO เห็นเฉพาะคันในขอบเขตของตัวเอง
+  async slips(query: { from?: unknown; to?: unknown; customerId?: unknown }) {
+    const from = parseOptionalIsoDate(query?.from, 'วันที่เริ่ม');
+    const to = parseOptionalIsoDate(query?.to, 'วันที่สิ้นสุด');
+    if (from && to && from > to) throw bad('วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด');
+    const customerId = typeof query?.customerId === 'string' && query.customerId ? query.customerId : undefined;
+    const slips = await this.prisma.deliverySlip.findMany({
+      where: {
+        ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+        ...(customerId ? { customerId } : {}),
+      },
+      orderBy: [{ date: 'desc' }, { slipNo: 'desc' }],
+      take: 500,
+      include: SLIP_INCLUDE,
+    });
+    return slips.map((s) => this.mapSlip(s)).filter((s) => s.items.length > 0);
+  }
+
+  async slip(id: string) {
+    const found = await this.prisma.deliverySlip.findUnique({ where: { id }, include: SLIP_INCLUDE });
+    const slip = found && this.mapSlip(found);
+    if (!slip || slip.items.length === 0) throw new NotFoundException({ error: 'ไม่พบใบส่งงาน' });
+    return slip;
+  }
+
+  private mapSlip(s: {
+    id: string;
+    slipNo: number;
+    date: Date;
+    recipient: string;
+    note: string | null;
+    createdAt: Date;
+    customer: { id: string; name: string; company: string | null; branch: string | null; address: string | null; phone: string | null };
+    createdBy: { name: string; displayName: string | null } | null;
+    items: Array<{ vehicleId: string; receipt: boolean; book: boolean; plate: boolean; chassis: string; brandName: string; body: string | null; plateText: string; receiptNo: string | null }>;
+  }) {
+    return {
+      id: s.id,
+      slipNo: s.slipNo,
+      date: s.date.toISOString().slice(0, 10),
+      recipient: s.recipient,
+      note: s.note,
+      createdAt: s.createdAt.toISOString(),
+      createdBy: s.createdBy ? s.createdBy.displayName || s.createdBy.name : null,
+      customer: { ...s.customer, displayName: s.customer.company || s.customer.name },
+      items: s.items
+        .filter((i) => isVehicleInScope(i.body))
+        .sort((a, b) => a.plateText.localeCompare(b.plateText, 'th') || a.chassis.localeCompare(b.chassis))
+        .map((i) => ({
+          vehicleId: i.vehicleId,
+          chassis: i.chassis,
+          brandName: i.brandName,
+          body: i.body,
+          plateText: i.plateText,
+          receiptNo: i.receiptNo,
+          receipt: i.receipt,
+          book: i.book,
+          plate: i.plate,
+        })),
     };
   }
 

@@ -70,6 +70,19 @@ This private repository is the shared development surface for the user, Claude C
   date can be corrected with the "✎ แก้" button in the "ได้ใบเสร็จแล้ว" table
   (`PATCH /api/vehicles/document-submission/:id/receipt-date` `{ receiptDate }`, RECEIPT_RECEIVED only, same access as step 5). The capture
   page (`/receive-receipt/capture`) has no date field and uses the same panel layout as the plate/book capture pages.
+- Delivery slips and report (added 2026-09-25): every save on the Delivery page creates one `DeliverySlip` (one customer,
+  date and recipient; `slipNo` shown as `DL-00001`) with a `DeliverySlipItem` per vehicle saying what went out this
+  time (`receipt` / `book` / `plate`, plus a snapshot of chassis, brand, plate text and receipt number). A later
+  plate-only delivery is its own slip. A save may not mix customers. `POST /api/delivery` now also returns
+  `slipId` / `slipNo`; `GET /api/delivery/slips?from&to&customerId` and `GET /api/delivery/slips/:id` read them
+  (items filtered by the car/moto scope). The page prints the slip for the recipient to sign right after saving;
+  `/registration/new-vehicle/delivery/report` lists slips by date range and customer, reprints any slip, prints the
+  report, and lists vehicles whose plate is still owed. Slips and the report can also be saved straight to a PDF file
+  (`frontend/src/lib/pdf-export.ts`: the same print HTML is rendered to images with `html2canvas-pro` and paged into
+  A4 with `jspdf`, both loaded only on click, so Thai text looks exactly as on screen but is not selectable; pages
+  break between rows and repeat the table header). No prices anywhere. The `Vehicle` delivery columns are still
+  the live state used by the queue and billing. Deliveries saved before this were backfilled by migration
+  `20260925200000_add_delivery_slips` (recipient of a later plate delivery read back from `deliveryNote`).
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)

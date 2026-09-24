@@ -22,6 +22,33 @@ export interface DeliveryRow {
   invoiceNo: string | null; // บัญชีวางบิลแล้วในบิลเลขนี้
 }
 
+// ใบส่งงาน Delivery: บันทึกส่ง 1 ครั้ง = 1 ใบ บอกแยกรายคันว่ารอบนี้ส่งใบเสร็จ / เล่ม / ป้าย (ไม่มีราคา)
+export interface DeliverySlipItem {
+  vehicleId: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  plateText: string; // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
+  receiptNo: string | null;
+  receipt: boolean;
+  book: boolean;
+  plate: boolean;
+}
+
+export interface DeliverySlip {
+  id: string;
+  slipNo: number;
+  date: string; // YYYY-MM-DD
+  recipient: string;
+  note: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  customer: { id: string; name: string; company: string | null; branch: string | null; address: string | null; phone: string | null; displayName: string };
+  items: DeliverySlipItem[];
+}
+
+export const slipNoText = (slipNo: number) => `DL-${String(slipNo).padStart(5, "0")}`;
+
 // วางบิลในนามบริษัท (บัญชี) - ดู backend/src/billing/billing.service.ts
 export interface BillingTerms {
   vat: boolean;
@@ -130,7 +157,10 @@ export const billingApi = {
   deliveryQueue: () => request<{ vehicles: DeliveryRow[] }>("/api/delivery/queue"),
   deliveryRecent: () => request<{ vehicles: DeliveryRow[] }>("/api/delivery/recent"),
   submitDelivery: (data: { vehicleIds: string[]; date: string; recipient: string; note: string }) =>
-    request<{ delivered: number; plateOnly: number; platePending: number }>("/api/delivery", json("POST", data)),
+    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>("/api/delivery", json("POST", data)),
+  deliverySlips: (params: { from?: string; to?: string; customerId?: string }) =>
+    request<{ slips: DeliverySlip[] }>(`/api/delivery/slips?${new URLSearchParams(Object.entries(params).filter(([, v]) => v) as string[][])}`),
+  deliverySlip: (id: string) => request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}`),
 
   billingQueue: () => request<{ suggestedInvoiceNo: string; customers: BillingCustomer[] }>("/api/billing/queue"),
   updateTerms: (customerId: string, terms: BillingTerms) =>

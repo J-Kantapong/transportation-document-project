@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { billingApi, type DeliveryKind, type DeliveryRow } from "@/lib/billing-api";
+import { billingApi, slipNoText, type DeliveryKind, type DeliveryRow } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { downloadDeliverySlipPdf, printDeliverySlips } from "@/lib/delivery-print";
 import { comparePlate } from "@/lib/plate-order";
 
 // ส่งงานลูกค้า (พนักงาน): ติ๊กคันที่ส่งแล้ว ใส่วันที่ส่ง + ผู้รับ แล้วกดบันทึกครั้งเดียวทั้งชุด - หน้านี้ไม่มีราคา/ยอดบิล
@@ -29,6 +30,9 @@ export function DeliveryPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  // ใบส่งงานของการบันทึกครั้งล่าสุด - พิมพ์ให้ผู้รับเซ็นได้ทันที (ใบเก่าพิมพ์ซ้ำได้ที่หน้ารายงานส่งงาน)
+  const [lastSlip, setLastSlip] = useState<{ id: string; slipNo: number } | null>(null);
+  const [printing, setPrinting] = useState(false);
 
   async function loadAll() {
     setLoading(true);
@@ -71,6 +75,20 @@ export function DeliveryPage() {
     setCustomerId(id);
     setSelected(new Set());
     setMessage({ text: "" });
+    setLastSlip(null);
+  }
+
+  async function outputSlip(id: string, as: "print" | "pdf") {
+    setPrinting(true);
+    try {
+      const slip = await billingApi.deliverySlip(id);
+      if (as === "pdf") await downloadDeliverySlipPdf(slip);
+      else printDeliverySlips([slip]);
+    } catch (err) {
+      setMessage({ text: err instanceof ApiError ? err.message : "สร้างใบส่งงานไม่สำเร็จ", error: true });
+    } finally {
+      setPrinting(false);
+    }
   }
 
   function toggle(id: string, checked: boolean) {
@@ -90,6 +108,7 @@ export function DeliveryPage() {
     if (!recipient.trim()) return fail("ใส่ชื่อผู้รับงาน");
 
     setSaving(true);
+    setLastSlip(null);
     setMessage({ text: "กำลังบันทึก…" });
     try {
       const result = await billingApi.submitDelivery({ vehicleIds: [...selected], date: dateIso, recipient, note });
@@ -101,7 +120,8 @@ export function DeliveryPage() {
       setRecipient("");
       setNote("");
       await loadAll();
-      setMessage({ text: `บันทึกแล้ว: ${parts.join(" · ")}` });
+      setLastSlip({ id: result.slipId, slipNo: result.slipNo });
+      setMessage({ text: `บันทึกแล้ว ใบส่งงาน ${slipNoText(result.slipNo)}: ${parts.join(" · ")}` });
     } catch (err) {
       fail(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
@@ -116,6 +136,28 @@ export function DeliveryPage() {
       </Link>
       <h1 tabIndex={-1}>Delivery</h1>
       <p>ติ๊กคันที่ส่งให้ลูกค้าแล้ว ใส่วันที่ส่งและผู้รับ แล้วกดบันทึก รถที่ส่งแล้วจะไปรอฝ่ายบัญชีวางบิลต่อ</p>
+      <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+        รายงานส่งงาน / พิมพ์ใบส่งงานย้อนหลัง →
+      </Link>
+
+      {/* อยู่นอกฟอร์ม: ส่งครบทุกคันแล้วฟอร์มจะหายไป แต่ยังต้องพิมพ์ใบส่งงานได้ */}
+      {lastSlip && (
+        <div
+          className={`customer-message${message.error ? " error" : " success"}`}
+          role="status"
+          style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
+        >
+          <span>{message.text}</span>
+          <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="primary" disabled={printing} onClick={() => outputSlip(lastSlip.id, "print")}>
+              {printing ? "กำลังเตรียม…" : `พิมพ์ใบส่งงาน ${slipNoText(lastSlip.slipNo)}`}
+            </button>
+            <button className="primary" disabled={printing} onClick={() => outputSlip(lastSlip.id, "pdf")}>
+              บันทึก PDF
+            </button>
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="customer-message" role="status" style={{ marginTop: 20 }}>
@@ -217,7 +259,7 @@ export function DeliveryPage() {
                 <button className="primary" style={{ justifyContent: "center" }} disabled={saving} onClick={handleSubmit}>
                   บันทึกส่งงาน{selected.size ? ` ${selected.size} คัน` : ""}
                 </button>
-                {message.text && (
+                {message.text && !lastSlip && (
                   <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
                     {message.text}
                   </div>

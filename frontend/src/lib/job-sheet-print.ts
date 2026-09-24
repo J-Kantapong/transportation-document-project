@@ -1,4 +1,5 @@
 import type { DocumentSubmission } from "@/lib/api";
+import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 
 // ใบส่งงาน 2 แบบตามตัวอย่าง PDF ของผู้ใช้ (กระดาษ A4 แนวตั้ง หัวใบซ้ำทุกหน้า):
 // - "car" (ยื่นเอกสารจดใหม่.pdf): หน้าละ 20 คัน หัวใบ = ชื่อบริษัท/วันที่/หมายเหตุ/รวม - "รวม" คือยอดของทั้งใบ (ทุกหน้า)
@@ -63,10 +64,6 @@ export function formatSheetMoney(amount: number): string {
 export function sheetDateText(iso: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   return match ? `${Number(match[3])}/${Number(match[2])}/${match[1]}` : iso;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 }
 
 const amountOf = (items: unknown, match: (label: string) => boolean): number =>
@@ -217,22 +214,7 @@ ${pages}
 </html>`;
 }
 
-// พิมพ์ผ่าน iframe ที่ซ่อนไว้ - ผู้ใช้เลือกเครื่องพิมพ์หรือ "บันทึกเป็น PDF" ในหน้าต่างพิมพ์ของเบราว์เซอร์ (วิธีเดียวกับใบส่งตรวจรถ
-// เพราะแสดงภาษาไทยได้ถูกต้องโดยไม่ต้องฝังฟอนต์)
+// พิมพ์ผ่าน iframe ที่ซ่อนไว้ (ดู print-html.ts) - วิธีเดียวกับใบส่งตรวจรถ
 export function printJobSheets(sheets: JobSheet[]): void {
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0";
-  iframe.srcdoc = buildJobSheetHtml(sheets);
-
-  iframe.onload = async () => {
-    const win = iframe.contentWindow;
-    if (!win) return;
-    await Promise.race([win.document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 3000))]);
-    win.addEventListener("afterprint", () => setTimeout(() => iframe.remove(), 0));
-    win.focus();
-    win.print();
-  };
-
-  document.body.appendChild(iframe);
+  printHtmlDocument(buildJobSheetHtml(sheets));
 }
