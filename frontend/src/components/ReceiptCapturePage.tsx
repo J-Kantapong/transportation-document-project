@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage } from "@/lib/api";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { AuthedImage } from "@/components/AuthedImage";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
@@ -123,14 +124,13 @@ export function ReceiptCapturePage() {
             const reading = extraction && "reading" in extraction ? extraction.reading : null;
             return (
               <div key={shot.receipt.id} style={{ display: "flex", gap: 12, padding: 10, borderRadius: 10, border: "1px solid #dfe5f0", background: style.background }}>
-                <a href={receiptImageUrl(shot.receipt.id)} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-                  <img
+                <div style={{ flexShrink: 0 }}>
+                  <AuthedImage
                     src={receiptImageUrl(shot.receipt.id)}
                     alt="ใบเสร็จที่ส่งแล้ว"
                     style={{ width: 64, height: 86, objectFit: "cover", objectPosition: "top", borderRadius: 6, display: "block" }}
                   />
-                </a>
+                </div>
                 <div style={{ minWidth: 0, flex: 1, fontSize: 14, lineHeight: 1.6 }}>
                   <div style={{ color: style.color, fontWeight: 600 }}>
                     {style.icon} {shot.text}

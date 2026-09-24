@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 
 // หน้าคิวของขั้นตอนหลังได้รับใบเสร็จ (รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery) - ใช้โครงเดียวกัน:
@@ -263,10 +264,12 @@ export function ReceivingQueuePage({
                     {photoColumnLabel && (
                       <td>
                         {r.photoUrl ? (
-                          <a href={r.photoUrl} target="_blank" rel="noreferrer" title={`เปิด${photoColumnLabel}ขนาดเต็ม`}>
-                            {/* eslint-disable-next-line @next/next/no-img-element -- รูปมาจาก backend API ไม่ผ่าน next/image */}
-                            <img src={r.photoUrl} alt={photoColumnLabel} loading="lazy" style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }} />
-                          </a>
+                          <AuthedImage
+                            src={r.photoUrl}
+                            alt={photoColumnLabel}
+                            style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }}
+                            linkTitle={`เปิด${photoColumnLabel}ขนาดเต็ม`}
+                          />
                         ) : (
                           "—"
                         )}
