@@ -57,6 +57,20 @@ export function assertVehicleInScope(body: string | null | undefined) {
   if (!isVehicleInScope(body, scope)) throw new ForbiddenException({ error: scopeErrorMessage(scope) });
 }
 
+// ขั้น 2 แจ้งย้าย/ตัดบัญชี: ADMIN/STAFF_ENTRY ทุกคัน, STAFF_MOTO เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24)
+// access-policy.ts กันบทบาทอื่นไว้แล้ว - นอกคำขอ HTTP ไม่จำกัด
+export function canEditTransferNotice(roles: UserRole[], body: string | null | undefined): boolean {
+  if (roles.includes('ADMIN') || roles.includes('STAFF_ENTRY')) return true;
+  return roles.includes('STAFF_MOTO') && vehicleKindOf(body) === 'moto';
+}
+
+export function assertTransferNoticeInScope(body: string | null | undefined) {
+  const user = currentUser();
+  if (user && !canEditTransferNotice(user.roles, body)) {
+    throw new ForbiddenException({ error: 'บัญชีของคุณแจ้งย้าย/ตัดบัญชีได้เฉพาะจักรยานยนต์ - รถคันนี้เป็นรถยนต์' });
+  }
+}
+
 // แท็บรูปป้าย (car | moto) ต้องอยู่ในขอบเขตเดียวกัน
 export function assertKindInScope(kind: VehicleKind) {
   const scope = currentVehicleScope();

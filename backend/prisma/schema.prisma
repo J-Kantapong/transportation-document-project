@@ -71,11 +71,12 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer        Customer? @relation(fields: [customerId], references: [id])
-  approvedBy      User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers   User[]    @relation("ApprovedUsers")
-  assignedCases   Case[]    @relation("AssignedStaff")
-  deletedVehicles Vehicle[] @relation("DeletedVehicles")
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  approvedBy      User?            @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers   User[]           @relation("ApprovedUsers")
+  assignedCases   Case[]           @relation("AssignedStaff")
+  deletedVehicles Vehicle[]        @relation("DeletedVehicles")
+  vehicleEdits    VehicleEditLog[] @relation("VehicleEdits")
 
   @@index([status])
   @@index([customerId])
@@ -216,15 +217,19 @@ model Vehicle {
 
 // แก้ไขข้อมูลรถจดใหม่หลังบันทึกแล้ว ต้องระบุเหตุผล (remark) ทุกครั้ง - บังคับที่ระดับ service
 model VehicleEditLog {
-  id        String   @id @default(cuid())
-  vehicleId String
-  remark    String // เหตุผลที่แก้ไข
-  changes   String // JSON: { field: { from, to } } เฉพาะฟิลด์ที่เปลี่ยนจริง
-  editedAt  DateTime @default(now())
+  id         String   @id @default(cuid())
+  vehicleId  String
+  remark     String // เหตุผลที่แก้ไข
+  changes    String // JSON: { field: { from, to } } เฉพาะฟิลด์ที่เปลี่ยนจริง
+  editedAt   DateTime @default(now())
+  // ผู้ใช้ที่แก้ (ผู้ใช้ 2026-09-24) - แถวก่อนหน้านี้ และงานที่รันนอกคำขอ HTTP (script) เป็น null
+  editedById String?
 
-  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicle  Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  editedBy User?   @relation("VehicleEdits", fields: [editedById], references: [id], onDelete: SetNull)
 
   @@index([vehicleId])
+  @@index([editedById])
 }
 
 model Case {
