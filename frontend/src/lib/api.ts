@@ -320,6 +320,7 @@ export interface PlatePhoto {
   kind: PlateKind;
   extractionSource: string; // NONE = ไม่มี AI
   error: string | null; // AI อ่านไม่สำเร็จ
+  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (plates ว่างไว้ก่อน)
   closedAt: string | null;
   createdAt: string;
   plates: PlatePhotoPlate[];
@@ -361,6 +362,7 @@ export interface BookPhoto {
   id: string;
   extractionSource: string; // NONE = ไม่มี AI
   error: string | null;
+  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (books ว่างไว้ก่อน)
   closedAt: string | null;
   createdAt: string;
   books: BookPhotoBook[];
@@ -804,10 +806,12 @@ export const api = {
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
   deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
 
-  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind) => {
+  // background = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (เลือกหลายรูปจากคลังภาพ)
+  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
     form.append('kind', kind);
+    if (background) form.append('background', '1');
     return request<PlatePhotoList>('/api/plate-photos', { method: 'POST', body: form });
   },
   listOpenPlatePhotos: (kind: PlateKind) => request<PlatePhotoList>(`/api/plate-photos/open?kind=${kind}`),
@@ -818,9 +822,10 @@ export const api = {
     }),
   deletePlatePhoto: (id: string) => request<{ id: string }>(`/api/plate-photos/${id}`, { method: 'DELETE' }),
 
-  uploadBookPhoto: (image: Blob, fileName: string) => {
+  uploadBookPhoto: (image: Blob, fileName: string, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
+    if (background) form.append('background', '1');
     return request<BookPhotoList>('/api/book-photos', { method: 'POST', body: form });
   },
   listOpenBookPhotos: () => request<BookPhotoList>('/api/book-photos/open'),

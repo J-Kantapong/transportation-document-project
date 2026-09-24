@@ -736,6 +736,7 @@ model PlatePhoto {
   kind             String    @default("car") // car | moto - แท็บที่ถ่าย จับคู่เฉพาะรถประเภทเดียวกัน (ป้ายรถยนต์/มอเตอร์ไซค์ เลขซ้ำกันได้)
   extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
   extraction       Json? // { plates: [...], usage } หรือ { error }
+  readPending      Boolean   @default(false) // true = เลือกหลายรูปแล้วรอ AI อ่านเบื้องหลัง (BackgroundReads)
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 
@@ -757,6 +758,7 @@ model BookPhoto {
   contentHash      String?   @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
   extraction       Json? // { books: [...], usage } หรือ { error }
+  readPending      Boolean   @default(false) // true = เลือกหลายรูปแล้วรอ AI อ่านเบื้องหลัง (BackgroundReads)
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 

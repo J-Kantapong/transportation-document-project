@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
-import type { RequestUser } from '../auth/auth.types.js';
-import { currentUser, requestContext } from '../auth/request-context.js';
+import { BadRequestException, Inject, Injectable, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { BackgroundReads, isBackgroundFlag } from './background-reads.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
 import { CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
@@ -45,12 +44,6 @@ const receiptSelect = {
   createdAt: true,
 } as const;
 
-// อ่านใบเสร็จเบื้องหลัง (ผู้ใช้ 2026-09-25): เลือกรูปหลายใบ -> เก็บรูปแล้วตอบทันที ให้ AI อ่านทีหลังทีละไม่เกินเท่านี้
-// ถ่ายทีละใบจากกล้องยังอ่านทันทีเหมือนเดิม เพราะคนถ่ายต้องรู้ผลตอนใบเสร็จยังอยู่ในมือ
-const READ_CONCURRENCY = 3;
-
-const isTrue = (v: unknown) => v === true || v === 'true' || v === '1';
-
 // ดูชนิดไฟล์จาก byte แรกของไฟล์ ไม่เชื่อ mimetype/นามสกุลที่ browser ส่งมา - รับเฉพาะรูป JPEG/PNG/WebP
 export function detectImageType(buf: Buffer): { mimeType: string; ext: string } | null {
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mimeType: 'image/jpeg', ext: 'jpg' };
@@ -65,9 +58,8 @@ export function detectImageType(buf: Buffer): { mimeType: string; ext: string } 
 
 @Injectable()
 export class ReceiptsService implements OnApplicationBootstrap {
-  private readonly logger = new Logger(ReceiptsService.name);
-  private readonly readQueue: Array<{ id: string; user: RequestUser | null }> = [];
-  private reading = 0;
+  // เลือกหลายใบจากคลังภาพ = อ่านเบื้องหลัง · ถ่ายทีละใบยังอ่านทันที เพราะคนถ่ายต้องรู้ผลตอนใบเสร็จยังอยู่ในมือ
+  private readonly reads = new BackgroundReads(ReceiptsService.name, (id) => this.readOne(id));
   private finishing: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -84,27 +76,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       return;
     }
     const pending = await this.prisma.receiptImage.findMany({ where: { readPending: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
-    for (const { id } of pending) this.enqueueRead(id, null);
-  }
-
-  // user = คนที่อัปโหลด: จับคู่อัตโนมัติเฉพาะรถประเภทที่คนนั้นดูแล เหมือนตอนอ่านทันที (null = ไม่จำกัด เช่นอ่านต่อหลังรีสตาร์ท)
-  private enqueueRead(id: string, user: RequestUser | null) {
-    this.readQueue.push({ id, user });
-    this.pumpReads();
-  }
-
-  private pumpReads() {
-    while (this.reading < READ_CONCURRENCY && this.readQueue.length > 0) {
-      const job = this.readQueue.shift()!;
-      this.reading++;
-      requestContext
-        .run({ user: job.user }, () => this.readOne(job.id))
-        .catch((err: unknown) => this.logger.error(`อ่านใบเสร็จ ${job.id} ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`))
-        .finally(() => {
-          this.reading--;
-          this.pumpReads();
-        });
-    }
+    for (const { id } of pending) this.reads.enqueue(id, null);
   }
 
   private async readOne(id: string) {
@@ -264,7 +236,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
 
     const now = new Date();
     const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
-    const background = !submissionId && isTrue(backgroundRaw) && this.extractor.source !== 'NONE';
+    const background = !submissionId && isBackgroundFlag(backgroundRaw) && this.extractor.source !== 'NONE';
     const extraction = background ? null : await this.extractor.extract(file.buffer, type.mimeType);
     const duplicate = await this.findDuplicate(extraction, null);
     // อัปโหลดหลายใบแล้วเจอใบซ้ำ -> ไม่แนบให้อัตโนมัติ รอในถาดพร้อมคำเตือน ให้พนักงานดูแล้วลบ (แนบในแถวรถ = แนบตามที่เลือก แต่เตือน)
@@ -285,7 +257,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         },
         select: receiptSelect,
       });
-      if (background) this.enqueueRead(receipt.id, currentUser());
+      if (background) this.reads.enqueue(receipt.id);
       return { receipt };
     } catch (err) {
       // บันทึกลงฐานข้อมูลไม่สำเร็จ - ลบไฟล์ทิ้งไม่ให้ค้างโดยไม่มีแถวอ้างถึง

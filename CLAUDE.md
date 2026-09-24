@@ -56,6 +56,9 @@ This private repository is the shared development surface for the user, Claude C
   runs duplicate check + chassis match + save one at a time (manual assign goes through the same lock, and a
   staff-chosen vehicle is kept). Pending rows are re-queued on boot (cleared if AI is off). The page polls
   `GET /api/receipts?ids=a,b` (`frontend/src/lib/receipt-upload.ts`). Only for uploads with no `submissionId`.
+  Step 6 plate photos and Step 7 book photos work the same way (camera = immediate, gallery = `background=1`,
+  `PlatePhoto.readPending` / `BookPhoto.readPending`); they only save the reading, since matches are computed on every
+  `GET .../open`, which the panels poll while a photo is pending. Shared queue: `backend/src/receipts/background-reads.ts`.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)
