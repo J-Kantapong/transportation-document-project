@@ -26,6 +26,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/auth\/(login|register)$/, access: 'PUBLIC' },
   { pattern: /^\/api\/auth(\/|$)/, access: 'ANY_USER' },
   { pattern: /^\/api\/admin(\/|$)/, access: ['ADMIN'] },
+  // ภาพรวมผู้บริหาร (ยอดเงินทั้งบริษัท) - ADMIN เท่านั้น บทบาทอื่นจะมีภาพรวมของตัวเองตามมาทีหลัง (ผู้ใช้ 2026-09-24)
+  { pattern: /^\/api\/overview(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
