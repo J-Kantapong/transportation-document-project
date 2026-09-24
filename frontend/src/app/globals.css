@@ -211,3 +211,104 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 @media(max-width:600px){.auth-fields--grid{grid-template-columns:1fr}.auth-card{padding:28px 22px}}
 /* เมนูยาวขึ้นหลังมีส่วนผู้ดูแลระบบ - ให้ sidebar เลื่อนได้ ปุ่มออกจากระบบไม่หลุดจอบนจอเตี้ย */
 aside{overflow-y:auto}
+
+/* ภาพรวมผู้บริหาร (ADMIN) - ExecutiveOverview.tsx / OverviewCharts.tsx */
+.exec .heading{align-items:flex-start;flex-wrap:wrap}
+.exec h3{font-size:13px;font-weight:600;color:#55617a;margin:0 0 12px}
+.exec-date{display:flex;align-items:center;gap:6px;background:white;border:1px solid #e3e8f1;border-radius:10px;padding:5px}
+.exec-date button{border:0;background:#f2f4f8;border-radius:7px;min-width:34px;height:34px;font-size:17px;color:#46526a}
+.exec-date button:disabled{opacity:.4;cursor:default}
+.exec-date span{min-width:104px;text-align:center;font-size:14px;font-weight:500}
+.exec-date .exec-date-today{font-size:13px;padding:0 12px;background:#edf2ff;color:#2854d9}
+.exec-kpis .num{font-size:30px;white-space:nowrap}
+.exec-kpis .foot{line-height:1.8}
+.exec-change{font-size:12px;color:#8590a1}
+.exec-change.good{color:#23825f}
+.exec-change.bad{color:#b43434}
+.exec-pos{color:#23825f}
+.exec-neg{color:#b43434}
+.exec-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px;margin-top:22px}
+.exec-panel{margin-top:22px}
+.exec-sub{font-size:12px;margin-top:5px;line-height:1.6}
+.exec-empty{padding:26px 23px 30px;color:#8290a5;font-size:14px}
+.exec-alerts{list-style:none;margin:0;padding:0 23px 12px}
+.exec-alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:13px 0;border-top:1px solid #f0f2f6;font-size:14px}
+.exec-alert .sub{line-height:1.6}
+.exec-alert-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;min-width:92px}
+.exec-alert-chip b{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;color:white;font-size:11px}
+.exec-alert--high .exec-alert-chip{background:#fdecec;color:#b43434}
+.exec-alert--high .exec-alert-chip b{background:#b43434}
+.exec-alert--medium .exec-alert-chip{background:#fff6e7;color:#9a6a14}
+.exec-alert--medium .exec-alert-chip b{background:#bb8527}
+.exec-alert--info .exec-alert-chip{background:#eef3ff;color:#3c5fb8}
+.exec-alert--info .exec-alert-chip b{background:#4a70c7}
+.exec-alert .text-button{white-space:nowrap;text-decoration:none}
+.exec-chart{position:relative;padding:0 23px 20px}
+.chart{position:relative;width:100%}
+.chart-svg{display:block;width:auto;height:auto;fill:none;stroke:none;overflow:visible}
+.chart-svg path{stroke:none}
+.chart-grid{stroke:#eef1f6;stroke-width:1}
+.chart-axis{stroke:#d9dfe9;stroke-width:1}
+.chart-tick{fill:#8a94a6;font-size:11px;stroke:none}
+.chart-empty{fill:#98a2b3;font-size:13px;stroke:none}
+.chart-band{fill:#f3f5fa}
+.chart-legend{display:flex;gap:16px;flex-shrink:0;white-space:nowrap;font-size:12px;color:#55617a}
+.chart-legend span{display:inline-flex;align-items:center;gap:6px}
+.chart-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.chart-tip{position:absolute;top:0;background:white;border:1px solid #e3e8f1;border-radius:10px;padding:10px 12px;font-size:12px;color:#34415a;box-shadow:0 10px 30px #14203c1f;pointer-events:none;min-width:190px;z-index:2}
+.chart-tip b{display:block;margin-bottom:6px;font-size:13px}
+.chart-tip div{display:flex;align-items:center;gap:6px;line-height:1.8}
+.chart-tip i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.chart-tip span{margin-left:auto;font-weight:600;padding-left:14px}
+.chart-tip .chart-tip-sub{color:#8590a1}
+.exec-table-toggle{margin-top:10px;font-size:13px;color:#55617a}
+.exec-table-toggle summary{cursor:pointer;color:#2854d9;width:max-content}
+.exec-table-toggle .table-wrap{max-height:320px;margin-top:10px;border:1px solid #f0f2f6;border-radius:8px}
+.exec-table td{padding:12px 20px}
+.exec-table th:first-child,.exec-table td:first-child{padding-left:23px}
+.exec-table tfoot td{font-weight:600;border-top:1px solid #e6eaf1;border-bottom:0}
+.num-col{text-align:right;font-variant-numeric:tabular-nums}
+th.num-col{text-align:right}
+.exec-wrap{white-space:normal;min-width:140px}
+.exec-bar-cell{width:30%;min-width:90px}
+.exec-hbar-track{display:block;height:8px;background:#f1f4fa;border-radius:4px;overflow:hidden}
+.exec-hbar-fill{display:block;height:100%;border-radius:0 4px 4px 0}
+.exec-hbars{display:grid;gap:10px}
+.exec-hbar{display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:12px;align-items:center;font-size:13px;color:#55617a}
+.exec-hbar-value{font-variant-numeric:tabular-nums;color:#18243c;min-width:96px;text-align:right}
+.exec-hbar-value small{color:#8a94a6}
+.exec-pipeline{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:0 23px}
+.exec-pipeline div{background:#f7f9fc;border-radius:10px;padding:13px 14px;display:flex;flex-direction:column;gap:3px;position:relative}
+.exec-pipeline span{font-size:12px;color:#69758a}
+.exec-pipeline b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.exec-pipeline small{font-size:11px;color:#8a94a6;line-height:1.5}
+.exec-block{padding:20px 23px 4px}
+.exec-block:last-child{padding-bottom:20px}
+.exec-block .exec-table th,.exec-block .exec-table td{padding:10px 8px}
+.exec-block .exec-table th:first-child,.exec-block .exec-table td:first-child{padding-left:0}
+.exec-note{padding:14px 0 0;font-size:12px;line-height:1.8}
+@media(max-width:1200px){.exec-grid{grid-template-columns:1fr}}
+@media(max-width:850px){.exec-kpis{grid-template-columns:repeat(2,1fr)}.exec-pipeline{grid-template-columns:1fr}}
+@media(max-width:550px){.exec-kpis .num{font-size:24px}.exec-alert{grid-template-columns:1fr;gap:6px}.exec-chart{padding:0 12px 16px}.exec-date span{min-width:88px}.exec .panel-head{flex-direction:column;align-items:flex-start}}
+/* งานแต่ละขั้นตอน + รถที่ติดขัด (OverviewProcess.tsx) - แยกคอลัมน์รถยนต์/จักรยานยนต์ */
+.proc-table th,.proc-table td{padding:11px 14px}
+.proc-table thead th{white-space:nowrap}
+.proc-group-head{text-align:center;border-right:1px solid #e6eaf1;color:#55617a;font-weight:500}
+.proc-table thead tr:first-child th:first-child{vertical-align:bottom}
+.proc-split-end{border-right:1px solid #eef1f6}
+.proc-val{font-weight:600;color:#18243c}
+.proc-zero{color:#b3bac7}
+.proc-na{color:#c9ced8}
+.proc-group-row td{background:#f7f9fc;font-size:12px;font-weight:600;color:#55617a;padding:8px 23px;border-bottom:1px solid #eef1f6}
+.proc-table tfoot td{font-weight:600}
+.kind-badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;border:1px solid}
+.kind-car{background:#eef3ff;color:#2f55b5;border-color:#d7e2ff}
+.kind-moto{background:#f4f1ff;color:#5b47b0;border-color:#e3dcff}
+.exec-alert-chip--high{background:#fdecec;color:#b43434}
+.exec-alert-chip--high b{background:#b43434}
+.exec-alert-chip--medium{background:#fff6e7;color:#9a6a14}
+.exec-alert-chip--medium b{background:#bb8527}
+.stuck-table td{vertical-align:top;padding-top:13px;padding-bottom:13px}
+.stuck-reason{white-space:normal;min-width:220px;max-width:340px;line-height:1.6}
+.stuck-more{padding:12px 23px 18px}
+.exec-panel .inspect-filter{padding:0 23px 16px}

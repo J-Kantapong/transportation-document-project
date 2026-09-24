@@ -10,6 +10,7 @@ import { CustomersModule } from './customers/customers.module.js';
 import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
 import { FinanceCompaniesModule } from './finance-companies/finance-companies.module.js';
+import { OverviewModule } from './overview/overview.module.js';
 import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
 import { PlateSwapModule } from './plate-swap/plate-swap.module.js';
@@ -44,6 +45,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BookPhotosModule,
     DeliveryModule,
     BillingModule,
+    OverviewModule,
   ],
   controllers: [AppController],
   providers: [AppService],
