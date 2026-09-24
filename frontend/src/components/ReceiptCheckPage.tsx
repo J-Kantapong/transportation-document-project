@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
 
@@ -95,6 +96,11 @@ function wrongCarReceipts(list: ReceiptSummary[] | undefined): Ai[] {
   return (list ?? []).flatMap((r) => (r.extraction && "reading" in r.extraction && r.extraction.match === "chassis-mismatch" ? [r.extraction as Ai] : []));
 }
 
+// รูปของรถคันนี้ที่ AI อ่านแล้วอาจซ้ำกับใบเสร็จที่มีอยู่ (เตือนอย่างเดียว)
+function duplicateOf(list: ReceiptSummary[] | undefined) {
+  return (list ?? []).map((r) => r.extraction?.duplicate).find(Boolean) ?? null;
+}
+
 // รูปที่ใช้เปิดใน popup: รูปที่ AI อ่าน (ตัวเดียวกับ latestAi) ไม่มีก็ใช้รูปล่าสุด
 function latestAiImageId(list: ReceiptSummary[] | undefined): string | null {
   const all = list ?? [];
@@ -124,7 +130,15 @@ function needsCheck(ai: Ai | null, reviewed = false): FieldFlags {
       u.includes("total") || u.includes("items"),
       ai.checks.itemsSumMatchesTotal ? null : "รายการในใบเสร็จรวมกันไม่เท่ายอดรวม",
     ),
-    chassis: reason(!r.chassis, u.includes("chassis"), ai.checks.chassisValid ? null : "เลขตัวถังไม่ผ่านการตรวจ check digit"),
+    chassis: reason(
+      !r.chassis,
+      u.includes("chassis"),
+      ai.match === "chassis-near"
+        ? `เลขตัวถังในใบเสร็จ (${r.chassis}) ต่างจากรถคันนี้เล็กน้อย - เทียบกับรูปว่าเป็นคันเดียวกัน`
+        : ai.checks.chassisValid
+          ? null
+          : "เลขตัวถังไม่ผ่านการตรวจ check digit",
+    ),
     receiptNo: reason(!r.receiptNo, u.includes("receiptNo"), ai.checks.receiptNoValid ? null : "รูปแบบไม่ใช่ ตัวเลข/ตัวเลข"),
   };
 }
@@ -582,10 +596,15 @@ export function ReceiptCheckPage() {
                         </td>
                         <td>
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={active ? (rid) => removeReceipt(s.id, rid) : undefined} />
+                          {active && (() => {
+                            const dup = duplicateOf(receipts[s.id]);
+                            return dup && <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
+                          })()}
                           {active && ai && (
                             <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
                               เลขที่ {ai.reading.receiptNo ?? "?"} · {ai.reading.date ? isoToDisplayDate(ai.reading.date) : "?"}
                               {ai.match === "chassis" && " · จับคู่ด้วยเลขตัวถัง"}
+                              {ai.match === "chassis-near" && " · จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
                             </div>
                           )}
                           {active && (

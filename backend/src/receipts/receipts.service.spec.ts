@@ -1,20 +1,28 @@
 import { vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
-import { checkReading, type ReceiptReading } from './receipt-extraction.js';
+import { checkReading, isNearChassis, type ReceiptReading } from './receipt-extraction.js';
 import type { ReceiptStorage } from './receipt-storage.js';
 import { ReceiptsService, detectImageType } from './receipts.service.js';
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const file = (buffer = JPEG) => ({ buffer, size: buffer.length, originalname: 'receipt.jpg' });
 
-function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null) {
+function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null, dups: { saved?: unknown; image?: unknown; byChassis?: unknown } = {}, nearCandidates: unknown[] = []) {
   const storage = { put: vi.fn().mockResolvedValue(undefined), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) } satisfies ReceiptStorage;
   const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data }));
   const prisma = {
-    documentSubmission: { findUnique: vi.fn().mockResolvedValue(submission), findFirst: vi.fn().mockResolvedValue(pendingByChassis) },
+    documentSubmission: {
+      findUnique: vi.fn().mockResolvedValue(submission),
+      // findDuplicate ค้นด้วย receiptNo / OR (รถมีใบเสร็จแล้ว) - matchByChassis ค้นรถที่รอใบเสร็จ
+      findFirst: vi.fn().mockImplementation(async ({ where }) =>
+        where.receiptNo ? (dups.saved ?? null) : where.OR ? (dups.byChassis ?? null) : pendingByChassis,
+      ),
+      findMany: vi.fn().mockResolvedValue(nearCandidates),
+    },
     receiptImage: {
       create,
+      findFirst: vi.fn().mockResolvedValue(dups.image ?? null),
       findUnique: vi.fn().mockResolvedValue(receipt),
       update: vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data })),
       delete: vi.fn().mockResolvedValue(receipt),
@@ -65,6 +73,28 @@ describe('ReceiptsService.upload', () => {
     create.mockRejectedValueOnce(new Error('db down'));
     await expect(svc.upload(file(), 's1')).rejects.toThrow('db down');
     expect(storage.delete).toHaveBeenCalledWith(vi.mocked(storage.put).mock.calls[0][0]);
+  });
+
+  it('บันทึก hash ของไฟล์ไว้กันอัปโหลดซ้ำ', async () => {
+    const { svc, create } = setup();
+    await svc.upload(file(), 's1');
+    expect(create.mock.calls[0][0].data.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('รูปเดิมอยู่ในระบบแล้ว = ปฏิเสธ "อัพโหลดไปแล้ว" ก่อนเก็บไฟล์และก่อนใช้ AI', async () => {
+    const extractor = { source: 'test', extract: vi.fn() } as unknown as ReceiptExtractor;
+    const { svc, storage, create } = setup(undefined, { id: 'r0' }, extractor);
+    await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ status: 409, response: { error: 'รูปนี้อัพโหลดไปแล้ว' } });
+    expect(extractor.extract).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('อัปโหลดรูปเดียวกันพร้อมกัน (unique index ชน) = "อัพโหลดไปแล้ว" และลบไฟล์ที่เก็บไปแล้ว', async () => {
+    const { svc, storage, create } = setup();
+    create.mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002', meta: { target: ['contentHash'] } }));
+    await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ status: 409, response: { error: 'รูปนี้อัพโหลดไปแล้ว' } });
+    expect(storage.delete).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -119,6 +149,124 @@ describe('ReceiptsService.upload - จับคู่ด้วยเลขตั
     const data = create.mock.calls[0][0].data;
     expect(data.submissionId).toBe('s1');
     expect(data.extraction.match).toBe('chassis-mismatch');
+  });
+
+  // เคสจริง 2026-09-24: AI อ่าน MLTZT1509TX007960 เป็น METZT1509TX007960
+  const MOTO_READ = { ...READING, chassis: 'METZT1509TX007960' };
+  const moto = (id: string, chassis: string) => ({ id, vehicle: { chassis } });
+
+  it('อัปโหลดหลายใบ: ไม่ตรงเป๊ะแต่ใกล้เคียงคันเดียว -> แนบให้ พร้อมให้เช็ก', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(MOTO_READ), null, {}, [moto('s7', 'MLTZT1509TX007960')]);
+    await svc.upload(file());
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBe('s7');
+    expect(data.extraction.match).toBe('chassis-near');
+  });
+
+  it('อัปโหลดหลายใบ: ใกล้เคียงหลายคัน -> ไม่เดา รอจับคู่', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(MOTO_READ), null, {}, [moto('s7', 'MLTZT1509TX007960'), moto('s8', 'MXTZT1509TX007960')]);
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.submissionId).toBeNull();
+  });
+
+  it('แนบในแถว: เลขตัวถังใกล้เคียงกับรถคันนั้น -> ไม่นับเป็นรถคันอื่น', async () => {
+    const { svc, create } = setup({ id: 's1', status: 'PENDING', vehicle: { chassis: 'MLTZT1509TX007960' } }, null, aiReading(MOTO_READ));
+    await svc.upload(file(), 's1');
+    expect(create.mock.calls[0][0].data.extraction.match).toBe('chassis-near');
+  });
+});
+
+describe('ReceiptsService.upload - อ่านเบื้องหลัง (background)', () => {
+  // findUnique: เช็ก hash ซ้ำ -> readOne โหลดรูป -> ก่อนบันทึกผล (ดูว่าพนักงานจับคู่เองไปแล้วหรือยัง)
+  function backgroundSetup(extractor: ReceiptExtractor, submissionIdWhileReading: string | null = null) {
+    const ctx = setup(undefined, null, extractor, { id: 's9' });
+    const prisma = (ctx.svc as unknown as { prisma: { receiptImage: Record<string, ReturnType<typeof vi.fn>> } }).prisma;
+    prisma.receiptImage.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ storageKey: 'k', mimeType: 'image/jpeg', readPending: true })
+      .mockResolvedValueOnce({ submissionId: submissionIdWhileReading });
+    vi.mocked(ctx.storage.get).mockResolvedValue(JPEG);
+    return { ...ctx, update: prisma.receiptImage.update };
+  }
+
+  it('ตอบทันทีโดยยังไม่อ่าน แล้ว AI อ่านและจับคู่ให้ทีหลัง', async () => {
+    const extract = vi.fn(aiReading(READING).extract);
+    const { svc, create, update } = backgroundSetup({ source: 'claude-sonnet-5', extract });
+    const { receipt } = await svc.upload(file(), undefined, '1');
+    expect(create.mock.calls[0][0].data).toMatchObject({ readPending: true, submissionId: null });
+    expect(create.mock.calls[0][0].data.extraction).toBeUndefined();
+    expect(receipt).toMatchObject({ readPending: true });
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][0].data).toMatchObject({ readPending: false, submissionId: 's9', extraction: { match: 'chassis' } });
+  });
+
+  it('พนักงานจับคู่เองระหว่างรออ่าน -> คงรถที่เลือกไว้', async () => {
+    const { svc, update } = backgroundSetup(aiReading(READING), 's1');
+    await svc.upload(file(), undefined, '1');
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].data.submissionId).toBe('s1');
+  });
+
+  it('ไม่มี AI หรือแนบในแถวรถ -> ไม่ใช้แบบเบื้องหลัง', async () => {
+    const { svc, create } = setup();
+    await svc.upload(file(), undefined, '1');
+    expect(create.mock.calls[0][0].data.readPending).toBe(false);
+    const withAi = setup(undefined, null, aiReading(READING));
+    await withAi.svc.upload(file(), 's1', '1');
+    expect(withAi.create.mock.calls[0][0].data).toMatchObject({ readPending: false, submissionId: 's1' });
+  });
+});
+
+describe('isNearChassis', () => {
+  it('11 ตัวแรกต่างได้ไม่เกิน 2 ตัว เลขท้าย 6 ตัวต้องตรง', () => {
+    expect(isNearChassis('METZT1509TX007960', 'MLTZT1509TX007960')).toBe(true);
+    expect(isNearChassis('MEXZT1509TX007960', 'MLTZT1509TX007960')).toBe(true);
+    expect(isNearChassis('MEXYT1509TX007960', 'MLTZT1509TX007960')).toBe(false);
+    // รถล็อตเดียวกันเลขเรียงกัน - อ่านเลขท้ายผิดตัวเดียวก็เป็นคนละคัน
+    expect(isNearChassis('MLTZT1509TX007966', 'MLTZT1509TX007960')).toBe(false);
+    expect(isNearChassis('MLTZT1509TX007960', 'MLTZT1509TX007960')).toBe(false);
+    expect(isNearChassis('MLTZT1509TX00796', 'MLTZT1509TX007960')).toBe(false);
+  });
+});
+
+describe('ReceiptsService.upload - เตือนใบเสร็จซ้ำจากข้อมูลที่ AI อ่าน', () => {
+  it('ไม่ซ้ำ = duplicate เป็น null', async () => {
+    const { svc, create } = setup(undefined, null, aiReading(READING), { id: 's9' });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toBeNull();
+  });
+
+  it('เลขที่ใบเสร็จตรงกับที่ยืนยันไว้แล้ว -> เตือน และไม่แนบให้อัตโนมัติ (รอในถาด)', async () => {
+    const saved = { receiptReceivedDate: new Date('2026-09-10T00:00:00Z'), vehicle: { chassis: 'LS6CME0P7TC914754' } };
+    const { svc, create } = setup(undefined, null, aiReading(READING), { id: 's9' }, { saved });
+    await svc.upload(file());
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBeNull();
+    expect(data.extraction.duplicate).toEqual({ by: 'receiptNo', receiptNo: '69/0035358', chassis: 'LS6CME0P7TC914754', receivedDate: '2026-09-10' });
+  });
+
+  it('เลขที่ใบเสร็จตรงกับรูปอื่นที่อัปโหลดไว้ (ยังไม่จับคู่) -> เตือน ใช้เลขตัวถังจากผลอ่านของรูปนั้น', async () => {
+    const image = { extraction: { reading: { chassis: 'LS6CME0P7TC914754' } }, submission: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { image });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toMatchObject({ by: 'receiptNo', chassis: 'LS6CME0P7TC914754', receivedDate: null });
+  });
+
+  it('รถคันนี้มีใบเสร็จแล้ว (เลขตัวถัง) -> เตือน', async () => {
+    const byChassis = { receiptNo: '69/0000001', receiptReceivedDate: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { byChassis });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toEqual({ by: 'chassis', receiptNo: '69/0000001', chassis: 'LS6CME0P7TC914754', receivedDate: null });
+  });
+
+  it('แนบในแถวรถแล้วซ้ำ -> ยังแนบตามที่พนักงานเลือก แต่เตือน', async () => {
+    const byChassis = { receiptNo: null, receiptReceivedDate: null };
+    const { svc, create } = setup(undefined, null, aiReading(READING), null, { byChassis });
+    await svc.upload(file(), 's1');
+    const data = create.mock.calls[0][0].data;
+    expect(data.submissionId).toBe('s1');
+    expect(data.extraction.duplicate).toMatchObject({ by: 'chassis' });
   });
 });
 

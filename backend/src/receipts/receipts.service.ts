@@ -1,9 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { BackgroundReads, isBackgroundFlag } from './background-reads.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
+import { CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
+
+// ใบเสร็จที่ AI อ่านได้ซ้ำกับที่มีในระบบแล้ว (ผู้ใช้ 2026-09-24: เตือน ไม่บล็อก เพราะ AI อ่านผิดได้) เก็บใน extraction.duplicate
+// receiptNo = เลขที่ใบเสร็จตรงกับใบที่บันทึก/อัปโหลดไว้แล้ว · chassis = รถคันนี้มีรูปใบเสร็จแล้วหรือรับใบเสร็จแล้ว (รถ 1 คันต่อใบเสร็จ 1 ใบ)
+export interface ReceiptDuplicate {
+  by: 'receiptNo' | 'chassis';
+  receiptNo: string | null;
+  chassis: string | null;
+  receivedDate: string | null; // YYYY-MM-DD = รถคันนั้นรับใบเสร็จแล้ว (Step 5)
+}
+
+const isoDate = (d: Date | null | undefined) => d?.toISOString().slice(0, 10) ?? null;
+
+type ReceiptMatch = 'chassis' | 'chassis-near' | 'chassis-mismatch' | null;
 
 // ไฟล์จาก multer (memory storage) - ใช้แค่ฟิลด์เหล่านี้
 export interface UploadedReceiptFile {
@@ -24,6 +40,7 @@ const receiptSelect = {
   originalName: true,
   extractionSource: true,
   extraction: true,
+  readPending: true,
   createdAt: true,
 } as const;
 
@@ -40,12 +57,73 @@ export function detectImageType(buf: Buffer): { mimeType: string; ext: string } 
 }
 
 @Injectable()
-export class ReceiptsService {
+export class ReceiptsService implements OnApplicationBootstrap {
+  // เลือกหลายใบจากคลังภาพ = อ่านเบื้องหลัง · ถ่ายทีละใบยังอ่านทันที เพราะคนถ่ายต้องรู้ผลตอนใบเสร็จยังอยู่ในมือ
+  private readonly reads = new BackgroundReads(ReceiptsService.name, (id) => this.readOne(id));
+  private finishing: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(RECEIPT_STORAGE) private readonly storage: ReceiptStorage,
     @Inject(RECEIPT_EXTRACTOR) private readonly extractor: ReceiptExtractor,
   ) {}
+
+  // server รีสตาร์ทระหว่างอ่าน -> รูปที่ค้างสถานะรออ่านอยู่ในฐานข้อมูล อ่านต่อตอนเปิดใหม่
+  // ปิด AI ไปแล้ว (ไม่มี ANTHROPIC_API_KEY) -> เลิกรอ ให้พนักงานจับคู่เองเหมือนรูปที่ไม่มี AI
+  async onApplicationBootstrap() {
+    if (this.extractor.source === 'NONE') {
+      await this.prisma.receiptImage.updateMany({ where: { readPending: true }, data: { readPending: false } });
+      return;
+    }
+    const pending = await this.prisma.receiptImage.findMany({ where: { readPending: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+    for (const { id } of pending) this.reads.enqueue(id, null);
+  }
+
+  private async readOne(id: string) {
+    const row = await this.prisma.receiptImage.findUnique({ where: { id }, select: { storageKey: true, mimeType: true, readPending: true } });
+    if (!row?.readPending) return; // ลบไปแล้ว หรืออ่านไปแล้ว
+    let extraction: ReceiptExtraction | null;
+    try {
+      extraction = await this.extractor.extract(await this.storage.get(row.storageKey), row.mimeType);
+    } catch {
+      extraction = { error: 'อ่านรูปไม่สำเร็จ' };
+    }
+    await this.serialize(async () => {
+      const current = await this.prisma.receiptImage.findUnique({ where: { id }, select: { submissionId: true } });
+      if (!current) return; // ลบไปแล้วระหว่างรออ่าน
+      const duplicate = await this.findDuplicate(extraction, id);
+      // พนักงานจับคู่เองระหว่างรออ่าน -> คงรถที่เลือกไว้ แค่เช็กเลขตัวถัง · ใบซ้ำ -> ไม่แนบให้อัตโนมัติ (เหมือน upload)
+      const matched = current.submissionId
+        ? await this.matchByChassis(extraction, current.submissionId)
+        : duplicate
+          ? { submissionId: null, match: null }
+          : await this.matchByChassis(extraction, null);
+      await this.prisma.receiptImage.update({
+        where: { id },
+        data: {
+          readPending: false,
+          submissionId: matched.submissionId,
+          ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}),
+        },
+      });
+    });
+  }
+
+  // ตรวจซ้ำ + จับคู่ + บันทึก ทำทีละใบ (AI อ่านพร้อมกันได้): รูปใบเสร็จใบเดียวกันสองรูปที่อ่านเสร็จพร้อมกันจะได้เห็นกัน
+  // และไม่ทับรถที่พนักงานจับคู่เอง (assign ก็ผ่านตรงนี้) - backend มี process เดียว ล็อกในหน่วยความจำพอ
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.finishing.then(fn, fn);
+    this.finishing = run.catch(() => undefined);
+    return run;
+  }
+
+  // GET /api/receipts?ids=a,b - หน้าเว็บถามผลของรูปที่ส่งไปอ่านเบื้องหลัง
+  async findByIds(idsRaw: unknown) {
+    const ids = typeof idsRaw === 'string' ? [...new Set(idsRaw.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 200) : [];
+    if (ids.length === 0) return { receipts: [] };
+    const receipts = await this.prisma.receiptImage.findMany({ where: { id: { in: ids } }, select: receiptSelect });
+    return { receipts };
+  }
 
   // แนบรูปได้เฉพาะรายการที่ยังรอใบเสร็จหรือรับใบเสร็จแล้ว - ยื่นไม่สำเร็จ (FAILED) ไม่มีใบเสร็จ
   private async assertAttachable(submissionIdRaw: unknown): Promise<string> {
@@ -67,11 +145,13 @@ export class ReceiptsService {
   // จับคู่ด้วยเลขตัวถังที่ AI อ่านได้:
   // - อัปโหลดหลายใบ (ไม่ระบุรถ): หารถที่รอใบเสร็จซึ่งเลขตัวถังตรงเป๊ะ -> แนบให้เลย (match = 'chassis')
   // - แนบในแถวของรถ: เลขตัวถังในใบเสร็จไม่ตรงกับรถคันนั้น -> เตือน (match = 'chassis-mismatch') แต่ยังแนบตามที่พนักงานเลือก
+  // - ไม่ตรงเป๊ะแต่ใกล้เคียง (isNearChassis) = AI อ่านเพี้ยน -> match = 'chassis-near' หน้าเว็บให้เช็กเลขตัวถังกับรูป
+  //   อัปโหลดหลายใบ: แนบให้เฉพาะเมื่อมีรถที่รอใบเสร็จ (PENDING และยังไม่มีรูปใบเสร็จ) ใกล้เคียงแค่คันเดียว
   // ไม่มีผลอ่าน/อ่านเลขตัวถังไม่ได้ = ไม่จับคู่ให้ (match = null)
   private async matchByChassis(
     extraction: ReceiptExtraction | null,
     submissionId: string | null,
-  ): Promise<{ submissionId: string | null; match: 'chassis' | 'chassis-mismatch' | null }> {
+  ): Promise<{ submissionId: string | null; match: ReceiptMatch }> {
     const chassis = extraction && 'reading' in extraction ? extraction.reading.chassis?.trim().toUpperCase() : undefined;
     if (!chassis) return { submissionId, match: null };
     if (!submissionId) {
@@ -79,46 +159,120 @@ export class ReceiptsService {
         where: { status: 'PENDING', vehicle: { chassis, ...vehicleTypeWhere() } },
         select: { id: true },
       });
-      return found ? { submissionId: found.id, match: 'chassis' } : { submissionId: null, match: null };
+      if (found) return { submissionId: found.id, match: 'chassis' };
+      if (chassis.length !== 17) return { submissionId: null, match: null };
+      const candidates = await this.prisma.documentSubmission.findMany({
+        where: {
+          status: 'PENDING',
+          receipts: { none: {} },
+          vehicle: { chassis: { endsWith: chassis.slice(-CHASSIS_SERIAL_LENGTH), mode: 'insensitive' }, ...vehicleTypeWhere() },
+        },
+        select: { id: true, vehicle: { select: { chassis: true } } },
+      });
+      const near = candidates.filter((c) => isNearChassis(chassis, c.vehicle.chassis));
+      return near.length === 1 ? { submissionId: near[0].id, match: 'chassis-near' } : { submissionId: null, match: null };
     }
     const target = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId }, select: { vehicle: { select: { chassis: true } } } });
-    return { submissionId, match: target && target.vehicle.chassis.toUpperCase() !== chassis ? 'chassis-mismatch' : null };
+    if (!target || target.vehicle.chassis.toUpperCase() === chassis) return { submissionId, match: null };
+    return { submissionId, match: isNearChassis(chassis, target.vehicle.chassis) ? 'chassis-near' : 'chassis-mismatch' };
+  }
+
+  // หาใบเสร็จที่ซ้ำจากข้อมูลที่ AI อ่าน (selfId = รูปนี้เอง ไม่นับ) - ไม่มีผลอ่าน = ไม่รู้ ไม่เตือน
+  // ไม่กรองตามประเภทรถของผู้ใช้: ใบเสร็จซ้ำกับรถประเภทอื่นก็ยังเป็นใบซ้ำ
+  private async findDuplicate(extraction: ReceiptExtraction | null, selfId: string | null): Promise<ReceiptDuplicate | null> {
+    if (!extraction || !('reading' in extraction)) return null;
+    const receiptNo = extraction.reading.receiptNo?.trim();
+    const chassis = extraction.reading.chassis?.trim().toUpperCase();
+    const notSelf = selfId ? { id: { not: selfId } } : {};
+
+    if (receiptNo && /^\d+\/\d+$/.test(receiptNo)) {
+      // เลขที่ใบเสร็จที่พนักงานยืนยันแล้วใน Step 5 ก่อน แล้วจึงเลขที่ AI อ่านจากรูปอื่น (ไม่รวมใบเสร็จงานสลับเลข)
+      const saved = await this.prisma.documentSubmission.findFirst({
+        where: { receiptNo, status: { not: 'FAILED' } },
+        select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } },
+      });
+      if (saved) return { by: 'receiptNo', receiptNo, chassis: saved.vehicle.chassis, receivedDate: isoDate(saved.receiptReceivedDate) };
+      const image = await this.prisma.receiptImage.findFirst({
+        where: { ...notSelf, plateSwapId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
+        select: { extraction: true, submission: { select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } } } },
+      });
+      if (image) {
+        const read = image.extraction as { reading?: { chassis?: string | null } } | null;
+        return {
+          by: 'receiptNo',
+          receiptNo,
+          chassis: image.submission?.vehicle.chassis ?? read?.reading?.chassis ?? null,
+          receivedDate: isoDate(image.submission?.receiptReceivedDate),
+        };
+      }
+    }
+
+    if (chassis && chassis.length === 17) {
+      const submission = await this.prisma.documentSubmission.findFirst({
+        where: {
+          vehicle: { chassis: { equals: chassis, mode: 'insensitive' }, deletedAt: null },
+          OR: [{ status: 'RECEIPT_RECEIVED' }, { status: 'PENDING', receipts: { some: notSelf } }],
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { receiptNo: true, receiptReceivedDate: true },
+      });
+      if (submission) return { by: 'chassis', receiptNo: submission.receiptNo, chassis, receivedDate: isoDate(submission.receiptReceivedDate) };
+    }
+    return null;
   }
 
   // submissionId ไม่ส่ง = อัปโหลดแบบหลายใบ (มี AI จะจับคู่ด้วยเลขตัวถังให้ ไม่งั้นรอพนักงานจับคู่)
-  async upload(file: UploadedReceiptFile | undefined, submissionIdRaw?: unknown) {
+  // background = เก็บรูปแล้วตอบทันที (readPending) AI อ่าน/จับคู่ทีหลัง - ใช้ได้เฉพาะแบบหลายใบที่เปิด AI
+  async upload(file: UploadedReceiptFile | undefined, submissionIdRaw?: unknown, backgroundRaw?: unknown) {
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปใบเสร็จ' });
     if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: 'ไฟล์รูปใหญ่เกิน 8MB' });
     const type = detectImageType(file.buffer);
     if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
 
+    // ตรวจรูปซ้ำก่อนส่งให้ AI อ่าน - ไม่เสียค่า AI กับรูปที่มีอยู่แล้ว
+    const contentHash = await this.assertNotUploaded(file.buffer);
     const submissionId =
       submissionIdRaw === undefined || submissionIdRaw === null || submissionIdRaw === '' ? null : await this.assertAttachable(submissionIdRaw);
 
     const now = new Date();
     const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
-    const extraction = await this.extractor.extract(file.buffer, type.mimeType);
-    const matched = await this.matchByChassis(extraction, submissionId);
+    const background = !submissionId && isBackgroundFlag(backgroundRaw) && this.extractor.source !== 'NONE';
+    const extraction = background ? null : await this.extractor.extract(file.buffer, type.mimeType);
+    const duplicate = await this.findDuplicate(extraction, null);
+    // อัปโหลดหลายใบแล้วเจอใบซ้ำ -> ไม่แนบให้อัตโนมัติ รอในถาดพร้อมคำเตือน ให้พนักงานดูแล้วลบ (แนบในแถวรถ = แนบตามที่เลือก แต่เตือน)
+    const matched = duplicate && !submissionId ? { submissionId: null, match: null } : await this.matchByChassis(extraction, submissionId);
     await this.storage.put(storageKey, file.buffer, type.mimeType);
     try {
       const receipt = await this.prisma.receiptImage.create({
         data: {
           submissionId: matched.submissionId,
           storageKey,
+          contentHash,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
           extractionSource: this.extractor.source,
-          ...(extraction ? { extraction: { ...extraction, match: matched.match } as object } : {}),
+          readPending: background,
+          ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}),
         },
         select: receiptSelect,
       });
+      if (background) this.reads.enqueue(receipt.id);
       return { receipt };
     } catch (err) {
       // บันทึกลงฐานข้อมูลไม่สำเร็จ - ลบไฟล์ทิ้งไม่ให้ค้างโดยไม่มีแถวอ้างถึง
       await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
       throw err;
     }
+  }
+
+  // ใบเสร็จทุกแบบ (Step 5 และงานสลับเลข) อยู่ในตาราง ReceiptImage เดียวกัน - รูปเดิมใช้ได้ครั้งเดียวทั้งระบบ
+  private async assertNotUploaded(buf: Buffer): Promise<string> {
+    const contentHash = contentHashOf(buf);
+    const existing = await this.prisma.receiptImage.findUnique({ where: { contentHash }, select: { id: true } });
+    if (existing) throw duplicateUpload();
+    return contentHash;
   }
 
   // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ (ไม่รวมใบเสร็จงานสลับเลข ซึ่งผูกกับงานผ่าน plateSwapId)
@@ -143,15 +297,20 @@ export class ReceiptsService {
   }
 
   async assign(id: string, submissionIdRaw: unknown) {
+    return this.serialize(() => this.assignNow(id, submissionIdRaw));
+  }
+
+  private async assignNow(id: string, submissionIdRaw: unknown) {
     const existing = await this.prisma.receiptImage.findUnique({ where: { id }, select: { id: true, extraction: true } });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
     const submissionId = await this.assertAttachable(submissionIdRaw);
     // พนักงานจับคู่เอง - เช็กเลขตัวถังที่ AI อ่านได้กับรถที่เลือกอีกรอบ
     const extraction = existing.extraction as ReceiptExtraction | null;
     const matched = await this.matchByChassis(extraction, submissionId);
+    const duplicate = await this.findDuplicate(extraction, id); // เช็กใหม่ - ใบเดิมอาจถูกลบไปแล้ว
     const receipt = await this.prisma.receiptImage.update({
       where: { id },
-      data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match } as object } : {}) },
+      data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}) },
       select: receiptSelect,
     });
     return { receipt };

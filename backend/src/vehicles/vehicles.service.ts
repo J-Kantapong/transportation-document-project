@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import { assertTransferNoticeInScope, assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { currentUser } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
@@ -80,6 +80,11 @@ function ownerDataFor(row: NormalizedVehicleRow, financeName: string | null): Ow
 
 function ownerTypeLabel(type: string | null | undefined): string {
   return OWNER_TYPE_CHOICES.find(([code]) => code === type)?.[1] ?? '-';
+}
+
+// ผู้แก้สำหรับ VehicleEditLog.editedById (ผู้ใช้ 2026-09-24) - นอกคำขอ HTTP (script/test) เป็น null
+function editorId(): string | null {
+  return currentUser()?.id ?? null;
 }
 
 // ข้อความสำหรับ VehicleEditLog - เทียบเจ้าของเดิมกับใหม่ว่าเปลี่ยนจริงไหม
@@ -562,7 +567,7 @@ export class VehiclesService {
         data.ownerId = owner.id;
       }
       const vehicle = await tx.vehicle.update({ where: { id }, data });
-      await tx.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes) } });
+      await tx.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes), editedById: editorId() } });
       return vehicle;
     });
 
@@ -597,7 +602,7 @@ export class VehiclesService {
       });
       // บันทึกลงประวัติเดียวกับการแก้ไข เพื่อให้ลบ -> กู้คืน -> ลบใหม่ ยังเห็นครบทุกครั้ง (ช่องบน Vehicle เก็บได้แค่ครั้งล่าสุด)
       await tx.vehicleEditLog.create({
-        data: { vehicleId: id, remark, changes: JSON.stringify({ deleted: { from: null, to: 'ลบข้อมูลรถ' } }) },
+        data: { vehicleId: id, remark, changes: JSON.stringify({ deleted: { from: null, to: 'ลบข้อมูลรถ' } }), editedById: editorId() },
       });
     });
 
@@ -623,6 +628,7 @@ export class VehiclesService {
           vehicleId: id,
           remark: `กู้คืนข้อมูลรถที่ลบไว้ (เหตุผลที่ลบ: ${existing.deletedReason ?? '—'})`,
           changes: JSON.stringify({ deleted: { from: 'ลบข้อมูลรถ', to: null } }),
+          editedById: editorId(),
         },
       });
     });
@@ -769,6 +775,7 @@ export class VehiclesService {
 
     const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: activeSubmissionsInclude });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertTransferNoticeInScope(vehicle.body);
     assertNotSubmitted(vehicle);
 
     const updated = await this.prisma.vehicle.update({
@@ -1023,6 +1030,7 @@ export class VehiclesService {
                 remark: startsRound2
                   ? `เริ่มตรวจรอบ 2 (ผลตรวจรอบ ${vehicle.inspectionRound} ผ่านวันที่ ${diffField(vehicle.inspectionResultDate)} ครบ ${INSPECTION_VALID_DAYS} วันแล้วยังไม่ได้ยื่นเอกสาร)`
                   : `ส่งตรวจใหม่หลังตรวจไม่ผ่าน (เหตุผลเดิม: ${vehicle.inspectionFailRemark ?? '—'})`,
+                editedById: editorId(),
                 changes: JSON.stringify(changes),
               },
             }),
@@ -1135,6 +1143,7 @@ export class VehiclesService {
         data: {
           vehicleId: id,
           remark: `แก้ไขผลตรวจ (${vehicle.inspectionResult} → ${result}): ${remark}`,
+          editedById: editorId(),
           changes: JSON.stringify(changes),
         },
       }),

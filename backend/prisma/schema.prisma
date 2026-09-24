@@ -71,11 +71,12 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer        Customer? @relation(fields: [customerId], references: [id])
-  approvedBy      User?     @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers   User[]    @relation("ApprovedUsers")
-  assignedCases   Case[]    @relation("AssignedStaff")
-  deletedVehicles Vehicle[] @relation("DeletedVehicles")
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  approvedBy      User?            @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers   User[]           @relation("ApprovedUsers")
+  assignedCases   Case[]           @relation("AssignedStaff")
+  deletedVehicles Vehicle[]        @relation("DeletedVehicles")
+  vehicleEdits    VehicleEditLog[] @relation("VehicleEdits")
 
   @@index([status])
   @@index([customerId])
@@ -216,15 +217,19 @@ model Vehicle {
 
 // แก้ไขข้อมูลรถจดใหม่หลังบันทึกแล้ว ต้องระบุเหตุผล (remark) ทุกครั้ง - บังคับที่ระดับ service
 model VehicleEditLog {
-  id        String   @id @default(cuid())
-  vehicleId String
-  remark    String // เหตุผลที่แก้ไข
-  changes   String // JSON: { field: { from, to } } เฉพาะฟิลด์ที่เปลี่ยนจริง
-  editedAt  DateTime @default(now())
+  id         String   @id @default(cuid())
+  vehicleId  String
+  remark     String // เหตุผลที่แก้ไข
+  changes    String // JSON: { field: { from, to } } เฉพาะฟิลด์ที่เปลี่ยนจริง
+  editedAt   DateTime @default(now())
+  // ผู้ใช้ที่แก้ (ผู้ใช้ 2026-09-24) - แถวก่อนหน้านี้ และงานที่รันนอกคำขอ HTTP (script) เป็น null
+  editedById String?
 
-  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicle  Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  editedBy User?   @relation("VehicleEdits", fields: [editedById], references: [id], onDelete: SetNull)
 
   @@index([vehicleId])
+  @@index([editedById])
 }
 
 model Case {
@@ -584,8 +589,10 @@ model ReceiptImage {
   mimeType         String
   sizeBytes        Int
   originalName     String?
+  contentHash      String?  @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   extractionSource String   @default("NONE") // NONE = ยังไม่ได้ใช้ AI อ่าน | model id ของ AI ที่อ่าน
   extraction       Json? // ผลที่ AI อ่านได้ - รูปแบบจะกำหนดหลังเห็นใบเสร็จจริง
+  readPending      Boolean  @default(false) // true = อัปโหลดหลายใบแล้วรอ AI อ่านเบื้องหลัง (ReceiptsService.enqueueRead)
   createdAt        DateTime @default(now())
 
   // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง
@@ -706,6 +713,7 @@ model YamahaRelocationAttachment {
   mimeType     String
   sizeBytes    Int
   originalName String?
+  contentHash  String?                        @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   createdAt    DateTime                       @default(now())
 
   entry YamahaRelocationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
@@ -724,9 +732,11 @@ model PlatePhoto {
   mimeType         String
   sizeBytes        Int
   originalName     String?
+  contentHash      String?   @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   kind             String    @default("car") // car | moto - แท็บที่ถ่าย จับคู่เฉพาะรถประเภทเดียวกัน (ป้ายรถยนต์/มอเตอร์ไซค์ เลขซ้ำกันได้)
   extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
   extraction       Json? // { plates: [...], usage } หรือ { error }
+  readPending      Boolean   @default(false) // true = เลือกหลายรูปแล้วรอ AI อ่านเบื้องหลัง (BackgroundReads)
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 
@@ -745,8 +755,10 @@ model BookPhoto {
   mimeType         String
   sizeBytes        Int
   originalName     String?
+  contentHash      String?   @unique // SHA-256 ของไฟล์ - กันอัปโหลดรูปเดิมซ้ำ (NULL = รูปก่อน 2026-09-24)
   extractionSource String    @default("NONE") // NONE = ไม่ได้ใช้ AI | model id ของ AI ที่อ่าน
   extraction       Json? // { books: [...], usage } หรือ { error }
+  readPending      Boolean   @default(false) // true = เลือกหลายรูปแล้วรอ AI อ่านเบื้องหลัง (BackgroundReads)
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 

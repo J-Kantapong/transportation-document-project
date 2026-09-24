@@ -5,6 +5,7 @@ import { ApiError, api, bookPhotoImageUrl, type BookPhotoBook, type BookPhotoLis
 import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { uploadAllInBackground, usePolling } from "@/lib/receipt-upload";
 
 // ถ่ายรูปเล่มทะเบียนเพื่อยืนยันการรับเล่ม (Step 7) - ใช้วิธีเดียวกับรูปป้าย (PlatePhotoPanel):
 // AI อ่านเลขตัวรถ (VIN) + ทะเบียนในเล่ม (รูปเดียวหลายเล่มได้) แล้วระบบจับคู่กับรถที่รอรับเล่ม
@@ -49,7 +50,11 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
   // รวมผลใหม่เข้ากับที่มีอยู่ - คงตัวเลือกที่พนักงานแก้ไว้แล้ว ใส่ค่าเริ่มต้นให้เฉพาะเล่มที่เพิ่งมา
   function merge(next: BookPhotoList, replace: boolean) {
     setData((prev) => {
-      const photos = replace ? next.photos : [...prev.photos.filter((p) => !next.photos.some((n) => n.id === p.id)), ...next.photos];
+      // ไม่ replace: รูปเดิมอัปเดตที่ตำแหน่งเดิม (ผลอ่านเบื้องหลังเข้ามาแล้วการ์ดไม่กระโดด) รูปใหม่ต่อท้าย
+      const nextById = new Map(next.photos.map((p) => [p.id, p]));
+      const photos = replace
+        ? next.photos
+        : [...prev.photos.map((p) => nextById.get(p.id) ?? p), ...next.photos.filter((n) => !prev.photos.some((p) => p.id === n.id))];
       const vehicles = [...new Map([...(replace ? [] : prev.vehicles), ...next.vehicles].map((v) => [v.id, v])).values()];
       return { photos, vehicles };
     });
@@ -79,25 +84,52 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleFiles(files: FileList | null) {
+  // ถ่ายจากกล้อง (ทีละรูป) = อ่านทันที เห็นผลตอนของยังอยู่ตรงหน้า
+  async function handleCamera(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setMessage({ text: "" });
+    setProgress("กำลังอ่านเล่มทะเบียน…");
+    try {
+      const image = await compressReceiptImage(file);
+      merge(await api.uploadBookPhoto(image, compressedFileName(file)), false);
+    } catch (err) {
+      setMessage({ text: `ส่งไม่สำเร็จ - ${errorText(err)}`, error: true });
+    }
+    setProgress("");
+    if (cameraRef.current) cameraRef.current.value = "";
+  }
+
+  // เลือกหลายรูปจากเครื่อง = ส่งพร้อมกันแบบไม่รอ AI - รูปขึ้นเป็น "กำลังอ่าน" แล้วผลทยอยเข้ามา (usePolling ด้านล่าง)
+  async function handleGallery(files: FileList | null) {
     if (!files || files.length === 0) return;
     setMessage({ text: "" });
     const list = Array.from(files);
     const failed: string[] = [];
-    for (const [i, file] of list.entries()) {
-      setProgress(list.length > 1 ? `กำลังอ่านเล่มทะเบียน ${i + 1}/${list.length}…` : "กำลังอ่านเล่มทะเบียน…");
-      try {
-        const image = await compressReceiptImage(file);
-        merge(await api.uploadBookPhoto(image, compressedFileName(file)), false);
-      } catch (err) {
-        failed.push(errorText(err));
-      }
-    }
+    setProgress(`กำลังส่งรูป 0/${list.length}…`);
+    await uploadAllInBackground(
+      list,
+      (image, fileName) => api.uploadBookPhoto(image, fileName, true),
+      (res) => merge(res, false),
+      (file, err) => failed.push(`${file.name}: ${errorText(err)}`),
+      (done) => setProgress(`กำลังส่งรูป ${done}/${list.length}…`),
+    );
     setProgress("");
-    if (failed.length) setMessage({ text: `ส่งไม่สำเร็จ ${failed.length} รูป - ${failed.join(" · ")}`, error: true });
-    if (cameraRef.current) cameraRef.current.value = "";
+    setMessage(
+      failed.length
+        ? { text: `ส่งไม่สำเร็จ ${failed.length} รูป - ${failed.join(" · ")}`, error: true }
+        : { text: `ส่งครบ ${list.length} รูปแล้ว - ระบบกำลังอ่านเล่มทะเบียน ไปทำอย่างอื่นก่อนแล้วค่อยกลับมายืนยันได้` },
+    );
     if (galleryRef.current) galleryRef.current.value = "";
   }
+
+  // รูปที่ยังรออ่าน: ถามถาดใหม่ทุก 3 วินาที แล้วรับเฉพาะรูปที่อ่านเสร็จ (ไม่ทับรูปอื่นที่พนักงานกำลังติ๊กอยู่)
+  const pendingIds = data.photos.filter((p) => p.readPending).map((p) => p.id);
+  usePolling(pendingIds.length > 0, async () => {
+    const next = await api.listOpenBookPhotos();
+    const read = next.photos.filter((p) => pendingIds.includes(p.id) && !p.readPending);
+    if (read.length) merge({ photos: read, vehicles: next.vehicles }, false);
+  });
 
   const vehicleById = new Map(data.vehicles.map((v) => [v.id, v]));
 
@@ -177,7 +209,8 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
       status = vehicleIds.length > 1 ? "ตรงได้หลายคัน - เลือกคันที่ถูก" : "อ่านได้ไม่ตรงเป๊ะ - ดูรูปแล้วติ๊กถ้าใช่คันนี้";
     } else if (kind === "received") {
       const v = vehicleById.get(vehicleIds[0]);
-      status = `รับเล่มคันนี้ไปแล้ว${v?.bookReceivedDate ? ` (${isoToDisplayDate(v.bookReceivedDate)})` : ""}`;
+      style = STATUS.warn; // รูปซ้ำ - เล่มคันนี้ยืนยันรับไปแล้ว
+      status = `⚠️ รูปซ้ำ: รับเล่มคันนี้ไปแล้ว${v?.bookReceivedDate ? ` (${isoToDisplayDate(v.bookReceivedDate)})` : ""}`;
     } else if (kind === "none") {
       style = STATUS.bad;
       status = "ไม่พบรถที่รอรับเล่มนี้ (ยังไม่ได้บันทึกใบเสร็จ หรือ AI อ่านผิด)";
@@ -257,8 +290,8 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
         </p>
 
         {/* capture="environment" = เปิดกล้องหลังทันทีบนมือถือ */}
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleFiles(e.target.files)} />
-        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
+        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleGallery(e.target.files)} />
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <button
             type="button"
@@ -314,7 +347,9 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
                     />
                   </div>
                   <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {photo.error ? (
+                    {photo.readPending ? (
+                      <div style={{ ...STATUS.info, padding: "8px 10px", borderRadius: 8 }}>⏳ กำลังอ่านเล่มทะเบียน… ผลจะขึ้นเองเมื่ออ่านเสร็จ</div>
+                    ) : photo.error ? (
                       <div style={{ ...STATUS.bad, padding: "8px 10px", borderRadius: 8 }}>{photo.error} - ลบแล้วถ่ายใหม่</div>
                     ) : photo.extractionSource === "NONE" ? (
                       <div style={{ ...STATUS.info, padding: "8px 10px", borderRadius: 8 }}>ยังไม่ได้เปิดใช้ AI (ไม่มี API key) - อ่านและจับคู่เล่มอัตโนมัติไม่ได้</div>

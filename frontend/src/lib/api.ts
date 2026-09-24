@@ -249,6 +249,7 @@ export interface ReceiptImage {
   originalName: string | null;
   extractionSource: string; // NONE = ยังไม่ได้ใช้ AI อ่าน | model id
   extraction: ReceiptExtraction | null;
+  readPending: boolean; // true = อัปโหลดหลายใบแล้ว AI ยังอ่านอยู่เบื้องหลัง (ถามผลด้วย getReceipts)
   createdAt: string;
 }
 
@@ -265,6 +266,14 @@ export interface ReceiptReading {
   uncertainFields: string[]; // ช่องที่ AI ไม่มั่นใจ: receiptNo | date | plate | chassis | weightKg | items | total
 }
 
+// ใบเสร็จที่ AI อ่านได้ซ้ำกับที่มีในระบบ: receiptNo = เลขที่ใบเสร็จซ้ำ · chassis = รถคันนี้มีใบเสร็จแล้ว (เตือน ไม่บล็อก)
+export interface ReceiptDuplicate {
+  by: "receiptNo" | "chassis";
+  receiptNo: string | null;
+  chassis: string | null;
+  receivedDate: string | null; // YYYY-MM-DD
+}
+
 export type ReceiptExtraction = (
   | {
       reading: ReceiptReading;
@@ -273,7 +282,9 @@ export type ReceiptExtraction = (
   | { error: string }
 ) & {
   // chassis = ระบบจับคู่กับรถให้จากเลขตัวถัง / chassis-mismatch = เลขตัวถังในใบเสร็จไม่ตรงกับรถที่แนบ
-  match?: "chassis" | "chassis-mismatch" | null;
+  // chassis-near = เลขตัวถังใกล้เคียงรถคันนี้ (เลขท้าย 6 ตัวตรง, 11 ตัวแรกต่างไม่เกิน 2) - AI น่าจะอ่านเพี้ยน ให้เช็กกับรูป
+  match?: "chassis" | "chassis-near" | "chassis-mismatch" | null;
+  duplicate?: ReceiptDuplicate | null; // ไม่มี = รูปก่อน 2026-09-24
 };
 
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
@@ -309,6 +320,7 @@ export interface PlatePhoto {
   kind: PlateKind;
   extractionSource: string; // NONE = ไม่มี AI
   error: string | null; // AI อ่านไม่สำเร็จ
+  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (plates ว่างไว้ก่อน)
   closedAt: string | null;
   createdAt: string;
   plates: PlatePhotoPlate[];
@@ -350,6 +362,7 @@ export interface BookPhoto {
   id: string;
   extractionSource: string; // NONE = ไม่มี AI
   error: string | null;
+  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (books ว่างไว้ก่อน)
   closedAt: string | null;
   createdAt: string;
   books: BookPhotoBook[];
@@ -779,21 +792,26 @@ export const api = {
       body: JSON.stringify({ receivedDate, entries }),
     }),
 
-  uploadReceipt: (image: Blob, fileName: string, submissionId?: string) => {
+  // background = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (ใช้กับการเลือกหลายรูปที่ไม่ระบุรถ)
+  uploadReceipt: (image: Blob, fileName: string, submissionId?: string, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
     if (submissionId) form.append('submissionId', submissionId);
+    if (background) form.append('background', '1');
     return request<{ receipt: ReceiptImage }>('/api/receipts', { method: 'POST', body: form });
   },
+  getReceipts: (ids: string[]) => request<{ receipts: ReceiptImage[] }>(`/api/receipts?ids=${ids.map(encodeURIComponent).join(',')}`),
   listUnassignedReceipts: () => request<{ receipts: ReceiptImage[] }>('/api/receipts/unassigned'),
   assignReceipt: (id: string, submissionId: string) =>
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
   deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
 
-  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind) => {
+  // background = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (เลือกหลายรูปจากคลังภาพ)
+  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
     form.append('kind', kind);
+    if (background) form.append('background', '1');
     return request<PlatePhotoList>('/api/plate-photos', { method: 'POST', body: form });
   },
   listOpenPlatePhotos: (kind: PlateKind) => request<PlatePhotoList>(`/api/plate-photos/open?kind=${kind}`),
@@ -804,9 +822,10 @@ export const api = {
     }),
   deletePlatePhoto: (id: string) => request<{ id: string }>(`/api/plate-photos/${id}`, { method: 'DELETE' }),
 
-  uploadBookPhoto: (image: Blob, fileName: string) => {
+  uploadBookPhoto: (image: Blob, fileName: string, background = false) => {
     const form = new FormData();
     form.append('file', image, fileName);
+    if (background) form.append('background', '1');
     return request<BookPhotoList>('/api/book-photos', { method: 'POST', body: form });
   },
   listOpenBookPhotos: () => request<BookPhotoList>('/api/book-photos/open'),

@@ -33,17 +33,37 @@ This private repository is the shared development surface for the user, Claude C
 - Deleting a vehicle (added 2026-09-23): soft delete only. `DELETE /api/vehicles/:id` needs a `remark` (mandatory reason)
   and is `ADMIN`-only, as are `GET /api/vehicles/deleted` and `POST /api/vehicles/:id/restore`. `Vehicle.deletedAt` /
   `deletedReason` / `deletedById` hold the current state; every delete and restore also writes a `VehicleEditLog` row so
-  repeated cycles stay auditable. Deleted vehicles are filtered out of every list, queue, search and the customer portal
+  repeated cycles stay auditable. `VehicleEditLog.editedById` (added 2026-09-24) records who made each edit, delete, restore or inspection correction (null for rows before then and for scripts). Deleted vehicles are filtered out of every list, queue, search and the customer portal
   (`deletedAt: null` in each `where`). A vehicle cannot be deleted once it has any `DocumentSubmission` (including FAILED),
   any `InvoiceLine`, or is linked as the new vehicle of a `PlateSwap` - fix it with แก้ไข instead. `Vehicle.chassis` is no
   longer `@unique` in Prisma: uniqueness is a Postgres partial unique index `Vehicle_chassis_active_key` over
   `chassis WHERE "deletedAt" IS NULL`, so a deleted chassis can be keyed in again (never use `findUnique({ where: { chassis } })`).
   UI: ลบ button per row plus a "รายการที่ลบแล้ว" panel with กู้คืน, both ADMIN-only, in `/registration/new-vehicle/entry`.
+- Duplicate uploads (added 2026-09-24): the same file cannot be uploaded twice. `ReceiptImage`, `PlatePhoto`, `BookPhoto`
+  and `YamahaRelocationAttachment` store a SHA-256 `contentHash` (`@unique`, NULL for files uploaded before then); every
+  upload endpoint answers 409 `{ error: 'รูปนี้อัพโหลดไปแล้ว' }` (Yamaha: `ไฟล์ใบเสร็จนี้…` / `ไฟล์ Report นี้…`, and ใบเสร็จ =
+  Report is rejected) before storing the file or calling the AI. Receipts from step 5 and plate swaps share one table,
+  so a photo used as either counts. Deleting a photo frees its hash. Helper: `backend/src/receipts/upload-hash.ts`.
+  On top of that, a *warning only* (user's choice, AI can misread) from what the AI read: a step-5 receipt whose
+  เลขที่ใบเสร็จ matches a saved `DocumentSubmission.receiptNo` or another photo's reading, or whose chassis already has a
+  receipt / is RECEIPT_RECEIVED, gets `extraction.duplicate` (`ReceiptsService.findDuplicate`, re-checked on assign);
+  batch uploads with a duplicate are not auto-attached. Plate/book photos use their existing `received` match, now
+  styled as a "รูปซ้ำ" warning. Needs `ANTHROPIC_API_KEY`, so it does nothing where AI reading is off.
+- Background receipt reading (added 2026-09-25): a camera shot on the capture page is still read immediately (the
+  photographer needs the result while holding the receipt), but picking several receipts from the gallery (capture
+  page and the "เลือกรูปหลายใบ" tray) uploads 4 at a time with `background=1`: `POST /api/receipts` stores the file,
+  sets `ReceiptImage.readPending` and answers at once; `ReceiptsService` reads up to 3 at a time in-process, then
+  runs duplicate check + chassis match + save one at a time (manual assign goes through the same lock, and a
+  staff-chosen vehicle is kept). Pending rows are re-queued on boot (cleared if AI is off). The page polls
+  `GET /api/receipts?ids=a,b` (`frontend/src/lib/receipt-upload.ts`). Only for uploads with no `submissionId`.
+  Step 6 plate photos and Step 7 book photos work the same way (camera = immediate, gallery = `background=1`,
+  `PlatePhoto.readPending` / `BookPhoto.readPending`); they only save the reading, since matches are computed on every
+  `GET .../open`, which the panels poll while a photo is pending. Shared queue: `backend/src/receipts/background-reads.ts`.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)
 
-- Roles (user-decided): `ADMIN` (everything + approve users), `STAFF_ENTRY` (steps 1-3: vehicle entry, transfer notice, inspection, plus brands/finance/owner reference data; all vehicle types), `STAFF_CAR` and `STAFF_MOTO` (steps 4-8: submit documents, receipt, plate, book, Delivery, job sheet; only cars / only motorcycles, where motorcycle = `Vehicle.body` starting with `รย.12-`; holding both = all vehicles; they can read steps 1-3 but not save), `ACCOUNTANT` (billing + dashboard + read-only on registration data), `DELIVERY` (Delivery page only, no prices), `CUSTOMER` (portal only). Staff roles have no dashboard `/` and cannot add customers (only `ADMIN` can `POST /api/customers`; the add form is hidden for others). One user may hold several staff roles (`User.roles[]`); `CUSTOMER` cannot be combined with staff roles.
+- Roles (user-decided): `ADMIN` (everything + approve users), `STAFF_ENTRY` (steps 1-3: vehicle entry, transfer notice, inspection, plus brands/finance/owner reference data; all vehicle types), `STAFF_CAR` and `STAFF_MOTO` (steps 4-8: submit documents, receipt, plate, book, Delivery, job sheet; only cars / only motorcycles, where motorcycle = `Vehicle.body` starting with `รย.12-`; holding both = all vehicles; they can read steps 1-3 but not save, except that `STAFF_MOTO` can also save step 2 แจ้งย้าย/ตัดบัญชี for motorcycles, added 2026-09-24: `canEditTransferNotice` in `vehicle-scope.ts` and `auth.ts`), `ACCOUNTANT` (billing + dashboard + read-only on registration data), `DELIVERY` (Delivery page only, no prices), `CUSTOMER` (portal only). Staff roles have no dashboard `/` and cannot add customers (only `ADMIN` can `POST /api/customers`; the add form is hidden for others). One user may hold several staff roles (`User.roles[]`); `CUSTOMER` cannot be combined with staff roles.
 - Vehicle-type scoping for steps 4-8 is enforced in `backend/src/auth/vehicle-scope.ts` (a Prisma `where` fragment plus `assertVehicleInScope`) inside the step 4-8 services; the current user reaches services through AsyncLocalStorage (`backend/src/auth/request-context.ts`, opened per request in `main.ts`). Outside an HTTP request (unit tests, scripts) the scope is unrestricted. The frontend mirrors it with `vehicleScopeFor` in `frontend/src/lib/auth.ts` (locks the plate-photo car/moto tab).
 - Flow: anyone registers at `/register` (staff tab: name, nickname, email, phone, password x2, requested role; customer tab: contact name, company, phone, email, password x2; no ID-card number) -> status `PENDING` -> Admin approves at `/admin/users`, sets roles and, for customers, links `User.customerId` to a `Customer` row. Only `APPROVED` users can log in. The first admin is created with `npm run seed:admin` in `backend/` (env `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME`); there is no self-registration as admin.
 - Auth mechanics: scrypt password hashes and HS256 JWT signed with `AUTH_SECRET` (both via `node:crypto`, no extra dependencies; 12 h TTL). The frontend keeps the token in cookie `td_token` on its own domain and sends `Authorization: Bearer` on every request (`frontend/src/lib/api.ts`); a 401 redirects to `/login`. `frontend/src/proxy.ts` gates pages by the roles in the token payload; the backend re-reads the user from the database on every request (`backend/src/auth/auth.guard.ts`, registered as a global `APP_GUARD`).

@@ -42,3 +42,29 @@ describe('PlatePhotosService.confirm', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe('PlatePhotosService.upload - อ่านเบื้องหลัง (background)', () => {
+  it('เก็บรูปแล้วตอบทันที (readPending) แล้วค่อยบันทึกผลที่ AI อ่าน', async () => {
+    const plates = { plates: [{ category: '8ขก', number: '1', province: null, plateType: 'car' }] };
+    const reader = { source: 'claude-sonnet-5', read: vi.fn().mockResolvedValue(plates) } as unknown as PlateReader;
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'p1', closedAt: null, createdAt: new Date(), ...data }));
+    const prisma = {
+      vehicle: { findMany: vi.fn().mockResolvedValue([]) },
+      platePhoto: {
+        findUnique: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ storageKey: 'k', mimeType: 'image/jpeg', readPending: true }),
+        create,
+        updateMany,
+      },
+    } as unknown as PrismaService;
+    const storage = { put: vi.fn(), get: vi.fn().mockResolvedValue(Buffer.from('x')), delete: vi.fn() } as unknown as ReceiptStorage;
+    const svc = new PlatePhotosService(prisma, storage, reader);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    const res = await svc.upload({ buffer: jpeg, size: jpeg.length, originalname: 'p.jpg' }, 'car', '1');
+    expect(create.mock.calls[0][0].data).toMatchObject({ readPending: true });
+    expect(res.photos[0]).toMatchObject({ readPending: true, plates: [] });
+    await vi.waitFor(() => expect(updateMany).toHaveBeenCalled());
+    expect(reader.read).toHaveBeenCalledTimes(1);
+    expect(updateMany.mock.calls[0][0]).toEqual({ where: { id: 'p1', readPending: true }, data: { readPending: false, extraction: plates } });
+  });
+});

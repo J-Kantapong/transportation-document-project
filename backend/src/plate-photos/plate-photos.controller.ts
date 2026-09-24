@@ -8,10 +8,11 @@ export class PlatePhotosController {
   constructor(private readonly platePhotosService: PlatePhotosService) {}
 
   // multipart/form-data: file = รูปป้ายทะเบียน (แผ่นเดียวหรือหลายแผ่นในรูปเดียว), kind = car | moto (แท็บที่ถ่าย)
+  // background=1 = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง - หน้าเว็บดูผลจาก GET open (readPending)
   @Post()
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
-  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { kind?: unknown }) {
-    return this.platePhotosService.upload(file, body?.kind);
+  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { kind?: unknown; background?: unknown }) {
+    return this.platePhotosService.upload(file, body?.kind, body?.background);
   }
 
   // ?kind=car | moto

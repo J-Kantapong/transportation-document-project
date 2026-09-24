@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { receiptDuplicateText } from "@/lib/receipt-duplicate";
+import { uploadReceiptsInBackground, usePendingReceipts } from "@/lib/receipt-upload";
 
 // รูปใบเสร็จในหน้ารับใบเสร็จ: แนบทีละแถว (ReceiptAttachButton) หรืออัปโหลดหลายใบแล้วจับคู่กับรถ (ReceiptBatchPanel)
 // ตอนนี้ยังไม่ได้เปิดใช้ AI อ่านใบเสร็จ - เก็บรูปอย่างเดียว พนักงานกรอกยอด/ทะเบียนเอง
@@ -94,6 +96,7 @@ export function ReceiptAttachButton({
       const extraction = last?.extraction;
       if (!extraction) onMessage("แนบรูปแล้ว (ยังไม่ได้เปิดใช้ AI อ่าน - กรอกทะเบียนและยอดเอง)");
       else if ("error" in extraction) onMessage(`แนบรูปแล้ว แต่${extraction.error} - กรอกเอง`, true);
+      else if (extraction.duplicate) onMessage(receiptDuplicateText(extraction.duplicate), true);
       else if (extraction.match === "chassis-mismatch") onMessage(`เลขตัวถังในใบเสร็จ (${extraction.reading.chassis}) ไม่ตรงกับรถคันนี้ - ตรวจว่าแนบผิดคันหรือไม่`, true);
       else onMessage("");
     } catch (err) {
@@ -135,33 +138,31 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
       .catch((err) => setMessage({ text: errorText(err), error: true }));
   }, []);
 
+  // AI อ่านเบื้องหลังเสร็จ: เจอรถที่รอใบเสร็จ -> backend แนบให้แล้ว ย้ายไปอยู่ในแถวรถ ที่เหลือคงอยู่ในถาดพร้อมผลอ่าน
+  usePendingReceipts(
+    tray.filter((r) => r.readPending).map((r) => r.id),
+    (read) => {
+      const byId = new Map(read.map((r) => [r.id, r]));
+      setTray((prev) => prev.flatMap((r) => (!byId.has(r.id) ? [r] : byId.get(r.id)!.submissionId ? [] : [byId.get(r.id)!])));
+      read.filter((r) => r.submissionId).forEach(onAssigned);
+    },
+  );
+
+  // ส่งพร้อมกันหลายรูปแบบไม่รอ AI - รูปเข้าถาดเป็น "กำลังอ่าน" ก่อน (ไม่มี AI = รอจับคู่เองเหมือนเดิม)
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     const list = Array.from(files);
     const failed: string[] = [];
-    let autoMatched = 0;
-    let waiting = 0;
-    for (const [i, file] of list.entries()) {
-      setMessage({ text: `กำลังอัปโหลดและอ่านใบเสร็จ ${i + 1}/${list.length}…` });
-      try {
-        const receipt = await uploadOne(file);
-        // AI อ่านเลขตัวถังแล้วเจอรถที่รอใบเสร็จ -> backend แนบให้แล้ว ย้ายไปอยู่ในแถวรถเลย
-        if (receipt.submissionId) {
-          autoMatched++;
-          onAssigned(receipt);
-        } else {
-          waiting++;
-          setTray((prev) => [receipt, ...prev]);
-        }
-      } catch (err) {
-        failed.push(`${file.name}: ${errorText(err)}`);
-      }
-    }
+    setMessage({ text: `กำลังอัปโหลด 0/${list.length} รูป…` });
+    await uploadReceiptsInBackground(
+      list,
+      (receipt) => setTray((prev) => [receipt, ...prev]),
+      (file, err) => failed.push(`${file.name}: ${errorText(err)}`),
+      (done) => setMessage({ text: `กำลังอัปโหลด ${done}/${list.length} รูป…` }),
+    );
     const parts = [
-      `อัปโหลดแล้ว ${list.length - failed.length} รูป`,
-      autoMatched ? `จับคู่กับรถให้อัตโนมัติ ${autoMatched} รูป` : "",
-      waiting ? `รอจับคู่ ${waiting} รูป (เลือกรถแล้วกด "จับคู่")` : "",
+      `อัปโหลดแล้ว ${list.length - failed.length} รูป - ระบบกำลังอ่านและจับคู่กับรถให้ ไปทำอย่างอื่นก่อนได้`,
       failed.length ? `ไม่สำเร็จ ${failed.length} รูป - ${failed.join(" · ")}` : "",
     ].filter(Boolean);
     setMessage({ text: parts.join(" · "), error: failed.length > 0 });
@@ -244,7 +245,11 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                       {r.originalName}
                     </div>
                   )}
-                  {r.extraction && "reading" in r.extraction && (
+                  {r.readPending && <div style={{ fontSize: 11, color: "#4a5a78", fontWeight: 600, marginTop: 2 }}>⏳ กำลังอ่านใบเสร็จ…</div>}
+                  {r.extraction?.duplicate && (
+                    <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 2 }}>⚠️ {receiptDuplicateText(r.extraction.duplicate)}</div>
+                  )}
+                  {r.extraction && "reading" in r.extraction && !r.extraction.duplicate && (
                     <div style={{ fontSize: 11, color: "#bb8527", marginTop: 2 }}>
                       AI อ่านเลขตัวถัง {r.extraction.reading.chassis ?? "ไม่ออก"} - ไม่พบรถที่รอใบเสร็จ
                     </div>

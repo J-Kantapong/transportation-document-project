@@ -4,8 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
-import { ChangePasswordDialog } from "./ChangePasswordDialog";
-import { NEW_VEHICLE_SUBTASKS, REGISTRATION_CATEGORIES } from "@/lib/categories";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
+  type RegistrationSubtask,
+  NEW_VEHICLE_SUBTASKS,
+  PLATE_SWAP_SUBTASKS,
+  REGISTRATION_CATEGORIES,
+  YAMAHA_RELOCATION_SUBTASKS,
+} from "@/lib/categories";
 import {
   type AuthUser,
   type UserRole,
@@ -21,16 +26,53 @@ import {
 } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
 
-function breadcrumbLabel(pathname: string): string {
-  if (pathname === "/") return "ภาพรวม";
-  if (pathname.startsWith("/customers")) return "ฐานข้อมูลลูกค้า";
-  if (pathname.startsWith("/accounting/billing")) return "งานบัญชี / วางบิล";
-  if (pathname.startsWith("/admin/users")) return "ผู้ดูแลระบบ / จัดการผู้ใช้";
-  if (pathname.startsWith("/portal")) return "สถานะรถของคุณ";
-  const subtask = NEW_VEHICLE_SUBTASKS.find((s) => pathname.startsWith(s.href));
-  if (subtask) return `จดทะเบียนรถใหม่ / ${subtask.title}`;
-  const category = REGISTRATION_CATEGORIES.find((c) => pathname.startsWith(c.href));
-  return category?.title ?? "";
+interface Crumb {
+  label: string;
+  href?: string; // ไม่มี href = หัวข้อที่ไม่มีหน้าของตัวเอง (เช่น งานบัญชี)
+}
+
+const SUBTASKS_BY_CATEGORY: Record<string, RegistrationSubtask[]> = {
+  "/registration/new-vehicle": NEW_VEHICLE_SUBTASKS,
+  "/registration/plate-swap": PLATE_SWAP_SUBTASKS,
+  "/registration/yamaha-relocation": YAMAHA_RELOCATION_SUBTASKS,
+};
+
+function within(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function breadcrumbs(pathname: string): Crumb[] {
+  if (pathname === "/") return [{ label: "ภาพรวม", href: "/" }];
+  if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
+  if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
+  if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
+  if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
+  const category = REGISTRATION_CATEGORIES.find((c) => within(pathname, c.href));
+  if (!category) return [];
+  const crumbs: Crumb[] = [{ label: category.title, href: category.href }];
+  const subtask = SUBTASKS_BY_CATEGORY[category.href]?.find((s) => within(pathname, s.href));
+  if (subtask) crumbs.push({ label: subtask.title, href: subtask.href });
+  return crumbs;
+}
+
+// ทุกส่วนของ breadcrumb กดได้ (ผู้ใช้ 2026-09-24) ยกเว้นหน้าที่อยู่ตอนนี้ และหน้าที่บทบาทนี้เปิดไม่ได้
+function Breadcrumb({ pathname, roles, home }: { pathname: string; roles: UserRole[]; home: string | null }) {
+  const crumbs = breadcrumbs(pathname);
+  const linkable = (href?: string): href is string => !!href && href !== pathname && canAccessPage(href, roles);
+  return (
+    <nav className="breadcrumb" aria-label="ตำแหน่งหน้า">
+      {home && home !== pathname ? <Link href={home}>พื้นที่ทำงาน</Link> : "พื้นที่ทำงาน"}
+      {crumbs.map((c, i) => {
+        const last = i === crumbs.length - 1;
+        const text = last ? <b>{c.label}</b> : c.label;
+        return (
+          <span key={c.label}>
+            &nbsp;/&nbsp; {linkable(c.href) ? <Link href={c.href}>{text}</Link> : text}
+          </span>
+        );
+      })}
+    </nav>
+  );
 }
 
 // เมนูแสดงตามบทบาท (สิทธิ์จริงอยู่ที่ backend + proxy.ts - ตรงนี้แค่ซ่อนเมนูที่ใช้ไม่ได้)
@@ -88,6 +130,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // ระหว่างยังไม่รู้ roles (โหลดครั้งแรก) ให้แสดงเมนูว่างไว้ก่อน ไม่กะพริบเมนูที่ไม่มีสิทธิ์
   const known = user !== null;
   const blocked = known && !canAccessPage(pathname, roles);
+  // "พื้นที่ทำงาน" พาไปหน้าแรกของบทบาทนั้น - พนักงานที่ไม่มีหน้า / ให้เป็นข้อความเฉยๆ
+  const home = !known ? null : canAccessPage("/", roles) ? "/" : isCustomer ? "/portal" : null;
 
   function logout() {
     clearSession();
@@ -184,9 +228,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button className="mobile-menu" aria-label="เปิดเมนู" onClick={() => setOpen((v) => !v)}>
               ☰
             </button>
-            <div className="breadcrumb">
-              พื้นที่ทำงาน &nbsp;/&nbsp; <b>{breadcrumbLabel(pathname)}</b>
-            </div>
+            <Breadcrumb pathname={pathname} roles={roles} home={home} />
           </div>
           {/* มุมขวาบน (ผู้ใช้ 2026-09-23): ลูกค้าเห็นชื่อบริษัทที่ผูกไว้ ไม่มีบริษัท (พนักงาน) เห็นชื่อ-นามสกุลของตัวเอง
               คนละป้ายกัน - ชื่อบริษัทเป็นป้ายสีน้ำเงิน (status-badge) ส่วนชื่อผู้ใช้เป็นป้ายสีเทา (user-badge) */}

@@ -11,8 +11,9 @@ import {
   type YamahaRelocationSize,
   type YamahaRelocationSummary,
 } from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -174,6 +175,14 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, size]);
 
+  // บันทึกได้เฉพาะ ADMIN/STAFF_ENTRY (backend กัน POST อยู่แล้ว) - กลุ่มอื่นเห็นแค่รายการ
+  // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
+  }, []);
+
   function handleDateTextChange(raw: string) {
     setDateText(formatDateDigits(raw.replace(/\D/g, "").slice(0, 8)));
   }
@@ -181,9 +190,19 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const count = parseCount(countText);
 
   // เลือก/เอาไฟล์ออกแล้วล้างข้อความเตือนเก่า (เช่น "กรุณาแนบไฟล์ใบเสร็จ") ที่ไม่ตรงกับสถานะแล้ว
-  function pickFile(set: (file: File | null) => void, file: File | null) {
-    set(file);
+  // ไฟล์เป็นรูป (ไม่ใช่ PDF) -> ย่อก่อนเก็บ เหมือนช่องแนบรูปอื่นๆ ในระบบ (ไม่มีการอ่านด้วย AI ตรงนี้ ย่อได้เต็มที่)
+  async function pickFile(set: (file: File | null) => void, file: File | null) {
     setFormMessage({ text: "" });
+    if (!file || !file.type.startsWith("image/")) {
+      set(file);
+      return;
+    }
+    try {
+      const blob = await compressReceiptImage(file);
+      set(new File([blob], compressedFileName(file), { type: "image/jpeg" }));
+    } catch {
+      set(file); // ย่อไม่สำเร็จ (ไฟล์เปิดไม่ได้) - ใช้ไฟล์เดิม ให้ backend/ผู้ใช้เห็น error ตอนบันทึกแทน
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -235,55 +254,57 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
       </Link>
       <h1>{title}</h1>
 
-      <div className="panel" style={{ marginBottom: 24 }}>
-        <div className="panel-head">
-          <h2>บันทึกรายการแจ้งย้าย</h2>
+      {canEdit && (
+        <div className="panel" style={{ marginBottom: 24 }}>
+          <div className="panel-head">
+            <h2>บันทึกรายการแจ้งย้าย</h2>
+          </div>
+          <form className="customer-form" onSubmit={handleSubmit}>
+            <div className="customer-grid">
+              <label className="field">
+                วันที่ *
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="วว/ดด/ปปปป"
+                  value={dateText}
+                  onChange={(e) => handleDateTextChange(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="field">
+                จำนวนคัน *
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={countText}
+                  onChange={(e) => setCountText(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+            <p className="muted" style={{ margin: "14px 0 6px" }}>
+              ทุกรายการต้องแนบไฟล์ 2 อย่างเสมอ: 1) ใบเสร็จ 2) Report
+            </p>
+            <div className="customer-grid">
+              <FileField label="ใบเสร็จ" file={receiptFile} disabled={saving} onChange={(f) => pickFile(setReceiptFile, f)} />
+              <FileField label="Report" file={reportFile} disabled={saving} onChange={(f) => pickFile(setReportFile, f)} />
+            </div>
+            <div className="form-actions">
+              <button className="primary" type="submit" disabled={saving}>
+                บันทึก
+              </button>
+              <span
+                className={`customer-message${formMessage.error ? " error" : formMessage.text ? " success" : ""}`}
+                role="status"
+              >
+                {formMessage.text}
+              </span>
+            </div>
+          </form>
         </div>
-        <form className="customer-form" onSubmit={handleSubmit}>
-          <div className="customer-grid">
-            <label className="field">
-              วันที่ *
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="วว/ดด/ปปปป"
-                value={dateText}
-                onChange={(e) => handleDateTextChange(e.target.value)}
-                required
-              />
-            </label>
-            <label className="field">
-              จำนวนคัน *
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={countText}
-                onChange={(e) => setCountText(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <p className="muted" style={{ margin: "14px 0 6px" }}>
-            ทุกรายการต้องแนบไฟล์ 2 อย่างเสมอ: 1) ใบเสร็จ 2) Report
-          </p>
-          <div className="customer-grid">
-            <FileField label="ใบเสร็จ" file={receiptFile} disabled={saving} onChange={(f) => pickFile(setReceiptFile, f)} />
-            <FileField label="Report" file={reportFile} disabled={saving} onChange={(f) => pickFile(setReportFile, f)} />
-          </div>
-          <div className="form-actions">
-            <button className="primary" type="submit" disabled={saving}>
-              บันทึก
-            </button>
-            <span
-              className={`customer-message${formMessage.error ? " error" : formMessage.text ? " success" : ""}`}
-              role="status"
-            >
-              {formMessage.text}
-            </span>
-          </div>
-        </form>
-      </div>
+      )}
 
       <div className="panel">
         <div className="panel-head">

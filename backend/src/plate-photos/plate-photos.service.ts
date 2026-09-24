@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { assertKindInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { isMotorcycle } from '../document-submission/document-fee-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { BackgroundReads, isBackgroundFlag } from '../receipts/background-reads.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { PLATE_READER, type PlateExtraction, type PlateReader } from './plate-reader.js';
 import { matchPlate, type PlateCandidate, type PlateKind, type PlateMatch, type ReadPlate } from './plate-reading.js';
 
-const photoSelect = { id: true, kind: true, extractionSource: true, extraction: true, closedAt: true, createdAt: true } as const;
+const photoSelect = { id: true, kind: true, extractionSource: true, extraction: true, readPending: true, closedAt: true, createdAt: true } as const;
 
 // body ใช้แยกรถยนต์/มอเตอร์ไซค์ (รย.12 = มอเตอร์ไซค์) - ป้ายสองประเภทเลขซ้ำกันได้ จึงจับคู่เฉพาะประเภทเดียวกับรูป
 const candidateSelect = { id: true, plateCategory: true, plateNumber: true, registrationProvince: true, body: true } as const;
@@ -36,12 +38,15 @@ function parseIsoDate(raw: unknown): Date {
   return new Date(`${raw}T00:00:00.000Z`);
 }
 
-type PhotoRow = { id: string; kind: string; extractionSource: string; extraction: unknown; closedAt: Date | null; createdAt: Date };
+type PhotoRow = { id: string; kind: string; extractionSource: string; extraction: unknown; readPending: boolean; closedAt: Date | null; createdAt: Date };
 
 // รูปป้ายทะเบียน (Step 6): อัปโหลด -> AI อ่านเลขทะเบียน -> จับคู่กับรถที่รอรับป้าย (ทะเบียนรู้แล้วจาก Step 5)
 // AI ไม่บันทึกเอง: พนักงานกดยืนยัน (confirm) แล้วจึงตั้ง plateReceivedDate + platePhotoId
 @Injectable()
-export class PlatePhotosService {
+export class PlatePhotosService implements OnApplicationBootstrap {
+  // เลือกหลายรูปจากคลังภาพ = อ่านเบื้องหลัง (ดู background-reads.ts) · ถ่ายจากกล้องยังอ่านทันที
+  private readonly reads = new BackgroundReads(PlatePhotosService.name, (id) => this.readOne(id));
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(RECEIPT_STORAGE) private readonly storage: ReceiptStorage,
@@ -88,6 +93,7 @@ export class PlatePhotosService {
         kind: photo.kind,
         extractionSource: photo.extractionSource,
         error: extractionError(photo.extraction),
+        readPending: photo.readPending,
         closedAt: photo.closedAt?.toISOString() ?? null,
         createdAt: photo.createdAt.toISOString(),
         plates: ps as Array<ReadPlate & { match: PlateMatch }>,
@@ -105,7 +111,34 @@ export class PlatePhotosService {
     };
   }
 
-  async upload(file: UploadedReceiptFile | undefined, kindRaw: unknown) {
+  // รูปที่ค้างรออ่านตอน server รีสตาร์ท -> อ่านต่อ · ปิด AI ไปแล้ว -> เลิกรอ (แสดงแบบไม่มี AI)
+  async onApplicationBootstrap() {
+    if (this.reader.source === 'NONE') {
+      await this.prisma.platePhoto.updateMany({ where: { readPending: true }, data: { readPending: false } });
+      return;
+    }
+    const pending = await this.prisma.platePhoto.findMany({ where: { readPending: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+    for (const { id } of pending) this.reads.enqueue(id, null);
+  }
+
+  // จับคู่คำนวณใหม่ทุกครั้งที่ดู (withMatches) จึงแค่บันทึกผลอ่าน - รูปถูกลบระหว่างรออ่าน = updateMany ไม่เจอแถว
+  private async readOne(id: string) {
+    const row = await this.prisma.platePhoto.findUnique({ where: { id }, select: { storageKey: true, mimeType: true, readPending: true } });
+    if (!row?.readPending) return;
+    let extraction: unknown;
+    try {
+      extraction = await this.reader.read(await this.storage.get(row.storageKey), row.mimeType);
+    } catch {
+      extraction = { error: 'อ่านรูปไม่สำเร็จ' };
+    }
+    await this.prisma.platePhoto.updateMany({
+      where: { id, readPending: true },
+      data: { readPending: false, ...(extraction ? { extraction: extraction as object } : {}) },
+    });
+  }
+
+  // backgroundRaw = '1' -> เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (รูปขึ้นในถาดเป็น readPending)
+  async upload(file: UploadedReceiptFile | undefined, kindRaw: unknown, backgroundRaw?: unknown) {
     const kind = parseKind(kindRaw);
     assertKindInScope(kind); // STAFF_CAR ถ่ายได้เฉพาะแท็บรถยนต์ / STAFF_MOTO เฉพาะแท็บมอเตอร์ไซค์
     if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปป้ายทะเบียน' });
@@ -113,26 +146,35 @@ export class PlatePhotosService {
     const type = detectImageType(file.buffer);
     if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
 
+    // ตรวจรูปซ้ำก่อนส่งให้ AI อ่าน (นับทั้งแท็บรถยนต์และมอเตอร์ไซค์)
+    const contentHash = contentHashOf(file.buffer);
+    if (await this.prisma.platePhoto.findUnique({ where: { contentHash }, select: { id: true } })) throw duplicateUpload();
+
     const now = new Date();
     const storageKey = `plates/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
-    const extraction = await this.reader.read(file.buffer, type.mimeType);
+    const background = isBackgroundFlag(backgroundRaw) && this.reader.source !== 'NONE';
+    const extraction = background ? null : await this.reader.read(file.buffer, type.mimeType);
     await this.storage.put(storageKey, file.buffer, type.mimeType);
     try {
       const photo = await this.prisma.platePhoto.create({
         data: {
           storageKey,
+          contentHash,
           kind,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
           extractionSource: this.reader.source,
+          readPending: background,
           ...(extraction ? { extraction: extraction as object } : {}),
         },
         select: photoSelect,
       });
+      if (background) this.reads.enqueue(photo.id);
       return this.withMatches([photo]);
     } catch (err) {
       await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
       throw err;
     }
   }

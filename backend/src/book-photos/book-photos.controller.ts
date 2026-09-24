@@ -8,10 +8,11 @@ export class BookPhotosController {
   constructor(private readonly bookPhotosService: BookPhotosService) {}
 
   // multipart/form-data: file = รูปเล่มทะเบียน (เล่มเดียวหรือหลายเล่มในรูปเดียว)
+  // background=1 = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง - หน้าเว็บดูผลจาก GET open (readPending)
   @Post()
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
-  upload(@UploadedFile() file: UploadedReceiptFile | undefined) {
-    return this.bookPhotosService.upload(file);
+  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { background?: unknown }) {
+    return this.bookPhotosService.upload(file, body?.background);
   }
 
   @Get('open')
