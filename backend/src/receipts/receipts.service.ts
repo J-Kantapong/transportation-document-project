@@ -4,6 +4,7 @@ import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
 
 // ไฟล์จาก multer (memory storage) - ใช้แค่ฟิลด์เหล่านี้
 export interface UploadedReceiptFile {
@@ -92,6 +93,8 @@ export class ReceiptsService {
     const type = detectImageType(file.buffer);
     if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
 
+    // ตรวจรูปซ้ำก่อนส่งให้ AI อ่าน - ไม่เสียค่า AI กับรูปที่มีอยู่แล้ว
+    const contentHash = await this.assertNotUploaded(file.buffer);
     const submissionId =
       submissionIdRaw === undefined || submissionIdRaw === null || submissionIdRaw === '' ? null : await this.assertAttachable(submissionIdRaw);
 
@@ -105,6 +108,7 @@ export class ReceiptsService {
         data: {
           submissionId: matched.submissionId,
           storageKey,
+          contentHash,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
@@ -117,8 +121,17 @@ export class ReceiptsService {
     } catch (err) {
       // บันทึกลงฐานข้อมูลไม่สำเร็จ - ลบไฟล์ทิ้งไม่ให้ค้างโดยไม่มีแถวอ้างถึง
       await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
       throw err;
     }
+  }
+
+  // ใบเสร็จทุกแบบ (Step 5 และงานสลับเลข) อยู่ในตาราง ReceiptImage เดียวกัน - รูปเดิมใช้ได้ครั้งเดียวทั้งระบบ
+  private async assertNotUploaded(buf: Buffer): Promise<string> {
+    const contentHash = contentHashOf(buf);
+    const existing = await this.prisma.receiptImage.findUnique({ where: { contentHash }, select: { id: true } });
+    if (existing) throw duplicateUpload();
+    return contentHash;
   }
 
   // รูปที่อัปโหลดแบบหลายใบแล้วยังไม่ได้จับคู่กับรถ (ไม่รวมใบเสร็จงานสลับเลข ซึ่งผูกกับงานผ่าน plateSwapId)

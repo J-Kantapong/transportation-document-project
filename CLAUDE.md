@@ -39,6 +39,11 @@ This private repository is the shared development surface for the user, Claude C
   longer `@unique` in Prisma: uniqueness is a Postgres partial unique index `Vehicle_chassis_active_key` over
   `chassis WHERE "deletedAt" IS NULL`, so a deleted chassis can be keyed in again (never use `findUnique({ where: { chassis } })`).
   UI: ลบ button per row plus a "รายการที่ลบแล้ว" panel with กู้คืน, both ADMIN-only, in `/registration/new-vehicle/entry`.
+- Duplicate uploads (added 2026-09-24): the same file cannot be uploaded twice. `ReceiptImage`, `PlatePhoto`, `BookPhoto`
+  and `YamahaRelocationAttachment` store a SHA-256 `contentHash` (`@unique`, NULL for files uploaded before then); every
+  upload endpoint answers 409 `{ error: 'รูปนี้อัพโหลดไปแล้ว' }` (Yamaha: `ไฟล์ใบเสร็จนี้…` / `ไฟล์ Report นี้…`, and ใบเสร็จ =
+  Report is rejected) before storing the file or calling the AI. Receipts from step 5 and plate swaps share one table,
+  so a photo used as either counts. Deleting a photo frees its hash. Helper: `backend/src/receipts/upload-hash.ts`.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)

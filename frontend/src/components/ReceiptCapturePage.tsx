@@ -54,7 +54,7 @@ export function ReceiptCapturePage() {
         const { receipt } = await api.uploadReceipt(image, compressedFileName(file));
         setShots((prev) => [toShot(receipt), ...prev]);
       } catch (err) {
-        failed.push(errorText(err));
+        failed.push(`${file.name}: ${errorText(err)}`);
       }
     }
     setProgress("");

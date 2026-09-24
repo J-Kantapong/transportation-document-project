@@ -66,6 +66,28 @@ describe('ReceiptsService.upload', () => {
     await expect(svc.upload(file(), 's1')).rejects.toThrow('db down');
     expect(storage.delete).toHaveBeenCalledWith(vi.mocked(storage.put).mock.calls[0][0]);
   });
+
+  it('บันทึก hash ของไฟล์ไว้กันอัปโหลดซ้ำ', async () => {
+    const { svc, create } = setup();
+    await svc.upload(file(), 's1');
+    expect(create.mock.calls[0][0].data.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('รูปเดิมอยู่ในระบบแล้ว = ปฏิเสธ "อัพโหลดไปแล้ว" ก่อนเก็บไฟล์และก่อนใช้ AI', async () => {
+    const extractor = { source: 'test', extract: vi.fn() } as unknown as ReceiptExtractor;
+    const { svc, storage, create } = setup(undefined, { id: 'r0' }, extractor);
+    await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ status: 409, response: { error: 'รูปนี้อัพโหลดไปแล้ว' } });
+    expect(extractor.extract).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('อัปโหลดรูปเดียวกันพร้อมกัน (unique index ชน) = "อัพโหลดไปแล้ว" และลบไฟล์ที่เก็บไปแล้ว', async () => {
+    const { svc, storage, create } = setup();
+    create.mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002', meta: { target: ['contentHash'] } }));
+    await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ status: 409, response: { error: 'รูปนี้อัพโหลดไปแล้ว' } });
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ReceiptsService.remove', () => {

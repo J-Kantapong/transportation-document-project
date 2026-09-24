@@ -158,7 +158,7 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
         const image = await compressReceiptImage(file);
         merge(await api.uploadPlatePhoto(image, compressedFileName(file), kind), false);
       } catch (err) {
-        failed.push(errorText(err));
+        failed.push(`${file.name}: ${errorText(err)}`);
       }
     }
     setProgress("");

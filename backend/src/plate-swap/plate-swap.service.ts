@@ -6,6 +6,7 @@ import { PlateSwapKind, PlateSwapNumberSource } from '../generated/prisma/enums.
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { calculatePlateSwapCarFees, type FeeItem } from './plate-swap-fee.js';
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
@@ -365,6 +366,10 @@ export class PlateSwapService {
     const type = detectImageType(file.buffer);
     if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
 
+    // ตาราง ReceiptImage เดียวกับใบเสร็จ Step 5 - รูปที่ใช้เป็นใบเสร็จที่ไหนแล้วก็ใช้ซ้ำไม่ได้
+    const contentHash = contentHashOf(file.buffer);
+    if (await this.prisma.receiptImage.findUnique({ where: { contentHash }, select: { id: true } })) throw duplicateUpload();
+
     const now = new Date();
     const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
     await this.storage.put(storageKey, file.buffer, type.mimeType);
@@ -373,6 +378,7 @@ export class PlateSwapService {
         data: {
           plateSwapId: existing.id,
           storageKey,
+          contentHash,
           mimeType: type.mimeType,
           sizeBytes: file.size,
           originalName: file.originalname ? file.originalname.slice(0, 200) : null,
@@ -381,6 +387,7 @@ export class PlateSwapService {
     } catch (err) {
       // บันทึกลงฐานข้อมูลไม่สำเร็จ - ลบไฟล์ทิ้งไม่ให้ค้างโดยไม่มีแถวอ้างถึง
       await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
       throw err;
     }
     return this.reload(id);

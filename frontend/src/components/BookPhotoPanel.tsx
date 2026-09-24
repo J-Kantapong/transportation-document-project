@@ -90,7 +90,7 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
         const image = await compressReceiptImage(file);
         merge(await api.uploadBookPhoto(image, compressedFileName(file)), false);
       } catch (err) {
-        failed.push(errorText(err));
+        failed.push(`${file.name}: ${errorText(err)}`);
       }
     }
     setProgress("");

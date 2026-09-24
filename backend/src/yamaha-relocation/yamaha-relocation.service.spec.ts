@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { ReceiptStorage } from '../receipts/receipt-storage.js';
+import { contentHashOf } from '../receipts/upload-hash.js';
 import { detectAttachmentType, YamahaRelocationService } from './yamaha-relocation.service.js';
 
 const jpeg = { buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]), size: 5, originalname: 'receipt.jpg' };
@@ -9,7 +10,7 @@ const text = { buffer: Buffer.from('hello'), size: 5, originalname: 'note.txt' }
 
 type CreateArgs = { data: { attachments: { create: Array<Record<string, unknown>> } } };
 
-function build(createImpl?: () => Promise<unknown>) {
+function build(createImpl?: () => Promise<unknown>, existingHashes: string[] = []) {
   const create = vi.fn(
     createImpl ??
       (async (args: CreateArgs) => ({
@@ -24,7 +25,10 @@ function build(createImpl?: () => Promise<unknown>) {
       })),
   );
   const storage = { put: vi.fn().mockResolvedValue(undefined), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) };
-  const prisma = { yamahaRelocationEntry: { create } } as unknown as PrismaService;
+  const findMany = vi.fn(async (args: { where: { contentHash: { in: string[] } } }) =>
+    args.where.contentHash.in.filter((h) => existingHashes.includes(h)).map((contentHash) => ({ contentHash })),
+  );
+  const prisma = { yamahaRelocationEntry: { create }, yamahaRelocationAttachment: { findMany } } as unknown as PrismaService;
   return { svc: new YamahaRelocationService(prisma, storage as unknown as ReceiptStorage), create, storage };
 }
 
@@ -84,5 +88,29 @@ describe('YamahaRelocationService.create', () => {
     const { svc, storage } = build(() => Promise.reject(new Error('db down')));
     await expect(svc.create(dto, { receipt: [jpeg], report: [pdf] })).rejects.toThrow('db down');
     expect(storage.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it('บันทึก hash ของไฟล์แนบทั้ง 2 ไฟล์', async () => {
+    const { svc, create } = build();
+    await svc.create(dto, { receipt: [jpeg], report: [pdf] });
+    const { data } = create.mock.calls[0][0] as CreateArgs;
+    expect(data.attachments.create.map((a) => a.contentHash)).toEqual([contentHashOf(jpeg.buffer), contentHashOf(pdf.buffer)]);
+  });
+
+  it('ไฟล์ใบเสร็จเคยแนบกับรายการอื่นแล้ว = ปฏิเสธ "อัพโหลดไปแล้ว" ไม่อัปโหลดอะไรเลย', async () => {
+    const { svc, storage } = build(undefined, [contentHashOf(jpeg.buffer)]);
+    await expect(svc.create(dto, { receipt: [jpeg], report: [pdf] })).rejects.toMatchObject({
+      status: 409,
+      response: { error: 'ไฟล์ใบเสร็จนี้อัพโหลดไปแล้ว' },
+    });
+    expect(storage.put).not.toHaveBeenCalled();
+  });
+
+  it('ใบเสร็จกับ Report เป็นไฟล์เดียวกัน = ปฏิเสธ', async () => {
+    const { svc, storage } = build();
+    await expect(svc.create(dto, { receipt: [pdf], report: [pdf] })).rejects.toMatchObject({
+      response: { error: 'ไฟล์ใบเสร็จกับไฟล์ Report เป็นไฟล์เดียวกัน' },
+    });
+    expect(storage.put).not.toHaveBeenCalled();
   });
 });
