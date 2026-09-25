@@ -786,6 +786,13 @@ export const api = {
     }>(`/api/vehicles/${id}/inspection-result-correction`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   // แก้วันที่ในใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ค.ศ. YYYY-MM-DD)
+  // ยกเลิกรายการที่ยังรอใบเสร็จ (รถยนต์/จักรยานยนต์, รูปใบเสร็จที่แนบถูกถอดไปรอจับคู่) - รถกลับไปอยู่ในคิวรอยื่นเอกสาร ยื่นใหม่ได้, ต้องมีเหตุผล
+  cancelDocumentSubmission: (submissionId: string, remark: string) =>
+    request<{ id: string; cancelled: true }>(`/api/vehicles/document-submission/${submissionId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+
   updateReceiptDate: (submissionId: string, receiptDate: string) =>
     request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/receipt-date`, {
       method: 'PATCH',

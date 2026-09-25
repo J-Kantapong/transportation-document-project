@@ -46,6 +46,12 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.updateReceiptDate(id, body?.receiptDate);
   }
 
+  // ยกเลิกรายการที่ยังรอใบเสร็จ ให้รถกลับไปยื่นใหม่ได้ ต้องมี remark - ดู DocumentSubmissionService.cancel
+  @Post('document-submission/:id/cancel')
+  cancel(@Param('id') id: string, @Body() body: { remark?: unknown }) {
+    return this.documentSubmissionService.cancel(id, body?.remark);
+  }
+
   @Patch('document-submission/:id/status')
   updateStatus(
     @Param('id') id: string,
