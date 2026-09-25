@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { assertVehicleInScope, currentVehicleScope, isVehicleInScope, scopeErrorMessage, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OwnerType } from '../generated/prisma/enums.js';
+import { currentUser } from '../auth/request-context.js';
 import { TaxService } from '../tax/tax.service.js';
 import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeeParamRow } from './document-fee-calculator.js';
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
@@ -43,6 +44,12 @@ function parseReceiptDate(raw: unknown): Date {
   } catch {
     throw new BadRequestException({ error: 'วันที่ในใบเสร็จต้องเป็น DD/MM/YYYY ที่ถูกต้อง เช่น 23/09/2026' });
   }
+}
+
+// สรุปรายการค่าธรรมเนียมเป็นข้อความสั้นๆ ไว้เก็บใน VehicleEditLog ตอนยกเลิกรายการ ("ลงขัน 200, ค่าอากร 10")
+function describeItems(items: unknown): string {
+  if (!Array.isArray(items) || items.length === 0) return '-';
+  return items.map((i: { label?: unknown; amount?: unknown }) => `${String(i?.label ?? '')} ${Number(i?.amount ?? 0)}`).join(', ');
 }
 
 @Injectable()
@@ -423,6 +430,45 @@ export class DocumentSubmissionService {
       throw new BadRequestException({ error: 'แก้วันที่ในใบเสร็จได้เฉพาะรายการที่ได้ใบเสร็จแล้ว' });
     }
     return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { receiptDate } });
+  }
+
+  // ยกเลิกรายการที่ยื่นแล้ว (ผู้ใช้ 2026-09-25) เพื่อให้รถกลับไปอยู่ในคิวรอยื่นเอกสารแล้วยื่นใหม่ (ราคาคำนวณใหม่ทั้งหมด)
+  // ลบแถว DocumentSubmission ทิ้ง ต่างจาก FAILED ที่เก็บไว้เป็นประวัติยื่นไม่สำเร็จ - ต้องมีเหตุผล, เก็บ snapshot ลง VehicleEditLog
+  // ได้เฉพาะ PENDING (ได้ใบเสร็จแล้ว = จดทะเบียนแล้ว ห้ามยื่นซ้ำ) ทั้งรถยนต์และจักรยานยนต์
+  // รูปใบเสร็จที่แนบไว้ไม่ถูกลบ: ถูกถอดออก (FK onDelete SetNull) กลับไปอยู่ในรายการรอจับคู่ ใช้จับคู่กับรายการที่ยื่นใหม่ได้
+  async cancel(submissionId: string, remarkRaw: unknown) {
+    const remark = typeof remarkRaw === 'string' ? remarkRaw.trim() : '';
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่ยกเลิก' });
+    const submission = await this.prisma.documentSubmission.findUnique({
+      where: { id: submissionId },
+      include: { vehicle: { select: { body: true } }, _count: { select: { receipts: true } } },
+    });
+    if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body);
+    if (submission.status !== 'PENDING') {
+      throw new BadRequestException({ error: 'ยกเลิกได้เฉพาะรายการที่ยังรอใบเสร็จ' });
+    }
+
+    const snapshot = [
+      `ยื่น ${submission.submitDate.toISOString().slice(0, 10)}${submission.urgent ? ' ด่วน' : ''}`,
+      `Bill: ${describeItems(submission.billItems)}`,
+      `No Bill: ${describeItems(submission.noBillItems)}`,
+      `ภาษี ${submission.taxAmount === null ? '-' : Number(submission.taxAmount)}`,
+      ...(submission._count.receipts > 0 ? [`ถอดรูปใบเสร็จ ${submission._count.receipts} รูป`] : []),
+    ].join(' | ');
+    await this.prisma.$transaction([
+      this.prisma.receiptImage.updateMany({ where: { submissionId }, data: { submissionId: null } }),
+      this.prisma.documentSubmission.delete({ where: { id: submissionId } }),
+      this.prisma.vehicleEditLog.create({
+        data: {
+          vehicleId: submission.vehicleId,
+          remark,
+          changes: JSON.stringify({ 'submission.cancelled': { from: snapshot, to: 'ยกเลิกการยื่น' } }),
+          editedById: currentUser()?.id ?? null,
+        },
+      }),
+    ]);
+    return { id: submissionId, cancelled: true };
   }
 
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort - คันที่พลาดคืนเหตุผลกลับไป คันอื่นบันทึกต่อ)

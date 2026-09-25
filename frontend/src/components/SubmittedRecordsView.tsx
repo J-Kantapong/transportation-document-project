@@ -5,6 +5,7 @@ import type { DocumentSubmission } from "@/lib/api";
 import { ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate } from "@/lib/date";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
+import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
 
 function formatMoney(amount: number): string {
@@ -40,11 +41,13 @@ function GroupTable({
   rows,
   showUrgent,
   onPrint,
+  onCancel,
 }: {
   title: string;
   rows: DocumentSubmission[];
   showUrgent: boolean;
   onPrint?: () => void;
+  onCancel?: (record: DocumentSubmission) => void;
 }) {
   const total = rows.reduce((sum, r) => sum + recordTotal(r), 0);
   return (
@@ -75,6 +78,7 @@ function GroupTable({
                 <th>เลขทะเบียนที่ขอ</th>
                 <th>ยอดรวม</th>
                 <th>สถานะ</th>
+                {onCancel && <th aria-label="ยกเลิก" />}
               </tr>
             </thead>
             <tbody>
@@ -94,6 +98,16 @@ function GroupTable({
                   <td>
                     <StatusBadge status={r.status} />
                   </td>
+                  {onCancel && (
+                    <td>
+                      {/* ยกเลิกได้เฉพาะที่ยังรอใบเสร็จ ทั้งรถยนต์และจักรยานยนต์ - backend เช็กซ้ำ */}
+                      {r.status === "PENDING" && (
+                        <button type="button" className="text-button" style={{ color: "#c2410c" }} onClick={() => onCancel(r)}>
+                          ยกเลิก
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -156,8 +170,21 @@ function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
   );
 }
 
-export function SubmittedRecordsView({ records, loading }: { records: DocumentSubmission[]; loading: boolean }) {
+export function SubmittedRecordsView({
+  records,
+  loading,
+  canCancel = false,
+  onRecordRemoved,
+}: {
+  records: DocumentSubmission[];
+  loading: boolean;
+  canCancel?: boolean;
+  onRecordRemoved?: (id: string) => void;
+}) {
   const [tab, setTab] = useState<Tab>("car");
+  // รายการที่กำลังจะยกเลิก (เปิด SubmissionCancelDialog)
+  const [cancelling, setCancelling] = useState<DocumentSubmission | null>(null);
+  const onCancel = canCancel ? setCancelling : undefined;
   // undefined = ยังไม่ได้เลือก -> ใช้วันที่ล่าสุดที่มีข้อมูล, "" = ทุกวันที่
   const [dateChoice, setDateChoice] = useState<string | undefined>(undefined);
   const [ownerChoice, setOwnerChoice] = useState("");
@@ -275,6 +302,7 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
                   title={g.title}
                   rows={g.rows}
                   showUrgent={g.showUrgent}
+                  onCancel={onCancel}
                   onPrint={() => setPrintGroup({ kind: "car", urgent: g.urgent, title: g.title, rows: g.rows, note: g.note })}
                 />
               ))}
@@ -292,6 +320,7 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
                   title={g.title}
                   rows={g.rows}
                   showUrgent={false}
+                  onCancel={onCancel}
                   onPrint={() => setPrintGroup({ kind: "moto", urgent: g.urgent, title: g.title, rows: g.rows, note: "" })}
                 />
               ))}
@@ -300,11 +329,19 @@ export function SubmittedRecordsView({ records, loading }: { records: DocumentSu
           )}
           {activeTab === "unknown" && (
             <>
-              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent />
+              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent onCancel={onCancel} />
               <FailedTable rows={failedByTab.unknown} />
             </>
           )}
         </>
+      )}
+      {cancelling && (
+        <SubmissionCancelDialog
+          key={cancelling.id}
+          record={cancelling}
+          onClose={() => setCancelling(null)}
+          onCancelled={(id) => onRecordRemoved?.(id)}
+        />
       )}
       {printGroup && (
         <JobSheetPrintDialog

@@ -70,6 +70,12 @@ This private repository is the shared development surface for the user, Claude C
   date can be corrected with the "✎ แก้" button in the "ได้ใบเสร็จแล้ว" table
   (`PATCH /api/vehicles/document-submission/:id/receipt-date` `{ receiptDate }`, RECEIPT_RECEIVED only, same access as step 5). The capture
   page (`/receive-receipt/capture`) has no date field and uses the same panel layout as the plate/book capture pages.
+- Cancelling a submission (added 2026-09-25): each PENDING row (cars and motorcycles) on
+  `/registration/new-vehicle/submit-documents/records` has "ยกเลิก" (ADMIN / STAFF_CAR / STAFF_MOTO, in their vehicle
+  scope). Attached receipt photos are detached back to the unmatched pool (the dialog warns about it). `POST /api/vehicles/document-submission/:id/cancel` `{ remark }` deletes the submission so the vehicle returns
+  to the submit queue and can be submitted again with freshly calculated fees; a snapshot + remark goes to
+  `VehicleEditLog` (the cash-advance refund is added once that feature lands). Unlike FAILED, nothing is kept. Editing a single submission's price
+  was tried and dropped (user 2026-09-25); changing fee rates for future submissions is still undecided.
 - Delivery slips and report (added 2026-09-25): every save on the Delivery page creates one `DeliverySlip` (one customer,
   date and recipient; `slipNo` shown as `DL-00001`) with a `DeliverySlipItem` per vehicle saying what went out this
   time (`receipt` / `book` / `plate`, plus a snapshot of chassis, brand, plate text and receipt number). A later
