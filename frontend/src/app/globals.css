@@ -451,3 +451,14 @@ tr.row-selected td{background:#f3f6ff}
 .queue-sort{display:inline-flex;border:1px solid #dce2ec;border-radius:8px;overflow:hidden}
 .queue-sort button{border:0;background:#fff;padding:9px 14px;font-size:13px;color:#46526a;cursor:pointer}
 .queue-sort button.active{background:#2854d9;color:#fff}
+/* Delivery: สถานะใบเสร็จ/เล่ม/ป้ายรายคัน + แถบบันทึกค้างล่างจอ (ผู้ใช้ 2026-09-26) */
+.delivery-item{display:inline-block;padding:3px 8px;border-radius:5px;font-size:12px;white-space:nowrap}
+.delivery-item.ready{background:#eaf7f2;color:#278f6b;font-weight:600}
+.delivery-item.waiting{background:#fff6e7;color:#bb8527}
+.delivery-item.sent{background:#f0f2f6;color:#7b8aa3}
+.delivery-row-muted td{color:#8a94a6}
+.delivery-bar{position:sticky;bottom:12px;z-index:5;margin-top:20px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:14px 18px;background:#fff;border:2px solid #2854d9;border-radius:10px;box-shadow:0 8px 24px rgba(24,36,60,.16)}
+.delivery-bar .field{gap:4px;min-width:0}
+.delivery-bar .field input[type="text"]{width:180px;max-width:100%}
+.delivery-bar-summary{display:flex;flex-direction:column;gap:2px;margin-right:auto;min-width:140px}
+@media (max-width:640px){.delivery-bar .field,.delivery-bar .field input[type="text"],.delivery-bar button.primary{width:100%}}

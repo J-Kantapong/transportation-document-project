@@ -7,7 +7,9 @@ export class DeliveryController {
 
   @Get('queue')
   async queue() {
-    return { vehicles: await this.deliveryService.queue() };
+    const vehicles = await this.deliveryService.queue();
+    // lotVehicles = คันอื่นในใบยื่นเดียวกันที่ยังไม่พร้อมส่งหรือส่งครบแล้ว (แสดงอย่างเดียว ติ๊กไม่ได้)
+    return { vehicles, lotVehicles: await this.deliveryService.lotVehicles(vehicles) };
   }
 
   @Get('recent')
