@@ -47,8 +47,8 @@ This private repository is the shared development surface for the user, Claude C
   On top of that, a *warning only* (user's choice, AI can misread) from what the AI read: a step-5 receipt whose
   เลขที่ใบเสร็จ matches a saved `DocumentSubmission.receiptNo` or another photo's reading, or whose chassis already has a
   receipt / is RECEIPT_RECEIVED, gets `extraction.duplicate` (`ReceiptsService.findDuplicate`, re-checked on assign);
-  batch uploads with a duplicate are not auto-attached. Plate/book photos use their existing `received` match, now
-  styled as a "รูปซ้ำ" warning. Needs `ANTHROPIC_API_KEY`, so it does nothing where AI reading is off.
+  batch uploads with a duplicate are not auto-attached. Plate/book photos no longer
+  use AI (see below). Needs `ANTHROPIC_API_KEY`, so it does nothing where AI reading is off.
 - Background receipt reading (added 2026-09-25): a camera shot on the capture page is still read immediately (the
   photographer needs the result while holding the receipt), but picking several receipts from the gallery (capture
   page and the "เลือกรูปหลายใบ" tray) uploads 4 at a time with `background=1`: `POST /api/receipts` stores the file,
@@ -56,9 +56,26 @@ This private repository is the shared development surface for the user, Claude C
   runs duplicate check + chassis match + save one at a time (manual assign goes through the same lock, and a
   staff-chosen vehicle is kept). Pending rows are re-queued on boot (cleared if AI is off). The page polls
   `GET /api/receipts?ids=a,b` (`frontend/src/lib/receipt-upload.ts`). Only for uploads with no `submissionId`.
-  Step 6 plate photos and Step 7 book photos work the same way (camera = immediate, gallery = `background=1`,
-  `PlatePhoto.readPending` / `BookPhoto.readPending`); they only save the reading, since matches are computed on every
-  `GET .../open`, which the panels poll while a photo is pending. Shared queue: `backend/src/receipts/background-reads.ts`.
+  Shared queue: `backend/src/receipts/background-reads.ts` (receipts only since 2026-09-26).
+- No AI for plates and books (user 2026-09-26): the AI reading, matching, photo trays and phone capture pages of
+  Step 6/7 were removed (`plate-reader`, `plate-reading`, `book-reader`, `book-reading`, `PlatePhotoPanel`,
+  `BookPhotoPanel`, `scripts/plate-bench.ts`; old `/capture` URLs redirect to the chooser). Each pending row in the
+  `/car` or `/moto` queue has "📷 แนบรูปป้าย" / "แนบรูปเล่ม" plus a date: picking a photo calls
+  `POST /api/plate-photos/attach` or `/api/book-photos/attach` (multipart `file`, `vehicleId`, `date`), which stores the
+  photo (closed, duplicate check kept) and sets `plateReceivedDate` + `platePhotoId` / `bookReceivedDate` + `bookPhotoId`
+  at once. A photo is still required for every vehicle. `extraction` / `readPending` columns stay for old rows.
+  The pending queue is a list of ใบยื่น cards styled like the receipt page ("date · job-sheet group · customer" on the
+  left, "N คัน · รับป้ายแล้ว x · รอรับป้าย y" on the right; group logic in `lib/job-sheet.ts`, shared with the receipt
+  page), oldest submit date first; `GET /api/vehicles/receiving/:step/pending` rows carry `submitDate` + `urgent` +
+  `submittedAt` of the latest submission (user 2026-09-26). Cards start folded (click to show that sheet's table, plus
+  ขยายทั้งหมด / พับทั้งหมด / เลือกทุกใบ); searching opens all, and a `?focus=` link opens its sheet. N = how many vehicles
+  the whole ใบยื่น submitted (read from `GET /api/vehicles/document-submission?date=`); a sheet with vehicles still
+  waiting for a receipt or FAILED is orange with "⚠ ยื่นไม่ครบ".
+  Both queues show เลขที่ใบเสร็จ. Cars in a ใบยื่น are listed in submission order by default (`submittedAt` = the latest
+  submission's createdAt, i.e. the printed job-sheet order) with a "เรียงตามหมวด" toggle (`comparePlate`: 1กก 1, 1กก 2, 1กข 1).
+  A filter bar (วันที่ยื่น from/to; เจ้าของงาน dropdown; เลขที่ใบเสร็จ, เลขตัวรถ, ทะเบียน contain) sits above the list; each ใบยื่น card has a checkbox,
+  and "🖨 ปริ้นชุดที่เลือก" prints the ticked sheets, one table per sheet in the current order, for handing to the DLT
+  (`lib/receiving-print.ts`, user 2026-09-26).
 - Receipt dates (user's choice 2026-09-25): two separate dates on `DocumentSubmission`. `receiptDate` = the date printed
   on the receipt (the official date; filled from the AI reading, editable in the receipt-check table and popup, flagged
   when unreadable or different from the submit date; defaults to `submitDate`, since DLT issued all 59 checked receipts
@@ -68,7 +85,7 @@ This private repository is the shared development surface for the user, Claude C
   from the latest photo's AI-read date (Buddhist year converted), else `submitDate`. The AI date is also normalised
   in code (`normalizeReceiptDate`), and the date inputs turn a typed Buddhist year into Gregorian. A saved receipt
   date can be corrected with the "✎ แก้" button in the "ได้ใบเสร็จแล้ว" table
-  (`PATCH /api/vehicles/document-submission/:id/receipt-date` `{ receiptDate }`, RECEIPT_RECEIVED only, same access as step 5). The capture
+  (`PATCH /api/vehicles/document-submission/:id/receipt-date` `{ receiptDate, remark }`, RECEIPT_RECEIVED only, same access as step 5; user 2026-09-25: `remark` is mandatory and logged to `VehicleEditLog`, and the date must lie between the submit date and the receipt-received date / today). The page is split by vehicle type (user 2026-09-25): `/receive-receipt` only picks รถยนต์ / มอเตอร์ไซค์ (limited to the user's vehicle scope) and the work happens on `/receive-receipt/car` and `/receive-receipt/moto`; vehicles left without a receipt stay in their original ใบยื่น, flagged "ยังขาด N คัน" (the separate "ค้างจากใบก่อน" group was removed). Receive plate and receive book follow the same split (user 2026-09-26): `/receive-plate` and `/receive-book` are choosers (`components/VehicleKindChooser.tsx`) and the queues live on `/car` and `/moto` (`ReceivePlateQueue`, `ReceiveBookQueue`). The capture
   page (`/receive-receipt/capture`) has no date field and uses the same panel layout as the plate/book capture pages.
 - Cancelling a submission (added 2026-09-25): each PENDING row (cars and motorcycles) on
   `/registration/new-vehicle/submit-documents/records` has "ยกเลิก" (ADMIN / STAFF_CAR / STAFF_MOTO, in their vehicle
@@ -105,7 +122,7 @@ This private repository is the shared development surface for the user, Claude C
   work page with `?focus=<chassis>` (`frontend/src/lib/vehicle-focus.ts`, stage → page map there): `FocusVehicleRow`
   in `AppShell` waits for that vehicle's table row, scrolls to it and highlights it (or shows "ไม่พบรถ…" after 15 s).
   Pages that hide rows reveal it themselves: inspection jumps to the right page of 10, the step-4 queue prefills its
-  chassis box, the receipt page picks car/moto and opens the vehicle's sheet, receive-plate takes `?kind=`, and
+  chassis box, the receipt / plate / book links go to that vehicle's `/car` or `/moto` page (the receipt page opens the vehicle's sheet), and
   Delivery/billing select the vehicle's customer.
 - Date inputs (user's choice 2026-09-25): every วว/ดด/ปปปป box is `components/DateInput.tsx`, which keeps typing
   (each caller still formats / converts a Buddhist year as before) and adds a calendar button that opens a hidden

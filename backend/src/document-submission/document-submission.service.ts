@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { OwnerType } from '../generated/prisma/enums.js';
 import { currentUser } from '../auth/request-context.js';
 import { TaxService } from '../tax/tax.service.js';
+import { bangkokToday } from '../overview/overview-calculator.js';
 import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeeParamRow } from './document-fee-calculator.js';
 import type { DocumentSubmissionOptionsDto } from './dto/document-submission-options.dto.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
@@ -418,18 +419,49 @@ export class DocumentSubmissionService {
 
   // แก้วันที่ในใบเสร็จย้อนหลัง (ผู้ใช้ 2026-09-25) - เฉพาะรายการที่ได้ใบเสร็จแล้ว, รับ ค.ศ. YYYY-MM-DD
   // ไม่แตะสถานะหรือช่องอื่น (สถานะยังเปลี่ยนได้ครั้งเดียวตาม updateStatus)
-  async updateReceiptDate(submissionId: string, receiptDateRaw: unknown) {
+  // แก้ย้อนหลังต้องมีเหตุผล (ผู้ใช้ 2026-09-25) เก็บลง VehicleEditLog และวันที่ต้องสมเหตุสมผล:
+  // ไม่ก่อนวันที่ยื่น (ขนส่งออกใบเสร็จหลังรับเรื่อง) และไม่หลังวันที่รับใบเสร็จกลับมา/วันนี้ (ยังไม่มีใบเสร็จ)
+  async updateReceiptDate(submissionId: string, receiptDateRaw: unknown, remarkRaw?: unknown) {
     const receiptDate = parseReceiptDate(receiptDateRaw);
+    const remark = typeof remarkRaw === 'string' ? remarkRaw.trim() : '';
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้วันที่ในใบเสร็จ' });
     const submission = await this.prisma.documentSubmission.findUnique({
       where: { id: submissionId },
-      select: { status: true, vehicle: { select: { body: true } } },
+      select: { status: true, vehicleId: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, vehicle: { select: { body: true } } },
     });
     if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
     assertVehicleInScope(submission.vehicle.body);
     if (submission.status !== 'RECEIPT_RECEIVED') {
       throw new BadRequestException({ error: 'แก้วันที่ในใบเสร็จได้เฉพาะรายการที่ได้ใบเสร็จแล้ว' });
     }
-    return this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { receiptDate } });
+    const iso = receiptDate.toISOString().slice(0, 10);
+    const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+    const submitted = submission.submitDate.toISOString().slice(0, 10);
+    if (iso < submitted) {
+      throw new BadRequestException({ error: `วันที่ในใบเสร็จต้องไม่ก่อนวันที่ยื่นเอกสาร (${dmy(submitted)})` });
+    }
+    const today = bangkokToday();
+    const received = submission.receiptReceivedDate?.toISOString().slice(0, 10);
+    const latest = received && received < today ? received : today;
+    if (iso > latest) {
+      throw new BadRequestException({
+        error: latest === today ? 'วันที่ในใบเสร็จต้องไม่เกินวันนี้' : `วันที่ในใบเสร็จต้องไม่หลังวันที่รับใบเสร็จ (${dmy(latest)})`,
+      });
+    }
+    const before = submission.receiptDate?.toISOString().slice(0, 10) ?? null;
+    if (before === iso) throw new BadRequestException({ error: 'วันที่ไม่ได้เปลี่ยน' });
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.documentSubmission.update({ where: { id: submissionId }, data: { receiptDate } }),
+      this.prisma.vehicleEditLog.create({
+        data: {
+          vehicleId: submission.vehicleId,
+          remark,
+          changes: JSON.stringify({ 'submission.receiptDate': { from: before, to: iso } }),
+          editedById: currentUser()?.id ?? null,
+        },
+      }),
+    ]);
+    return updated;
   }
 
   // ยกเลิกรายการที่ยื่นแล้ว (ผู้ใช้ 2026-09-25) เพื่อให้รถกลับไปอยู่ในคิวรอยื่นเอกสารแล้วยื่นใหม่ (ราคาคำนวณใหม่ทั้งหมด)

@@ -283,7 +283,7 @@ export interface DocumentSubmission {
   receiptAmount: string | null; // ยอดบนใบเสร็จจริงที่พนักงานกรอก - เทียบกับ billFeeTotal + taxAmount
   receiptNo: string | null; // เลขที่ใบเสร็จ (AI กรอกให้ พนักงานแก้ได้)
   failRemark: string | null; // เหตุผลที่ยื่นไม่สำเร็จ - มีเฉพาะ status FAILED
-  receiptCarriedAt: string | null; // ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ/ยังไม่รู้สาเหตุ -> อยู่ใน "ค้างจากใบก่อน"
+  receiptCarriedAt: string | null; // ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ/ยังไม่รู้สาเหตุ -> ค้างอยู่ในใบยื่นเดิม ("ยังขาด" ในหน้ารับใบเสร็จ)
   vehicle: {
     chassis: string;
     body: string | null;
@@ -354,94 +354,12 @@ export type ReceiptCheckEntry =
 
 export const receiptImageUrl = (id: string) => `${API_BASE_URL}/api/receipts/${id}/image`;
 
-// รูปป้ายทะเบียน (Step 6 รับป้ายทะเบียน) - ดู backend/src/plate-photos/
-// POST /api/plate-photos (multipart: file, kind) · GET /api/plate-photos/open?kind=car|moto · GET /api/plate-photos/:id/image
-// POST /api/plate-photos/confirm {date, items:[{vehicleId, photoId}], closePhotoIds} · DELETE /api/plate-photos/:id
-// exact = ตรงเป๊ะ 1 คัน · close = ต่างกัน 1 ตัว/ทะเบียนซ้ำ (ให้พนักงานเลือก) · received = รับป้ายไปแล้ว · none · unreadable
-export type PlateMatchKind = "exact" | "close" | "received" | "none" | "unreadable";
-
-export interface PlatePhotoPlate {
-  category: string | null;
-  number: string | null;
-  province: string | null;
-  uncertain: boolean;
-  plateType?: "car" | "motorcycle" | null; // AI ดูจากรูปแบบป้าย (รูปเก่าก่อนแยกประเภทไม่มีช่องนี้)
-  // typeMismatch = AI ว่าเป็นป้ายอีกประเภทกับแท็บที่ถ่าย
-  match: { kind: PlateMatchKind; vehicleIds: string[]; provinceMismatch: boolean; typeMismatch: boolean };
-}
-
-// car | moto - แท็บที่ถ่าย จับคู่เฉพาะรถประเภทเดียวกัน (ป้ายรถยนต์กับมอเตอร์ไซค์เลขซ้ำกันได้)
+// รูปป้าย/รูปเล่มทะเบียน (Step 6/7) - ดู backend/src/plate-photos/, book-photos/ (ผู้ใช้ 2026-09-26: ไม่มี AI แล้ว)
+// POST /api/plate-photos/attach, /api/book-photos/attach (multipart: file, vehicleId, date YYYY-MM-DD) = แนบรูปให้รถคันนั้นแล้วบันทึกรับทันที
+// GET /api/plate-photos/:id/image · GET /api/book-photos/:id/image
 export type PlateKind = "car" | "moto";
 
-export interface PlatePhoto {
-  id: string;
-  kind: PlateKind;
-  extractionSource: string; // NONE = ไม่มี AI
-  error: string | null; // AI อ่านไม่สำเร็จ
-  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (plates ว่างไว้ก่อน)
-  closedAt: string | null;
-  createdAt: string;
-  plates: PlatePhotoPlate[];
-}
-
-export interface PlatePhotoVehicle {
-  id: string;
-  customerName: string;
-  chassis: string;
-  body: string | null;
-  plateCategory: string | null;
-  plateNumber: string | null;
-  registrationProvince: string | null;
-  plateReceivedDate: string | null;
-}
-
-export interface PlatePhotoList {
-  photos: PlatePhoto[];
-  vehicles: PlatePhotoVehicle[];
-}
-
 export const platePhotoImageUrl = (id: string) => `${API_BASE_URL}/api/plate-photos/${id}/image`;
-
-// รูปเล่มทะเบียน (Step 7 รับเล่มทะเบียน) - ดู backend/src/book-photos/ (โครงเดียวกับรูปป้าย แต่ไม่แยกรถยนต์/มอเตอร์ไซค์)
-// POST /api/book-photos (multipart: file) · GET /api/book-photos/open · GET /api/book-photos/:id/image
-// POST /api/book-photos/confirm {date, items:[{vehicleId, photoId}], closePhotoIds} · DELETE /api/book-photos/:id
-// จับคู่ด้วยเลขตัวรถ (VIN) ก่อน ถ้าอ่าน VIN ไม่ได้จึงใช้ทะเบียน
-export interface BookPhotoBook {
-  chassis: string | null; // เลขตัวรถที่ AI อ่านได้
-  category: string | null;
-  number: string | null;
-  province: string | null;
-  uncertain: boolean;
-  // by = จับคู่ได้ด้วยเลขตัวรถหรือทะเบียน · plateMismatch = VIN ตรงแต่ทะเบียนในเล่มไม่ตรงกับที่บันทึกไว้
-  match: { kind: PlateMatchKind; vehicleIds: string[]; by: "chassis" | "plate" | null; plateMismatch: boolean; provinceMismatch: boolean };
-}
-
-export interface BookPhoto {
-  id: string;
-  extractionSource: string; // NONE = ไม่มี AI
-  error: string | null;
-  readPending: boolean; // true = เลือกหลายรูปแล้ว AI ยังอ่านอยู่เบื้องหลัง (books ว่างไว้ก่อน)
-  closedAt: string | null;
-  createdAt: string;
-  books: BookPhotoBook[];
-}
-
-export interface BookPhotoVehicle {
-  id: string;
-  customerName: string;
-  chassis: string;
-  body: string | null;
-  plateCategory: string | null;
-  plateNumber: string | null;
-  registrationProvince: string | null;
-  bookReceivedDate: string | null;
-}
-
-export interface BookPhotoList {
-  photos: BookPhoto[];
-  vehicles: BookPhotoVehicle[];
-}
-
 export const bookPhotoImageUrl = (id: string) => `${API_BASE_URL}/api/book-photos/${id}/image`;
 
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
@@ -457,6 +375,9 @@ export interface ReceivingRow {
   plateCategory: string | null;
   plateNumber: string | null;
   receiptNo: string | null; // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด
+  submitDate: string | null; // วันที่ยื่นของการยื่นครั้งล่าสุด - ใช้จัดกลุ่มตามใบยื่น (รับป้าย/รับเล่ม)
+  urgent: boolean;
+  submittedAt: string | null; // เวลาที่บันทึกยื่น (ลำดับในใบส่งงาน) - ค่าเริ่มต้นของการเรียงในหน้ารับป้าย/รับเล่ม
   platePhotoId: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - ดูรูปที่ platePhotoImageUrl(id) (เฉพาะขั้น plate)
   bookPhotoId: string | null; // รูปเล่มที่ใช้ยืนยันการรับเล่ม - ดูรูปที่ bookPhotoImageUrl(id) (เฉพาะขั้น book)
   doneDate: string | null;
@@ -870,14 +791,15 @@ export const api = {
       body: JSON.stringify({ remark }),
     }),
 
-  updateReceiptDate: (submissionId: string, receiptDate: string) =>
+  // แก้ย้อนหลังต้องมีเหตุผล (เก็บลง VehicleEditLog) และวันที่ต้องอยู่ระหว่างวันที่ยื่นกับวันที่รับใบเสร็จ
+  updateReceiptDate: (submissionId: string, receiptDate: string, remark: string) =>
     request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/receipt-date`, {
       method: 'PATCH',
-      body: JSON.stringify({ receiptDate }),
+      body: JSON.stringify({ receiptDate, remark }),
     }),
 
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort) - RECEIVED ต้องแนบรูปแล้ว, FAILED ต้องมี failRemark,
-  // CARRY = ย้ายไป "ค้างจากใบก่อน"
+  // CARRY = ค้างไว้ในใบยื่นเดิม ("ยังขาด")
   saveReceiptCheck: (receivedDate: string, entries: ReceiptCheckEntry[]) =>
     request<{ succeeded: string[]; failed: Array<{ submissionId: string; error: string }> }>('/api/vehicles/document-submission/receipt-check', {
       method: 'POST',
@@ -898,35 +820,20 @@ export const api = {
     request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
   deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
 
-  // background = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง (เลือกหลายรูปจากคลังภาพ)
-  uploadPlatePhoto: (image: Blob, fileName: string, kind: PlateKind, background = false) => {
+  attachPlatePhoto: (vehicleId: string, image: Blob, fileName: string, date: string) => {
     const form = new FormData();
     form.append('file', image, fileName);
-    form.append('kind', kind);
-    if (background) form.append('background', '1');
-    return request<PlatePhotoList>('/api/plate-photos', { method: 'POST', body: form });
+    form.append('vehicleId', vehicleId);
+    form.append('date', date);
+    return request<{ vehicleId: string }>('/api/plate-photos/attach', { method: 'POST', body: form });
   },
-  listOpenPlatePhotos: (kind: PlateKind) => request<PlatePhotoList>(`/api/plate-photos/open?kind=${kind}`),
-  confirmPlatePhotos: (date: string, items: Array<{ vehicleId: string; photoId: string }>, closePhotoIds: string[]) =>
-    request<{ succeeded: string[]; failed: Array<{ vehicleId: string; error: string }> }>('/api/plate-photos/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ date, items, closePhotoIds }),
-    }),
-  deletePlatePhoto: (id: string) => request<{ id: string }>(`/api/plate-photos/${id}`, { method: 'DELETE' }),
-
-  uploadBookPhoto: (image: Blob, fileName: string, background = false) => {
+  attachBookPhoto: (vehicleId: string, image: Blob, fileName: string, date: string) => {
     const form = new FormData();
     form.append('file', image, fileName);
-    if (background) form.append('background', '1');
-    return request<BookPhotoList>('/api/book-photos', { method: 'POST', body: form });
+    form.append('vehicleId', vehicleId);
+    form.append('date', date);
+    return request<{ vehicleId: string }>('/api/book-photos/attach', { method: 'POST', body: form });
   },
-  listOpenBookPhotos: () => request<BookPhotoList>('/api/book-photos/open'),
-  confirmBookPhotos: (date: string, items: Array<{ vehicleId: string; photoId: string }>, closePhotoIds: string[]) =>
-    request<{ succeeded: string[]; failed: Array<{ vehicleId: string; error: string }> }>('/api/book-photos/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ date, items, closePhotoIds }),
-    }),
-  deleteBookPhoto: (id: string) => request<{ id: string }>(`/api/book-photos/${id}`, { method: 'DELETE' }),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>

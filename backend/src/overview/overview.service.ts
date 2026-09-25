@@ -622,7 +622,7 @@ export class OverviewService {
         key: 'receipt-unknown',
         severity: 'medium',
         title: 'ยื่นแล้วยังไม่ได้ใบเสร็จ ไม่ทราบสาเหตุ',
-        detail: `${flags('RECEIPT_UNKNOWN')} คัน (ค้างจากใบก่อน) - ควรตามที่ขนส่ง`,
+        detail: `${flags('RECEIPT_UNKNOWN')} คัน (ยังขาดใบเสร็จในใบยื่น) - ควรตามที่ขนส่ง`,
         href: STAGES.receipt.href,
       },
       late('receipt') && {

@@ -400,9 +400,10 @@ function VehicleStatusCell({ row, roles }: { row: VehicleSearchRow; roles: UserR
         const done = doneText(s);
         const sameAsPrevious = i > 0 && doneText(row.statuses[i - 1]) === done;
         // ไปหน้าที่มีรายการรถของขั้นนั้นพร้อมเลขตัวถัง - หน้าปลายทางเลื่อนไปที่รถคันนี้และไฮไลต์ให้ (lib/vehicle-focus.ts)
-        // หน้ารับป้ายแยกแท็บรถยนต์/จักรยานยนต์ จึงบอกประเภทรถไปด้วย
-        const page = stagePageFor(s.stage, s.href);
-        const href = focusHref(page, row.chassis, s.stage === "plate" ? { kind: row.kind } : {});
+        // หน้ารับใบเสร็จ/รับป้าย/รับเล่มแยกหน้ารถยนต์/จักรยานยนต์ (.../car, .../moto) จึงต่อประเภทรถท้าย path
+        const base = stagePageFor(s.stage, s.href);
+        const page = ["receipt", "plate", "book"].includes(s.stage) ? `${base}/${row.kind}` : base;
+        const href = focusHref(page, row.chassis);
         return (
           <div key={s.stage}>
             {!sameAsPrevious && <div className="status-done">{done}</div>}

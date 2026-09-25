@@ -326,6 +326,21 @@ th.num-col{text-align:right}
 .receipt-check-table th,.receipt-check-table td{padding:10px 12px;vertical-align:top}
 .receipt-fields{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
 .receipt-fields>span:nth-child(odd){font-size:12px;color:#8a94a6;white-space:nowrap}
+/* ตารางตรวจใบเสร็จในพื้นที่แคบ (จอเล็ก/มีเมนูข้าง): ซ้อนแต่ละคันเป็น 2 บรรทัดแทนการเลื่อนขวา (ผู้ใช้ 2026-09-25) */
+.receipt-sheet-wrap{container-type:inline-size}
+@container (max-width:860px){
+.receipt-sheet-table thead{display:none}
+.receipt-sheet-table tr{display:grid;grid-template-columns:40px minmax(0,1fr) minmax(0,1fr);border-bottom:1px solid #f0f2f6}
+.receipt-sheet-table tbody tr:last-child{border-bottom:0}
+.receipt-sheet-table td{border:0;padding:8px 10px;min-width:0!important}
+.receipt-sheet-table td:nth-child(1){grid-row:span 2}
+.receipt-sheet-table td:nth-child(4){grid-column:2}
+}
+@container (max-width:520px){
+.receipt-sheet-table tr{grid-template-columns:32px minmax(0,1fr)}
+.receipt-sheet-table td:nth-child(1){grid-row:span 4}
+.receipt-sheet-table td:nth-child(n+2){grid-column:2}
+}
 .receipt-save-bar{position:sticky;bottom:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:12px 0;background:#fff;border-top:1px solid #dfe5f0;box-shadow:0 -6px 12px -8px rgba(15,23,42,.18)}
 /* หน้าที่ตารางกว้าง (หน้ารับใบเสร็จ) ใช้ความกว้างเต็มจอ ไม่จำกัด 1450px */
 .content.content-wide{max-width:none}
@@ -415,3 +430,24 @@ tr.row-selected td{background:#f3f6ff}
 .vehicle-search-filter,.vehicle-list-filter{display:flex;flex-wrap:wrap;align-items:flex-end}
 .vehicle-search-filter>.field,.vehicle-list-filter>.field{flex:1 1 180px;min-width:0}
 .vehicle-search-filter>.field:first-child,.vehicle-list-filter>.field:first-child{flex:2 1 260px}
+/* คิวรับป้าย/รับเล่ม: การ์ดใบยื่นแบบหน้ารับใบเสร็จ กดเพื่อกางตารางรถ (ผู้ใช้ 2026-09-26) */
+.queue-sheets{display:flex;flex-direction:column;gap:8px;padding:0 23px 20px}
+.queue-sheet{border:1px solid #dfe5f0;border-radius:8px;background:#fff;overflow:hidden}
+.queue-sheet.open{border:2px solid #2854d9}
+.queue-sheet.warn{border-color:#f0d9ae;background:#fffaf0}
+.queue-sheet.warn.open{border:2px solid #bb8527}
+.queue-sheet-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 14px;cursor:pointer;user-select:none}
+.queue-sheet-title{font-weight:600;color:#18243c;display:inline-flex;align-items:center}
+.queue-sheet-counts{color:#576781;display:inline-flex;align-items:center;flex-wrap:wrap}
+.queue-sheet .table-wrap{border-top:1px solid #dfe5f0;background:#fff}
+.queue-caret{display:inline-block;width:16px;color:#7b8aa3}
+.queue-warn{margin-left:10px;font-weight:600}
+.queue-filter{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end;padding:0 23px 14px}
+.queue-filter input[type="text"],.queue-filter select{width:100%;min-width:0}
+.queue-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 23px 14px;margin-bottom:14px;border-top:1px solid #f0f2f6;border-bottom:1px solid #f0f2f6}
+.queue-toolbar-group{display:inline-flex;align-items:center;flex-wrap:wrap;gap:16px}
+.queue-filter .field{gap:4px;min-width:0}
+.queue-check{margin:0 8px 0 0;vertical-align:middle;width:16px;height:16px;cursor:pointer}
+.queue-sort{display:inline-flex;border:1px solid #dce2ec;border-radius:8px;overflow:hidden}
+.queue-sort button{border:0;background:#fff;padding:9px 14px;font-size:13px;color:#46526a;cursor:pointer}
+.queue-sort button.active{background:#2854d9;color:#fff}

@@ -343,41 +343,54 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
 });
 
 describe('DocumentSubmissionService.updateReceiptDate - แก้วันที่ในใบเสร็จย้อนหลัง', () => {
-  function setup(status: string) {
+  function setup(status = 'RECEIPT_RECEIVED', receiptReceivedDate: Date | null = new Date('2026-09-24T00:00:00.000Z')) {
     const update = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
+    const create = vi.fn().mockResolvedValue({});
     const prisma = mockPrisma({
-      documentSubmission: { findUnique: vi.fn().mockResolvedValue({ status, vehicle: { body: 'รย.12-รถจักรยานยนต์' } }), update },
+      documentSubmission: {
+        findUnique: vi.fn().mockResolvedValue({
+          status,
+          vehicleId: 'v1',
+          submitDate: new Date('2026-09-20T00:00:00.000Z'),
+          receiptDate: new Date('2026-09-20T00:00:00.000Z'),
+          receiptReceivedDate,
+          vehicle: { body: 'รย.12-รถจักรยานยนต์' },
+        }),
+        update,
+      },
+      vehicleEditLog: { create },
+      $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     });
-    return { service: new DocumentSubmissionService(prisma, mockTaxService()), update };
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), update, create };
   }
 
-  it('ได้ใบเสร็จแล้ว: บันทึกวันที่ใหม่อย่างเดียว', async () => {
-    const { service, update } = setup('RECEIPT_RECEIVED');
-    await service.updateReceiptDate('sub1', '2026-09-22');
+  it('ได้ใบเสร็จแล้ว + มีเหตุผล: บันทึกวันที่ใหม่และเก็บประวัติพร้อมเหตุผล', async () => {
+    const { service, update, create } = setup();
+    await service.updateReceiptDate('sub1', '2026-09-22', 'AI อ่านวันที่ผิด');
     expect(update.mock.calls[0][0].data).toEqual({ receiptDate: new Date('2026-09-22T00:00:00.000Z') });
+    expect(create.mock.calls[0][0].data).toMatchObject({ vehicleId: 'v1', remark: 'AI อ่านวันที่ผิด' });
+    expect(JSON.parse(create.mock.calls[0][0].data.changes)).toEqual({ 'submission.receiptDate': { from: '2026-09-20', to: '2026-09-22' } });
   });
 
-  it('ยังไม่ได้ใบเสร็จ หรือวันที่ผิดรูปแบบ แก้ไม่ได้', async () => {
-    await expect(setup('PENDING').service.updateReceiptDate('sub1', '2026-09-22')).rejects.toThrow();
-    await expect(setup('RECEIPT_RECEIVED').service.updateReceiptDate('sub1', '2026/09/22')).rejects.toThrow();
+  it('ไม่มีเหตุผล / ยังไม่ได้ใบเสร็จ / วันที่ผิดรูปแบบ แก้ไม่ได้', async () => {
+    await expect(setup().service.updateReceiptDate('sub1', '2026-09-22', '  ')).rejects.toMatchObject({ response: { error: expect.stringContaining('เหตุผล') } });
+    await expect(setup('PENDING').service.updateReceiptDate('sub1', '2026-09-22', 'x')).rejects.toThrow();
+    await expect(setup().service.updateReceiptDate('sub1', '2026/09/22', 'x')).rejects.toThrow();
   });
-});
 
-describe('DocumentSubmissionService.updateReceiptDate - รูปแบบวันที่', () => {
-  function setup() {
-    const update = vi.fn().mockImplementation(async ({ data }) => ({ id: 'sub1', ...data }));
-    const prisma = mockPrisma({
-      documentSubmission: { findUnique: vi.fn().mockResolvedValue({ status: 'RECEIPT_RECEIVED', vehicle: { body: 'รย.1-รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน' } }), update },
-    });
-    return { service: new DocumentSubmissionService(prisma, mockTaxService()), update };
-  }
+  it('วันที่ต้องอยู่ระหว่างวันที่ยื่นกับวันที่รับใบเสร็จ และต้องเปลี่ยนจริง', async () => {
+    await expect(setup().service.updateReceiptDate('sub1', '2026-09-19', 'x')).rejects.toMatchObject({ response: { error: expect.stringContaining('20/09/2026') } });
+    await expect(setup().service.updateReceiptDate('sub1', '2026-09-25', 'x')).rejects.toMatchObject({ response: { error: expect.stringContaining('24/09/2026') } });
+    await expect(setup(undefined, null).service.updateReceiptDate('sub1', '2099-01-01', 'x')).rejects.toMatchObject({ response: { error: expect.stringContaining('วันนี้') } });
+    await expect(setup().service.updateReceiptDate('sub1', '20/09/2026', 'x')).rejects.toMatchObject({ response: { error: 'วันที่ไม่ได้เปลี่ยน' } });
+  });
 
   it('รับ DD-MM-YYYY / DD/MM/YYYY / ปี พ.ศ. และแจ้ง error เป็น DD/MM/YYYY', async () => {
     const { service, update } = setup();
-    await service.updateReceiptDate('sub1', '23-09-2026');
-    await service.updateReceiptDate('sub1', '23/09/2569');
+    await service.updateReceiptDate('sub1', '23-09-2026', 'x');
+    await service.updateReceiptDate('sub1', '23/09/2569', 'x');
     const saved = update.mock.calls.map((c) => c[0].data.receiptDate.toISOString().slice(0, 10));
     expect(saved).toEqual(['2026-09-23', '2026-09-23']);
-    await expect(service.updateReceiptDate('sub1', '31-02-2026')).rejects.toMatchObject({ response: { error: expect.stringContaining('DD/MM/YYYY') } });
+    await expect(service.updateReceiptDate('sub1', '31-02-2026', 'x')).rejects.toMatchObject({ response: { error: expect.stringContaining('DD/MM/YYYY') } });
   });
 });

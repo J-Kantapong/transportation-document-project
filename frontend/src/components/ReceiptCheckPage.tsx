@@ -9,15 +9,17 @@ import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
 import { DateInput } from "@/components/DateInput";
+import { jobSheetGroup } from "@/lib/job-sheet";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
 // พนักงานรถยนต์/มอเตอร์ไซค์แยกแท็บกัน. แนบรูปใบเสร็จให้แต่ละคัน -> ระบบนับ ยื่นไป/ได้ใบเสร็จ/ขาด ให้เห็นทันที
-// คันที่ขาด: รู้สาเหตุ = ยื่นไม่สำเร็จ (กลับไป Step 4 - กฎผู้ใช้ 2026-09-20), ยังไม่รู้ = ย้ายไป "ค้างจากใบก่อน"
+// คันที่ขาด: รู้สาเหตุ = ยื่นไม่สำเร็จ (กลับไป Step 4 - กฎผู้ใช้ 2026-09-20), ยังไม่รู้ = ค้างไว้ (receiptCarriedAt)
+// คันที่ค้างยังอยู่ในใบยื่นเดิม และใบนั้นขึ้นว่า "ยังขาด N คัน" (ผู้ใช้ 2026-09-25 - เดิมแยกไปกอง "ค้างจากใบก่อน" ดูยาก)
 
-type Tab = "car" | "moto";
-const TAB_STORAGE_KEY = "receipt-check-tab";
-const CARRIED_KEY = "__carried__";
+export type ReceiptKind = "car" | "moto";
+type Tab = ReceiptKind;
+export const RECEIPT_KIND_LABEL: Record<ReceiptKind, string> = { car: "รถยนต์", moto: "มอเตอร์ไซค์" };
 
 // สาเหตุที่ยังไม่ได้ใบเสร็จ (ผู้ใช้กำหนด) - ทุกสาเหตุ = ยื่นไม่สำเร็จ
 const MISSING_REASONS = [
@@ -29,11 +31,8 @@ const MISSING_REASONS = [
 ] as const;
 
 function sheetGroup(s: DocumentSubmission): { tab: Tab; label: string } {
-  const body = s.vehicle.body ?? "";
-  if (body.startsWith("รย.12-")) return { tab: "moto", label: s.urgent ? "มอเตอร์ไซค์ แบบด่วน" : "มอเตอร์ไซค์ แบบธรรมดา" };
-  if (body.startsWith("รย.1-")) return { tab: "car", label: s.urgent ? "รย.1 แบบด่วน" : "รย.1 แบบธรรมดา" };
-  if (body.startsWith("รย.2-") || body.startsWith("รย.3-")) return { tab: "car", label: "รย.2 และ รย.3" };
-  return { tab: "car", label: "ไม่ระบุประเภทรถ" };
+  const g = jobSheetGroup(s.vehicle.body, s.urgent);
+  return { tab: g.kind, label: g.label };
 }
 
 const sheetKey = (s: DocumentSubmission) => `${s.submitDate.slice(0, 10)}|${sheetGroup(s).label}|${s.vehicle.customer.name}`;
@@ -47,8 +46,9 @@ interface Sheet {
   rows: DocumentSubmission[]; // ทุกคันในใบ เรียงตามลำดับในใบที่ปริ้น (createdAt)
 }
 
-// คันที่ต้องตรวจในใบนี้ = ยังรอใบเสร็จและยังไม่ถูกย้ายไปค้าง
+// คันที่ยังไม่ได้ตรวจเลย กับคันที่ตรวจแล้วแต่ยังไม่ได้ใบเสร็จ (ค้าง) - ทั้งคู่ยังรอใบเสร็จ
 const isOpen = (s: DocumentSubmission) => s.status === "PENDING" && !s.receiptCarriedAt;
+const isCarried = (s: DocumentSubmission) => s.status === "PENDING" && !!s.receiptCarriedAt;
 
 interface RowInput {
   plateCategory: string;
@@ -244,15 +244,25 @@ function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (rece
   const current = s.receiptDate ? isoToDisplayDate(s.receiptDate.slice(0, 10)) : "";
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(current);
+  const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // วันที่ที่เป็นไปได้: ตั้งแต่วันที่ยื่น ถึงวันที่รับใบเสร็จกลับมา (หรือวันนี้) - backend ตรวจซ้ำ
+  const earliest = s.submitDate.slice(0, 10);
+  const received = s.receiptReceivedDate?.slice(0, 10);
+  const today = todayIso();
+  const latest = received && received < today ? received : today;
 
   async function save() {
     const iso = toIso(text);
     if (!iso) return setError("วันที่ไม่ถูกต้อง - ใส่เป็น DD/MM/YYYY เช่น 23/09/2026");
+    if (iso < earliest) return setError(`วันที่ในใบเสร็จต้องไม่ก่อนวันที่ยื่นเอกสาร (${isoToDisplayDate(earliest)})`);
+    if (iso > latest) return setError(latest === today ? "วันที่ในใบเสร็จต้องไม่เกินวันนี้" : `วันที่ในใบเสร็จต้องไม่หลังวันที่รับใบเสร็จ (${isoToDisplayDate(latest)})`);
+    if (iso === s.receiptDate?.slice(0, 10)) return setError("วันที่ไม่ได้เปลี่ยน");
+    if (!remark.trim()) return setError("ระบุเหตุผลที่แก้ เช่น AI อ่านวันที่ผิด");
     setSaving(true);
     try {
-      const updated = await api.updateReceiptDate(s.id, iso);
+      const updated = await api.updateReceiptDate(s.id, iso, remark.trim());
       onSaved(updated.receiptDate ?? `${iso}T00:00:00.000Z`);
       setEditing(false);
       setError("");
@@ -273,6 +283,7 @@ function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (rece
           style={{ fontSize: 12, padding: 0 }}
           onClick={() => {
             setText(current);
+            setRemark("");
             setError("");
             setEditing(true);
           }}
@@ -292,6 +303,15 @@ function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (rece
           style={{ width: 110 }}
           autoFocus
         />
+        <input
+          type="text"
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          placeholder="เหตุผลที่แก้ (บังคับ)"
+          aria-label="เหตุผลที่แก้วันที่ในใบเสร็จ"
+          maxLength={200}
+          style={{ width: 180 }}
+        />
         <button type="button" className="primary" style={{ padding: "6px 10px", fontSize: 12 }} disabled={saving} onClick={save}>
           {saving ? "…" : "บันทึก"}
         </button>
@@ -299,6 +319,9 @@ function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (rece
           ยกเลิก
         </button>
       </div>
+      <span style={{ fontSize: 11, color: "#8a94a6" }}>
+        ใส่ได้ {isoToDisplayDate(earliest)} - {isoToDisplayDate(latest)} (วันที่ยื่น ถึง {latest === today ? "วันนี้" : "วันที่รับใบเสร็จ"})
+      </span>
       {error && <span style={{ fontSize: 11, color: "#b43434" }}>{error}</span>}
     </div>
   );
@@ -315,9 +338,9 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
-export function ReceiptCheckPage() {
-  const [tab, setTab] = useState<Tab>("car");
-  const [pending, setPending] = useState<DocumentSubmission[]>([]);
+// รถยนต์กับมอเตอร์ไซค์แยกหน้ากัน (ผู้ใช้ 2026-09-25): /receive-receipt เป็นหน้าเลือกประเภท แล้วเข้า /car หรือ /moto
+export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
+  const tab = kind;
   const [sheetRows, setSheetRows] = useState<DocumentSubmission[]>([]); // ทุกคันของวันที่ที่มีใบยื่นค้างตรวจ
   const [completed, setCompleted] = useState<DocumentSubmission[]>([]);
   const [receipts, setReceipts] = useState<Record<string, ReceiptSummary[]>>({});
@@ -338,11 +361,10 @@ export function ReceiptCheckPage() {
     setError("");
     try {
       const [p, c] = await Promise.all([api.listDocumentSubmissions(undefined, "PENDING"), api.listDocumentSubmissions(undefined, "RECEIPT_RECEIVED")]);
-      // ใบยื่นต้องแสดงครบทุกคันตามกระดาษ (รวมคันที่ได้ใบเสร็จ/ยื่นไม่สำเร็จไปแล้ว) - โหลดทุกสถานะของวันที่ที่ยังมีคันค้างตรวจ
-      const dates = [...new Set(p.submissions.filter(isOpen).map((s) => s.submitDate.slice(0, 10)))];
+      // ใบยื่นต้องแสดงครบทุกคันตามกระดาษ (รวมคันที่ได้ใบเสร็จ/ยื่นไม่สำเร็จไปแล้ว) - โหลดทุกสถานะของวันที่ที่ยังมีคันรอใบเสร็จ (รวมคันค้าง)
+      const dates = [...new Set(p.submissions.map((s) => s.submitDate.slice(0, 10)))];
       const byDate = await Promise.all(dates.map((d) => api.listDocumentSubmissions(d)));
       const all = [...byDate.flatMap((r) => r.submissions), ...p.submissions, ...c.submissions];
-      setPending(p.submissions);
       setSheetRows(byDate.flatMap((r) => r.submissions));
       setCompleted(c.submissions);
       setReceipts(Object.fromEntries(all.map((s) => [s.id, s.receipts ?? []])));
@@ -358,16 +380,13 @@ export function ReceiptCheckPage() {
         ),
       );
       setRowErrors({});
-      // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกแท็บและเปิดใบยื่นที่มีรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น
+      // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เปิดใบยื่นที่มีรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น
       // (loadAll ถูกเรียกซ้ำหลังบันทึก ห้ามดึงพนักงานกลับไปใบเดิม) FocusVehicleRow เลื่อนไปที่แถวต่อเอง
       if (!focusApplied.current) {
         focusApplied.current = true;
         const chassis = focusChassis();
-        const target = chassis ? p.submissions.find((s) => sameChassis(s.vehicle.chassis, chassis)) : undefined;
-        if (target) {
-          setTab(sheetGroup(target).tab);
-          setOpenKey(target.receiptCarriedAt ? CARRIED_KEY : sheetKey(target));
-        }
+        const target = chassis ? p.submissions.find((s) => sheetGroup(s).tab === tab && sameChassis(s.vehicle.chassis, chassis)) : undefined;
+        if (target) setOpenKey(sheetKey(target));
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
@@ -377,22 +396,10 @@ export function ReceiptCheckPage() {
   }
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(TAB_STORAGE_KEY);
-      if (saved === "car" || saved === "moto") setTab(saved);
-    } catch {}
     loadAll();
   }, []);
 
-  function switchTab(next: Tab) {
-    setTab(next);
-    setOpenKey(null);
-    try {
-      window.localStorage.setItem(TAB_STORAGE_KEY, next);
-    } catch {}
-  }
-
-  const sheets = useMemo(() => {
+  const allSheets = useMemo(() => {
     const map = new Map<string, Sheet>();
     for (const s of [...sheetRows].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
       const key = sheetKey(s);
@@ -403,22 +410,19 @@ export function ReceiptCheckPage() {
       map.get(key)!.rows.push(s);
     }
     return [...map.values()]
-      .filter((sh) => sh.tab === tab && sh.rows.some(isOpen))
+      .filter((sh) => sh.tab === tab && sh.rows.some((s) => s.status === "PENDING"))
       .sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label, "th") || a.owner.localeCompare(b.owner, "th"));
   }, [sheetRows, tab]);
+  // ใบยื่นที่คีย์ล่วงหน้า (วันที่ยื่นยังไม่ถึง) ยังไม่มีใบเสร็จแน่นอน - ไม่ให้ปนในรายการรอตรวจ บอกไว้เป็นบรรทัดสรุปแทน
+  const today = todayIso();
+  const sheets = allSheets.filter((sh) => sh.date <= today);
+  const futureSheets = allSheets.filter((sh) => sh.date > today);
+  const completedInTab = completed.filter((s) => sheetGroup(s).tab === tab);
 
-  const carried = useMemo(
-    () => pending.filter((s) => s.receiptCarriedAt && sheetGroup(s).tab === tab).sort((a, b) => a.submitDate.localeCompare(b.submitDate)),
-    [pending, tab],
-  );
+  const openSheet: Sheet | null = allSheets.find((sh) => sh.key === openKey) ?? null;
 
-  const openSheet: Sheet | null =
-    openKey === CARRIED_KEY
-      ? { key: CARRIED_KEY, tab, date: "", label: "ค้างจากใบก่อน", owner: "", rows: carried }
-      : (sheets.find((sh) => sh.key === openKey) ?? null);
-
-  // คันที่พนักงานต้องตัดสินในใบที่เปิดอยู่
-  const activeRows = openSheet ? openSheet.rows.filter((s) => s.status === "PENDING" && (openSheet.key === CARRIED_KEY || !s.receiptCarriedAt)) : [];
+  // คันที่พนักงานต้องตัดสินในใบที่เปิดอยู่ (รวมคันที่ค้างจากรอบก่อน)
+  const activeRows = openSheet ? openSheet.rows.filter((s) => s.status === "PENDING") : [];
   const hasPhoto = (id: string) => (receipts[id] ?? []).length > 0;
   const gotCount = openSheet ? openSheet.rows.filter((s) => s.status === "RECEIPT_RECEIVED" || (activeRows.includes(s) && hasPhoto(s.id))).length : 0;
   const missingRows = activeRows.filter((s) => !hasPhoto(s.id));
@@ -483,7 +487,7 @@ export function ReceiptCheckPage() {
         const remark = input.reason === "อื่นๆ" ? input.otherText.trim() : input.reason;
         if (!remark) errors[s.id] = "ระบุสาเหตุ";
         else entries.push({ submissionId: s.id, action: "FAILED", failRemark: input.reason === "อื่นๆ" ? `อื่นๆ: ${remark}` : remark });
-      } else if (openSheet.key !== CARRIED_KEY) {
+      } else if (!s.receiptCarriedAt) {
         entries.push({ submissionId: s.id, action: "CARRY" });
       }
     }
@@ -503,8 +507,8 @@ export function ReceiptCheckPage() {
     const got = entries.filter((e) => e.action === "RECEIVED").length;
     const failed = entries.filter((e) => e.action === "FAILED").length;
     const carry = entries.filter((e) => e.action === "CARRY").length;
-    const summary = [`ได้ใบเสร็จ ${got} คัน`, failed ? `ยื่นไม่สำเร็จ ${failed} คัน (กลับไป Step 4)` : "", carry ? `ค้างไว้ ${carry} คัน` : ""].filter(Boolean).join("\n");
-    if (!window.confirm(`บันทึก${openSheet.key === CARRIED_KEY ? "รายการค้าง" : "ใบยื่นนี้"}?\n\n${summary}`)) return;
+    const summary = [`ได้ใบเสร็จ ${got} คัน`, failed ? `ยื่นไม่สำเร็จ ${failed} คัน (กลับไป Step 4)` : "", carry ? `ยังขาด (ค้างไว้ในใบนี้) ${carry} คัน` : ""].filter(Boolean).join("\n");
+    if (!window.confirm(`บันทึกใบยื่นนี้?\n\n${summary}`)) return;
 
     setSaving(true);
     setMessage({ text: "กำลังบันทึก…" });
@@ -532,10 +536,10 @@ export function ReceiptCheckPage() {
 
   return (
     <section className="content content-wide">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
+      <Link href="/registration/new-vehicle/receive-receipt" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+        ← เลือกประเภทรถ
       </Link>
-      <h1 tabIndex={-1}>รับใบเสร็จ</h1>
+      <h1 tabIndex={-1}>รับใบเสร็จ · {RECEIPT_KIND_LABEL[tab]}</h1>
 
       {/* อยู่บนสุดให้เห็นเสมอ - คนถ่ายใบเสร็จไม่ต้องเปิดใบยื่นก่อน รูปที่ถ่ายจะจับคู่กับรถเอง หรือไปรอในถาดของใบยื่น */}
       <Link
@@ -545,26 +549,6 @@ export function ReceiptCheckPage() {
       >
         📷 ถ่ายใบเสร็จจากมือถือ
       </Link>
-
-      <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center", flexWrap: "wrap" }}>
-        {(
-          [
-            ["car", "รถยนต์"],
-            ["moto", "มอเตอร์ไซค์"],
-          ] as Array<[Tab, string]>
-        ).map(([t, label]) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => switchTab(t)}
-            className={tab === t ? "primary" : undefined}
-            style={tab === t ? undefined : { border: "1px solid #dce2ec", background: "#fff", padding: "12px 20px", borderRadius: 8 }}
-            aria-pressed={tab === t}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -602,56 +586,54 @@ export function ReceiptCheckPage() {
           <div className="empty-customers" role="alert">
             {error}
           </div>
-        ) : sheets.length === 0 && carried.length === 0 ? (
+        ) : sheets.length === 0 && futureSheets.length === 0 ? (
           <div className="empty-customers">ไม่มีใบยื่นที่รอใบเสร็จ</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 23px 20px" }}>
             {sheets.map((sh) => {
-              const open = sh.rows.filter(isOpen);
-              const withPhoto = open.filter((s) => hasPhoto(s.id)).length;
+              const open = sh.rows.filter(isOpen).length;
+              const short = sh.rows.filter(isCarried).length; // ตรวจไปแล้วแต่ยังไม่ได้ใบเสร็จ
+              const got = sh.rows.filter((s) => s.status === "RECEIPT_RECEIVED").length;
+              const withPhoto = sh.rows.filter((s) => s.status === "PENDING" && hasPhoto(s.id)).length;
+              const selected = openKey === sh.key;
               return (
                 <button
                   key={sh.key}
                   type="button"
-                  onClick={() => setOpenKey(openKey === sh.key ? null : sh.key)}
+                  onClick={() => setOpenKey(selected ? null : sh.key)}
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
                     gap: 12,
                     textAlign: "left",
                     padding: "12px 14px",
                     borderRadius: 8,
-                    border: openKey === sh.key ? "2px solid #2854d9" : "1px solid #dfe5f0",
-                    background: "#fff",
+                    border: selected ? `2px solid ${short ? "#bb8527" : "#2854d9"}` : `1px solid ${short ? "#f0d9ae" : "#dfe5f0"}`,
+                    background: short ? "#fffaf0" : "#fff",
                     cursor: "pointer",
                   }}
                 >
                   <span style={{ fontWeight: 600 }}>{sheetTitle(sh)}</span>
-                  <span style={{ color: "#576781", whiteSpace: "nowrap" }}>
-                    {sh.rows.length} คัน · รอตรวจ {open.length} · แนบรูปแล้ว {withPhoto}
+                  <span style={{ display: "inline-flex", gap: 10, alignItems: "center", color: "#576781", whiteSpace: "nowrap" }}>
+                    {sh.rows.length} คัน{got > 0 && ` · ได้ใบเสร็จ ${got}`}
+                    {open > 0 && ` · รอตรวจ ${open}`}
+                    {withPhoto > 0 && ` · แนบรูปแล้ว ${withPhoto}`}
+                    {short > 0 && (
+                      <span className="badge warn" style={{ fontWeight: 600 }}>
+                        ยังขาด {short} คัน
+                      </span>
+                    )}
                   </span>
                 </button>
               );
             })}
-            {carried.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setOpenKey(openKey === CARRIED_KEY ? null : CARRIED_KEY)}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  textAlign: "left",
-                  padding: "12px 14px",
-                  borderRadius: 8,
-                  border: openKey === CARRIED_KEY ? "2px solid #bb8527" : "1px solid #f0d9ae",
-                  background: "#fffaf0",
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ fontWeight: 600 }}>ค้างจากใบก่อน</span>
-                <span style={{ color: "#bb8527" }}>{carried.length} คัน</span>
-              </button>
+            {futureSheets.length > 0 && (
+              <div className="customer-message" style={{ fontSize: 13 }}>
+                ยังไม่ถึงวันยื่น {futureSheets.length} ใบ (
+                {futureSheets.map((sh) => `${isoToDisplayDate(sh.date)} ${sh.label} · ${sh.owner} ${sh.rows.length} คัน`).join(", ")}) - จะขึ้นให้ตรวจเมื่อถึงวันยื่น
+              </div>
             )}
           </div>
         )}
@@ -660,11 +642,11 @@ export function ReceiptCheckPage() {
       {openSheet && (
         <section className="panel" style={{ marginTop: 20 }}>
           <div className="panel-head">
-            <h2>{openSheet.key === CARRIED_KEY ? "ค้างจากใบก่อน" : sheetTitle(openSheet)}</h2>
+            <h2>{sheetTitle(openSheet)}</h2>
           </div>
           <div style={{ padding: "0 23px 20px" }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-              <Metric label={openSheet.key === CARRIED_KEY ? "ค้างอยู่" : "ยื่นไป"} value={`${openSheet.rows.length} คัน`} />
+              <Metric label="ยื่นไป" value={`${openSheet.rows.length} คัน`} />
               <Metric label="ได้ใบเสร็จ" value={`${gotCount} ใบ`} tone="ok" />
               <Metric label="ขาด" value={`${missingRows.length} คัน`} tone={missingRows.length > 0 ? "warn" : undefined} />
               {aiChecked.length > 0 && <Metric label="AI ตรวจแล้ว ตรงทุกอย่าง" value={`${aiAllGood} คัน`} tone="ok" />}
@@ -674,17 +656,17 @@ export function ReceiptCheckPage() {
             <ReceiptBatchPanel
               targets={activeRows.map((s) => ({
                 id: s.id,
-                label: `${openSheet.key === CARRIED_KEY ? isoToDisplayDate(s.submitDate.slice(0, 10)) : `ลำดับ ${openSheet.rows.indexOf(s) + 1}`} · ${s.vehicle.chassis}`,
+                label: `ลำดับ ${openSheet.rows.indexOf(s) + 1} · ${s.vehicle.chassis}`,
               }))}
               onAssigned={addReceipt}
             />
 
             {/* ตารางแบบกระชับ (ผู้ใช้ 2026-09-25: ไม่ต้องเลื่อนขวา) - ข้อมูลเท่าเดิม แต่ซ้อนเป็นบรรทัดในช่องเดียวกัน */}
-            <div className="table-wrap" style={{ marginTop: 16 }}>
-              <table className="receipt-check-table">
+            <div className="table-wrap receipt-sheet-wrap" style={{ marginTop: 16 }}>
+              <table className="receipt-check-table receipt-sheet-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 44 }}>{openSheet.key === CARRIED_KEY ? "วันที่ยื่น" : "ลำดับ"}</th>
+                    <th style={{ width: 44 }}>ลำดับ</th>
                     <th>รถ / รูปใบเสร็จ</th>
                     <th>ข้อมูลตามใบเสร็จ</th>
                     <th>ยอดเงิน</th>
@@ -705,13 +687,17 @@ export function ReceiptCheckPage() {
                     const editable = active && input;
                     return (
                       <tr key={s.id} style={active && !photo ? { background: "#fffaf0" } : !active ? { opacity: 0.6 } : undefined}>
-                        <td>{openSheet.key === CARRIED_KEY ? isoToDisplayDate(s.submitDate.slice(0, 10)) : i + 1}</td>
+                        <td>{i + 1}</td>
                         <td>
                           <div style={{ fontFamily: "monospace" }}>{s.vehicle.chassis}</div>
                           <div style={{ fontSize: 11, color: "#8a94a6", marginBottom: 6 }}>
                             {s.vehicle.brand.name}
-                            {openSheet.key === CARRIED_KEY ? ` · ${s.vehicle.customer.name}` : ""}
                           </div>
+                          {isCarried(s) && (
+                            <div style={{ marginBottom: 6 }}>
+                              <span className="badge warn">ยังขาด - ค้างจากรอบก่อน</span>
+                            </div>
+                          )}
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={active ? (rid) => removeReceipt(s.id, rid) : undefined} />
                           {active && (() => {
                             const dup = duplicateOf(receipts[s.id]);
@@ -739,7 +725,6 @@ export function ReceiptCheckPage() {
                               <div style={{ display: "flex", gap: 6 }}>
                                 <input
                                   type="text"
-                                  placeholder="8ขก"
                                   maxLength={3}
                                   value={input.plateCategory}
                                   onChange={(e) => patchInput(s.id, { plateCategory: e.target.value.slice(0, 3) })}
@@ -749,7 +734,6 @@ export function ReceiptCheckPage() {
                                 <input
                                   type="text"
                                   inputMode="numeric"
-                                  placeholder="3484"
                                   maxLength={4}
                                   value={input.plateNumber}
                                   onChange={(e) => patchInput(s.id, { plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
@@ -766,7 +750,6 @@ export function ReceiptCheckPage() {
                                 <input
                                   type="text"
                                   inputMode="numeric"
-                                  placeholder="69/0035358"
                                   maxLength={30}
                                   value={input.receiptNo}
                                   onChange={(e) => patchInput(s.id, { receiptNo: e.target.value.replace(/[^\d/]/g, "") })}
@@ -844,7 +827,7 @@ export function ReceiptCheckPage() {
                                 aria-label="สาเหตุที่ยังไม่ได้ใบเสร็จ"
                                 style={{ width: "100%" }}
                               >
-                                <option value="">{openSheet.key === CARRIED_KEY ? "ยังรอใบเสร็จ" : "ยังไม่ทราบ - ค้างไว้"}</option>
+                                <option value="">{s.receiptCarriedAt ? "ยังรอใบเสร็จ - ค้างไว้ต่อ" : "ยังไม่ทราบ - ค้างไว้"}</option>
                                 {MISSING_REASONS.map((r) => (
                                   <option key={r} value={r}>
                                     ยื่นไม่สำเร็จ: {r}
@@ -894,14 +877,12 @@ export function ReceiptCheckPage() {
             {/* ปุ่มบันทึกติดขอบล่างจอ - ตรวจแถวไหนอยู่ก็กดยืนยันได้โดยไม่ต้องเลื่อนลงไปท้ายตาราง */}
             <div className="receipt-save-bar">
               <span className="customer-message" style={{ fontSize: 13 }}>
-                {openSheet.key === CARRIED_KEY
-                  ? "คันที่ยังรอใบเสร็จจะอยู่ในรายการนี้ต่อ"
-                  : "คันที่ไม่มีใบเสร็จและยังไม่ทราบสาเหตุ จะย้ายไป \"ค้างจากใบก่อน\""}
+                คันที่ไม่มีใบเสร็จและยังไม่ทราบสาเหตุ จะค้างอยู่ในใบนี้ และขึ้นว่า &quot;ยังขาด&quot; ในรายการด้านบน
               </span>
               <span style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <span>วันที่รับใบเสร็จ {dateText}</span>
                 <button type="button" className="primary" disabled={saving} onClick={handleSave}>
-                  {saving ? "กำลังบันทึก…" : openSheet.key === CARRIED_KEY ? "บันทึกรายการค้าง" : `บันทึกใบยื่นนี้ (ได้ใบเสร็จ ${activeRows.filter((s) => hasPhoto(s.id)).length} คัน)`}
+                  {saving ? "กำลังบันทึก…" : `บันทึกใบยื่นนี้ (ได้ใบเสร็จ ${activeRows.filter((s) => hasPhoto(s.id)).length} คัน)`}
                 </button>
               </span>
             </div>
@@ -911,9 +892,9 @@ export function ReceiptCheckPage() {
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-head">
-          <h2>ได้ใบเสร็จแล้ว (ล่าสุด {completed.length})</h2>
+          <h2>ได้ใบเสร็จแล้ว (ล่าสุด {completedInTab.length})</h2>
         </div>
-        {completed.length === 0 ? (
+        {completedInTab.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการที่ได้ใบเสร็จ</div>
         ) : (
           <div className="table-wrap">
@@ -933,9 +914,7 @@ export function ReceiptCheckPage() {
                 </tr>
               </thead>
               <tbody>
-                {completed
-                  .filter((s) => sheetGroup(s).tab === tab)
-                  .map((s) => {
+                {completedInTab.map((s) => {
                     const bill = billOf(s);
                     return (
                       <tr key={s.id}>

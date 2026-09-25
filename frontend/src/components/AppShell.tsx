@@ -38,6 +38,16 @@ const SUBTASKS_BY_CATEGORY: Record<string, RegistrationSubtask[]> = {
   "/registration/yamaha-relocation": YAMAHA_RELOCATION_SUBTASKS,
 };
 
+// หน้าย่อยใต้ขั้นตอนที่ควรขึ้นใน breadcrumb ด้วย (รับใบเสร็จ/ป้าย/เล่มแยกหน้ารถยนต์/มอเตอร์ไซค์ ผู้ใช้ 2026-09-25/26)
+const DETAIL_CRUMBS: Record<string, string> = {
+  "/registration/new-vehicle/receive-receipt/car": "รถยนต์",
+  "/registration/new-vehicle/receive-receipt/moto": "มอเตอร์ไซค์",
+  "/registration/new-vehicle/receive-plate/car": "รถยนต์",
+  "/registration/new-vehicle/receive-plate/moto": "มอเตอร์ไซค์",
+  "/registration/new-vehicle/receive-book/car": "รถยนต์",
+  "/registration/new-vehicle/receive-book/moto": "มอเตอร์ไซค์",
+};
+
 function within(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -54,6 +64,8 @@ function breadcrumbs(pathname: string): Crumb[] {
   const crumbs: Crumb[] = [{ label: category.title, href: category.href }];
   const subtask = SUBTASKS_BY_CATEGORY[category.href]?.find((s) => within(pathname, s.href));
   if (subtask) crumbs.push({ label: subtask.title, href: subtask.href });
+  const detail = Object.entries(DETAIL_CRUMBS).find(([href]) => within(pathname, href));
+  if (detail) crumbs.push({ label: detail[1], href: detail[0] });
   return crumbs;
 }
 
