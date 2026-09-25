@@ -211,7 +211,14 @@ export function SubmittedRecordsView({
   const inDate = useMemo(() => (date ? records.filter((r) => r.submitDate.slice(0, 10) === date) : records), [records, date]);
   const owners = useMemo(() => Array.from(new Set(inDate.map((r) => r.vehicle.customer.name))).sort((a, b) => a.localeCompare(b, "th")), [inDate]);
   const owner = owners.includes(ownerChoice) ? ownerChoice : "";
-  const filtered = useMemo(() => (owner ? inDate.filter((r) => r.vehicle.customer.name === owner) : inDate), [inDate, owner]);
+  // คันที่ยื่นก่อนอยู่บนสุด (ตาราง + ใบส่งงานที่ปริ้นใช้ลำดับเดียวกัน)
+  const filtered = useMemo(
+    () =>
+      (owner ? inDate.filter((r) => r.vehicle.customer.name === owner) : inDate)
+        .slice()
+        .sort((a, b) => a.submitDate.localeCompare(b.submitDate) || a.createdAt.localeCompare(b.createdAt)),
+    [inDate, owner],
+  );
 
   // ยื่นไม่สำเร็จ (FAILED) แยกออกจากตารางตามแบบใบส่งงาน ไปอยู่ตารางล่างสุดของแท็บตัวเอง
   const byFamily = useMemo(() => {
