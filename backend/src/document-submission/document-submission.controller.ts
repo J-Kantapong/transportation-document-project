@@ -40,10 +40,10 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.saveReceiptCheck(body);
   }
 
-  // แก้วันที่ในใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ปุ่มแก้ในตาราง "ได้ใบเสร็จแล้ว") - แก้ได้เฉพาะช่องนี้
+  // แก้วันที่ในใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ปุ่มแก้ในตาราง "ได้ใบเสร็จแล้ว") - แก้ได้เฉพาะช่องนี้ ต้องมี remark
   @Patch('document-submission/:id/receipt-date')
-  updateReceiptDate(@Param('id') id: string, @Body() body: { receiptDate?: unknown }) {
-    return this.documentSubmissionService.updateReceiptDate(id, body?.receiptDate);
+  updateReceiptDate(@Param('id') id: string, @Body() body: { receiptDate?: unknown; remark?: unknown }) {
+    return this.documentSubmissionService.updateReceiptDate(id, body?.receiptDate, body?.remark);
   }
 
   // ยกเลิกรายการที่ยังรอใบเสร็จ ให้รถกลับไปยื่นใหม่ได้ ต้องมี remark - ดู DocumentSubmissionService.cancel

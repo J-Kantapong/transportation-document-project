@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { BookPhotosService } from './book-photos.service.js';
@@ -7,33 +7,16 @@ import { BookPhotosService } from './book-photos.service.js';
 export class BookPhotosController {
   constructor(private readonly bookPhotosService: BookPhotosService) {}
 
-  // multipart/form-data: file = รูปเล่มทะเบียน (เล่มเดียวหรือหลายเล่มในรูปเดียว)
-  // background=1 = เก็บรูปแล้วตอบทันที AI อ่านทีหลัง - หน้าเว็บดูผลจาก GET open (readPending)
-  @Post()
+  // multipart/form-data: file = รูปเล่มทะเบียนของรถคันนี้, vehicleId, date = YYYY-MM-DD -> บันทึกรับทันที (ไม่มี AI แล้ว)
+  @Post('attach')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
-  upload(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { background?: unknown }) {
-    return this.bookPhotosService.upload(file, body?.background);
-  }
-
-  @Get('open')
-  listOpen() {
-    return this.bookPhotosService.listOpen();
+  attach(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { vehicleId?: unknown; date?: unknown }) {
+    return this.bookPhotosService.attach(file, body?.vehicleId, body?.date);
   }
 
   @Get(':id/image')
   async image(@Param('id') id: string) {
     const { data, mimeType } = await this.bookPhotosService.getImage(id);
     return new StreamableFile(data, { type: mimeType, disposition: 'inline' });
-  }
-
-  // { date: 'YYYY-MM-DD', items: [{ vehicleId, photoId }], closePhotoIds: [...] }
-  @Post('confirm')
-  confirm(@Body() body: { date?: unknown; items?: unknown; closePhotoIds?: unknown }) {
-    return this.bookPhotosService.confirm(body);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.bookPhotosService.remove(id);
   }
 }

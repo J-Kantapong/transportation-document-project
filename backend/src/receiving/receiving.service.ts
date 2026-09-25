@@ -35,7 +35,8 @@ const VEHICLE_INCLUDE = {
   customer: { select: { name: true } },
   brand: { select: { name: true } },
   // แถวล่าสุดแถวเดียวพอ - ใช้เช็คว่าได้รับใบเสร็จแล้วหรือยัง (ขั้น plate/book ต้องมีใบเสร็จก่อน)
-  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true, receiptNo: true } },
+  // submitDate + urgent = ใบยื่นที่รถคันนี้อยู่ (หน้ารับป้าย/รับเล่มจัดกลุ่มตามใบยื่น ผู้ใช้ 2026-09-26)
+  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true } },
 } as const;
 
 // รับป้ายทะเบียน/รับเล่มทะเบียน เข้าคิวเมื่อได้รับใบเสร็จแล้ว (ยื่นเอกสารครั้งล่าสุด = RECEIPT_RECEIVED)
@@ -69,7 +70,7 @@ export class ReceivingService {
       deliveryNote: string | null;
       customer: { name: string };
       brand: { name: string };
-      documentSubmissions: Array<{ receiptNo?: string | null }>;
+      documentSubmissions: Array<{ receiptNo?: string | null; submitDate?: Date; urgent?: boolean; createdAt?: Date }>;
     },
   ) {
     const doneDate = vehicle[DONE_DATE_FIELD[step]];
@@ -83,6 +84,10 @@ export class ReceivingService {
       plateCategory: vehicle.plateCategory,
       plateNumber: vehicle.plateNumber,
       receiptNo: vehicle.documentSubmissions[0]?.receiptNo ?? null, // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด - เรียงไปห้องรับป้าย
+      submitDate: vehicle.documentSubmissions[0]?.submitDate?.toISOString().slice(0, 10) ?? null, // วันที่ยื่นของใบยื่นล่าสุด
+      urgent: vehicle.documentSubmissions[0]?.urgent ?? false,
+      // ลำดับที่บันทึกยื่น (= ลำดับในใบส่งงานที่ปริ้น) - หน้ารับป้าย/รับเล่มเรียงตามนี้เป็นค่าเริ่มต้น
+      submittedAt: vehicle.documentSubmissions[0]?.createdAt?.toISOString() ?? null,
       platePhotoId: step === 'plate' ? vehicle.platePhotoId : null, // รูปป้ายที่ใช้ยืนยันการรับป้าย (หลักฐาน)
       bookPhotoId: step === 'book' ? vehicle.bookPhotoId : null, // รูปเล่มที่ใช้ยืนยันการรับเล่ม (หลักฐาน)
       doneDate: doneDate?.toISOString().slice(0, 10) ?? null,
@@ -117,13 +122,13 @@ export class ReceivingService {
 
   async markDone(id: string, stepRaw: string, dto: { date?: unknown; recipient?: unknown; note?: unknown }) {
     const step = parseStep(stepRaw);
-    // ผู้ใช้ 2026-09-21: รับป้ายต้องมีรูปป้ายทุกคัน -> ยืนยันได้ทางเดียวคือ POST /api/plate-photos/confirm (ติ๊กเองปิดแล้ว)
+    // ผู้ใช้ 2026-09-21: รับป้ายต้องมีรูปป้ายทุกคัน -> บันทึกได้ทางเดียวคือ POST /api/plate-photos/attach (ติ๊กเองปิดแล้ว)
     if (step === 'plate') {
-      throw new BadRequestException({ error: 'รับป้ายทะเบียนต้องยืนยันด้วยรูปป้ายทุกคัน - ถ่ายรูปป้ายแล้วกดยืนยันในส่วนถ่ายรูปป้าย' });
+      throw new BadRequestException({ error: 'รับป้ายทะเบียนต้องแนบรูปป้ายทุกคัน - กด "แนบรูปป้าย" ที่แถวของรถคันนั้น' });
     }
-    // รับเล่มใช้วิธีเดียวกับรับป้าย (ต้องมีรูปเล่มทุกคัน) -> ยืนยันได้ทางเดียวคือ POST /api/book-photos/confirm
+    // รับเล่มใช้วิธีเดียวกับรับป้าย (ต้องมีรูปเล่มทุกคัน) -> บันทึกได้ทางเดียวคือ POST /api/book-photos/attach
     if (step === 'book') {
-      throw new BadRequestException({ error: 'รับเล่มทะเบียนต้องยืนยันด้วยรูปเล่มทุกคัน - ถ่ายรูปเล่มแล้วกดยืนยันในส่วนถ่ายรูปเล่ม' });
+      throw new BadRequestException({ error: 'รับเล่มทะเบียนต้องแนบรูปเล่มทุกคัน - กด "แนบรูปเล่ม" ที่แถวของรถคันนั้น' });
     }
     const date = parseIsoDate(dto?.date);
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: VEHICLE_INCLUDE });

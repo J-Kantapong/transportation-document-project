@@ -5,7 +5,7 @@ import { currentUser } from './request-context.js';
 // ขอบเขตประเภทรถของขั้น 4-8 (ยื่นเอกสาร -> Delivery) ตามบทบาท (ผู้ใช้ 2026-09-22):
 // STAFF_CAR เห็น/แก้เฉพาะรถยนต์, STAFF_MOTO เฉพาะจักรยานยนต์, ถือทั้งคู่หรือ ADMIN/ACCOUNTANT/DELIVERY = ทุกคัน
 // ประเภทรถดูจาก Vehicle.body ขึ้นต้น "รย.12-" = จักรยานยนต์ (กฎเดียวกับ document-fee-calculator.isMotorcycle
-// และ frontend PlatePhotoPanel.isMotorcycleBody) - body ว่างนับเป็นรถยนต์
+// และ frontend lib/vehicle-kind.ts isMotorcycleBody) - body ว่างนับเป็นรถยนต์
 export type VehicleKind = 'car' | 'moto';
 export type VehicleScope = 'ALL' | 'CAR' | 'MOTO' | 'NONE';
 
