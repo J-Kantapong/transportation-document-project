@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { FUEL_TYPES, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
+import { DateInput } from "@/components/DateInput";
 
 type Source = "VEHICLE" | "MANUAL";
 
@@ -727,15 +728,12 @@ function DateTextInput({
   label?: string;
 }) {
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      placeholder="วว/ดด/ปปปป"
+    <DateInput
       aria-label={label}
       className={className}
       required={required}
       value={value}
-      onChange={(e) => onChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+      onChange={(value) => onChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
     />
   );
 }

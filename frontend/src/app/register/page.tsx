@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Icon } from "@/components/Icon";
+import { PageTabs } from "@/components/PageTabs";
 import { ApiError } from "@/lib/api";
 import { ROLE_LABELS, STAFF_REQUESTABLE_ROLES, type UserRole } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
@@ -25,7 +26,8 @@ const EMPTY = {
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [kind, setKind] = useState<Kind>("STAFF");
+  // แท็บเป็น URL ของตัวเอง (ผู้ใช้ 2026-09-25): /register = พนักงาน, /register/customer = ลูกค้า
+  const kind: Kind = usePathname().endsWith("/customer") ? "CUSTOMER" : "STAFF";
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -76,20 +78,13 @@ export default function RegisterPage() {
         <h1>สมัครใช้งาน</h1>
         <p>หลังสมัคร ผู้ดูแลระบบจะตรวจสอบและอนุมัติก่อนจึงจะเข้าสู่ระบบได้</p>
 
-        <div className="vehicle-tabs" role="tablist">
-          {(["STAFF", "CUSTOMER"] as Kind[]).map((k) => (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={kind === k}
-              className={`vehicle-tab${kind === k ? " selected" : ""}`}
-              onClick={() => setKind(k)}
-            >
-              {k === "STAFF" ? "พนักงาน" : "ลูกค้า"}
-            </button>
-          ))}
-        </div>
+        <PageTabs
+          label="ประเภทผู้สมัคร"
+          tabs={[
+            { href: "/register", label: "พนักงาน", selected: kind === "STAFF" },
+            { href: "/register/customer", label: "ลูกค้า", selected: kind === "CUSTOMER" },
+          ]}
+        />
 
         <div className="auth-fields auth-fields--grid">
           <label className="field">

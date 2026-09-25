@@ -6,6 +6,7 @@ import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { uploadAllInBackground, usePolling } from "@/lib/receipt-upload";
+import { DateInput } from "@/components/DateInput";
 
 // ถ่ายรูปเล่มทะเบียนเพื่อยืนยันการรับเล่ม (Step 7) - ใช้วิธีเดียวกับรูปป้าย (PlatePhotoPanel):
 // AI อ่านเลขตัวรถ (VIN) + ทะเบียนในเล่ม (รูปเดียวหลายเล่มได้) แล้วระบบจับคู่กับรถที่รอรับเล่ม
@@ -310,12 +311,9 @@ export function BookPhotoPanel({ onConfirmed, compact }: { onConfirmed?: () => v
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <span>วันที่รับเล่ม</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="วว/ดด/ปปปป"
+            <DateInput
               value={dateText}
-              onChange={(e) => setEditedDate(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setEditedDate(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
               style={{ width: 120 }}
             />
           </label>

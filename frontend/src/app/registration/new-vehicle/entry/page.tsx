@@ -1,16 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { PageTabs } from "@/components/PageTabs";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { api, ApiError, type Brand, type Customer, type DeletedVehicle, type FinanceCompany, type Vehicle } from "@/lib/api";
 import { canDeleteVehicle, canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigits, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
+type VehicleListFilter = { q: string; from: string; to: string };
+
+const VEHICLE_PAGE_SIZE = 100;
+const ENTRY_HREF = "/registration/new-vehicle/entry";
 
 const EMPTY_SINGLE: NormalizedVehicleRow = {
   date: "",
@@ -62,13 +69,10 @@ function VehicleFieldsFieldset({
     <div className="vehicle-fields">
       <label className="field">
         วันที่ *
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="วว/ดด/ปปปป"
+        <DateInput
           required
           value={dateText}
-          onChange={(e) => onDateTextChange(e.target.value)}
+          onChange={(value) => onDateTextChange(value)}
         />
       </label>
       <label className="field">
@@ -300,7 +304,8 @@ function downloadBlob(blob: Blob, name: string) {
 }
 
 export default function VehicleEntryPage() {
-  const [tab, setTab] = useState<Tab>("single");
+  // แท็บเป็น URL ของตัวเอง (ผู้ใช้ 2026-09-25): /entry = Single, /entry/batch = Batch
+  const tab: Tab = usePathname().endsWith("/batch") ? "batch" : "single";
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -333,6 +338,15 @@ export default function VehicleEntryPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(true);
   const [vehiclesError, setVehiclesError] = useState("");
+  // ค้นหา/กรองวันที่ + โหลดเพิ่มทีละ 100 คัน (backend ค้นทั้งฐานข้อมูล) - filter = เงื่อนไขที่กดค้นหาแล้ว,
+  // searchText/fromText/toText = ที่กำลังพิมพ์อยู่ในช่อง (วันที่แบบ วว/ดด/ปปปป พิมพ์ พ.ศ. ได้)
+  const [filter, setFilter] = useState<VehicleListFilter>({ q: "", from: "", to: "" });
+  const [searchText, setSearchText] = useState("");
+  const [fromText, setFromText] = useState("");
+  const [toText, setToText] = useState("");
+  const [filterError, setFilterError] = useState("");
+  const [hasMoreVehicles, setHasMoreVehicles] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<Vehicle | null>(null);
 
@@ -382,17 +396,66 @@ export default function VehicleEntryPage() {
     }
   }
 
-  async function loadVehicles() {
+  // โหลดรายการใหม่ (หลังบันทึก/แก้ไข/ลบ) ได้จำนวนเท่าที่เปิดดูอยู่ ไม่หดกลับเหลือ 100 คัน - เปลี่ยนเงื่อนไขค้นหาแล้วเริ่มที่ 100
+  async function loadVehicles(nextFilter: VehicleListFilter = filter, keepCount = true) {
     setVehiclesLoading(true);
     setVehiclesError("");
     try {
-      const data = await api.listVehicles();
+      const limit = keepCount ? Math.min(1000, Math.max(VEHICLE_PAGE_SIZE, vehicles.length)) : VEHICLE_PAGE_SIZE;
+      const data = await api.listVehicles({ ...nextFilter, limit });
       setVehicles(data.vehicles);
+      setHasMoreVehicles(data.hasMore);
     } catch (error) {
       setVehiclesError(error instanceof ApiError ? error.message : "โหลดรายการรถไม่สำเร็จ");
     } finally {
       setVehiclesLoading(false);
     }
+  }
+
+  async function loadMoreVehicles() {
+    setLoadingMore(true);
+    setVehiclesError("");
+    try {
+      const data = await api.listVehicles({ ...filter, offset: vehicles.length });
+      // รถที่เพิ่งบันทึกระหว่างนั้นทำให้ลำดับเลื่อน - กันแถวซ้ำด้วย id
+      setVehicles((prev) => {
+        const seen = new Set(prev.map((v) => v.id));
+        return [...prev, ...data.vehicles.filter((v) => !seen.has(v.id))];
+      });
+      setHasMoreVehicles(data.hasMore);
+    } catch (error) {
+      setVehiclesError(error instanceof ApiError ? error.message : "โหลดรายการรถไม่สำเร็จ");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function applyFilter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const from = displayDateToIso(fromText.replace(/\D/g, ""));
+    const to = displayDateToIso(toText.replace(/\D/g, ""));
+    if ((fromText && !from) || (toText && !to)) {
+      setFilterError("กรุณากรอกวันที่ให้ครบ วว/ดด/ปปปป");
+      return;
+    }
+    if (from && to && from > to) {
+      setFilterError("วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
+      return;
+    }
+    setFilterError("");
+    const next = { q: searchText.trim(), from, to };
+    setFilter(next);
+    loadVehicles(next, false);
+  }
+
+  function clearFilter() {
+    const next = { q: "", from: "", to: "" };
+    setSearchText("");
+    setFromText("");
+    setToText("");
+    setFilterError("");
+    setFilter(next);
+    loadVehicles(next, false);
   }
 
   // รายการรถที่ถูกลบไว้ (ADMIN เท่านั้น) - โหลดเมื่อกดเปิดดูและหลังลบ/กู้คืนทุกครั้ง
@@ -418,6 +481,8 @@ export default function VehicleEntryPage() {
     setCanDelete(canDeleteVehicle(getCachedUser()?.roles ?? []));
     // แก้ไขรถที่บันทึกแล้ว: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน PATCH อยู่แล้ว - ซ่อนปุ่มให้กลุ่มอื่น)
     setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
+    // โหลดครั้งแรกตอนเปิดหน้าเท่านั้น - หลังจากนั้นโหลดใหม่ตามปุ่มค้นหา/โหลดเพิ่ม
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const customerOptions = useMemo(
@@ -808,24 +873,13 @@ export default function VehicleEntryPage() {
       {/* เพิ่มรถ/ยี่ห้อ/ไฟแนนซ์: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน POST อยู่แล้ว) - กลุ่มอื่นเห็นแค่รายการรถ */}
       {canEdit && (
         <>
-          <div className="vehicle-tabs" role="tablist" aria-label="วิธีเพิ่มข้อมูลรถ">
-            <button
-              className={`vehicle-tab${tab === "single" ? " selected" : ""}`}
-              role="tab"
-              aria-selected={tab === "single"}
-              onClick={() => setTab("single")}
-            >
-              Single · เพิ่มทีละคัน
-            </button>
-            <button
-              className={`vehicle-tab${tab === "batch" ? " selected" : ""}`}
-              role="tab"
-              aria-selected={tab === "batch"}
-              onClick={() => setTab("batch")}
-            >
-              Batch · นำเข้าไฟล์
-            </button>
-          </div>
+          <PageTabs
+            label="วิธีเพิ่มข้อมูลรถ"
+            tabs={[
+              { href: ENTRY_HREF, label: "Single · เพิ่มทีละคัน", selected: tab === "single" },
+              { href: `${ENTRY_HREF}/batch`, label: "Batch · นำเข้าไฟล์", selected: tab === "batch" },
+            ]}
+          />
 
           <div className="vehicle-tools">
             <span role="status">{lookupMessage}</span>
@@ -1015,20 +1069,65 @@ export default function VehicleEntryPage() {
                 {" · "}
               </>
             )}
-            <button className="text-button" onClick={loadVehicles}>
+            <button className="text-button" onClick={() => loadVehicles()}>
               โหลดรายการใหม่
             </button>
           </div>
         </div>
-        <p style={{ padding: "0 24px 12px", fontSize: 12 }}>แสดง 100 รายการล่าสุด</p>
+        <form className="vehicle-list-filter" onSubmit={applyFilter}>
+          <label className="field">
+            ค้นหา
+            <input
+              type="search"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="เลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อลูกค้า / ชื่อเจ้าของ"
+            />
+          </label>
+          <label className="field">
+            วันที่ตั้งแต่
+            <DateInput
+              value={fromText}
+              onChange={(value) => setFromText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
+            />
+          </label>
+          <label className="field">
+            ถึงวันที่
+            <DateInput
+              value={toText}
+              onChange={(value) => setToText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
+            />
+          </label>
+          <div className="vehicle-list-filter-actions">
+            <button className="primary" type="submit" disabled={vehiclesLoading}>
+              ค้นหา
+            </button>
+            {(filter.q || filter.from || filter.to || searchText || fromText || toText) && (
+              <button className="text-button" type="button" onClick={clearFilter}>
+                ล้าง
+              </button>
+            )}
+          </div>
+        </form>
+        {filterError && (
+          <p className="customer-message error" style={{ padding: "0 24px 12px" }} role="alert">
+            {filterError}
+          </p>
+        )}
+        <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
+          {filter.q || filter.from || filter.to ? "ผลค้นหาจากฐานข้อมูลทั้งหมด" : "เรียงจากที่บันทึกล่าสุด"} · แสดง{" "}
+          {vehicles.length.toLocaleString()} คัน{hasMoreVehicles ? " (ยังมีอีก กดโหลดเพิ่มด้านล่าง)" : ""}
+        </p>
         {vehiclesLoading ? (
           <div className="empty-customers">กำลังโหลดรายการรถ…</div>
-        ) : vehiclesError ? (
+        ) : vehiclesError && !vehicles.length ? (
           <div className="empty-customers" role="alert">
             {vehiclesError}
           </div>
         ) : !vehicles.length ? (
-          <div className="empty-customers">ยังไม่มีข้อมูลรถจดใหม่</div>
+          <div className="empty-customers">
+            {filter.q || filter.from || filter.to ? "ไม่พบรถที่ตรงกับเงื่อนไข" : "ยังไม่มีข้อมูลรถจดใหม่"}
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -1077,6 +1176,20 @@ export default function VehicleEntryPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!vehiclesLoading && vehicles.length > 0 && (vehiclesError || hasMoreVehicles) && (
+          <div className="vehicle-list-more">
+            {vehiclesError && (
+              <p className="customer-message error" role="alert">
+                {vehiclesError}
+              </p>
+            )}
+            {hasMoreVehicles && (
+              <button className="primary" type="button" onClick={loadMoreVehicles} disabled={loadingMore}>
+                {loadingMore ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 คัน"}
+              </button>
+            )}
           </div>
         )}
       </section>

@@ -13,6 +13,7 @@ import {
   printDeliverySlips,
   type DeliveryReportInput,
 } from "@/lib/delivery-print";
+import { DateInput } from "@/components/DateInput";
 
 // รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งใบเสร็จ / เล่ม / ป้าย
 // พิมพ์ใบส่งงานซ้ำได้ทีละใบ + ท้ายรายงานมีรถที่ป้ายยังค้างส่ง - ไม่มีราคา (DELIVERY เปิดหน้านี้ได้)
@@ -98,22 +99,16 @@ export function DeliveryReportPage() {
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label className="field">
             ส่งตั้งแต่วันที่
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="วว/ดด/ปปปป"
+            <DateInput
               value={fromText}
-              onChange={(e) => setFromText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setFromText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
             />
           </label>
           <label className="field">
             ถึงวันที่
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="วว/ดด/ปปปป"
+            <DateInput
               value={toText}
-              onChange={(e) => setToText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setToText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
             />
           </label>
           <label className="field">

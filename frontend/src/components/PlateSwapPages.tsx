@@ -14,6 +14,7 @@ import {
   type PlateSwapNumberSource,
 } from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { DateInput } from "@/components/DateInput";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
@@ -53,13 +54,10 @@ async function openReceiptImage(id: string) {
 
 function DateTextInput({ value, onChange, label }: { value: string; onChange: (text: string) => void; label?: string }) {
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      placeholder="วว/ดด/ปปปป"
+    <DateInput
       aria-label={label}
       value={value}
-      onChange={(e) => onChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+      onChange={(value) => onChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
     />
   );
 }

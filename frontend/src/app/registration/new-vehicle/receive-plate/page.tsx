@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { PlateKindTabs, PlatePhotoPanel, isMotorcycleBody, loadPlateKind, savePlateKind } from "@/components/PlatePhotoPanel";
+import { PlateKindTabs, PlatePhotoPanel, isMotorcycleBody, loadPlateKind, lockedPlateKind, savePlateKind } from "@/components/PlatePhotoPanel";
 import { ReceivingQueuePage, type QueueRow } from "@/components/ReceivingQueuePage";
 import { api, platePhotoImageUrl, type PlateKind, type ReceivingRow } from "@/lib/api";
 import { comparePlate } from "@/lib/plate-order";
@@ -31,8 +31,10 @@ export default function ReceivePlatePage() {
   const sameKind = (r: ReceivingRow) => isMotorcycleBody(r.body) === (kind === "moto");
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount (ตอน render ฝั่ง server ไม่มี window)
-    setKind(loadPlateKind());
+    // เปิดจากหน้าค้นหารถ (?kind=moto&focus=เลขตัวถัง) = เปิดแท็บของรถคันนั้น เว้นแต่บทบาทล็อกแท็บไว้
+    const linked = new URLSearchParams(window.location.search).get("kind");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage/URL หลัง mount (ตอน render ฝั่ง server ไม่มี window)
+    setKind(!lockedPlateKind() && (linked === "car" || linked === "moto") ? linked : loadPlateKind());
   }, []);
 
   function switchKind(next: PlateKind) {

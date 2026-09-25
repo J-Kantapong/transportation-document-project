@@ -162,6 +162,8 @@ const PAGE_RULES: PageRule[] = [
   // ต่อภาษี: กลุ่มยื่นเอกสาร (รถยนต์/จักรยานยนต์ตามขอบเขตของตัวเอง) + ACCOUNTANT อ่าน - backend: /api/tax-renewals
   { prefix: '/registration/tax-renewal', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },
+  // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25) - backend: /api/vehicle-search
+  { prefix: '/vehicles', roles: ALL_STAFF },
   { prefix: '/registration', roles: ALL_STAFF },
   { prefix: '/', exact: true, roles: ['ADMIN', 'ACCOUNTANT'] },
 ];

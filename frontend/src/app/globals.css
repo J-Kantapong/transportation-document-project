@@ -114,6 +114,10 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .customer-message.error{color:#b43434}
 .customer-message.success{color:#23825f}
 .customer-list{margin-top:24px}
+.vehicle-list-filter{display:grid;grid-template-columns:minmax(220px,2fr) minmax(130px,1fr) minmax(130px,1fr) auto;gap:12px;align-items:end;padding:0 24px 14px}
+.vehicle-list-filter-actions{display:flex;align-items:center;gap:8px;min-height:46px}
+.vehicle-list-more{display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 24px}
+@media(max-width:850px){.vehicle-list-filter{grid-template-columns:1fr 1fr}.vehicle-list-filter .field:first-child{grid-column:1/-1}}
 .empty-customers{padding:40px 24px;text-align:center;color:#8290a5;font-size:14px}
 .customer-detail{display:grid;gap:17px;margin-top:22px}
 .customer-detail dt{color:#8490a3;font-size:13px}
@@ -130,6 +134,8 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 
 .vehicle-tabs{display:flex;gap:8px;margin-top:26px;border-bottom:1px solid #e0e6f0}
 .vehicle-tab{padding:14px 22px;border:0;border-bottom:3px solid transparent;background:none;color:#788599;font-size:15px}
+a.vehicle-tab{display:inline-block;text-decoration:none}
+a.vehicle-tab:hover{color:#2854d9}
 .vehicle-tab.selected{color:#2854d9;border-bottom-color:#2854d9;font-weight:600}
 .vehicle-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:17px 0;font-size:14px}
 .vehicle-tools>span{flex:1}
@@ -329,3 +335,83 @@ th.num-col{text-align:right}
 .receipt-fields>span:nth-child(odd){padding-top:7px}
 .receipt-fields>span:nth-child(odd):not(:first-child){margin-left:14px}
 }
+.vehicle-search-filter{display:grid;grid-template-columns:minmax(220px,2fr) minmax(130px,1fr) minmax(130px,1fr) minmax(130px,1fr) auto;gap:12px;align-items:end;padding:22px 23px 14px}
+.status-chips{display:flex;flex-wrap:wrap;gap:8px;padding:4px 23px 20px}
+.status-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid #dce2ec;background:white;border-radius:999px;padding:7px 13px;font-size:13px;color:#46526a}
+.status-chip span{font-size:12px;color:#8290a5}
+.status-chip.warn{border-color:#f0d9b0;color:#bb8527}
+.status-chip.active{background:#2854d9;border-color:#2854d9;color:white}
+.status-chip.active span{color:#dfe7ff}
+.vehicle-statuses{display:flex;flex-direction:column;gap:8px}
+.vehicle-statuses .badge{white-space:nowrap}
+.vehicle-statuses .text-button{margin-left:6px;text-decoration:none}
+@media(max-width:850px){.vehicle-search-filter{grid-template-columns:1fr 1fr}.vehicle-search-filter .field:first-child{grid-column:1/-1}}
+.search-hit{background:#fff1b8;color:inherit;border-radius:3px;padding:0 1px}
+.status-done{font-size:13px;color:#46526a;margin-bottom:4px}
+/* แถวของรถที่เปิดมาจากหน้าค้นหารถ (?focus=) - ดู components/FocusVehicleRow.tsx */
+tr.row-focus,tr.row-focus:hover{background:#fff1b8;box-shadow:inset 4px 0 0 #e0a800}
+.focus-missing{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px);background:#18243c;color:white;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #18243c33}
+.focus-missing .text-button{color:#dfe7ff;font-size:18px}
+/* ยื่นเอกสาร 3 ขั้น (submit-documents/submit, review, done) */
+.submit-steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 14px}
+.submit-step{font-size:14px;padding:6px 12px;border-radius:8px;color:#788599;text-decoration:none}
+a.submit-step:hover{background:#edf2ff;color:#2854d9}
+.submit-step.current{background:#edf2ff;color:#2854d9;font-weight:600}
+.submit-steps-sep{color:#b3bccb}
+.submit-date{margin-bottom:16px;font-size:13px;color:#5b6172}
+.submit-date label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.submit-date input{width:130px;height:34px;border:1px solid #d3d7e3;border-radius:8px;padding:0 10px;font-size:13px}
+.submit-footer{position:sticky;bottom:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding:14px 20px;background:white;border:1px solid #e3e8f1;border-radius:12px;box-shadow:0 -6px 18px #18243c14}
+tr.row-selected td{background:#f3f6ff}
+.review-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid #edf0f5;font-size:14px}
+.review-toolbar select{height:34px;border:1px solid #d3d7e3;border-radius:8px;padding:0 8px;font-size:13px;background:white}
+.review-table select{height:34px;border:1px solid #d3d7e3;border-radius:8px;padding:0 6px;font-size:13px;background:white;max-width:190px}
+.review-table{white-space:normal}
+.review-table th,.review-table td{padding:12px 10px}
+.review-table td{vertical-align:top}
+.review-table .review-actions{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap}
+.review-vehicle{border-bottom:2px solid #e3e8f1}
+.review-vehicle.has-problem td{background:#fff6f6}
+.review-vehicle.is-checked td{background:#f3f6ff}
+.review-vehicle tr:not(:last-child) td{border-bottom:0}
+.review-plate{display:flex;gap:6px;margin-top:6px}
+.review-plate input{width:64px;height:32px;border:1px solid #d3d7e3;border-radius:8px;padding:0 8px;font-size:13px}
+.review-plate input[aria-invalid="true"]{border-color:#d9534f;background:#fff}
+.review-choice{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.review-choice label{display:flex;align-items:center;gap:6px;font-size:13px}
+.field-error{color:#b43434;font-size:12px;margin-top:4px}
+.review-cost td{padding-top:0}
+.cost-lines{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;font-size:12px;color:#46526a;background:#f7f9fc;border-radius:8px;padding:10px 14px}
+.cost-head{font-weight:600;color:#18243c;margin-bottom:4px}
+.cost-row{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+.cost-sum{font-weight:600;color:#18243c;border-top:1px solid #e3e8f1;margin-top:3px;padding-top:3px}
+@media(max-width:850px){.cost-lines{grid-template-columns:1fr}}
+.review-list{display:flex;flex-direction:column;gap:12px}
+.review-card{padding:16px 20px}
+.review-card.has-problem{border-color:#f0b4b4;background:#fff8f8}
+.review-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:10px}
+.review-card-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.review-summary .amt{text-align:right}
+.review-summary tfoot td{font-weight:600;color:#18243c;border-top:2px solid #e3e8f1;background:#fafbfd}
+.review-checks{display:flex;flex-direction:column;gap:6px}
+.review-inline-check{display:flex;align-items:center;gap:6px;font-size:12px;color:#46526a;white-space:nowrap;margin-top:6px}
+.review-checks .review-inline-check{margin-top:0}
+.submit-date-field{display:flex;align-items:center;gap:8px;font-size:13px;color:#46526a}
+.submit-date-field input{width:130px;height:34px;border:1px solid #d3d7e3;border-radius:8px;padding:0 10px;font-size:13px}
+.submit-date-field input[aria-invalid="true"]{border-color:#d9534f}
+.review-toolbar-sep{flex:0 0 1px;align-self:stretch;background:#e3e8f1;margin:0 4px}
+/* ช่องวันที่ + ปุ่มปฏิทิน (components/DateInput.tsx) */
+.date-input{position:relative;display:inline-flex;align-items:center;gap:6px;max-width:100%}
+.date-input>input[type="text"]{min-width:0}
+.field .date-input{display:flex;width:100%}
+.field .date-input>input[type="text"]{flex:1}
+.date-input-button{flex:none;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid #d3d7e3;border-radius:8px;background:white;color:#46526a;padding:0}
+.field .date-input-button{height:46px;width:42px}
+.date-input-button:hover:not(:disabled){background:#edf2ff;color:#2854d9;border-color:#c9d6fb}
+.date-input-button:disabled{opacity:.5;cursor:default}
+.date-input-button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.date-input-native{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}
+/* แถบตัวกรองที่มีช่องวันที่ + ปุ่มปฏิทิน: เรียงแบบขึ้นบรรทัดใหม่ได้ ช่องวันที่ไม่ถูกบีบจนตัวเลขขาด */
+.vehicle-search-filter,.vehicle-list-filter{display:flex;flex-wrap:wrap;align-items:flex-end}
+.vehicle-search-filter>.field,.vehicle-list-filter>.field{flex:1 1 180px;min-width:0}
+.vehicle-search-filter>.field:first-child,.vehicle-list-filter>.field:first-child{flex:2 1 260px}

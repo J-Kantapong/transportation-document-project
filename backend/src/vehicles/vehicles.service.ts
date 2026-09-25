@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { assertTransferNoticeInScope, assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { currentUser } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { vehicleListWhere } from './vehicle-list-filter.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
@@ -392,14 +393,26 @@ export class VehiclesService {
     return (await this.mapSubmitCandidates(vehicles, submitDate)).filter((v) => v.submitBlockReason === null);
   }
 
-  async findAll() {
-    const vehicles = await this.prisma.vehicle.findMany({
-      where: { deletedAt: null },
+  // รายการรถในหน้าเพิ่มข้อมูลรถจดใหม่ ทีละ 100 คัน (offset = ข้ามไปกี่คัน สำหรับปุ่ม "โหลดเพิ่ม", limit = ขนาดหน้า
+  // สูงสุด 1,000 ใช้ตอนโหลดรายการใหม่หลังแก้ไข/ลบให้ได้จำนวนเท่าที่เปิดดูอยู่) ค้นหา (q) ได้จาก
+  // เลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อลูกค้า / ผู้ถือกรรมสิทธิ์ / ผู้ครอบครอง และกรองช่วง "วันที่" (Vehicle.date)
+  // ด้วย from/to (ค.ศ. YYYY-MM-DD รวมวันปลายทั้งสองด้าน) - ค้นทั้งฐานข้อมูล ไม่ใช่แค่ 100 คันล่าสุด
+  async findAll(params: { q?: string; from?: string; to?: string; offset?: string; limit?: string } = {}) {
+    const pageSize = Math.min(1000, Math.max(1, Number.parseInt(params.limit ?? '100', 10) || 100));
+    const offset = Math.max(0, Number.parseInt(params.offset ?? '0', 10) || 0);
+    const where = vehicleListWhere(params);
+
+    const rows = await this.prisma.vehicle.findMany({
+      where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 100,
+      skip: offset,
+      take: pageSize + 1, // เกินมา 1 คัน = ยังมีหน้าถัดไป
       include: this.vehicleFullInclude,
     });
-    return vehicles.map((vehicle) => this.mapVehicleFull(vehicle));
+    return {
+      vehicles: rows.slice(0, pageSize).map((vehicle) => this.mapVehicleFull(vehicle)),
+      hasMore: rows.length > pageSize,
+    };
   }
 
   // ค้นหารถด้วยเลขตัวถัง (บางส่วนก็ได้) สำหรับหน้ายื่นเอกสารจดทะเบียน (Step 4) - แยกจาก findAll() เพราะ
@@ -926,6 +939,13 @@ export class VehiclesService {
       inspectionResultCost: vehicle.inspectionResultCost,
       inspectionResultBillCost: vehicle.inspectionResultBillCost,
       inspectionFailRemark: vehicle.inspectionFailRemark,
+      // ยื่นเอกสารแล้วหรือยัง + วันสุดท้ายที่ยังยื่นได้ (ตรวจผ่าน + 89 วัน กฎเดียวกับคิวยื่น) - ย้ายมาแสดงที่หน้าตรวจรถแทน
+      // คอลัมน์ "ยื่นได้ถึง" ในหน้ายื่นเอกสาร (ผู้ใช้ 2026-09-25) null = ไม่ผ่าน/ยังไม่มีผล/ยื่นแล้ว
+      submitted: vehicle.documentSubmissions.length > 0,
+      submitDeadline:
+        vehicle.inspectionResult === 'ผ่าน' && vehicle.inspectionResultDate && vehicle.documentSubmissions.length === 0
+          ? inspectionValidUntil(vehicle.inspectionResultDate)
+          : null,
     };
   }
 

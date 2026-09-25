@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 
 interface RowState {
   done: boolean;
@@ -120,14 +121,11 @@ function PendingVehicleTable({
                   />
                 </td>
                 <td>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="วว/ดด/ปปปป"
+                  <DateInput
                     value={row.completedDateText}
                     disabled={readOnly}
-                    onChange={(e) =>
-                      patchRow(v.id, { completedDateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                    onChange={(value) =>
+                      patchRow(v.id, { completedDateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
                     }
                     style={{ width: 110 }}
                   />
@@ -399,12 +397,9 @@ export default function TransferNoticePage() {
         <div className="panel-head" style={{ paddingTop: 0 }}>
           <label className="field" style={{ margin: 0 }}>
             วันที่รับงาน
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="วว/ดด/ปปปป"
+            <DateInput
               value={dateText}
-              onChange={(e) => handleDateTextChange(e.target.value)}
+              onChange={(value) => handleDateTextChange(value)}
               style={{ width: 130 }}
             />
           </label>

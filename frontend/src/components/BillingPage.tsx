@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type BillingCustomer, type BillingVehicle, type Invoice } from "@/lib/billing-api";
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
@@ -9,6 +9,8 @@ import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "
 import { computeTotals, formatMoney, round2, termsSummary } from "@/lib/invoice";
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { comparePlate } from "@/lib/plate-order";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
+import { DateInput } from "@/components/DateInput";
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถที่พนักงานบันทึกส่งงานแล้วมารอที่นี่ บัญชีเลือกคัน ตรวจค่าดำเนินการ แล้วออกใบวางบิล
 // (ผู้ใช้ 2026-09-21) ทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่งคิด VAT + หัก ณ ที่จ่าย, เลขที่ IV พิมพ์เองเพราะยังรันเลขร่วมกับ Google Sheet
@@ -54,6 +56,7 @@ export function BillingPage() {
   const [customers, setCustomers] = useState<BillingCustomer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customerId, setCustomerId] = useState("");
+  const focusApplied = useRef(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [extras, setExtras] = useState<ExtraState[]>([]);
   const [invoiceNo, setInvoiceNo] = useState("");
@@ -70,6 +73,13 @@ export function BillingPage() {
       const [q, inv] = await Promise.all([billingApi.billingQueue(), billingApi.listInvoices()]);
       setCustomers(q.customers);
       setInvoices(inv.invoices);
+      // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกลูกค้าของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
+      if (!focusApplied.current) {
+        focusApplied.current = true;
+        const chassis = focusChassis();
+        const owner = chassis ? q.customers.find((c) => c.vehicles.some((v) => sameChassis(v.chassis, chassis))) : undefined;
+        if (owner) setCustomerId(owner.id);
+      }
       setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
       setExtras([]);
       setJobLabelEdit(null);
@@ -448,12 +458,9 @@ export function BillingPage() {
                 </label>
                 <label className="field">
                   วันที่ออกบิล
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="วว/ดด/ปปปป"
+                  <DateInput
                     value={issueDateText}
-                    onChange={(e) => setIssueDateText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                    onChange={(value) => setIssueDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
                   />
                 </label>
                 <label className="field">
