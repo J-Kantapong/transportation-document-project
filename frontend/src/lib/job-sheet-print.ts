@@ -1,5 +1,5 @@
 import type { DocumentSubmission } from "@/lib/api";
-import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
+import { escapeHtml, printHtmlDocument, safeFileName } from "@/lib/print-html";
 
 // ใบส่งงาน 2 แบบตามตัวอย่าง PDF ของผู้ใช้ (กระดาษ A4 แนวตั้ง หัวใบซ้ำทุกหน้า):
 // - "car" (ยื่นเอกสารจดใหม่.pdf): หน้าละ 20 คัน หัวใบ = ชื่อบริษัท/วันที่/หมายเหตุ/รวม - "รวม" คือยอดของทั้งใบ (ทุกหน้า)
@@ -228,6 +228,17 @@ ${pages}
 }
 
 // พิมพ์ผ่าน iframe ที่ซ่อนไว้ (ดู print-html.ts) - วิธีเดียวกับใบส่งตรวจรถ
+// ชื่อไฟล์ = วันที่-ชื่อหัวใบ (ส่วนที่แก้ได้ ไม่มีคำนำหน้าของใบมอเตอร์ไซค์)-จำนวนคัน เช่น "25-09-2026-MC Superbike-5 คัน" (หลายใบคั่นด้วย ", ")
+export function jobSheetFileName(sheets: JobSheet[]): string {
+  const pad = (n: string) => n.padStart(2, "0");
+  const parts = sheets.map((s) => {
+    const [d, m, y] = s.dateText.split("/");
+    const date = y ? `${pad(d)}-${pad(m)}-${y}` : s.dateText;
+    return `${date}-${s.title.trim()}-${s.rows.length} คัน`;
+  });
+  return safeFileName(parts.join(", "));
+}
+
 export function printJobSheets(sheets: JobSheet[]): void {
-  printHtmlDocument(buildJobSheetHtml(sheets));
+  printHtmlDocument(buildJobSheetHtml(sheets), jobSheetFileName(sheets));
 }
