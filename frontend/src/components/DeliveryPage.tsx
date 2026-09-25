@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, slipNoText, type DeliveryKind, type DeliveryRow } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { downloadDeliverySlipPdf, printDeliverySlips } from "@/lib/delivery-print";
 import { comparePlate } from "@/lib/plate-order";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
+import { DateInput } from "@/components/DateInput";
 
 // ส่งงานลูกค้า (พนักงาน): ติ๊กคันที่ส่งแล้ว ใส่วันที่ส่ง + ผู้รับ แล้วกดบันทึกครั้งเดียวทั้งชุด - หน้านี้ไม่มีราคา/ยอดบิล
 // เรื่องวางบิลฝ่ายบัญชีทำต่อที่ /accounting/billing (ผู้ใช้ 2026-09-21) รถเข้าคิวเมื่อได้รับใบเสร็จ + เล่มแล้ว ป้ายตามทีหลังได้
@@ -23,6 +25,7 @@ export function DeliveryPage() {
   const [queue, setQueue] = useState<DeliveryRow[]>([]);
   const [recent, setRecent] = useState<DeliveryRow[]>([]);
   const [customerId, setCustomerId] = useState("");
+  const focusApplied = useRef(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dateText, setDateText] = useState(isoToDisplayDate(todayIso()));
   const [recipient, setRecipient] = useState("");
@@ -41,6 +44,13 @@ export function DeliveryPage() {
       setQueue(q.vehicles);
       setRecent(r.vehicles);
       setSelected(new Set());
+      // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกลูกค้าของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
+      if (!focusApplied.current) {
+        focusApplied.current = true;
+        const chassis = focusChassis();
+        const target = chassis ? q.vehicles.find((v) => sameChassis(v.chassis, chassis)) : undefined;
+        if (target) setCustomerId(target.customerId);
+      }
     } catch (err) {
       setMessage({ text: err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ", error: true });
     } finally {
@@ -240,12 +250,9 @@ export function DeliveryPage() {
               <div style={{ display: "grid", gap: 14 }}>
                 <label className="field">
                   วันที่ส่ง
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="วว/ดด/ปปปป"
+                  <DateInput
                     value={dateText}
-                    onChange={(e) => setDateText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                    onChange={(value) => setDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
                   />
                 </label>
                 <label className="field">

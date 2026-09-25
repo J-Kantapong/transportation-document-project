@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import type { DocumentSubmission } from "@/lib/api";
 import { ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate } from "@/lib/date";
+import { usePathname, useSearchParams } from "next/navigation";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
+import { PageTabs } from "@/components/PageTabs";
 import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
 
@@ -16,7 +18,7 @@ function formatMoney(amount: number): string {
 // แบบ 2 = มอเตอร์ไซค์ทั้งหมด (รย.12) - "unknown" คือรถที่ไม่ได้ระบุประเภทรถ แสดงแยกไว้เพื่อไม่ให้หายไปเงียบๆ
 type Family = "car1" | "car23" | "moto" | "unknown";
 
-function classify(body: string | null): Family {
+export function classify(body: string | null): Family {
   if (!body) return "unknown";
   if (body.startsWith("รย.12-")) return "moto";
   if (body.startsWith("รย.1-")) return "car1";
@@ -36,7 +38,7 @@ function StatusBadge({ status }: { status: DocumentSubmission["status"] }) {
   return <span className="badge done">ได้รับใบเสร็จแล้ว</span>;
 }
 
-function GroupTable({
+export function GroupTable({
   title,
   rows,
   showUrgent,
@@ -181,7 +183,10 @@ export function SubmittedRecordsView({
   canCancel?: boolean;
   onRecordRemoved?: (id: string) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("car");
+  // แท็บอยู่ใน URL (?tab=moto) ให้กดย้อนกลับ/ส่งลิงก์ได้ (ผู้ใช้ 2026-09-25) - เปลี่ยนแค่ query จึงไม่ล้างตัวกรองวันที่/เจ้าของงาน
+  const pathname = usePathname();
+  const tabParam = useSearchParams().get("tab");
+  const tab: Tab = tabParam === "moto" || tabParam === "unknown" ? tabParam : "car";
   // รายการที่กำลังจะยกเลิก (เปิด SubmissionCancelDialog)
   const [cancelling, setCancelling] = useState<DocumentSubmission | null>(null);
   const onCancel = canCancel ? setCancelling : undefined;
@@ -283,19 +288,15 @@ export function SubmittedRecordsView({
         <p className="muted">ยังไม่มีข้อมูลที่ยื่นแล้ว</p>
       ) : (
         <>
-          <div className="vehicle-tabs" role="tablist" aria-label="แบบใบส่งงาน" style={{ marginTop: 0, marginBottom: 20 }}>
-            {tabs.map(([key, label]) => (
-              <button
-                key={key}
-                className={`vehicle-tab${activeTab === key ? " selected" : ""}`}
-                role="tab"
-                aria-selected={activeTab === key}
-                onClick={() => setTab(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <PageTabs
+            label="แบบใบส่งงาน"
+            style={{ marginTop: 0, marginBottom: 20 }}
+            tabs={tabs.map(([key, label]) => ({
+              href: key === "car" ? pathname : `${pathname}?tab=${key}`,
+              label,
+              selected: activeTab === key,
+            }))}
+          />
 
           {activeTab === "car" && (
             <>

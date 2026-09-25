@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type BillingTerms, type RateVehicleKind, type ServiceFeeRate, type ServiceFeeRateInput } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 
 // ตั้งค่าวางบิลของลูกค้าหนึ่งราย (แสดงในหน้าวางบิล): เงื่อนไข VAT/หัก ณ ที่จ่าย และตารางค่าดำเนินการ
 // ราคาในตารางเป็นแค่ราคาเริ่มต้นที่ระบบเสนอให้รายคัน - บัญชีแก้ราคารายคันตอนออกบิลได้เสมอ
@@ -60,12 +61,9 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
         </label>
         <label className="field">
           ใช้อัตราพิเศษถึงวันที่
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="วว/ดด/ปปปป"
+          <DateInput
             value={untilText}
-            onChange={(e) => setUntilText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+            onChange={(value) => setUntilText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
           />
         </label>
       </div>

@@ -14,6 +14,7 @@ import {
 import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { DateInput } from "@/components/DateInput";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -263,12 +264,9 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
             <div className="customer-grid">
               <label className="field">
                 วันที่ *
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
+                <DateInput
                   value={dateText}
-                  onChange={(e) => handleDateTextChange(e.target.value)}
+                  onChange={(value) => handleDateTextChange(value)}
                   required
                 />
               </label>

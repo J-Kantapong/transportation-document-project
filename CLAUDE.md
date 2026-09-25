@@ -89,6 +89,56 @@ This private repository is the shared development surface for the user, Claude C
   break between rows and repeat the table header). No prices anywhere. The `Vehicle` delivery columns are still
   the live state used by the queue and billing. Deliveries saved before this were backfilled by migration
   `20260925200000_add_delivery_slips` (recipient of a later plate delivery read back from `deliveryNote`).
+- Saved-vehicle list on `/registration/new-vehicle/entry` (added 2026-09-25): `GET /api/vehicles` returns
+  `{ vehicles, hasMore }`, 100 at a time newest-first (`offset` for "โหลดเพิ่มอีก 100 คัน", `limit` up to 1,000 so a
+  reload after edit/delete keeps what is open). `q` searches the whole database (chassis, engine, plate incl.
+  "4กข 4444", customer name/company, owner/hirer name); `from` / `to` (YYYY-MM-DD, inclusive) filter `Vehicle.date`.
+  The date boxes are DD/MM/YYYY and accept a Buddhist year. The search/date matching lives in
+  `backend/src/vehicles/vehicle-list-filter.ts`, shared with the vehicle search page below.
+- Vehicle search page (added 2026-09-25): main menu "ค้นหารถ" at `/vehicles`, open to `ADMIN`, `STAFF_ENTRY`, `STAFF_CAR`,
+  `STAFF_MOTO`, `ACCOUNTANT` (read-only; `STAFF_CAR` / `STAFF_MOTO` only see their vehicle type, `STAFF_ENTRY` sees all).
+  `GET /api/vehicle-search?q=&from=&to=&status=&kind=car|moto&offset=` returns `{ vehicles, total, all, hasMore, counts }`,
+  100 per page. Each vehicle's `statuses` (the steps it is waiting on, days waited, late vs `STAGES` SLA, flags, reason)
+  come from `waitsFor` in `overview-process.ts`, so they match the real queues; empty = finished (delivered, plate
+  delivered, billed). `status` = a stage key, `done`, or `problem` (late or flagged). The filters live in the URL so
+  refresh and back work. Typing filters live (300 ms debounce) and highlights the match. "ไปที่งาน →" opens the stage's
+  work page with `?focus=<chassis>` (`frontend/src/lib/vehicle-focus.ts`, stage → page map there): `FocusVehicleRow`
+  in `AppShell` waits for that vehicle's table row, scrolls to it and highlights it (or shows "ไม่พบรถ…" after 15 s).
+  Pages that hide rows reveal it themselves: inspection jumps to the right page of 10, the step-4 queue prefills its
+  chassis box, the receipt page picks car/moto and opens the vehicle's sheet, receive-plate takes `?kind=`, and
+  Delivery/billing select the vehicle's customer.
+- Date inputs (user's choice 2026-09-25): every วว/ดด/ปปปป box is `components/DateInput.tsx`, which keeps typing
+  (each caller still formats / converts a Buddhist year as before) and adds a calendar button that opens a hidden
+  native `<input type="date">` via `showPicker()` and hands back "วว/ดด/ปปปป". Use it for any new date field.
+  `CashAdvancePage` (another chat's work in progress) was not converted yet.
+- Underline tabs are URLs (user's choice 2026-09-25, `components/PageTabs.tsx`): `/inspection` + `/inspection/result`,
+  `/entry` + `/entry/batch`, `/register` + `/register/customer` (the second route re-exports the first page, which
+  picks its tab from `usePathname`), and the submitted-records car/moto tabs use `?tab=moto` so their filters stay.
+  The tax-renewal "เลือกรถจากระบบ / กรอกข้อมูลรถเอง" toggle stays in-page because it is part of an unsaved form.
+- Step 4 submit flow in 4 URLs (user's redesign 2026-09-25, `frontend/src/components/submit-flow/`); every step can
+  go back to edit the earlier ones (step bar links + back buttons):
+  1. `/submit` pick vehicles (queue + filters + "วางเลขตัวถังหลายคัน", no per-vehicle form, no "ยื่นได้ถึง" column).
+  2. `/submit/settings` one table where every option is set in the row, with the full Bill / No bill / tax / อากร
+     lines under each vehicle (user's choice: the detail and the editing live here); the only bulk control is
+     "งานด่วนทุกคัน / ไม่ด่วนทุกคัน" (no select checkboxes here, ticking twice was confusing); the rarer options are
+     small checkboxes right in the row (รวมค่าแผ่นป้าย under the plate cell; ด่วน + แจ้งย้ายออก (car) / หยุดใช้ย้ายออก
+     (moto) in the ตัวเลือก column; no "เพิ่มเติม" button); incomplete rows (owner type, plate number when requested,
+     pricing error) block going on. The submit date input lives here too (user's choice) and may be a future date,
+     since jobs are sometimes keyed in advance: the screen does no date-based eligibility check (the step-1 queue is
+     loaded for today and not tied to the submit date); the backend still enforces the 90-day rule for the chosen
+     date when submitting, and any vehicle it rejects shows up with its reason in step 4.
+  3. `/submit/review` a plain read-only table, one row per vehicle: chassis, customer, brand/body, Bill (fees + tax),
+     No bill (without อากร), อากร, รวม (without อากร), plus a totals row, then "ยืนยันยื่น".
+  4. `/submit/done` the vehicles just submitted, grouped like the job sheets (รย.1 ธรรมดา / ด่วน, รย.2+3, มอเตอร์ไซค์
+     ธรรมดา / ด่วน) with "ปริ้นใบส่งงาน" per group, reusing `GroupTable` + `JobSheetPrintDialog` from the records view
+     (records re-read with `GET /api/vehicles/document-submission?date=`); failures listed with reasons and kept
+     selected so they can be fixed and resubmitted.
+  State and pricing live in `submit/layout.tsx` (`SubmitFlowProvider`), so moving between steps and the back button
+  keep them, but a refresh starts over: the localStorage draft was removed (user's choice) and the old
+  `submit-documents-draft-v1` key is deleted on load. Pricing reuses `POST /api/vehicles/document-submission/preview-bulk`
+  and submit `POST .../document-submission/bulk`, unchanged. The submit deadline moved to the inspection page:
+  `InspectionVehicle.submitted` / `submitDeadline` (pass date + 89 days, null once submitted) shown as "ยื่นได้ถึง"
+  in the completed-inspections table.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)

@@ -7,6 +7,7 @@ import { getCachedUser, vehicleScopeFor } from "@/lib/auth";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { uploadAllInBackground, usePolling } from "@/lib/receipt-upload";
+import { DateInput } from "@/components/DateInput";
 
 // ถ่ายรูปป้ายทะเบียนเพื่อยืนยันการรับป้าย (Step 6): AI อ่านเลขทะเบียนในรูป (รูปเดียวหลายแผ่นได้) แล้วระบบจับคู่
 // กับรถที่รอรับป้ายจากทะเบียนที่รู้แล้วใน Step 5 - พนักงานไม่ต้องไล่จับคู่เอง แค่ดูแล้วกดยืนยันทีเดียว
@@ -384,12 +385,9 @@ export function PlatePhotoPanel({ kind, onConfirmed, compact }: { kind: PlateKin
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <span>วันที่รับป้าย</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="วว/ดด/ปปปป"
+            <DateInput
               value={dateText}
-              onChange={(e) => setEditedDate(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setEditedDate(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
               style={{ width: 120 }}
             />
           </label>

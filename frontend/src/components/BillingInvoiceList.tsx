@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type Invoice } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 import { formatMoney } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
 
@@ -104,12 +105,10 @@ export function BillingInvoiceList({ invoices, onChanged }: { invoices: Invoice[
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         {action.kind === "paid" ? (
                           <>
-                            <input
-                              type="text"
-                              inputMode="numeric"
+                            <DateInput
                               placeholder="วันที่รับเงิน"
                               value={paidDateText}
-                              onChange={(e) => setPaidDateText(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                              onChange={(value) => setPaidDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
                               style={{ width: 110 }}
                               aria-label="วันที่รับเงิน"
                             />

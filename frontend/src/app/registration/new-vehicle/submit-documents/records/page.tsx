@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { api, type DocumentSubmission } from "@/lib/api";
 import { SubmittedRecordsView } from "@/components/SubmittedRecordsView";
 import { getToken, rolesFromToken } from "@/lib/auth";
@@ -44,12 +44,15 @@ export default function SubmitDocumentsRecordsPage() {
       <p className="muted" style={{ marginBottom: 20 }}>
         รายการที่ยื่นแล้ว แยกรถยนต์ / มอเตอร์ไซค์ ตามแบบใบส่งงาน
       </p>
-      <SubmittedRecordsView
-        records={records}
-        loading={loading}
-        canCancel={canCancel}
-        onRecordRemoved={(id) => setRecords((prev) => prev.filter((r) => r.id !== id))}
-      />
+      {/* แท็บรถยนต์/มอเตอร์ไซค์อยู่ใน URL (useSearchParams ต้องอยู่ใต้ Suspense) */}
+      <Suspense>
+        <SubmittedRecordsView
+          records={records}
+          loading={loading}
+          canCancel={canCancel}
+          onRecordRemoved={(id) => setRecords((prev) => prev.filter((r) => r.id !== id))}
+        />
+      </Suspense>
     </section>
   );
 }

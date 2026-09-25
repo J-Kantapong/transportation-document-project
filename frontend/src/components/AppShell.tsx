@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
+import { FocusVehicleRow } from "./FocusVehicleRow";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
   type RegistrationSubtask,
   NEW_VEHICLE_SUBTASKS,
@@ -44,6 +45,7 @@ function within(pathname: string, href: string): boolean {
 function breadcrumbs(pathname: string): Crumb[] {
   if (pathname === "/") return [{ label: "ภาพรวม", href: "/" }];
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
+  if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
   if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
@@ -167,7 +169,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <NavLink href="/" icon="grid" label="ภาพรวม" pathname={pathname} exact onClick={close} />
             )}
             {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (
-              <NavLink href="/customers" icon="card" label="ฐานข้อมูลลูกค้า" pathname={pathname} onClick={close} />
+              <>
+                <NavLink href="/customers" icon="card" label="ฐานข้อมูลลูกค้า" pathname={pathname} onClick={close} />
+                <NavLink href="/vehicles" icon="search" label="ค้นหารถ" pathname={pathname} onClick={close} />
+              </>
             )}
             {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (
               <>
@@ -244,7 +249,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="empty-page">บัญชีของคุณไม่มีสิทธิ์ใช้งานหน้านี้</div>
           </div>
         ) : (
-          children
+          <>
+            {children}
+            <FocusVehicleRow />
+          </>
         )}
       </main>
       <ChangePasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />

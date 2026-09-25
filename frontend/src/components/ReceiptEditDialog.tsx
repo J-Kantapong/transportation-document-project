@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { receiptImageUrl, type DocumentSubmission, type ReceiptSummary } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 
 // Popup แก้ข้อมูลที่ AI กรอกให้ในหน้ารับใบเสร็จ: รูปใบเสร็จขนาดใหญ่อยู่ข้างช่องกรอก ให้พนักงานเทียบทีละช่อง
 // ช่องที่ AI ไม่แน่ใจ/อ่านไม่ออก/ตรวจอัตโนมัติไม่ผ่าน ขึ้นสีเหลืองพร้อมเหตุผล - กดยืนยันแล้วถือว่าคนตรวจแล้ว (ReceiptCheckPage เลิก highlight)
@@ -165,12 +166,9 @@ export function ReceiptEditButton(props: Props) {
             </label>
             <label className="field">
               วันที่ในใบเสร็จ
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="วว/ดด/ปปปป"
+              <DateInput
                 value={draft.receiptDate}
-                onChange={(e) => setDraft({ ...draft, receiptDate: formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                onChange={(value) => setDraft({ ...draft, receiptDate: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                 style={{ width: 180, ...hl(props.flags.date) }}
               />
               {props.highlight && <Flag text={props.flags.date} />}

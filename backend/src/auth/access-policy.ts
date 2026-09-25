@@ -31,6 +31,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
+  // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
+  { pattern: /^\/api\/vehicle-search(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api\/customers$/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api\/customers(\/|$)/, access: ['ADMIN'] },
   // ลบ/กู้คืนข้อมูลรถ และรายการรถที่ถูกลบ: ADMIN เท่านั้น (ผู้ใช้ 2026-09-23) - ต้องมาก่อนกฎขั้น 1-3 ด้านล่าง

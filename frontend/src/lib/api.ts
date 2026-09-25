@@ -145,6 +145,63 @@ export interface DeletedVehicle extends Vehicle {
   deletedByName: string | null; // ชื่อเล่น (ถ้ามี) ของผู้ที่กดลบ
 }
 
+// หน้าค้นหารถ (ผู้ใช้ 2026-09-25) - สถานะคำนวณฝั่ง backend ด้วย waitsFor() ตัวเดียวกับภาพรวมผู้บริหาร
+export const VEHICLE_SEARCH_STAGES = [
+  ['transfer', 'รอแจ้งย้าย/ตัดบัญชี'],
+  ['inspectSend', 'รอส่งตรวจรถ'],
+  ['inspectResult', 'รอผลตรวจรถ'],
+  ['submit', 'รอยื่นเอกสาร'],
+  ['receipt', 'รอใบเสร็จ'],
+  ['plate', 'รอรับป้าย'],
+  ['book', 'รอรับเล่ม'],
+  ['delivery', 'รอส่งงานลูกค้า'],
+  ['plateDelivery', 'รอส่งป้ายตามหลัง'],
+  ['billing', 'รอวางบิล'],
+] as const;
+export type VehicleSearchStage = (typeof VEHICLE_SEARCH_STAGES)[number][0];
+export type VehicleSearchStatus = VehicleSearchStage | 'done' | 'problem';
+
+export interface VehicleSearchParams {
+  q?: string;
+  from?: string;
+  to?: string;
+  status?: string;
+  kind?: string;
+}
+
+export interface VehicleStageStatus {
+  stage: VehicleSearchStage;
+  label: string;
+  href: string;
+  since: string;
+  days: number;
+  sla: number;
+  late: boolean;
+  flags: string[];
+  reason: string | null;
+}
+
+export interface VehicleSearchRow {
+  id: string;
+  date: string;
+  kind: 'car' | 'moto';
+  customerName: string;
+  brandName: string;
+  chassis: string;
+  engine: string | null;
+  plate: string | null;
+  statuses: VehicleStageStatus[]; // ว่าง = จบงานแล้ว
+  problem: boolean;
+}
+
+export interface VehicleSearchResult {
+  vehicles: VehicleSearchRow[];
+  total: number; // ตรงเงื่อนไขทั้งหมด (รวมสถานะ)
+  all: number; // ตรงคำค้น/วันที่/ประเภทรถ ก่อนกรองสถานะ
+  hasMore: boolean;
+  counts: Record<VehicleSearchStatus, number>;
+}
+
 // รถในหน้ายื่นเอกสาร (Step 4) - ดู backend/src/document-submission/submission-eligibility.ts สำหรับกฎ:
 // แจ้งย้าย/ตัดบัญชีเสร็จ + ตรวจผ่านไม่เกิน 90 วัน ณ วันที่ยื่น + ไม่มีรายการที่รอใบเสร็จ/ได้ใบเสร็จแล้ว
 export interface SubmitCandidate extends Vehicle {
@@ -493,6 +550,8 @@ export interface InspectionVehicle {
   inspectionResultCost: string | null; // ราคาตรวจรถ (No bill)
   inspectionResultBillCost: string | null; // ค่าตรวจรถ (Bill) - เฉพาะรอบ 2
   inspectionFailRemark: string | null;
+  submitted: boolean; // ยื่นเอกสารแล้ว (มีรายการยื่นที่ยังไม่ยกเลิก/ไม่สำเร็จ)
+  submitDeadline: string | null; // วันสุดท้ายที่ยื่นได้ (ตรวจผ่าน + 89 วัน) - null = ไม่ผ่าน/ยังไม่มีผล/ยื่นแล้ว
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -673,7 +732,25 @@ export const api = {
   createFinanceCompany: (name: string) =>
     request<{ financeCompany: FinanceCompany }>('/api/finance-companies', { method: 'POST', body: JSON.stringify({ name }) }),
 
-  listVehicles: () => request<{ vehicles: Vehicle[] }>('/api/vehicles'),
+  // หน้าค้นหารถ: ค้นทั้งฐานข้อมูล + สถานะขั้นที่ค้าง (ทีละ 100 คัน) - ดู backend/src/vehicle-search
+  searchVehicles: (params: VehicleSearchParams, offset = 0) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
+    if (offset) search.set('offset', String(offset));
+    const qs = search.toString();
+    return request<VehicleSearchResult>(`/api/vehicle-search${qs ? `?${qs}` : ''}`);
+  },
+  // ทีละ 100 คัน - q ค้นจากเลขตัวถัง/เลขเครื่อง/ทะเบียน/ชื่อลูกค้า/เจ้าของ, from/to กรองวันที่ (ค.ศ. YYYY-MM-DD)
+  listVehicles: (params: { q?: string; from?: string; to?: string; offset?: number; limit?: number } = {}) => {
+    const search = new URLSearchParams();
+    if (params.q) search.set('q', params.q);
+    if (params.from) search.set('from', params.from);
+    if (params.to) search.set('to', params.to);
+    if (params.offset) search.set('offset', String(params.offset));
+    if (params.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return request<{ vehicles: Vehicle[]; hasMore: boolean }>(`/api/vehicles${qs ? `?${qs}` : ''}`);
+  },
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
   updateVehicle: (id: string, data: Record<string, string>) =>

@@ -1,13 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PageTabs } from "@/components/PageTabs";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { api, ApiError, type InspectionVehicle } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
+import { DateInput } from "@/components/DateInput";
 
 // หัวกระดาษที่แก้ไขล่าสุดจำไว้ในเบราว์เซอร์นี้ - ถ้าอ่านไม่ได้ใช้ค่าเริ่มต้น
 const PRINT_HEADER_STORAGE_KEY = "inspection-print-header";
+const INSPECTION_HREF = "/registration/new-vehicle/inspection";
 
 function loadPrintHeader(): string {
   try {
@@ -117,8 +122,31 @@ function roundLabel(v: InspectionVehicle): string {
 // แบ่งหน้าละ 10 คัน ทุก panel ในหน้านี้ - select all/บันทึกทั้งหมด ยังทำงานกับทั้งลิสต์ ไม่ใช่แค่หน้าที่เห็น
 const PAGE_SIZE = 10;
 
+// วันสุดท้ายที่ยังยื่นเอกสารได้ (ตรวจผ่าน + 89 วัน) - ย้ายมาจากคิวหน้ายื่นเอกสาร (ผู้ใช้ 2026-09-25) เหลือ 7 วันขึ้นสีเตือน
+function SubmitDeadline({ vehicle }: { vehicle: InspectionVehicle }) {
+  if (vehicle.submitted) return <span className="badge done">ยื่นแล้ว</span>;
+  if (!vehicle.submitDeadline) return <>—</>;
+  const daysLeft = Math.round((Date.parse(`${vehicle.submitDeadline}T00:00:00Z`) - Date.parse(`${todayIso()}T00:00:00Z`)) / 86_400_000);
+  return (
+    <>
+      {isoToDisplayDate(vehicle.submitDeadline)}
+      <span className={daysLeft <= 7 ? "badge warn" : "muted"} style={{ marginLeft: 8, whiteSpace: "nowrap" }}>
+        {daysLeft < 0 ? "หมดอายุแล้ว" : daysLeft === 0 ? "วันสุดท้าย" : `อีก ${daysLeft} วัน`}
+      </span>
+    </>
+  );
+}
+
 function usePagedList<T>(items: T[]): { pageItems: T[]; page: number; setPage: (p: number) => void; totalPages: number } {
   const [page, setPage] = useState(0);
+  // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): พอรายการโหลดเสร็จครั้งแรก ข้ามไปหน้าที่มีรถคันนั้น (lib/vehicle-focus.ts)
+  const [focusChecked, setFocusChecked] = useState(false);
+  if (!focusChecked && items.length > 0) {
+    setFocusChecked(true);
+    const chassis = focusChassis();
+    const index = chassis ? items.findIndex((item) => sameChassis((item as { chassis?: string }).chassis, chassis)) : -1;
+    if (index >= 0) setPage(Math.floor(index / PAGE_SIZE));
+  }
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const pageItems = items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
@@ -276,12 +304,9 @@ function SendPanel({
             <div className="inspect-select-all-info">
               <label>
                 วันที่ (ใช้กับที่เลือกทั้งหมด)
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
+                <DateInput
                   value={selectAllDateText}
-                  onChange={(e) => onSelectAllDateTextChange(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+                  onChange={(value) => onSelectAllDateTextChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
                   style={{ width: 100 }}
                 />
               </label>
@@ -353,15 +378,12 @@ function SendPanel({
                         </div>
                       </td>
                       <td>
-                        <input
+                        <DateInput
                           className="inspect-input inspect-input--date"
-                          type="text"
-                          inputMode="numeric"
                           aria-label="วันที่ส่งตรวจ"
-                          placeholder="วว/ดด/ปปปป"
                           value={row.dateText}
-                          onChange={(e) =>
-                            patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                          onChange={(value) =>
+                            patchRow(v.id, { dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
                           }
                         />
                       </td>
@@ -512,16 +534,13 @@ function ResultPanel({
                         </div>
                       </td>
                       <td>
-                        <input
+                        <DateInput
                           className="inspect-input inspect-input--date"
-                          type="text"
-                          inputMode="numeric"
                           aria-label="วันที่ทราบผล"
-                          placeholder="วว/ดด/ปปปป"
                           value={row.dateText}
                           disabled={!selected}
-                          onChange={(e) =>
-                            patchRow(v.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })
+                          onChange={(value) =>
+                            patchRow(v.id, { dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
                           }
                         />
                       </td>
@@ -683,6 +702,7 @@ function CompletedInspectionPanel({
                   <th>รอบตรวจ</th>
                   <th>ผลตรวจ</th>
                   <th>วันที่เสร็จ</th>
+                  <th>ยื่นได้ถึง</th>
                   <th>ราคาตรวจรถ (No bill)</th>
                   <th>ค่าตรวจรถ (Bill)</th>
                   <th></th>
@@ -699,6 +719,9 @@ function CompletedInspectionPanel({
                     <td>{roundLabel(v)}</td>
                     <td>{v.inspectionResult || "—"}</td>
                     <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
+                    <td>
+                      <SubmitDeadline vehicle={v} />
+                    </td>
                     <td>{v.inspectionResultCost ? `${v.inspectionResultCost} บาท` : "—"}</td>
                     <td>{v.inspectionResultBillCost ? `${v.inspectionResultBillCost} บาท` : "—"}</td>
                     <td>
@@ -723,7 +746,8 @@ function CompletedInspectionPanel({
 }
 
 export default function InspectionPage() {
-  const [activeTab, setActiveTab] = useState<"send" | "result">("send");
+  // แท็บเป็น URL ของตัวเอง (ผู้ใช้ 2026-09-25): /inspection = ตรวจรถ, /inspection/result = ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน
+  const activeTab: "send" | "result" = usePathname().endsWith("/result") ? "result" : "send";
 
   // Tab 1: ผ่าน Step 2 แล้ว แต่ยังไม่ได้ส่งตรวจ
   const [pendingSendVehicles, setPendingSendVehicles] = useState<InspectionVehicle[]>([]);
@@ -1130,24 +1154,13 @@ export default function InspectionPage() {
       </Link>
       <h1 tabIndex={-1}>ตรวจรถ</h1>
 
-      <div className="vehicle-tabs" role="tablist" aria-label="ขั้นตอนตรวจรถ">
-        <button
-          className={`vehicle-tab${activeTab === "send" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={activeTab === "send"}
-          onClick={() => setActiveTab("send")}
-        >
-          1. ตรวจรถ
-        </button>
-        <button
-          className={`vehicle-tab${activeTab === "result" ? " selected" : ""}`}
-          role="tab"
-          aria-selected={activeTab === "result"}
-          onClick={() => setActiveTab("result")}
-        >
-          2. ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน
-        </button>
-      </div>
+      <PageTabs
+        label="ขั้นตอนตรวจรถ"
+        tabs={[
+          { href: INSPECTION_HREF, label: "1. ตรวจรถ", selected: activeTab === "send" },
+          { href: `${INSPECTION_HREF}/result`, label: "2. ตรวจรถเรียบร้อย / ตรวจไม่ผ่าน", selected: activeTab === "result" },
+        ]}
+      />
 
       {activeTab === "send" ? (
         <>
@@ -1289,12 +1302,9 @@ export default function InspectionPage() {
               </div>
               <label className="field">
                 วันที่ทราบผล
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="วว/ดด/ปปปป"
+                <DateInput
                   value={editResult.dateText}
-                  onChange={(e) => patchEditResult({ dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                  onChange={(value) => patchEditResult({ dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })}
                 />
               </label>
               {editResult.result === "ไม่ผ่าน" && (

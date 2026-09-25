@@ -14,8 +14,14 @@ export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
   @Get()
-  async findAll() {
-    return { vehicles: await this.vehiclesService.findAll() };
+  findAll(
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.vehiclesService.findAll({ q, from, to, offset, limit });
   }
 
   @Post()

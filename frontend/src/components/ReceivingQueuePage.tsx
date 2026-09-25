@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
 
 // หน้าคิวของขั้นตอนหลังได้รับใบเสร็จ (รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery) - ใช้โครงเดียวกัน:
 // ติ๊กว่ารับแล้ว + วันที่ แล้วกดบันทึก รายการที่ทำแล้วย้ายไปตารางด้านล่าง
@@ -189,12 +190,9 @@ export function ReceivingQueuePage({
                             <input type="checkbox" checked={row.checked} onChange={(e) => patchRow(r.id, { checked: e.target.checked })} aria-label={doneLabel} />
                           </td>
                           <td>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="วว/ดด/ปปปป"
+                            <DateInput
                               value={row.dateText}
-                              onChange={(e) => patchRow(r.id, { dateText: formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                              onChange={(value) => patchRow(r.id, { dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })}
                               style={{ width: 110 }}
                             />
                           </td>

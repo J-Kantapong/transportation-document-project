@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { displayDateToIso, formatDateDigits, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { ReceiptEditButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary } from "./ReceiptPhotos";
+import { DateInput } from "@/components/DateInput";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
@@ -283,12 +285,9 @@ function ReceiptDateCell({ s, onSaved }: { s: DocumentSubmission; onSaved: (rece
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="วว/ดด/ปปปป"
+        <DateInput
           value={text}
-          onChange={(e) => setText(formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+          onChange={(value) => setText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
           aria-label="แก้วันที่ในใบเสร็จ"
           style={{ width: 110 }}
           autoFocus
@@ -324,6 +323,7 @@ export function ReceiptCheckPage() {
   const [receipts, setReceipts] = useState<Record<string, ReceiptSummary[]>>({});
   const [inputs, setInputs] = useState<Record<string, RowInput>>({});
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const focusApplied = useRef(false);
   // วันที่รับใบเสร็จ: เหมือนหน้ารับป้าย/รับเล่ม - เติมอัตโนมัติเป็นวันที่บันทึก (วันนี้) null = ยังไม่แก้เอง พนักงานแก้เป็นวันอื่นได้
   const [editedDate, setEditedDate] = useState<string | null>(null);
   const dateText = editedDate ?? isoToDisplayDate(todayIso());
@@ -358,6 +358,17 @@ export function ReceiptCheckPage() {
         ),
       );
       setRowErrors({});
+      // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกแท็บและเปิดใบยื่นที่มีรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น
+      // (loadAll ถูกเรียกซ้ำหลังบันทึก ห้ามดึงพนักงานกลับไปใบเดิม) FocusVehicleRow เลื่อนไปที่แถวต่อเอง
+      if (!focusApplied.current) {
+        focusApplied.current = true;
+        const chassis = focusChassis();
+        const target = chassis ? p.submissions.find((s) => sameChassis(s.vehicle.chassis, chassis)) : undefined;
+        if (target) {
+          setTab(sheetGroup(target).tab);
+          setOpenKey(target.receiptCarriedAt ? CARRIED_KEY : sheetKey(target));
+        }
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
     } finally {
@@ -558,12 +569,9 @@ export function ReceiptCheckPage() {
       <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <span>วันที่รับใบเสร็จ</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="วว/ดด/ปปปป"
+          <DateInput
             value={dateText}
-            onChange={(e) => setEditedDate(formatDateDigits(e.target.value.replace(/\D/g, "").slice(0, 8)))}
+            onChange={(value) => setEditedDate(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
             style={{ width: 120 }}
           />
         </label>
@@ -776,12 +784,9 @@ export function ReceiptCheckPage() {
                             )}
                             <span>วันที่</span>
                             {editable ? (
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="วว/ดด/ปปปป"
+                              <DateInput
                                 value={input.receiptDate}
-                                onChange={(e) => patchInput(s.id, { receiptDate: formatDateDigitsCe(e.target.value.replace(/\D/g, "").slice(0, 8)) })}
+                                onChange={(value) => patchInput(s.id, { receiptDate: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                                 aria-label="วันที่ในใบเสร็จ"
                                 style={{ width: 126, ...(check.date ? CHECK_STYLE : {}) }}
                               />
