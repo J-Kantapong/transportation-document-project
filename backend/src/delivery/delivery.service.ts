@@ -15,7 +15,12 @@ export type DeliveryKind =
 const VEHICLE_INCLUDE = {
   customer: { select: { id: true, name: true, company: true } },
   brand: { select: { name: true } },
-  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true, receiptNo: true } },
+  // submitDate + urgent + createdAt = ใบยื่น (lot) ที่รถคันนี้อยู่ - หน้า Delivery จัดการ์ดตามใบยื่นแบบหน้ารับป้าย (ผู้ใช้ 2026-09-26)
+  documentSubmissions: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true },
+  },
   invoiceLines: { where: { invoice: { status: { not: 'VOID' } } }, select: { invoice: { select: { invoiceNo: true } } } },
 } as const;
 
@@ -68,6 +73,28 @@ export class DeliveryService {
     });
     // some(RECEIPT_RECEIVED) ยังนับรถที่เคยได้ใบเสร็จแล้วยื่นใหม่ค้าง PENDING - เอาเฉพาะที่การยื่นล่าสุดได้ใบเสร็จจริง
     return vehicles.filter((v) => v.deliveredDate || v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED').map((v) => this.mapRow(v));
+  }
+
+  // รถคันอื่นในใบยื่น (lot) เดียวกับคันที่อยู่ในคิว: ยังไม่พร้อมส่ง (รอใบเสร็จ/รอเล่ม) หรือส่งครบแล้ว
+  // งานเสร็จเป็น lot แต่บางทีเสร็จไม่หมด (ผู้ใช้ 2026-09-26) - หน้า Delivery แสดงทั้ง lot ให้เห็นว่าเหลือคันไหน ติ๊กได้เฉพาะคันในคิว
+  async lotVehicles(rows: Array<{ id: string; customerId: string; submitDate: string | null }>) {
+    const dates = [...new Set(rows.map((r) => r.submitDate).filter((d): d is string => !!d))];
+    if (dates.length === 0) return [];
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: {
+        id: { notIn: rows.map((r) => r.id) },
+        customerId: { in: [...new Set(rows.map((r) => r.customerId))] },
+        deletedAt: null,
+        documentSubmissions: { some: { submitDate: { in: dates.map((d) => new Date(`${d}T00:00:00.000Z`)) } } },
+        ...vehicleTypeWhere(),
+      },
+      include: VEHICLE_INCLUDE,
+    });
+    const lotKeys = new Set(rows.map((r) => `${r.submitDate}|${r.customerId}`));
+    // ใบยื่นล่าสุดของคันนั้นต้องอยู่ใน lot เดียวกัน (ยื่นใหม่ไปใบอื่นแล้ว = ไม่นับ) และไม่ใช่ยื่นไม่สำเร็จ
+    return vehicles
+      .map((v) => this.mapRow(v))
+      .filter((r) => r.submissionStatus !== 'FAILED' && lotKeys.has(`${r.submitDate}|${r.customerId}`));
   }
 
   async recent() {
@@ -230,9 +257,10 @@ export class DeliveryService {
     plateDeliveredDate: Date | null;
     deliveryRecipient: string | null;
     deliveryNote: string | null;
+    bookReceivedDate: Date | null;
     customer: { id: string; name: string; company: string | null };
     brand: { name: string };
-    documentSubmissions: Array<{ receiptNo: string | null }>;
+    documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date }>;
     invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
   }) {
     return {
@@ -252,6 +280,13 @@ export class DeliveryService {
       recipient: v.deliveryRecipient,
       note: v.deliveryNote,
       invoiceNo: v.invoiceLines[0]?.invoice.invoiceNo ?? null,
+      // ใบยื่นล่าสุด = lot ของรถคันนี้ (วันที่ยื่น + กลุ่ม รย./ด่วน + ลูกค้า)
+      submitDate: v.documentSubmissions[0]?.submitDate.toISOString().slice(0, 10) ?? null,
+      urgent: v.documentSubmissions[0]?.urgent ?? false,
+      submittedAt: v.documentSubmissions[0]?.createdAt.toISOString() ?? null,
+      submissionStatus: v.documentSubmissions[0]?.status ?? null,
+      receiptReceived: v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED',
+      bookReceived: v.bookReceivedDate !== null,
     };
   }
 }

@@ -106,6 +106,12 @@ This private repository is the shared development surface for the user, Claude C
   break between rows and repeat the table header). No prices anywhere. The `Vehicle` delivery columns are still
   the live state used by the queue and billing. Deliveries saved before this were backfilled by migration
   `20260925200000_add_delivery_slips` (recipient of a later plate delivery read back from `deliveryNote`).
+  The Delivery page is a list of ใบยื่น (lot) cards like the receive plate/book queues (user 2026-09-26: work finishes
+  per lot but not always all of it): lot = latest submission's submit date + job-sheet group + customer; every vehicle
+  of the lot is listed with ใบเสร็จ / เล่ม / ป้าย status (มีแล้ว / รอ / ส่งแล้ว), only queue vehicles can be ticked,
+  ticking across lots is allowed for one customer, and the save form is a sticky bar at the bottom. `GET
+  /api/delivery/queue` returns `{ vehicles, lotVehicles }` (the other vehicles of those lots, display only); rows carry
+  `submitDate`, `urgent`, `submittedAt`, `submissionStatus`, `receiptReceived`, `bookReceived`.
 - Saved-vehicle list on `/registration/new-vehicle/entry` (added 2026-09-25): `GET /api/vehicles` returns
   `{ vehicles, hasMore }`, 100 at a time newest-first (`offset` for "โหลดเพิ่มอีก 100 คัน", `limit` up to 1,000 so a
   reload after edit/delete keeps what is open). `q` searches the whole database (chassis, engine, plate incl.

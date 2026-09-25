@@ -20,6 +20,13 @@ export interface DeliveryRow {
   recipient: string | null;
   note: string | null;
   invoiceNo: string | null; // บัญชีวางบิลแล้วในบิลเลขนี้
+  // ใบยื่นล่าสุด = lot ของรถคันนี้ (หน้า Delivery จัดการ์ดตามใบยื่น ผู้ใช้ 2026-09-26)
+  submitDate: string | null;
+  urgent: boolean;
+  submittedAt: string | null;
+  submissionStatus: string | null;
+  receiptReceived: boolean;
+  bookReceived: boolean;
 }
 
 // ใบส่งงาน Delivery: บันทึกส่ง 1 ครั้ง = 1 ใบ บอกแยกรายคันว่ารอบนี้ส่งใบเสร็จ / เล่ม / ป้าย (ไม่มีราคา)
@@ -154,7 +161,8 @@ export interface CreateInvoiceInput {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const billingApi = {
-  deliveryQueue: () => request<{ vehicles: DeliveryRow[] }>("/api/delivery/queue"),
+  // lotVehicles = คันอื่นในใบยื่นเดียวกันที่ยังไม่พร้อมส่งหรือส่งครบแล้ว (แสดงอย่างเดียว)
+  deliveryQueue: () => request<{ vehicles: DeliveryRow[]; lotVehicles: DeliveryRow[] }>("/api/delivery/queue"),
   deliveryRecent: () => request<{ vehicles: DeliveryRow[] }>("/api/delivery/recent"),
   submitDelivery: (data: { vehicleIds: string[]; date: string; recipient: string; note: string }) =>
     request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>("/api/delivery", json("POST", data)),
