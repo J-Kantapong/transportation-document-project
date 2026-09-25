@@ -48,13 +48,21 @@ const CAR_COLUMNS: Array<[string, number]> = [
   ["เลขทะเบียน", 17],
 ];
 
+// ผู้ถือกรรมสิทธิ์กว้างสุด เพราะชื่อบริษัทไฟแนนซ์ยาว (เช่น "บริษัท อยุธยา แคปปิตอล ออโต้ ลีส จำกัด (มหาชน)")
 const MOTO_COLUMNS: Array<[string, number]> = [
   ["ลำดับ", 7],
-  ["เลขตัวรถ", 28],
-  ["ผู้ถือกรรมสิทธิ์", 26],
-  ["ค่าธรรมเนียม", 18],
-  ["เลขทะเบียน", 21],
+  ["เลขตัวรถ", 24],
+  ["ผู้ถือกรรมสิทธิ์", 39],
+  ["ค่าธรรมเนียม", 14],
+  ["เลขทะเบียน", 16],
 ];
+
+// ชื่อที่ยาวเกินช่องที่ขนาดปกติ: ย่อตัวอักษร และถ้ายาวมากให้ขึ้นบรรทัดใหม่ได้ (2 บรรทัดในแถวเดียว) แทนการล้นทับช่องถัดไป
+function ownerCellClass(owner: string): string {
+  if (owner.length > 56) return "owner xs";
+  if (owner.length > 38) return "owner sm";
+  return "owner";
+}
 
 export function formatSheetMoney(amount: number): string {
   return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -144,7 +152,9 @@ function pageHtml(sheet: JobSheet, pageIndex: number): string {
   const columns = sheet.kind === "moto" ? MOTO_COLUMNS : CAR_COLUMNS;
   const body = Array.from({ length: perPage }, (_, i) => {
     const cells = rowCells(sheet.kind, sheet.rows[start + i]);
-    return `<tr><td>${start + i + 1}</td>${cells.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`;
+    // แบบ moto: ช่อง index 1 คือผู้ถือกรรมสิทธิ์
+    const cellClass = (c: string, idx: number) => (sheet.kind === "moto" && idx === 1 ? ` class="${ownerCellClass(c)}"` : "");
+    return `<tr><td>${start + i + 1}</td>${cells.map((c, idx) => `<td${cellClass(c, idx)}>${escapeHtml(c)}</td>`).join("")}</tr>`;
   }).join("");
   const cols = columns.map(([, w]) => `<col style="width:${w}%">`).join("");
   const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
@@ -205,6 +215,9 @@ export function buildJobSheetHtml(sheets: JobSheet[]): string {
   .moto .mtitle { font-size: 14pt; white-space: normal; }
   .moto .mdatel { font-size: 8pt; text-align: right; font-style: normal; }
   .moto .mdate { font-size: 14pt; }
+  .moto .grid td.owner { overflow: hidden; }
+  .moto .grid td.owner.sm { font-size: 8.5pt; }
+  .moto .grid td.owner.xs { font-size: 7pt; line-height: 1.1; white-space: normal; }
   .pageno { position: absolute; right: 0; bottom: 0; font-size: 9pt; }
 </style>
 </head>
