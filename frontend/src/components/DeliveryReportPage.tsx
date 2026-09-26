@@ -18,7 +18,7 @@ import {
 import { DateInput } from "@/components/DateInput";
 import { DeliverySlipCancelDialog, DeliverySlipEditDialog } from "@/components/DeliverySlipDialogs";
 
-// รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งใบเสร็จ / เล่ม / ป้าย
+// รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งเล่ม / ป้าย (ใบเสร็จไปกับใบวางบิล ผู้ใช้ 2026-09-26)
 // พิมพ์ใบส่งงานซ้ำได้ทีละใบ + ท้ายรายงานมีรถที่ป้ายยังค้างส่ง - ไม่มีราคา (DELIVERY เปิดหน้านี้ได้)
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
 const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done">✓</span> : <span className="muted">—</span>);
@@ -133,7 +133,7 @@ export function DeliveryReportPage() {
         ← Delivery
       </Link>
       <h1 tabIndex={-1}>รายงานส่งงาน</h1>
-      <p>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกใบเสร็จ / เล่ม / ป้าย พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</p>
+      <p>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกเล่ม / ป้าย (ใบเสร็จส่งพร้อมใบวางบิล) พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</p>
 
       <section className="panel" style={{ marginTop: 20, padding: "18px 23px", overflow: "visible" }}>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -193,7 +193,6 @@ export function DeliveryReportPage() {
           <div className="stats" style={{ marginTop: 20 }}>
             {[
               ["ใบส่งงาน", `${liveSlips.length} ใบ · ${counts.vehicles} คัน`],
-              ["ใบเสร็จ", counts.receipt],
               ["เล่มทะเบียน", counts.book],
               ["ป้าย", counts.plate],
             ].map(([label, value]) => (
@@ -225,7 +224,6 @@ export function DeliveryReportPage() {
                       <th>เลขตัวถัง</th>
                       <th>ยี่ห้อ</th>
                       <th>เลขที่ใบเสร็จ</th>
-                      <th>ใบเสร็จ</th>
                       <th>เล่ม</th>
                       <th>ป้าย</th>
                     </tr>
@@ -234,7 +232,7 @@ export function DeliveryReportPage() {
                     {shownSlips.map((s) => (
                       <Fragment key={s.id}>
                         <tr style={{ background: s.cancelledAt ? "#fbf1f1" : "#f5f7fb" }}>
-                          <td colSpan={7}>
+                          <td colSpan={6}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                               <span>
                                 <b style={s.cancelledAt ? CANCELLED_ROW : undefined}>{slipNoText(s.slipNo)}</b> · {isoToDisplayDate(s.date)} ·{" "}
@@ -283,9 +281,6 @@ export function DeliveryReportPage() {
                             <td>{i.brandName}</td>
                             <td>{i.receiptNo || "—"}</td>
                             <td>
-                              <Tick sent={i.receipt} />
-                            </td>
-                            <td>
                               <Tick sent={i.book} />
                             </td>
                             <td>
@@ -295,7 +290,7 @@ export function DeliveryReportPage() {
                         ))}
                         {!s.cancelledAt && s.items.some((i) => i.cancelledAt) && (
                           <tr>
-                            <td colSpan={7} className="muted" style={{ fontSize: 13 }}>
+                            <td colSpan={6} className="muted" style={{ fontSize: 13 }}>
                               {s.items
                                 .filter((i) => i.cancelledAt)
                                 .map((i) => `ยกเลิก ${i.chassis}: ${i.cancelReason}${i.cancelledBy ? ` (${i.cancelledBy})` : ""}`)

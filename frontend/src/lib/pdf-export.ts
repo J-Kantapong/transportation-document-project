@@ -6,7 +6,9 @@
 
 const PX_PER_MM = 96 / 25.4;
 const SCALE = 2; // ความละเอียดรูป 2 เท่า - ตัวหนังสือคมพอสำหรับพิมพ์
-const BREAK_AFTER = "tr, h1, h2, p, .head, .info, .sign";
+const BREAK_AFTER = "tr, h1, h2, p, .head, .info, .sign, .tail";
+// .tail = กลุ่มที่ห้ามตัดกลาง (ท้ายใบส่งงาน: หมายเหตุ + ช่องลงชื่อ) - จุดตัดข้างในไม่นับ ตัดได้แค่หลังทั้งกลุ่ม
+const KEEP_TOGETHER = ".tail";
 
 export interface PdfPageSetup {
   orientation: "portrait" | "landscape";
@@ -34,7 +36,11 @@ interface Layout {
 
 function layoutOf(doc: Document): Layout {
   const top = doc.body.getBoundingClientRect().top;
-  const soft = [...doc.querySelectorAll(BREAK_AFTER)].map((el) => el.getBoundingClientRect().bottom - top);
+  const soft = [...doc.querySelectorAll(BREAK_AFTER)]
+    .filter((el) => !el.parentElement?.closest(KEEP_TOGETHER))
+    .map((el) => el.getBoundingClientRect().bottom - top);
+  // ขอบบนของกลุ่มที่ห้ามตัดกลาง = ตัดก่อนเริ่มกลุ่มได้ (ถ้าทั้งกลุ่มไม่พอในหน้านี้ จะขึ้นหน้าใหม่ทั้งกลุ่ม)
+  soft.push(...[...doc.querySelectorAll(KEEP_TOGETHER)].map((el) => el.getBoundingClientRect().top - top));
   const forced = [...doc.querySelectorAll("section.slip")].slice(1).map((el) => el.getBoundingClientRect().top - top);
   const tables = [...doc.querySelectorAll("table")].flatMap((table) => {
     const head = table.querySelector("thead");

@@ -161,7 +161,7 @@ export function DeliverySlipCancelDialog({
                 <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={!!i.invoiceNo} onChange={() => toggle(i.vehicleId)} />
                 <span>
                   {i.plateText || "—"} · {i.chassis}
-                  {i.receipt ? "" : " (ใบส่งป้าย)"}
+                  {i.book ? "" : " (ใบส่งป้าย)"}
                   {i.invoiceNo ? <span className="muted"> · วางบิลแล้ว {i.invoiceNo} ยกเลิกไม่ได้</span> : null}
                 </span>
               </label>

@@ -117,6 +117,18 @@ This private repository is the shared development surface for the user, Claude C
   slip first). Remark is mandatory and every change is logged to `VehicleEditLog`. To catch the usual mistake (the
   date) before it happens, "บันทึกส่งงาน" on the Delivery page first opens a confirm popup (date, days from today in
   orange when not today, customer, recipient, vehicle count by what goes out); future dates are allowed (user).
+  Receipts are not delivered with the job (user 2026-09-26): they go to the customer with the billing statement
+  (ใบวางบิล, not built yet), so new `DeliverySlipItem.receipt` is always false, slips/report/prints show only เล่ม +
+  ป้าย (receipt number kept for reference), and the Delivery queue shows the receipt only as มีแล้ว / รอ (still
+  required before delivery). Slip logic keys on `book` (book = first delivery, no book + plate = plate-only slip).
+  Printed slip layout (user 2026-09-26): company header from `DELIVERY_HEADER` in `frontend/src/lib/company-profile.ts`
+  (no logo; phone 0655194565 differs from the invoice header) with a "ใบส่งงาน" box for DL number and date; columns
+  ลำดับ, เลขตัวถัง, เลขทะเบียน, ยี่ห้อ, ชื่อเจ้าของ (+ เล่ม / ป้าย ticks). ชื่อเจ้าของ = `VehicleOwner.hirerName` when
+  financed, else `name` (never the finance company), read live via `GET /api/delivery/slips` items `ownerName`. Every row
+  is one line of fixed height: fixed column widths and a small script in the print HTML shrinks long text to fit (down
+  to 6pt, then "…"). Long slips repeat the table header per page, the total row prints once, and the note + signature
+  block never splits (it starts with a "ใบส่งงานเลขที่ … · รวม N คัน" line in case it lands on its own page;
+  `.tail` is kept together by `pdf-export.ts` too).
   The Delivery page is a list of ใบยื่น (lot) cards like the receive plate/book queues (user 2026-09-26: work finishes
   per lot but not always all of it): lot = latest submission's submit date + job-sheet group + customer; every vehicle
   of the lot is listed with ใบเสร็จ / เล่ม / ป้าย status (มีแล้ว / รอ / ส่งแล้ว), only queue vehicles can be ticked,
