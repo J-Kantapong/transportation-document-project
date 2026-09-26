@@ -68,7 +68,7 @@ ${body}
 // ทุกแถวสูงเท่ากัน (ผู้ใช้ 2026-09-26): ช่องกว้างคงที่ ข้อความบรรทัดเดียว ข้อความยาวย่อตัวอักษรลงจนพอดีช่อง
 // วัดความกว้างจริงในเอกสาร (FIT_SCRIPT) หลังฟอนต์โหลดเสร็จ - ทั้งหน้าต่างพิมพ์และบันทึก PDF รอ fonts.ready ก่อนเสมอ
 // .slip กว้างเท่าพื้นที่พิมพ์ A4 (210 - ขอบ 12mm x2) จึงวัดบนจอได้ตรงกับบนกระดาษ ย่อได้ต่ำสุด 6pt แล้วค่อยตัดด้วย "…"
-const fitCell = (text: string) => `<td class="fit"><span>${esc(text)}</span></td>`;
+const fitCell = (text: string, align = "") => `<td class="fit${align ? ` ${align}` : ""}"><span>${esc(text)}</span></td>`;
 
 // วัดที่ span (ความกว้างข้อความจริง) เทียบกับพื้นที่ในช่อง - scrollWidth ของ td ในตาราง table-layout: fixed เชื่อไม่ได้
 const FIT_SCRIPT = `<script>
@@ -129,11 +129,12 @@ ${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.book)}</td><td class="
 ${customer.address ? `<div>${esc(customer.address)}</div>` : ""}${customer.phone ? `<div>โทร ${esc(customer.phone)}</div>` : ""}
 ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(slip.note)}</div>` : ""}</div>
 </div>
-<table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:19mm"><col style="width:25mm"><col><col style="width:10mm"><col style="width:10mm"></colgroup>
+<table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:22mm"><col style="width:25mm"><col><col style="width:10mm"><col style="width:10mm"></colgroup>
 <thead><tr><th class="c">ลำดับ</th><th>เลขตัวถัง</th><th>เลขทะเบียน</th><th>ยี่ห้อ</th><th>ชื่อเจ้าของ</th>
 <th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows}
-<tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody></table>
+<tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody>
+<tfoot><tr class="edge"><td colspan="7"></td></tr></tfoot></table>
 <div class="tail">
 <p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
 ${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
@@ -167,13 +168,19 @@ const SLIP_STYLE = `
   .card .label.sub { margin-top: 1.2mm; }
   .card .main { font-size: 11pt; font-weight: 700; }
   /* ตาราง: ช่องกว้างคงที่ ทุกแถวสูงเท่ากัน (ผู้ใช้ 2026-09-26) - หัวตารางตัวหนาพื้นขาว เส้นใต้หนา, แถวคั่นเส้นบาง */
-  .slip .grid.rows { table-layout: fixed; border: 1.5px solid #000; }
+  .slip .grid.rows { table-layout: fixed; border: 1.5px solid #000; border-bottom: 0; }
+  /* tfoot ว่างสูง 0 มีแค่เส้นบนหนา - เบราว์เซอร์พิมพ์ tfoot ซ้ำท้ายทุกหน้า จึงเป็นเส้นปิดล่างของตารางทุกหน้าที่ถูกตัด */
+  .slip .grid.rows tfoot td { height: 0; padding: 0; border: 0; border-top: 1.5px solid #000; }
   .slip .grid th, .slip .grid td { border: 0; border-bottom: 0.6px solid ${LINE}; padding: 1.2mm 2mm; }
   .slip .grid td + td, .slip .grid th + th { border-left: 0.6px solid ${LINE}; }
   .slip .grid th { background: none; font-size: 9pt; font-weight: 700; white-space: nowrap; border-bottom: 1.5px solid #000; }
-  .slip .grid.rows td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 7.8mm; }
+  .slip .grid.rows td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 7.8mm; line-height: 5mm; }
+  /* การจัดแนว: ลำดับ / เล่ม / ป้าย กึ่งกลาง, ตัวถัง / ทะเบียน / ยี่ห้อ / ชื่อ ชิดซ้าย (ผู้ใช้ 2026-09-26) - หัวตารางตามคอลัมน์ของตัวเอง
+     ข้อความที่ถูกย่อ (FIT_SCRIPT) ตั้ง line-height 0 ไม่ให้ดันเส้นฐานของบรรทัด จึงอยู่ระดับเดียวกับช่องอื่นในแถว */
+  .slip .grid th.c, .slip .grid td.c { text-align: center; }
+  .slip .grid td.fit span { line-height: 0; }
   .slip .grid .tick { font-size: 11pt; line-height: 1; }
-  /* แถวรวมอยู่ใน tbody ไม่ใช่ tfoot - tfoot ถูกพิมพ์ซ้ำท้ายทุกหน้าเมื่อรถเกิน 1 หน้า */
+  /* แถวรวมอยู่ใน tbody ไม่ใช่ tfoot - tfoot ถูกพิมพ์ซ้ำท้ายทุกหน้า (ใช้เป็นเส้นปิดล่างด้านบนแทน) */
   .slip .grid tr.total td { font-weight: 700; border-top: 1.5px solid #000; border-bottom: 0; }
   /* ท้ายใบ (หมายเหตุ + ช่องลงชื่อ) ไม่แยกหน้า - ถ้าตกไปหน้าใหม่ บรรทัด .ref บอกว่าเป็นของใบไหน รวมกี่คัน */
   .slip .tail { break-inside: avoid; page-break-inside: avoid; margin-top: 3.5mm; }
