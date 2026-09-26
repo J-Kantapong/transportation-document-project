@@ -1,18 +1,21 @@
 import { slipNoText, type DeliveryRow, type DeliverySlip, type DeliverySlipItem } from "@/lib/billing-api";
+import { DELIVERY_HEADER } from "@/lib/company-profile";
 import { isoToDisplayDate } from "@/lib/date";
 import { downloadHtmlAsPdf } from "@/lib/pdf-export";
 import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 
 // ใบส่งงาน Delivery (ให้ผู้รับเซ็น) และรายงานส่งงานย้อนหลัง - ผู้ใช้ 2026-09-25: บอกแยกรายคันว่าส่งใบเสร็จ / เล่ม / ป้าย
 // ห้ามมีราคา (พนักงานส่งของไม่เห็นราคา)
-const TICK = "✓";
+// ผู้ใช้ 2026-09-26: ใบเสร็จส่งไปพร้อมใบวางบิล ไม่ได้ไปกับใบส่งงาน -> ไม่มีช่องใบเสร็จ
+// ช่องใบส่งงานตามผู้ใช้ 2026-09-26: ลำดับ, เลขตัวถัง, เลขทะเบียน, ยี่ห้อ, ชื่อเจ้าของ (+ ติ๊กเล่ม / ป้าย)
+// ส่งแล้ว = วงกลมทึบ (ผู้ใช้ 2026-09-26 ขอเปลี่ยนจากติ๊ก)
+const TICK = "●";
 
 const esc = (text: string | null | undefined) => escapeHtml(text ?? "");
 const tick = (sent: boolean) => (sent ? TICK : "");
 
 export interface DeliveryCounts {
   vehicles: number;
-  receipt: number;
   book: number;
   plate: number;
 }
@@ -20,7 +23,6 @@ export interface DeliveryCounts {
 export function countItems(items: DeliverySlipItem[]): DeliveryCounts {
   return {
     vehicles: items.length,
-    receipt: items.filter((i) => i.receipt).length,
     book: items.filter((i) => i.book).length,
     plate: items.filter((i) => i.plate).length,
   };
@@ -63,52 +65,131 @@ ${body}
 </html>`;
 }
 
+// ทุกแถวสูงเท่ากัน (ผู้ใช้ 2026-09-26): ช่องกว้างคงที่ ข้อความบรรทัดเดียว ข้อความยาวย่อตัวอักษรลงจนพอดีช่อง
+// วัดความกว้างจริงในเอกสาร (FIT_SCRIPT) หลังฟอนต์โหลดเสร็จ - ทั้งหน้าต่างพิมพ์และบันทึก PDF รอ fonts.ready ก่อนเสมอ
+// .slip กว้างเท่าพื้นที่พิมพ์ A4 (210 - ขอบ 12mm x2) จึงวัดบนจอได้ตรงกับบนกระดาษ ย่อได้ต่ำสุด 6pt แล้วค่อยตัดด้วย "…"
+const fitCell = (text: string) => `<td class="fit"><span>${esc(text)}</span></td>`;
+
+// วัดที่ span (ความกว้างข้อความจริง) เทียบกับพื้นที่ในช่อง - scrollWidth ของ td ในตาราง table-layout: fixed เชื่อไม่ได้
+const FIT_SCRIPT = `<script>
+(function () {
+  function fit() {
+    document.querySelectorAll("td.fit").forEach(function (td) {
+      var span = td.firstElementChild;
+      var cs = getComputedStyle(td);
+      var room = td.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      span.style.fontSize = "";
+      var pt = 10;
+      while (span.getBoundingClientRect().width > room && pt > 6) {
+        pt -= 0.25;
+        span.style.fontSize = pt + "pt";
+      }
+    });
+  }
+  // วัดซ้ำทุกครั้งที่ความกว้างตัวอักษรอาจเปลี่ยน: ฟอนต์ Noto Sans Thai โหลดเสร็จช้ากว่าหน้า และก่อนพิมพ์
+  fit();
+  window.addEventListener("load", fit);
+  window.addEventListener("beforeprint", fit);
+  if (document.fonts) {
+    document.fonts.ready.then(fit);
+    document.fonts.addEventListener("loadingdone", fit);
+  }
+})();
+</script>`;
+
 function slipHtml(slip: DeliverySlip): string {
   const c = countItems(slip.items);
   const platePending = slip.items.filter((i) => !i.plate).length;
-  const customerLines = [
-    slip.customer.displayName + (slip.customer.branch ? ` (สาขา ${slip.customer.branch})` : ""),
-    slip.customer.address ?? "",
-    slip.customer.phone ? `โทร ${slip.customer.phone}` : "",
-  ].filter(Boolean);
+  const customer = slip.customer;
+  const customerName = customer.displayName + (customer.branch ? ` (สาขา ${customer.branch})` : "");
   const rows = slip.items
     .map(
-      (i, n) => `<tr><td class="c">${n + 1}</td><td>${esc(i.plateText) || "—"}</td><td>${esc(i.chassis)}</td><td>${esc(i.brandName)}</td>
-<td>${esc(i.receiptNo) || "—"}</td><td class="tick">${tick(i.receipt)}</td><td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
+      (i, n) => `<tr><td class="c no">${n + 1}</td>${fitCell(i.chassis)}${fitCell(i.plateText || "—")}${fitCell(i.brandName)}
+${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
     )
     .join("");
+  const co = DELIVERY_HEADER;
+  const signBox = (role: string, name: string | null) => `<div class="signbox"><div class="role">${role}</div>
+<div class="line"></div><div class="who">(${name ? esc(name) : "&nbsp;".repeat(40)})</div>
+<div class="date">วันที่ ______ / ______ / __________</div></div>`;
   return `<section class="slip">
-<div class="head"><h1>ใบส่งงาน</h1><div class="no"><b>เลขที่ ${esc(slipNoText(slip.slipNo))}</b><br>วันที่ส่ง ${esc(isoToDisplayDate(slip.date))}</div></div>
-<table class="info"><tr><td class="k">ลูกค้า</td><td>${customerLines.map(esc).join("<br>")}</td></tr>
-<tr><td class="k">ผู้รับ</td><td>${esc(slip.recipient)}</td></tr>
-${slip.note ? `<tr><td class="k">หมายเหตุ</td><td>${esc(slip.note)}</td></tr>` : ""}</table>
-<table class="grid"><thead><tr><th class="c" style="width:10mm">ลำดับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th><th>ยี่ห้อ</th><th>เลขที่ใบเสร็จ</th>
-<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
-<tbody>${rows}</tbody>
-<tfoot><tr><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.receipt}</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tfoot></table>
-${platePending ? `<p>ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
-<table class="sign"><tr>
-<td>ลงชื่อ ................................................ ผู้ส่ง<br>${slip.createdBy ? `(${esc(slip.createdBy)})` : "(................................................)"}<br>วันที่ ........../........../..........</td>
-<td>ลงชื่อ ................................................ ผู้รับ<br>(${esc(slip.recipient)})<br>วันที่ ........../........../..........</td>
-</tr></table>
+<div class="head">
+<div class="co">
+<div class="name">${esc(co.name)}</div>
+<div>${co.addressLines.map(esc).join("<br>")}</div>
+<div>เลขประจำตัวผู้เสียภาษี : ${esc(co.taxId)}</div>
+<div>โทร : ${esc(co.phone)}<span class="gap"></span>อีเมล : ${esc(co.email)}</div>
+</div>
+<div class="doc"><div class="title">ใบส่งงาน<span>DELIVERY NOTE</span></div>
+<div class="row"><span class="k">เลขที่</span><b>${esc(slipNoText(slip.slipNo))}</b></div>
+<div class="row"><span class="k">วันที่ส่ง</span><b>${esc(isoToDisplayDate(slip.date))}</b></div></div>
+</div>
+<div class="info">
+<div class="card grow"><div class="label">ลูกค้า</div><div class="main">${esc(customerName)}</div>
+${customer.address ? `<div>${esc(customer.address)}</div>` : ""}${customer.phone ? `<div>โทร ${esc(customer.phone)}</div>` : ""}
+${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(slip.note)}</div>` : ""}</div>
+</div>
+<table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:19mm"><col style="width:25mm"><col><col style="width:10mm"><col style="width:10mm"></colgroup>
+<thead><tr><th class="c">ลำดับ</th><th>เลขตัวถัง</th><th>เลขทะเบียน</th><th>ยี่ห้อ</th><th>ชื่อเจ้าของ</th>
+<th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<tbody>${rows}
+<tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody></table>
+<div class="tail">
+<p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
+${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
+<div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", slip.recipient)}</div>
+</div>
 </section>`;
 }
 
+// ใบส่งงานพิมพ์ขาวดำเป็นหลัก (ผู้ใช้ 2026-09-26): ไม่มีพื้นสี ตัวอักษรดำทั้งหมด - เด่นด้วยเส้นกับตัวหนาแทนการถมสี
+// ประหยัดหมึก คมทุกเครื่องพิมพ์ ถ่ายเอกสารต่อได้ชัด โครงเดิม: หัวบริษัท + กล่องชื่อเอกสาร, การ์ดลูกค้า, ตาราง, ช่องลงชื่อ
+const LINE = "#9a9a9a";
 const SLIP_STYLE = `
-  .slip { page-break-after: always; break-after: page; }
+  .slip { page-break-after: always; break-after: page; width: 186mm; }
   .slip:last-child { page-break-after: auto; break-after: auto; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4mm; }
-  .head .no { text-align: right; font-size: 11pt; }
+  /* หัวบริษัท: ข้อมูลบริษัท + กล่องชื่อเอกสารด้านขวา - ไม่มีโลโก้ (ผู้ใช้ 2026-09-26) */
+  .head { display: flex; align-items: stretch; gap: 5mm; padding-bottom: 3.5mm; margin-bottom: 4mm; border-bottom: 2px solid #000; }
+  .co { flex: 1; font-size: 8.8pt; line-height: 1.55; align-self: center; }
+  .co .name { font-size: 14pt; font-weight: 700; line-height: 1.3; margin-bottom: 0.8mm; }
+  .co .gap { display: inline-block; width: 6mm; }
+  .doc { flex: none; width: 56mm; border: 1.5px solid #000; border-radius: 2.5mm; }
+  .doc .title { text-align: center; font-size: 17pt; font-weight: 700; line-height: 1.15; padding: 2mm 0 1.6mm; border-bottom: 1.5px solid #000; }
+  .doc .title span { display: block; font-size: 7pt; font-weight: 400; letter-spacing: 3px; margin-top: 0.8mm; }
+  .doc .row { display: flex; justify-content: space-between; align-items: baseline; padding: 1.9mm 4mm; }
+  .doc .row + .row { border-top: 0.8px solid ${LINE}; }
+  .doc .row .k { font-size: 8.8pt; }
+  .doc .row b { font-size: 11.5pt; }
+  /* การ์ดลูกค้า (ชื่อผู้รับอยู่ในช่องลงชื่อผู้รับงานแล้ว ไม่ต้องซ้ำด้านบน - ผู้ใช้ 2026-09-26) */
   .info { margin-bottom: 4mm; }
-  .info td { padding: 0.8mm 0; vertical-align: top; }
-  .info .k { width: 22mm; font-weight: 700; }
-  .sign { margin-top: 14mm; }
-  .sign td { width: 50%; text-align: center; line-height: 2.2; }
+  .card { border: 1px solid #000; border-radius: 2mm; padding: 2.2mm 3.5mm; font-size: 9pt; line-height: 1.5; }
+  .card .label { font-size: 7.8pt; letter-spacing: 0.3px; }
+  .card .label.sub { margin-top: 1.2mm; }
+  .card .main { font-size: 11pt; font-weight: 700; }
+  /* ตาราง: ช่องกว้างคงที่ ทุกแถวสูงเท่ากัน (ผู้ใช้ 2026-09-26) - หัวตารางตัวหนาพื้นขาว เส้นใต้หนา, แถวคั่นเส้นบาง */
+  .slip .grid.rows { table-layout: fixed; border: 1.5px solid #000; }
+  .slip .grid th, .slip .grid td { border: 0; border-bottom: 0.6px solid ${LINE}; padding: 1.2mm 2mm; }
+  .slip .grid td + td, .slip .grid th + th { border-left: 0.6px solid ${LINE}; }
+  .slip .grid th { background: none; font-size: 9pt; font-weight: 700; white-space: nowrap; border-bottom: 1.5px solid #000; }
+  .slip .grid.rows td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 7.8mm; }
+  .slip .grid .tick { font-size: 11pt; line-height: 1; }
+  /* แถวรวมอยู่ใน tbody ไม่ใช่ tfoot - tfoot ถูกพิมพ์ซ้ำท้ายทุกหน้าเมื่อรถเกิน 1 หน้า */
+  .slip .grid tr.total td { font-weight: 700; border-top: 1.5px solid #000; border-bottom: 0; }
+  /* ท้ายใบ (หมายเหตุ + ช่องลงชื่อ) ไม่แยกหน้า - ถ้าตกไปหน้าใหม่ บรรทัด .ref บอกว่าเป็นของใบไหน รวมกี่คัน */
+  .slip .tail { break-inside: avoid; page-break-inside: avoid; margin-top: 3.5mm; }
+  .slip .tail .ref { font-size: 9pt; font-weight: 700; margin: 0 0 1mm; }
+  .slip .tail .note { font-size: 9pt; margin: 0; }
+  .sign { display: flex; gap: 8mm; margin-top: 8mm; }
+  .signbox { flex: 1; border: 1px solid #000; border-radius: 2mm; padding: 3mm 6mm 3.5mm; text-align: center; font-size: 9.5pt; }
+  .signbox .role { font-weight: 700; font-size: 10pt; }
+  .signbox .line { border-bottom: 1px dotted #000; height: 14mm; margin: 0 4mm 1.8mm; }
+  .signbox .who { margin-bottom: 1.5mm; }
+  .signbox .date { font-size: 9pt; }
 `;
 
 export function buildDeliverySlipHtml(slips: DeliverySlip[]): string {
   const title = slips.length === 1 ? `ใบส่งงาน ${slipNoText(slips[0].slipNo)}` : "ใบส่งงาน";
-  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map(slipHtml).join("\n"));
+  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map(slipHtml).join("\n") + FIT_SCRIPT);
 }
 
 export function printDeliverySlips(slips: DeliverySlip[]): void {
@@ -132,7 +213,7 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
       s.items.map(
         (i, n) => `<tr${n === 0 ? ' class="first"' : ""}><td>${n === 0 ? esc(isoToDisplayDate(s.date)) : ""}</td><td>${n === 0 ? esc(slipNoText(s.slipNo)) : ""}</td>
 <td>${n === 0 ? esc(s.customer.displayName) : ""}</td><td>${n === 0 ? esc(s.recipient) : ""}</td><td>${esc(i.plateText) || "—"}</td><td>${esc(i.chassis)}</td>
-<td class="tick">${tick(i.receipt)}</td><td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
+<td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
       ),
     )
     .join("");
@@ -144,10 +225,10 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
     .join("");
   const body = `<h1>รายงานส่งงาน</h1>
 <p>วันที่ส่ง ${esc(range)} · ลูกค้า ${esc(r.customerName ?? "ทั้งหมด")}<br>
-${r.slips.length} ใบ · ${c.vehicles} รายการ · ใบเสร็จ ${c.receipt} · เล่ม ${c.book} · ป้าย ${c.plate}</p>
+${r.slips.length} ใบ · ${c.vehicles} รายการ · เล่ม ${c.book} · ป้าย ${c.plate}</p>
 <table class="grid"><thead><tr><th>วันที่ส่ง</th><th>เลขที่ใบ</th><th>ลูกค้า</th><th>ผู้รับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th>
-<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
+<th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
 <h2>ป้ายค้างส่ง (${r.platePending.length} คัน)</h2>
 ${
   r.platePending.length

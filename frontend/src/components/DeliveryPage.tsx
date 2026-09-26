@@ -25,10 +25,11 @@ const lotKeyOf = (r: DeliveryRow) => `${r.submitDate ?? ""}|${groupLabel(r)}|${r
 const fullyDelivered = (r: DeliveryRow) => !!r.deliveredDate && !!r.plateDeliveredDate;
 
 // สถานะแยก ใบเสร็จ / เล่ม / ป้าย ของแต่ละคัน
+// ใบเสร็จไม่ได้ส่งไปกับงาน (ไปพร้อมใบวางบิล ผู้ใช้ 2026-09-26) -> บอกแค่ว่าได้กลับมาแล้วหรือยัง (ต้องมีก่อนจึงส่งได้) ไม่ขึ้น "ส่งแล้ว"
 function itemsOf(r: DeliveryRow): { receipt: ItemState; book: ItemState; plate: ItemState } {
   const docs = (have: boolean): ItemState => (r.deliveredDate ? { state: "sent", date: r.deliveredDate } : { state: have ? "ready" : "waiting" });
   return {
-    receipt: docs(r.receiptReceived),
+    receipt: { state: r.receiptReceived ? "ready" : "waiting" },
     book: docs(r.bookReceived),
     plate: r.plateDeliveredDate ? { state: "sent", date: r.plateDeliveredDate } : { state: r.plateReceived ? "ready" : "waiting" },
   };
@@ -579,8 +580,8 @@ function DeliveryConfirmDialog({
   const dayNote = days === 0 ? "วันนี้" : days < 0 ? `ย้อนหลัง ${-days} วัน` : `ล่วงหน้า ${days} วัน`;
   const count = (kind: DeliveryRow["kind"]) => rows.filter((r) => r.kind === kind).length;
   const parts = [
-    [count("FULL"), "ใบเสร็จ + เล่ม + ป้าย"],
-    [count("NO_PLATE"), "ใบเสร็จ + เล่ม (ป้ายตามทีหลัง)"],
+    [count("FULL"), "เล่ม + ป้าย"],
+    [count("NO_PLATE"), "เล่ม (ป้ายตามทีหลัง)"],
     [count("PLATE_ONLY"), "ส่งป้ายอย่างเดียว"],
   ].filter(([n]) => n) as Array<[number, string]>;
 

@@ -84,8 +84,8 @@ describe('DeliveryService.submit', () => {
     const data = create.mock.calls[0][0].data;
     expect(data).toMatchObject({ customerId: 'c1', recipient: 'คุณนก', note: null, date: new Date('2026-09-21T00:00:00.000Z') });
     expect(data.items.create.map((i: Record<string, unknown>) => [i.vehicleId, i.receipt, i.book, i.plate])).toEqual([
-      ['v1', true, true, true],
-      ['v2', true, true, false],
+      ['v1', false, true, true],
+      ['v2', false, true, false],
       ['v3', false, false, true],
     ]);
     expect(data.items.create[0]).toMatchObject({ chassis: 'CH1', brandName: 'Lexus', plateText: '8ขง 363', receiptNo: '69/0035358' });

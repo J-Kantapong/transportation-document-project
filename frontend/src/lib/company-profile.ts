@@ -9,3 +9,12 @@ export const COMPANY_PROFILE = {
   email: "kj.tradeinter@gmail.com",
   paymentLines: ["โอนเข้าบัญชีธนาคาร: กสิกรไทย สาขา: สมุทรปราการ", "ชื่อบัญชี: บริษัท เทรดอินเตอร์ จำกัด เลขที่บัญชี: 224-2-61888-7"],
 } as const;
+
+// หัวใบส่งงาน Delivery (ผู้ใช้พิมพ์ให้ 2026-09-26): โลโก้ + ข้อความชุดนี้ - เบอร์โทรต่างจากหัวใบวางบิล
+export const DELIVERY_HEADER = {
+  name: COMPANY_PROFILE.nameTh,
+  addressLines: COMPANY_PROFILE.addressLines, // 2 บรรทัด ตัดที่ "ตำบล" - บรรทัดเดียวยาวจน 10270 ตกไปบรรทัดใหม่
+  taxId: COMPANY_PROFILE.taxId,
+  phone: "0655194565",
+  email: COMPANY_PROFILE.email,
+} as const;

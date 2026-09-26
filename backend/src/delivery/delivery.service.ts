@@ -36,10 +36,19 @@ const SLIP_INCLUDE = {
     include: {
       cancelledBy: USER_NAME,
       // วางบิลแล้ว = ห้ามยกเลิก / เปลี่ยนวันที่ส่ง (บิลเก็บวันที่ส่งไว้แล้ว)
-      vehicle: { select: { invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } } },
+      vehicle: {
+        select: {
+          invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } },
+          // ชื่อเจ้าของบนใบส่งงาน (ผู้ใช้ 2026-09-26) - อ่านสดจาก VehicleOwner
+          owner: { select: { name: true, hirerName: true } },
+        },
+      },
     },
   },
 } as const;
+
+// ชื่อเจ้าของบนใบส่งงาน: ติดไฟแนนซ์ = ชื่อผู้ครอบครอง (ไม่ใส่ชื่อไฟแนนซ์ - ผู้ใช้ 2026-09-26) ไม่ติด = ผู้ถือกรรมสิทธิ์
+const ownerNameOf = (o: { name: string | null; hirerName: string | null } | null) => o?.hirerName || o?.name || null;
 
 const userName = (u: { name: string; displayName: string | null } | null) => (u ? u.displayName || u.name : null);
 
@@ -188,7 +197,8 @@ export class DeliveryService {
             const kind = deliveryKind(v);
             return {
               vehicleId: v.id,
-              receipt: kind !== 'PLATE_ONLY',
+              // ใบเสร็จส่งไปพร้อมใบวางบิล ไม่ได้ไปกับใบส่งงาน (ผู้ใช้ 2026-09-26) - ใบเก่าก่อนนี้ยังเป็น true
+              receipt: false,
               book: kind !== 'PLATE_ONLY',
               plate: kind !== 'NO_PLATE',
               chassis: v.chassis,
@@ -266,8 +276,8 @@ export class DeliveryService {
       const invoiceNo = i.vehicle.invoiceLines[0]?.invoice.invoiceNo;
       if (dateChanged && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ`);
       const data: { deliveredDate?: Date; deliveryRecipient?: string; plateDeliveredDate?: Date } = {};
-      if (i.receipt) {
-        // ใบนี้ส่งใบเสร็จ + เล่ม - ถ้าส่งป้ายตามไปทีหลังแล้ว วันที่ใหม่ต้องไม่หลังวันส่งป้าย
+      if (i.book) {
+        // ใบนี้ส่งเล่ม - ถ้าส่งป้ายตามไปทีหลังแล้ว วันที่ใหม่ต้องไม่หลังวันส่งป้าย
         if (!i.plate && v.plateDeliveredDate && date > v.plateDeliveredDate) {
           throw bad(`รถ ${i.chassis} ส่งป้ายไปแล้วเมื่อ ${dmy(v.plateDeliveredDate)} วันที่ส่งเล่มต้องไม่หลังวันนั้น`);
         }
@@ -291,7 +301,7 @@ export class DeliveryService {
       if (data.plateDeliveredDate && isoDay(v.plateDeliveredDate) !== isoDay(data.plateDeliveredDate)) {
         changes.plateDeliveredDate = { from: isoDay(v.plateDeliveredDate), to: isoDay(data.plateDeliveredDate) };
       }
-      if (!i.receipt && slip.recipient !== recipient) changes['deliverySlip.recipient'] = { from: slip.recipient, to: recipient };
+      if (!i.book && slip.recipient !== recipient) changes['deliverySlip.recipient'] = { from: slip.recipient, to: recipient };
       ops.push(this.prisma.vehicle.update({ where: { id: v.id }, data }));
       ops.push(this.editLog(v.id, `แก้ใบส่งงาน ${slipNoLabel(slip.slipNo)}: ${remark}`, changes));
     }
@@ -313,7 +323,7 @@ export class DeliveryService {
     if (chosen.length !== ids.size || chosen.some((i) => i.cancelledAt)) throw bad('รถบางคันไม่อยู่ในใบนี้ หรือยกเลิกไปแล้ว');
 
     const laterPlate = await this.prisma.deliverySlipItem.findMany({
-      where: { vehicleId: { in: [...ids] }, slipId: { not: id }, cancelledAt: null, receipt: false, plate: true },
+      where: { vehicleId: { in: [...ids] }, slipId: { not: id }, cancelledAt: null, book: false, plate: true },
       select: { vehicleId: true, slip: { select: { slipNo: true } } },
     });
     const vehicles = await this.prisma.vehicle.findMany({
@@ -333,7 +343,7 @@ export class DeliveryService {
       const changes: Record<string, { from: string | null; to: string | null }> = {
         'deliverySlip.cancelled': { from: `${slipNoLabel(slip.slipNo)} ${dmy(slip.date)} ผู้รับ ${slip.recipient}`, to: 'ยกเลิกการส่ง' },
       };
-      if (i.receipt) {
+      if (i.book) {
         const plate = laterPlate.find((p) => p.vehicleId === i.vehicleId);
         if (plate) throw bad(`รถ ${i.chassis} ส่งป้ายตามไปแล้วในใบ ${slipNoLabel(plate.slip.slipNo)} ต้องยกเลิกใบนั้นก่อน`);
         if (v.deliveredDate) changes.deliveredDate = { from: isoDay(v.deliveredDate), to: null };
@@ -403,7 +413,7 @@ export class DeliveryService {
       cancelledAt: Date | null;
       cancelReason: string | null;
       cancelledBy: { name: string; displayName: string | null } | null;
-      vehicle: { invoiceLines: Array<{ invoice: { invoiceNo: string } }> };
+      vehicle: { invoiceLines: Array<{ invoice: { invoiceNo: string } }>; owner: { name: string | null; hirerName: string | null } | null };
     }>;
   }) {
     return {
@@ -435,6 +445,7 @@ export class DeliveryService {
           cancelReason: i.cancelReason,
           cancelledBy: userName(i.cancelledBy),
           invoiceNo: i.vehicle.invoiceLines[0]?.invoice.invoiceNo ?? null,
+          ownerName: ownerNameOf(i.vehicle.owner),
         })),
     };
   }

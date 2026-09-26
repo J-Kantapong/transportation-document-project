@@ -45,6 +45,7 @@ export interface DeliverySlipItem {
   cancelReason: string | null;
   cancelledBy: string | null;
   invoiceNo: string | null; // วางบิลแล้ว = ยกเลิก / เปลี่ยนวันที่ส่งไม่ได้
+  ownerName: string | null; // ติดไฟแนนซ์ = ผู้ครอบครอง, ไม่ติด = ผู้ถือกรรมสิทธิ์
 }
 
 export interface DeliverySlip {
