@@ -30,6 +30,9 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/overview(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
+  // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN / STAFF_CAR / STAFF_MOTO เท่านั้น - DELIVERY อ่านใบได้แต่แก้ไม่ได้
+  { pattern: /^\/api\/delivery\/slips(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY'] },
+  { pattern: /^\/api\/delivery\/slips(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
   { pattern: /^\/api\/vehicle-search(\/|$)/, method: 'GET', access: ALL_STAFF_READ },

@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { DeliveryService, deliveryKind } from './delivery.service.js';
+import { DeliveryService, deliveryKind, stripPlateNote } from './delivery.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 function vehicle(overrides: Record<string, unknown> = {}) {
@@ -100,5 +100,142 @@ describe('DeliveryService.submit', () => {
   it('ต้องมีผู้รับงาน', async () => {
     const { svc } = service([vehicle()]);
     await expect(svc.submit({ ...dto(['v1']), recipient: ' ' })).rejects.toMatchObject({ response: { error: expect.stringContaining('ผู้รับ') } });
+  });
+});
+
+describe('stripPlateNote', () => {
+  it('ตัดหมายเหตุการส่งป้ายตามทีหลังออก เก็บหมายเหตุเดิมไว้', () => {
+    expect(stripPlateNote('ฝากไว้ที่ รปภ. · ส่งป้าย 21/09/2026 ผู้รับ คุณนก')).toBe('ฝากไว้ที่ รปภ.');
+    expect(stripPlateNote('ส่งป้าย 21/09/2026 ผู้รับ คุณนก')).toBeNull();
+    expect(stripPlateNote(null)).toBeNull();
+  });
+});
+
+describe('DeliveryService แก้ / ยกเลิกใบส่งงาน', () => {
+  const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  function slipItem(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'i1',
+      vehicleId: 'v1',
+      receipt: true,
+      book: true,
+      plate: true,
+      chassis: 'CH1',
+      brandName: 'Lexus',
+      body: 'รย.1-เก๋ง 2 ตอน',
+      plateText: '8ขง 363',
+      receiptNo: null,
+      cancelledAt: null,
+      cancelReason: null,
+      cancelledBy: null,
+      vehicle: { invoiceLines: [] },
+      ...overrides,
+    };
+  }
+  function setup(items: unknown[], vehicles: unknown[], laterPlate: unknown[] = []) {
+    const slip = {
+      id: 's1',
+      slipNo: 7,
+      date: day('2026-09-21'),
+      recipient: 'คุณนก',
+      note: null,
+      createdAt: new Date(),
+      cancelledAt: null,
+      cancelReason: null,
+      customer: { id: 'c1', name: 'ลูกค้า', company: null, branch: null, address: null, phone: null },
+      createdBy: null,
+      cancelledBy: null,
+      items,
+    };
+    const vehicleUpdate = vi.fn().mockImplementation((args) => ({ op: 'vehicle', ...args }));
+    const itemUpdate = vi.fn().mockImplementation((args) => ({ op: 'item', ...args }));
+    const slipUpdate = vi.fn().mockImplementation((args) => ({ op: 'slip', ...args }));
+    const logCreate = vi.fn().mockImplementation((args) => ({ op: 'log', ...args }));
+    const $transaction = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      deliverySlip: { findUnique: vi.fn().mockResolvedValue(slip), update: slipUpdate },
+      deliverySlipItem: { findMany: vi.fn().mockResolvedValue(laterPlate), update: itemUpdate },
+      vehicle: { findMany: vi.fn().mockResolvedValue(vehicles), update: vehicleUpdate },
+      vehicleEditLog: { create: logCreate },
+      $transaction,
+    } as unknown as PrismaService;
+    return { svc: new DeliveryService(prisma), vehicleUpdate, itemUpdate, slipUpdate, logCreate, $transaction };
+  }
+  const delivered = { id: 'v1', deliveredDate: day('2026-09-21'), plateDeliveredDate: day('2026-09-21'), deliveryRecipient: 'คุณนก', deliveryNote: null };
+
+  it('ยกเลิกครบทุกคัน: รถกลับเข้าคิว และทั้งใบขึ้นว่ายกเลิก', async () => {
+    const { svc, vehicleUpdate, itemUpdate, slipUpdate, logCreate } = setup([slipItem()], [delivered]);
+    await svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'ติ๊กผิดคัน' });
+    expect(vehicleUpdate.mock.calls[0][0].data).toEqual({
+      deliveredDate: null,
+      deliveryRecipient: null,
+      deliveryNote: null,
+      plateDeliveredDate: null,
+      deliveryConfirmedAt: null,
+    });
+    expect(itemUpdate.mock.calls[0][0].data).toMatchObject({ cancelReason: 'ติ๊กผิดคัน' });
+    expect(slipUpdate.mock.calls[0][0].data).toMatchObject({ cancelReason: 'ติ๊กผิดคัน' });
+    expect(logCreate.mock.calls[0][0].data.remark).toBe('ติ๊กผิดคัน');
+  });
+
+  it('ยกเลิกบางคัน: ใบยังไม่ถูกยกเลิกทั้งใบ', async () => {
+    const { svc, slipUpdate } = setup([slipItem(), slipItem({ id: 'i2', vehicleId: 'v2', chassis: 'CH2' })], [delivered]);
+    await svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'ติ๊กผิดคัน' });
+    expect(slipUpdate).not.toHaveBeenCalled();
+  });
+
+  it('ยกเลิกใบส่งป้ายตามทีหลัง: ล้างเฉพาะวันที่ส่งป้าย', async () => {
+    const { svc, vehicleUpdate } = setup(
+      [slipItem({ receipt: false, book: false })],
+      [{ ...delivered, deliveredDate: day('2026-09-19'), deliveryNote: 'ส่งป้าย 21/09/2026 ผู้รับ คุณนก' }],
+    );
+    await svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'ป้ายยังไม่ได้ส่งจริง' });
+    expect(vehicleUpdate.mock.calls[0][0].data).toEqual({ plateDeliveredDate: null, deliveryNote: null });
+  });
+
+  it('วางบิลแล้ว ยกเลิกไม่ได้', async () => {
+    const { svc, $transaction } = setup([slipItem({ vehicle: { invoiceLines: [{ invoice: { invoiceNo: 'IV-001' } }] } })], [delivered]);
+    await expect(svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'x' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('วางบิลแล้ว') },
+    });
+    expect($transaction).not.toHaveBeenCalled();
+  });
+
+  it('ส่งป้ายตามไปแล้วในใบอื่น ต้องยกเลิกใบนั้นก่อน', async () => {
+    const { svc } = setup([slipItem({ plate: false })], [delivered], [{ vehicleId: 'v1', slip: { slipNo: 9 } }]);
+    await expect(svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'x' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('DL-00009') },
+    });
+  });
+
+  it('ต้องมีเหตุผล', async () => {
+    const { svc } = setup([slipItem()], [delivered]);
+    await expect(svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: ' ' })).rejects.toMatchObject({ response: { error: 'ต้องใส่เหตุผล' } });
+    await expect(svc.updateSlip('s1', { recipient: 'คุณเอก', date: '2026-09-21', remark: '' })).rejects.toMatchObject({
+      response: { error: 'ต้องใส่เหตุผล' },
+    });
+  });
+
+  it('แก้ผู้รับและวันที่: อัปเดตรถและใบ และบันทึกประวัติ', async () => {
+    const { svc, vehicleUpdate, slipUpdate, logCreate } = setup([slipItem()], [delivered]);
+    await svc.updateSlip('s1', { recipient: 'คุณเอก', date: '2026-09-22', remark: 'พิมพ์ชื่อผิด' });
+    expect(vehicleUpdate.mock.calls[0][0].data).toEqual({
+      deliveredDate: day('2026-09-22'),
+      deliveryRecipient: 'คุณเอก',
+      plateDeliveredDate: day('2026-09-22'),
+    });
+    expect(slipUpdate.mock.calls[0][0].data).toEqual({ recipient: 'คุณเอก', date: day('2026-09-22') });
+    expect(JSON.parse(logCreate.mock.calls[0][0].data.changes)).toMatchObject({ deliveryRecipient: { from: 'คุณนก', to: 'คุณเอก' } });
+  });
+
+  it('วางบิลแล้ว เปลี่ยนวันที่ไม่ได้ แต่แก้ชื่อผู้รับได้', async () => {
+    const billed = slipItem({ vehicle: { invoiceLines: [{ invoice: { invoiceNo: 'IV-001' } }] } });
+    const a = setup([billed], [delivered]);
+    await expect(a.svc.updateSlip('s1', { recipient: 'คุณนก', date: '2026-09-22', remark: 'x' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('วางบิลแล้ว') },
+    });
+    const b = setup([billed], [delivered]);
+    await b.svc.updateSlip('s1', { recipient: 'คุณเอก', date: '2026-09-21', remark: 'x' });
+    expect(b.$transaction).toHaveBeenCalled();
   });
 });

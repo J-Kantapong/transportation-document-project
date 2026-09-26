@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { DeliveryService } from './delivery.service.js';
 
 @Controller('api/delivery')
@@ -26,6 +26,17 @@ export class DeliveryController {
   @Get('slips/:id')
   slip(@Param('id') id: string) {
     return this.deliveryService.slip(id);
+  }
+
+  // แก้ / ยกเลิกใบส่งงานที่คีย์ผิด (ผู้ใช้ 2026-09-26) - ต้องมีเหตุผล, ADMIN / STAFF_CAR / STAFF_MOTO ตามประเภทรถ (DELIVERY ทำไม่ได้)
+  @Patch('slips/:id')
+  updateSlip(@Param('id') id: string, @Body() body: { recipient?: unknown; date?: unknown; remark?: unknown }) {
+    return this.deliveryService.updateSlip(id, body);
+  }
+
+  @Post('slips/:id/cancel')
+  cancelSlip(@Param('id') id: string, @Body() body: { vehicleIds?: unknown; remark?: unknown }) {
+    return this.deliveryService.cancelSlip(id, body);
   }
 
   @Post()

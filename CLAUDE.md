@@ -106,6 +106,17 @@ This private repository is the shared development surface for the user, Claude C
   break between rows and repeat the table header). No prices anywhere. The `Vehicle` delivery columns are still
   the live state used by the queue and billing. Deliveries saved before this were backfilled by migration
   `20260925200000_add_delivery_slips` (recipient of a later plate delivery read back from `deliveryNote`).
+  Fixing a mistyped slip (user 2026-09-26), on the report page, ADMIN every slip / STAFF_CAR car slips / STAFF_MOTO
+  motorcycle slips (DELIVERY read-only): "✎ แก้" = `PATCH /api/delivery/slips/:id` `{ recipient, date, remark }`
+  (date of a billed vehicle cannot change; book date may not be after a later plate slip); "ยกเลิก" =
+  `POST /api/delivery/slips/:id/cancel` `{ vehicleIds, remark }`, whole slip or chosen vehicles: the vehicle's
+  delivery columns are cleared so it returns to the Delivery queue (a plate-only item only clears the plate date).
+  Nothing is deleted: `DeliverySlipItem.cancelledAt/cancelReason/cancelledById`, and `DeliverySlip.cancelled*` once
+  every item is cancelled (shown "ยกเลิกแล้ว", DL numbers stay continuous, left out of counts/prints). Blocked for a
+  billed vehicle (void the invoice first) and for a book delivery whose plate went later on another slip (cancel that
+  slip first). Remark is mandatory and every change is logged to `VehicleEditLog`. To catch the usual mistake (the
+  date) before it happens, "บันทึกส่งงาน" on the Delivery page first opens a confirm popup (date, days from today in
+  orange when not today, customer, recipient, vehicle count by what goes out); future dates are allowed (user).
   The Delivery page is a list of ใบยื่น (lot) cards like the receive plate/book queues (user 2026-09-26: work finishes
   per lot but not always all of it): lot = latest submission's submit date + job-sheet group + customer; every vehicle
   of the lot is listed with ใบเสร็จ / เล่ม / ป้าย status (มีแล้ว / รอ / ส่งแล้ว), only queue vehicles can be ticked,
