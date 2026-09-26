@@ -67,6 +67,7 @@ export function DeliveryPage() {
   // ใบส่งงานของการบันทึกครั้งล่าสุด - พิมพ์ให้ผู้รับเซ็นได้ทันที (ใบเก่าพิมพ์ซ้ำได้ที่หน้ารายงานส่งงาน)
   const [lastSlip, setLastSlip] = useState<{ id: string; slipNo: number } | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [confirmDate, setConfirmDate] = useState<string | null>(null); // เปิดป๊อปอัปยืนยันด้วยวันที่ส่ง (YYYY-MM-DD)
   // ตัวกรองแบบหน้ารับป้าย/รับเล่ม
   const [fromText, setFromText] = useState("");
   const [toText, setToText] = useState("");
@@ -187,13 +188,20 @@ export function DeliveryPage() {
     }
   }
 
-  async function handleSubmit() {
+  // กดบันทึก -> ตรวจฟอร์มแล้วเปิดป๊อปอัปยืนยัน (วันที่ / ลูกค้า / จำนวนคัน) ก่อนบันทึกจริง (ผู้ใช้ 2026-09-26: คีย์ผิดส่วนใหญ่คือวันที่)
+  function handleSubmit() {
     const fail = (text: string) => setMessage({ text, error: true });
     if (selected.size === 0) return fail("ติ๊กรถที่ส่งแล้วอย่างน้อย 1 คัน");
     const dateIso = displayDateToIso(dateText.replace(/\D/g, ""));
     if (!dateIso) return fail("วันที่ส่งไม่ถูกต้อง");
     if (!recipient.trim()) return fail("ใส่ชื่อผู้รับงาน");
+    setMessage({ text: "" });
+    setConfirmDate(dateIso);
+  }
 
+  async function saveDelivery(dateIso: string) {
+    const fail = (text: string) => setMessage({ text, error: true });
+    setConfirmDate(null);
     setSaving(true);
     setLastSlip(null);
     setMessage({ text: "กำลังบันทึก…" });
@@ -532,6 +540,80 @@ export function DeliveryPage() {
           )}
         </div>
       )}
+      {confirmDate && (
+        <DeliveryConfirmDialog
+          dateIso={confirmDate}
+          customerName={selectedCustomerName}
+          recipient={recipient.trim()}
+          rows={selectedRows}
+          onClose={() => setConfirmDate(null)}
+          onConfirm={() => saveDelivery(confirmDate)}
+        />
+      )}
     </section>
+  );
+}
+
+// ป๊อปอัปยืนยันก่อนบันทึกส่งงาน: วันที่ส่ง (เตือนสีส้มถ้าไม่ใช่วันนี้ - วันอนาคตคีย์ได้ตามปกติ), ลูกค้า, ผู้รับ, จำนวนคันแยกตามสิ่งที่ส่ง
+function DeliveryConfirmDialog({
+  dateIso,
+  customerName,
+  recipient,
+  rows,
+  onClose,
+  onConfirm,
+}: {
+  dateIso: string;
+  customerName: string;
+  recipient: string;
+  rows: DeliveryRow[];
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    dialogRef.current?.showModal();
+  }, []);
+  const today = todayIso();
+  const days = Math.round((Date.parse(dateIso) - Date.parse(today)) / 86_400_000);
+  const dayNote = days === 0 ? "วันนี้" : days < 0 ? `ย้อนหลัง ${-days} วัน` : `ล่วงหน้า ${days} วัน`;
+  const count = (kind: DeliveryRow["kind"]) => rows.filter((r) => r.kind === kind).length;
+  const parts = [
+    [count("FULL"), "ใบเสร็จ + เล่ม + ป้าย"],
+    [count("NO_PLATE"), "ใบเสร็จ + เล่ม (ป้ายตามทีหลัง)"],
+    [count("PLATE_ONLY"), "ส่งป้ายอย่างเดียว"],
+  ].filter(([n]) => n) as Array<[number, string]>;
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(480px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>ยืนยันบันทึกส่งงาน</h2>
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <div>
+          วันที่ส่ง: <b style={{ fontSize: 20, color: days === 0 ? undefined : "#bb6a00" }}>{isoToDisplayDate(dateIso)}</b>{" "}
+          <span className={days === 0 ? "badge done" : "badge warn"}>{dayNote}</span>
+        </div>
+        <div>ลูกค้า: {customerName}</div>
+        <div>ผู้รับ: {recipient}</div>
+        <div>
+          <b>{rows.length} คัน</b>
+          {parts.map(([n, label]) => (
+            <div key={label} className="muted">
+              · {label} {n} คัน
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()}>
+          กลับไปแก้
+        </button>
+        <button type="button" className="primary" onClick={onConfirm} autoFocus>
+          ยืนยันบันทึก
+        </button>
+      </div>
+    </dialog>
   );
 }

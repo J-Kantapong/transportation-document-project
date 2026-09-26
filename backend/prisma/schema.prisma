@@ -71,13 +71,15 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer        Customer?        @relation(fields: [customerId], references: [id])
-  approvedBy      User?            @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers   User[]           @relation("ApprovedUsers")
-  assignedCases   Case[]           @relation("AssignedStaff")
-  deletedVehicles Vehicle[]        @relation("DeletedVehicles")
-  vehicleEdits    VehicleEditLog[] @relation("VehicleEdits")
-  deliverySlips   DeliverySlip[]   @relation("DeliverySlips")
+  customer           Customer?          @relation(fields: [customerId], references: [id])
+  approvedBy         User?              @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers      User[]             @relation("ApprovedUsers")
+  assignedCases      Case[]             @relation("AssignedStaff")
+  deletedVehicles    Vehicle[]          @relation("DeletedVehicles")
+  vehicleEdits       VehicleEditLog[]   @relation("VehicleEdits")
+  deliverySlips      DeliverySlip[]     @relation("DeliverySlips")
+  cancelledSlips     DeliverySlip[]     @relation("DeliverySlipCancels")
+  cancelledSlipItems DeliverySlipItem[] @relation("DeliverySlipItemCancels")
 
   @@index([status])
   @@index([customerId])
@@ -804,39 +806,49 @@ model ServiceFeeRate {
 // วันที่/ผู้รับบน Vehicle (deliveredDate, plateDeliveredDate ...) ยังเป็นสถานะปัจจุบันที่คิวและบัญชีใช้เหมือนเดิม
 // ใบของการส่งก่อนมีตารางนี้ถูกสร้างย้อนหลังจาก Vehicle ใน migration 20260925200000_add_delivery_slips
 model DeliverySlip {
-  id          String   @id @default(cuid())
-  slipNo      Int      @unique @default(autoincrement()) // เลขที่ใบ แสดงเป็น DL-00001
-  customerId  String
-  date        DateTime // วันที่ส่ง
-  recipient   String // ผู้รับที่ลูกค้า
-  note        String?
-  createdById String? // พนักงานที่กดบันทึก (null = สร้างย้อนหลัง / นอกคำขอ HTTP)
-  createdAt   DateTime @default(now())
+  id            String    @id @default(cuid())
+  slipNo        Int       @unique @default(autoincrement()) // เลขที่ใบ แสดงเป็น DL-00001
+  customerId    String
+  date          DateTime // วันที่ส่ง
+  recipient     String // ผู้รับที่ลูกค้า
+  note          String?
+  createdById   String? // พนักงานที่กดบันทึก (null = สร้างย้อนหลัง / นอกคำขอ HTTP)
+  createdAt     DateTime  @default(now())
+  // ยกเลิกทั้งใบ (ผู้ใช้ 2026-09-26): ตั้งเมื่อทุกรายการในใบถูกยกเลิก - ใบยังอยู่ในรายงานพร้อมเหตุผล ไม่ลบ เลข DL ไม่ขาดช่วง
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
 
-  customer  Customer           @relation(fields: [customerId], references: [id])
-  createdBy User?              @relation("DeliverySlips", fields: [createdById], references: [id], onDelete: SetNull)
-  items     DeliverySlipItem[]
+  customer    Customer           @relation(fields: [customerId], references: [id])
+  createdBy   User?              @relation("DeliverySlips", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy User?              @relation("DeliverySlipCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  items       DeliverySlipItem[]
 
   @@index([customerId])
   @@index([date])
 }
 
 model DeliverySlipItem {
-  id        String  @id @default(cuid())
-  slipId    String
-  vehicleId String
-  receipt   Boolean // ส่งใบเสร็จรอบนี้
-  book      Boolean // ส่งเล่มทะเบียนรอบนี้
-  plate     Boolean // ส่งป้ายรอบนี้
+  id            String    @id @default(cuid())
+  slipId        String
+  vehicleId     String
+  receipt       Boolean // ส่งใบเสร็จรอบนี้
+  book          Boolean // ส่งเล่มทะเบียนรอบนี้
+  plate         Boolean // ส่งป้ายรอบนี้
   // snapshot ตอนส่ง - พิมพ์ใบซ้ำภายหลังได้ตรงกับที่ส่งจริง
-  chassis   String
-  brandName String
-  body      String?
-  plateText String // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
-  receiptNo String?
+  chassis       String
+  brandName     String
+  body          String?
+  plateText     String // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
+  receiptNo     String?
+  // ยกเลิกรายคัน (ผู้ใช้ 2026-09-26): คีย์ผิดคัน -> รถกลับเข้าคิว Delivery ส่วนรายการนี้เก็บไว้พร้อมเหตุผล
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
 
-  slip    DeliverySlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
-  vehicle Vehicle      @relation(fields: [vehicleId], references: [id])
+  slip        DeliverySlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id])
+  cancelledBy User?        @relation("DeliverySlipItemCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   @@index([slipId])
   @@index([vehicleId])

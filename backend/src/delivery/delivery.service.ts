@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { currentUser } from '../auth/request-context.js';
 import { assertVehicleInScope, isVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -12,6 +12,8 @@ export type DeliveryKind =
   | 'PLATE_ONLY' // ส่งเล่มไปแล้ว ป้ายเพิ่งมา -> ส่งป้ายอย่างเดียว
   | 'WAITING_PLATE'; // ส่งเล่มไปแล้ว ป้ายยังไม่ออก -> ยังติ๊กไม่ได้
 
+const NOT_VOID = { invoice: { status: { not: 'VOID' } } };
+
 const VEHICLE_INCLUDE = {
   customer: { select: { id: true, name: true, company: true } },
   brand: { select: { name: true } },
@@ -21,16 +23,28 @@ const VEHICLE_INCLUDE = {
     take: 1,
     select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true },
   },
-  invoiceLines: { where: { invoice: { status: { not: 'VOID' } } }, select: { invoice: { select: { invoiceNo: true } } } },
+  invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } },
 } as const;
+
+const USER_NAME = { select: { name: true, displayName: true } } as const;
 
 const SLIP_INCLUDE = {
   customer: { select: { id: true, name: true, company: true, branch: true, address: true, phone: true } },
-  createdBy: { select: { name: true, displayName: true } },
-  items: true,
+  createdBy: USER_NAME,
+  cancelledBy: USER_NAME,
+  items: {
+    include: {
+      cancelledBy: USER_NAME,
+      // วางบิลแล้ว = ห้ามยกเลิก / เปลี่ยนวันที่ส่ง (บิลเก็บวันที่ส่งไว้แล้ว)
+      vehicle: { select: { invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } } },
+    },
+  },
 } as const;
 
+const userName = (u: { name: string; displayName: string | null } | null) => (u ? u.displayName || u.name : null);
+
 const bad = (error: string) => new BadRequestException({ error });
+const slipNoLabel = (slipNo: number) => `DL-${String(slipNo).padStart(5, '0')}`;
 
 const plateTextOf = (v: { plateCategory: string | null; plateNumber: string | null }) =>
   v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '';
@@ -41,6 +55,23 @@ function parseOptionalIsoDate(raw: unknown, label: string): Date | null {
     throw bad(`${label}ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง`);
   }
   return new Date(`${raw}T00:00:00.000Z`);
+}
+
+const dmy = (d: Date) =>
+  `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+const isoDay = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
+
+function parseRemark(raw: unknown): string {
+  const remark = typeof raw === 'string' ? raw.trim() : '';
+  if (!remark) throw bad('ต้องใส่เหตุผล');
+  return remark;
+}
+
+// หมายเหตุของการส่งป้ายตามทีหลังถูกต่อท้าย deliveryNote เป็น "... · ส่งป้าย วว/ดด/ปปปป ผู้รับ ..." - ยกเลิกใบส่งป้ายแล้วตัดส่วนนั้นออก
+export function stripPlateNote(note: string | null): string | null {
+  if (!note) return null;
+  const kept = note.split(' · ').filter((part) => !part.startsWith('ส่งป้าย '));
+  return kept.length ? kept.join(' · ') : null;
 }
 
 function parseIsoDate(raw: unknown): Date {
@@ -124,7 +155,7 @@ export class DeliveryService {
     // บันทึก 1 ครั้ง = ใบส่งงาน 1 ใบของลูกค้ารายเดียว (ผู้รับคนเดียว)
     if (new Set(vehicles.map((v) => v.customer.id)).size > 1) throw bad('ส่งงานได้ครั้งละ 1 ลูกค้า');
 
-    const dateText = `${String(date.getUTCDate()).padStart(2, '0')}/${String(date.getUTCMonth() + 1).padStart(2, '0')}/${date.getUTCFullYear()}`;
+    const dateText = dmy(date);
     const updates = vehicles.map((v) => {
       const kind = deliveryKind(v);
       if (kind === 'WAITING_PLATE') throw bad(`รถ ${v.chassis} ส่งเล่มไปแล้ว และป้ายยังไม่ออก`);
@@ -209,6 +240,144 @@ export class DeliveryService {
     return slip;
   }
 
+  // แก้ใบส่งงานที่คีย์ผิด (ผู้ใช้ 2026-09-26): ผู้รับ / วันที่ส่ง + เหตุผล (บันทึกลง VehicleEditLog ทุกคัน)
+  // ADMIN ทุกใบ, STAFF_CAR เฉพาะใบรถยนต์, STAFF_MOTO เฉพาะใบจักรยานยนต์ (ผู้รับ/วันที่ใช้ร่วมกันทั้งใบ - ทุกคันที่ยังไม่ยกเลิกต้องอยู่ในขอบเขต)
+  // วันที่ส่งของคันที่วางบิลแล้วเปลี่ยนไม่ได้ (บิลเก็บวันที่ส่งไว้แล้ว) แต่แก้ชื่อผู้รับได้
+  async updateSlip(id: string, dto: { recipient?: unknown; date?: unknown; remark?: unknown }) {
+    const remark = parseRemark(dto?.remark);
+    if (typeof dto.recipient !== 'string' || !dto.recipient.trim()) throw bad('ต้องใส่ชื่อผู้รับงาน');
+    const recipient = dto.recipient.trim();
+    const date = parseIsoDate(dto.date);
+    const slip = await this.findActiveSlip(id);
+    const items = slip.items.filter((i) => !i.cancelledAt);
+    for (const i of items) this.assertItemInScope(i.body, 'ใบนี้');
+    const dateChanged = slip.date.getTime() !== date.getTime();
+    if (slip.recipient === recipient && !dateChanged) throw bad('ไม่มีอะไรเปลี่ยน');
+
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { id: { in: items.map((i) => i.vehicleId) } },
+      select: { id: true, deliveredDate: true, plateDeliveredDate: true, deliveryRecipient: true },
+    });
+    const byId = new Map(vehicles.map((v) => [v.id, v]));
+    const ops = [];
+    for (const i of items) {
+      const v = byId.get(i.vehicleId);
+      if (!v) continue;
+      const invoiceNo = i.vehicle.invoiceLines[0]?.invoice.invoiceNo;
+      if (dateChanged && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ`);
+      const data: { deliveredDate?: Date; deliveryRecipient?: string; plateDeliveredDate?: Date } = {};
+      if (i.receipt) {
+        // ใบนี้ส่งใบเสร็จ + เล่ม - ถ้าส่งป้ายตามไปทีหลังแล้ว วันที่ใหม่ต้องไม่หลังวันส่งป้าย
+        if (!i.plate && v.plateDeliveredDate && date > v.plateDeliveredDate) {
+          throw bad(`รถ ${i.chassis} ส่งป้ายไปแล้วเมื่อ ${dmy(v.plateDeliveredDate)} วันที่ส่งเล่มต้องไม่หลังวันนั้น`);
+        }
+        data.deliveredDate = date;
+        data.deliveryRecipient = recipient;
+        if (i.plate) data.plateDeliveredDate = date;
+      } else {
+        // ใบส่งป้ายตามทีหลัง - ต้องไม่ก่อนวันส่งเล่ม
+        if (v.deliveredDate && date < v.deliveredDate) {
+          throw bad(`รถ ${i.chassis} ส่งเล่มเมื่อ ${dmy(v.deliveredDate)} วันที่ส่งป้ายต้องไม่ก่อนวันนั้น`);
+        }
+        data.plateDeliveredDate = date;
+      }
+      const changes: Record<string, { from: string | null; to: string | null }> = {};
+      if (data.deliveredDate && isoDay(v.deliveredDate) !== isoDay(data.deliveredDate)) {
+        changes.deliveredDate = { from: isoDay(v.deliveredDate), to: isoDay(data.deliveredDate) };
+      }
+      if (data.deliveryRecipient && v.deliveryRecipient !== data.deliveryRecipient) {
+        changes.deliveryRecipient = { from: v.deliveryRecipient, to: data.deliveryRecipient };
+      }
+      if (data.plateDeliveredDate && isoDay(v.plateDeliveredDate) !== isoDay(data.plateDeliveredDate)) {
+        changes.plateDeliveredDate = { from: isoDay(v.plateDeliveredDate), to: isoDay(data.plateDeliveredDate) };
+      }
+      if (!i.receipt && slip.recipient !== recipient) changes['deliverySlip.recipient'] = { from: slip.recipient, to: recipient };
+      ops.push(this.prisma.vehicle.update({ where: { id: v.id }, data }));
+      ops.push(this.editLog(v.id, `แก้ใบส่งงาน ${slipNoLabel(slip.slipNo)}: ${remark}`, changes));
+    }
+    await this.prisma.$transaction([...ops, this.prisma.deliverySlip.update({ where: { id }, data: { recipient, date } })]);
+    return this.slip(id);
+  }
+
+  // ยกเลิกใบส่งงาน (ทั้งใบหรือรายคัน) ที่คีย์ผิด (ผู้ใช้ 2026-09-26): รถกลับเข้าคิว Delivery แล้วบันทึกใหม่ได้
+  // ไม่ลบ - รายการ/ใบถูกทำเครื่องหมายยกเลิกพร้อมเหตุผล (ครบทุกคัน = ทั้งใบขึ้นว่ายกเลิกแล้ว) เลข DL ไม่ขาดช่วง
+  // ห้ามยกเลิก: คันที่วางบิลแล้ว (แก้บิลก่อน) และใบส่งเล่มของคันที่ส่งป้ายตามไปแล้ว (ยกเลิกใบส่งป้ายก่อน)
+  async cancelSlip(id: string, dto: { vehicleIds?: unknown; remark?: unknown }) {
+    const remark = parseRemark(dto?.remark);
+    if (!Array.isArray(dto.vehicleIds) || dto.vehicleIds.length === 0 || dto.vehicleIds.some((v) => typeof v !== 'string')) {
+      throw bad('ต้องเลือกรถที่จะยกเลิกอย่างน้อย 1 คัน');
+    }
+    const ids = new Set(dto.vehicleIds as string[]);
+    const slip = await this.findActiveSlip(id);
+    const chosen = slip.items.filter((i) => ids.has(i.vehicleId));
+    if (chosen.length !== ids.size || chosen.some((i) => i.cancelledAt)) throw bad('รถบางคันไม่อยู่ในใบนี้ หรือยกเลิกไปแล้ว');
+
+    const laterPlate = await this.prisma.deliverySlipItem.findMany({
+      where: { vehicleId: { in: [...ids] }, slipId: { not: id }, cancelledAt: null, receipt: false, plate: true },
+      select: { vehicleId: true, slip: { select: { slipNo: true } } },
+    });
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { id: { in: [...ids] } },
+      select: { id: true, deliveredDate: true, plateDeliveredDate: true, deliveryNote: true },
+    });
+    const byId = new Map(vehicles.map((v) => [v.id, v]));
+    const now = new Date();
+    const cancelledById = currentUser()?.id ?? null;
+    const ops = [];
+    for (const i of chosen) {
+      this.assertItemInScope(i.body, `รถ ${i.chassis} `);
+      const invoiceNo = i.vehicle.invoiceLines[0]?.invoice.invoiceNo;
+      if (invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) ต้องยกเลิกบิลก่อนจึงจะยกเลิกการส่งได้`);
+      const v = byId.get(i.vehicleId);
+      if (!v) continue;
+      const changes: Record<string, { from: string | null; to: string | null }> = {
+        'deliverySlip.cancelled': { from: `${slipNoLabel(slip.slipNo)} ${dmy(slip.date)} ผู้รับ ${slip.recipient}`, to: 'ยกเลิกการส่ง' },
+      };
+      if (i.receipt) {
+        const plate = laterPlate.find((p) => p.vehicleId === i.vehicleId);
+        if (plate) throw bad(`รถ ${i.chassis} ส่งป้ายตามไปแล้วในใบ ${slipNoLabel(plate.slip.slipNo)} ต้องยกเลิกใบนั้นก่อน`);
+        if (v.deliveredDate) changes.deliveredDate = { from: isoDay(v.deliveredDate), to: null };
+        if (v.plateDeliveredDate) changes.plateDeliveredDate = { from: isoDay(v.plateDeliveredDate), to: null };
+        ops.push(
+          this.prisma.vehicle.update({
+            where: { id: v.id },
+            data: { deliveredDate: null, deliveryRecipient: null, deliveryNote: null, plateDeliveredDate: null, deliveryConfirmedAt: null },
+          }),
+        );
+      } else {
+        if (v.plateDeliveredDate) changes.plateDeliveredDate = { from: isoDay(v.plateDeliveredDate), to: null };
+        ops.push(
+          this.prisma.vehicle.update({ where: { id: v.id }, data: { plateDeliveredDate: null, deliveryNote: stripPlateNote(v.deliveryNote) } }),
+        );
+      }
+      ops.push(this.prisma.deliverySlipItem.update({ where: { id: i.id }, data: { cancelledAt: now, cancelReason: remark, cancelledById } }));
+      ops.push(this.editLog(v.id, remark, changes));
+    }
+    // ครบทุกคัน = ยกเลิกทั้งใบ
+    if (slip.items.every((i) => i.cancelledAt || ids.has(i.vehicleId))) {
+      ops.push(this.prisma.deliverySlip.update({ where: { id }, data: { cancelledAt: now, cancelReason: remark, cancelledById } }));
+    }
+    await this.prisma.$transaction(ops);
+    return this.slip(id);
+  }
+
+  private async findActiveSlip(id: string) {
+    const slip = await this.prisma.deliverySlip.findUnique({ where: { id }, include: SLIP_INCLUDE });
+    if (!slip) throw new NotFoundException({ error: 'ไม่พบใบส่งงาน' });
+    if (slip.cancelledAt) throw bad('ใบส่งงานนี้ถูกยกเลิกไปแล้ว');
+    return slip;
+  }
+
+  private assertItemInScope(body: string | null, what: string) {
+    if (!isVehicleInScope(body)) throw new ForbiddenException({ error: `${what}มีรถประเภทที่บัญชีของคุณไม่ได้ดูแล` });
+  }
+
+  private editLog(vehicleId: string, remark: string, changes: Record<string, unknown>) {
+    return this.prisma.vehicleEditLog.create({
+      data: { vehicleId, remark, changes: JSON.stringify(changes), editedById: currentUser()?.id ?? null },
+    });
+  }
+
   private mapSlip(s: {
     id: string;
     slipNo: number;
@@ -216,9 +385,26 @@ export class DeliveryService {
     recipient: string;
     note: string | null;
     createdAt: Date;
+    cancelledAt: Date | null;
+    cancelReason: string | null;
     customer: { id: string; name: string; company: string | null; branch: string | null; address: string | null; phone: string | null };
     createdBy: { name: string; displayName: string | null } | null;
-    items: Array<{ vehicleId: string; receipt: boolean; book: boolean; plate: boolean; chassis: string; brandName: string; body: string | null; plateText: string; receiptNo: string | null }>;
+    cancelledBy: { name: string; displayName: string | null } | null;
+    items: Array<{
+      vehicleId: string;
+      receipt: boolean;
+      book: boolean;
+      plate: boolean;
+      chassis: string;
+      brandName: string;
+      body: string | null;
+      plateText: string;
+      receiptNo: string | null;
+      cancelledAt: Date | null;
+      cancelReason: string | null;
+      cancelledBy: { name: string; displayName: string | null } | null;
+      vehicle: { invoiceLines: Array<{ invoice: { invoiceNo: string } }> };
+    }>;
   }) {
     return {
       id: s.id,
@@ -227,7 +413,10 @@ export class DeliveryService {
       recipient: s.recipient,
       note: s.note,
       createdAt: s.createdAt.toISOString(),
-      createdBy: s.createdBy ? s.createdBy.displayName || s.createdBy.name : null,
+      createdBy: userName(s.createdBy),
+      cancelledAt: s.cancelledAt?.toISOString() ?? null,
+      cancelReason: s.cancelReason,
+      cancelledBy: userName(s.cancelledBy),
       customer: { ...s.customer, displayName: s.customer.company || s.customer.name },
       items: s.items
         .filter((i) => isVehicleInScope(i.body))
@@ -242,6 +431,10 @@ export class DeliveryService {
           receipt: i.receipt,
           book: i.book,
           plate: i.plate,
+          cancelledAt: i.cancelledAt?.toISOString() ?? null,
+          cancelReason: i.cancelReason,
+          cancelledBy: userName(i.cancelledBy),
+          invoiceNo: i.vehicle.invoiceLines[0]?.invoice.invoiceNo ?? null,
         })),
     };
   }

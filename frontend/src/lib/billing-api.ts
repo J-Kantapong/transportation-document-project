@@ -40,6 +40,11 @@ export interface DeliverySlipItem {
   receipt: boolean;
   book: boolean;
   plate: boolean;
+  // ยกเลิกรายคัน (คีย์ผิด) - รายการยังอยู่ในใบพร้อมเหตุผล แต่ไม่นับและไม่พิมพ์
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancelledBy: string | null;
+  invoiceNo: string | null; // วางบิลแล้ว = ยกเลิก / เปลี่ยนวันที่ส่งไม่ได้
 }
 
 export interface DeliverySlip {
@@ -50,11 +55,17 @@ export interface DeliverySlip {
   note: string | null;
   createdAt: string;
   createdBy: string | null;
+  cancelledAt: string | null; // ยกเลิกทั้งใบ (ทุกคันถูกยกเลิก)
+  cancelReason: string | null;
+  cancelledBy: string | null;
   customer: { id: string; name: string; company: string | null; branch: string | null; address: string | null; phone: string | null; displayName: string };
   items: DeliverySlipItem[];
 }
 
 export const slipNoText = (slipNo: number) => `DL-${String(slipNo).padStart(5, "0")}`;
+
+// ใบที่เหลือเฉพาะคันที่ยังไม่ยกเลิก - ใช้พิมพ์ / นับ / ทำ PDF
+export const activeSlip = (slip: DeliverySlip): DeliverySlip => ({ ...slip, items: slip.items.filter((i) => !i.cancelledAt) });
 
 // วางบิลในนามบริษัท (บัญชี) - ดู backend/src/billing/billing.service.ts
 export interface BillingTerms {
@@ -169,6 +180,11 @@ export const billingApi = {
   deliverySlips: (params: { from?: string; to?: string; customerId?: string }) =>
     request<{ slips: DeliverySlip[] }>(`/api/delivery/slips?${new URLSearchParams(Object.entries(params).filter(([, v]) => v) as string[][])}`),
   deliverySlip: (id: string) => request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}`),
+  // แก้ / ยกเลิกใบส่งงานที่คีย์ผิด (ต้องมีเหตุผล) - ADMIN / STAFF_CAR / STAFF_MOTO ตามประเภทรถ
+  updateDeliverySlip: (id: string, data: { recipient: string; date: string; remark: string }) =>
+    request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}`, json("PATCH", data)),
+  cancelDeliverySlip: (id: string, data: { vehicleIds: string[]; remark: string }) =>
+    request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}/cancel`, json("POST", data)),
 
   billingQueue: () => request<{ suggestedInvoiceNo: string; customers: BillingCustomer[] }>("/api/billing/queue"),
   updateTerms: (customerId: string, terms: BillingTerms) =>
