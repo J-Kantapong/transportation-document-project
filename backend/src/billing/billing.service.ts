@@ -310,7 +310,10 @@ export class BillingService {
             const urgent = sub?.urgent ?? false;
             // ขอใช้ = จดจังหวัดอื่น (จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ) เงื่อนไขเดียวกับค่าธรรมเนียมอื่นๆ 20 ตอนยื่น (document-fee-calculator)
             const otherProvince = !!v.registrationProvince && !!v.ownerProvince && v.registrationProvince !== v.ownerProvince;
-            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent });
+            // แจ้งย้าย = Step 2 เข้าเงื่อนไข "แจ้งย้าย" จริง (จดต่างจังหวัด ไม่ใช่กรุงเทพฯ) เหมือน getTransferStatus ใน vehicles.service.ts
+            // คนละเงื่อนไขกับ otherProvince (จดจังหวัดอื่นจากจังหวัดเจ้าของรถ) - ผู้ใช้ 2026-09-28, Spac EV
+            const transferNotice = !!v.registrationProvince && v.registrationProvince !== 'กรุงเทพมหานคร';
+            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber, transferNotice });
             const base = rate ? serviceFeeFromRate(rate, receiptAmount ?? estimate) : null;
             return {
               id: v.id,
@@ -337,6 +340,7 @@ export class BillingService {
               requestedPlateNumber,
               urgent,
               otherProvince,
+              transferNotice,
               // จับคู่ราคาอัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ราคาหลักตามชนิดรถ/CC + ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนตามการยื่นล่าสุด
               // หน้าจอเปลี่ยนแถวราคา / ติ๊กค่าเพิ่มเองได้ แล้วคิดค่าดำเนินการใหม่ฝั่งหน้าจอ (บิลเก็บเป็นยอด ไม่ผูกกับแถวราคา)
               suggestedRateId: rate?.id ?? null,
@@ -451,7 +455,7 @@ export class BillingService {
       const label = optionalText(r?.label, 'ชื่อรายการ');
       if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
       const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
-      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE หรือ URGENT`);
+      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST หรือ TRANSFER_NOTICE`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
       if (!vehicleKind) throw bad(`แถวที่ ${i + 1}: ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);

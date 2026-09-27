@@ -98,8 +98,10 @@ export interface BillingTerms {
 }
 
 export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
-// BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) = ค่าเพิ่มที่บวกให้เอง (ผู้ใช้ 2026-09-28)
-export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT";
+// BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) / PLATE_REQUEST (ขอใช้เลขทะเบียน,
+// ผู้ใช้ 2026-09-28 Spac EV - คนละเรื่องกับ OTHER_PROVINCE) / TRANSFER_NOTICE (แจ้งย้าย จริง = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ,
+// ผู้ใช้ 2026-09-28 Spac EV) = ค่าเพิ่มที่บวกให้เอง
+export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST" | "TRANSFER_NOTICE";
 
 export interface ServiceFeeRate {
   id: string;
@@ -142,6 +144,7 @@ export interface BillingVehicle {
   suggestedServiceFee: number | null; // ราคาหลัก + ค่าเพิ่มที่ระบบเลือก (ก่อนหักยอด)
   urgent: boolean; // การยื่นล่าสุดเป็นงานด่วน
   otherProvince: boolean; // ขอใช้ = จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ
+  transferNotice: boolean; // แจ้งย้าย = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ (ต่างจาก otherProvince)
   // จับคู่อัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนที่ระบบติ๊กให้
   suggestedAddOnIds: string[];
 }

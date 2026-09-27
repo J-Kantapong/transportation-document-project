@@ -227,6 +227,14 @@ This private repository is the shared development surface for the user, Claude C
   same 300-799cc bracket so CC alone can't tell them apart) - an optional prefix a BASE row's vehicle must match
   (case-insensitive `chassis.startsWith`), checked in `suggestRate` alongside vehicleKind/CC; null = unrestricted, same
   as before. Rate editor has an "เลขตัวถังขึ้นต้น" column.
+  Rate kind `PLATE_REQUEST` (user 2026-09-28, Spac EV: "ขอใช้เลข" priced separately from "ขอใช้" the province) = the
+  vehicle's latest submission requested a plate number (`requestsPlateNumber`) - distinct from the pre-existing
+  "ลูกค้าชำระค่าขอใช้เลขเอง" deduction checkbox on the billing row, which subtracts from an already-computed fee rather
+  than suggesting one.
+  Rate kind `TRANSFER_NOTICE` (user 2026-09-28, Spac EV: "แจ้งย้าย" 182.24, only for vehicles that actually go through
+  แจ้งย้าย, not every vehicle) = `registrationProvince !== 'กรุงเทพมหานคร'` (`transferNotice` in `billing.service.ts`,
+  same rule as `getTransferStatus` in `vehicles.service.ts`) - a different comparison from `OTHER_PROVINCE`
+  (`registrationProvince !== ownerProvince`); the two are independent and can both apply to the same vehicle.
   Tick-only billing (user 2026-09-28): the queue is a compact list per delivery date (plate, chassis, "ใบเสร็จ x +
   ค่าบริการ y", tags), no sideways scrolling; details (receipt, rate, add-ons, bill text, ปิดงาน) sit behind "แก้"; cars
   with a problem (no receipt amount / no price) are flagged and cannot be ticked; a sticky bottom bar shows count + total
