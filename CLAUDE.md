@@ -91,7 +91,7 @@ This private repository is the shared development surface for the user, Claude C
   `/registration/new-vehicle/submit-documents/records` has "ยกเลิก" (ADMIN / STAFF_CAR / STAFF_MOTO, in their vehicle
   scope). Attached receipt photos are detached back to the unmatched pool (the dialog warns about it). `POST /api/vehicles/document-submission/:id/cancel` `{ remark }` deletes the submission so the vehicle returns
   to the submit queue and can be submitted again with freshly calculated fees; a snapshot + remark goes to
-  `VehicleEditLog` (the cash-advance refund is added once that feature lands). Unlike FAILED, nothing is kept. Editing a single submission's price
+  `VehicleEditLog` and the cash ledger is refunded. Unlike FAILED, nothing is kept. Editing a single submission's price
   was tried and dropped (user 2026-09-25); changing fee rates for future submissions is still undecided.
 - Delivery slips and report (added 2026-09-25): every save on the Delivery page creates one `DeliverySlip` (one customer,
   date and recipient; `slipNo` shown as `DL-00001`) with a `DeliverySlipItem` per vehicle saying what went out this
@@ -223,6 +223,10 @@ This private repository is the shared development surface for the user, Claude C
   (typing a fee only via "กำหนดเอง"), flags rows changed from the system's choice or with no matching rate, and shows a
   per-price breakdown before issuing. "ขอใช้" here = ขอใช้จังหวัดอื่น (registrationProvince ≠ ownerProvince, the same rule
   as the ธรรมเนียมอื่นๆ 20 fee), kind `OTHER_PROVINCE` - not a plate-number request; it will apply to cars too.
+  `ServiceFeeRate.chassisPrefix` (user 2026-09-28, MC Superbike: chassis starting ML = 885, JH = 2685, both fall in the
+  same 300-799cc bracket so CC alone can't tell them apart) - an optional prefix a BASE row's vehicle must match
+  (case-insensitive `chassis.startsWith`), checked in `suggestRate` alongside vehicleKind/CC; null = unrestricted, same
+  as before. Rate editor has an "เลขตัวถังขึ้นต้น" column.
   Tick-only billing (user 2026-09-28): the queue is a compact list per delivery date (plate, chassis, "ใบเสร็จ x +
   ค่าบริการ y", tags), no sideways scrolling; details (receipt, rate, add-ons, bill text, ปิดงาน) sit behind "แก้"; cars
   with a problem (no receipt amount / no price) are flagged and cannot be ticked; a sticky bottom bar shows count + total
