@@ -24,6 +24,8 @@ import {
   initials,
   PUBLIC_PATHS,
   ROLE_LABELS,
+  saveSession,
+  tokenHasRoles,
 } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
 
@@ -128,7 +130,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     setUser(getCachedUser());
     authApi
       .me()
-      .then(({ user }) => {
+      .then(({ user, token }) => {
+        // Admin เปลี่ยนบทบาทระหว่างที่ล็อกอินอยู่ (พบ 2026-09-27): proxy.ts / หน้าแรก / บางหน้าอ่าน roles จาก token ที่ออก
+        // ตอนล็อกอิน - เก็บ token ใหม่จาก backend แล้วโหลดหน้าใหม่ครั้งเดียว ทุกส่วนจะใช้สิทธิ์ล่าสุดตรงกัน
+        // (โหลดใหม่เฉพาะเมื่อเก็บสำเร็จจริง กันวนโหลดไม่รู้จบถ้าตั้ง cookie ไม่ได้)
+        if (token && !tokenHasRoles(getToken(), user.roles)) {
+          saveSession(token, user);
+          if (tokenHasRoles(getToken(), user.roles)) {
+            window.location.reload();
+            return;
+          }
+        }
         cacheUser(user);
         setUser(user);
       })
@@ -189,7 +201,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (
               <>
                 <div className="label">ประเภทงานทะเบียน</div>
-                {REGISTRATION_CATEGORIES.map((category) => (
+                {/* ซ่อนหมวดที่บทบาทนี้เปิดไม่ได้ (เช่น STAFF_ENTRY กับต่อภาษี) ไม่งั้นกดแล้ว proxy.ts เด้งกลับเงียบๆ (พบ 2026-09-27) */}
+                {REGISTRATION_CATEGORIES.filter((category) => canAccessPage(category.href, roles)).map((category) => (
                   <NavLink
                     key={category.href}
                     href={category.href}

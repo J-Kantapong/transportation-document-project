@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { PlatePhotosService } from './plate-photos.service.js';
@@ -12,6 +12,18 @@ export class PlatePhotosController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
   attach(@UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { vehicleId?: unknown; date?: unknown }) {
     return this.platePhotosService.attach(file, body?.vehicleId, body?.date);
+  }
+
+  // แก้วันที่รับป้าย { date: YYYY-MM-DD, remark } - ก่อนส่งป้ายให้ลูกค้าเท่านั้น (ผู้ใช้ 2026-09-27)
+  @Patch('vehicle/:vehicleId/received-date')
+  updateReceivedDate(@Param('vehicleId') vehicleId: string, @Body() body: { date?: unknown; remark?: unknown }) {
+    return this.platePhotosService.updateReceivedDate(vehicleId, body ?? {});
+  }
+
+  // ถอดรูปป้ายที่แนบผิด { remark } -> รถกลับเข้าคิวรอรับป้าย (ผู้ใช้ 2026-09-27)
+  @Post('vehicle/:vehicleId/detach')
+  detach(@Param('vehicleId') vehicleId: string, @Body() body: { remark?: unknown }) {
+    return this.platePhotosService.detach(vehicleId, body ?? {});
   }
 
   @Get(':id/image')

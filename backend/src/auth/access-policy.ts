@@ -6,7 +6,8 @@ import type { UserRole } from '../generated/prisma/enums.js';
 // - STAFF_ENTRY ขั้น 1-3 (เพิ่มข้อมูลรถ/แจ้งย้าย/ตรวจรถ + ข้อมูลอ้างอิง ยี่ห้อ/ไฟแนนซ์/เจ้าของรถ/ยามาฮ่า) ทุกประเภทรถ
 // - STAFF_CAR / STAFF_MOTO ขั้น 4-8 (ยื่นเอกสาร/ใบเสร็จ/ป้าย/เล่ม/Delivery) - ประเภทรถกรองเพิ่มใน vehicle-scope.ts
 //   และอ่านข้อมูลขั้น 1-3 ได้ (read-only) ยกเว้น STAFF_MOTO บันทึกขั้น 2 แจ้งย้าย/ตัดบัญชีของจักรยานยนต์ได้ (ผู้ใช้ 2026-09-24)
-// - ACCOUNTANT วางบิล + อ่านข้อมูลงานทุกขั้นได้ | DELIVERY เฉพาะ /api/delivery | CUSTOMER เฉพาะ /api/portal
+// - ACCOUNTANT วางบิล + อ่านข้อมูลงานทุกขั้นได้ (ขั้น 8 อ่านได้เฉพาะรายงานส่งงาน/ใบส่งงาน ไม่ใช่คิว Delivery - ผู้ใช้ 2026-09-27)
+// - DELIVERY เฉพาะ /api/delivery | CUSTOMER เฉพาะ /api/portal
 // - ฐานข้อมูลลูกค้า: พนักงานทุกกลุ่มอ่านได้ เพิ่มได้เฉพาะ ADMIN
 export type Access = 'PUBLIC' | 'ANY_USER' | UserRole[];
 
@@ -29,9 +30,12 @@ const RULES: Rule[] = [
   // ภาพรวมผู้บริหาร (ยอดเงินทั้งบริษัท) - ADMIN เท่านั้น บทบาทอื่นจะมีภาพรวมของตัวเองตามมาทีหลัง (ผู้ใช้ 2026-09-24)
   { pattern: /^\/api\/overview(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
+  // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
+  { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
   // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN / STAFF_CAR / STAFF_MOTO เท่านั้น - DELIVERY อ่านใบได้แต่แก้ไม่ได้
-  { pattern: /^\/api\/delivery\/slips(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY'] },
+  // ACCOUNTANT อ่านรายงานส่งงานได้ (ใบส่งงาน + ป้ายค้างส่ง) ไว้ตรวจก่อนวางบิล แต่ไม่เห็นคิว Delivery และบันทึก/แก้ไม่ได้ (ผู้ใช้ 2026-09-27)
+  { pattern: /^\/api\/delivery\/(slips|plate-pending)(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery\/slips(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
@@ -47,10 +51,12 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|tax-renewals)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|document-submission|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|lookup-by-chassis|document-submission|receiving)(\/|$)/, access: SUBMIT },
-  { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
-  { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, access: SUBMIT },
+  // route ต่อคันของขั้น 4 เหลือแค่ GET :id/tax-calculations (:id/document-submission, :id/tax-input, :id/receiving/:step ถูกถอดแล้ว - พบ 2026-09-27)
+  { pattern: /^\/api\/vehicles\/[^/]+\/tax-calculations(\/|$)/, method: 'GET', access: SUBMIT_READ },
+  { pattern: /^\/api\/vehicles\/[^/]+\/tax-calculations(\/|$)/, access: SUBMIT },
   // ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24) - service กรองประเภทรถอีกชั้น
-  { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice$/, access: [...ENTRY, 'STAFF_MOTO'] },
+  // /correct = แก้/ยกเลิกสถานะคันที่ดำเนินการแล้ว (ต้องมีเหตุผล - ผู้ใช้ 2026-09-27) สิทธิ์เดียวกัน
+  { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice(\/correct)?$/, access: [...ENTRY, 'STAFF_MOTO'] },
   // ขั้น 1-3 + ข้อมูลอ้างอิง: ทุกกลุ่มอ่านได้ เขียนได้เฉพาะ STAFF_ENTRY
   { pattern: /^\/api(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api(\/|$)/, access: ENTRY },

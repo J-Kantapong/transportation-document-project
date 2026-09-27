@@ -25,12 +25,21 @@ export interface JobSheetRow {
   tax: number | null; // null = ยังคำนวณภาษีไม่ได้
   plateCategory: string; // หมวดทะเบียน (ว่างถ้ายังไม่มี)
   plateNumber: string;
+  // เลขจากงานสลับเลขที่คนอื่นทำมาให้ (ผู้ใช้ 2026-09-27) - พิมพ์ใต้เลขทะเบียนตัวเล็ก ว่าง = ไม่ใช่
+  plateNote: string;
   owner: string; // ผู้ถือกรรมสิทธิ์ (ใช้เฉพาะแบบ moto) - ว่างถ้ายังไม่ได้ระบุชื่อ
+}
+
+// ตัวเลือก SWAP_NORMAL / SWAP_AUCTION ของรายการที่ยื่น = "มีคนทำสลับเลขมาให้" ป้ายขาวดำ / ป้ายประมูล
+export function swapPlateNote(plateNumberOption: string): string {
+  if (plateNumberOption === "SWAP_NORMAL") return "สลับเลข · ป้ายขาวดำ";
+  if (plateNumberOption === "SWAP_AUCTION") return "สลับเลข · ป้ายประมูล";
+  return "";
 }
 
 export interface JobSheet {
   kind: JobSheetKind;
-  key: string; // "วันที่ ISO|ชื่อหัวใบเริ่มต้น" - ใช้ผูกชื่อที่ผู้ใช้แก้ไขกับแต่ละใบ
+  key: string; // "วันที่ ISO|รหัสลูกค้า" - ใช้ผูกชื่อที่ผู้ใช้แก้ไขกับแต่ละใบ
   title: string;
   dateText: string; // เช่น 22/9/2026
   note: string; // เฉพาะแบบ car
@@ -94,11 +103,12 @@ export function toJobSheetRow(r: DocumentSubmission): JobSheetRow {
     tax: r.taxAmount === null ? null : Number(r.taxAmount),
     plateCategory: v.plateCategory ?? "",
     plateNumber: v.plateNumber ?? "",
+    plateNote: swapPlateNote(r.plateNumberOption),
     owner: v.owner?.name?.trim() ?? "",
   };
 }
 
-// แบ่งรายการเป็นใบส่งงานตาม (ชื่อหัวใบเริ่มต้น, วันที่ยื่น) - 1 ใบต่อ 1 เจ้าของงานต่อ 1 วัน เรียงตามลำดับที่บันทึก
+// แบ่งรายการเป็นใบส่งงานตาม (รหัสลูกค้า, วันที่ยื่น) - 1 ใบต่อ 1 เจ้าของงานต่อ 1 วัน เรียงตามลำดับที่บันทึก
 // titleOverrides: key ของใบ -> ชื่อหัวใบที่ผู้ใช้แก้ไข (ไม่กระทบการแบ่งใบ)
 export function buildJobSheets(
   kind: JobSheetKind,
@@ -108,10 +118,13 @@ export function buildJobSheets(
   titleOverrides: Record<string, string> = {},
 ): JobSheet[] {
   const groups = new Map<string, { key: string; defaultTitle: string; date: string; records: DocumentSubmission[] }>();
-  for (const r of [...records].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+  // เวลาบันทึกเท่ากันเรียงด้วย id - พิมพ์ซ้ำได้ลำดับเดิมทุกครั้ง (พบ 2026-09-27)
+  for (const r of [...records].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))) {
     const defaultTitle = defaultTitleFor(r);
     const date = r.submitDate.slice(0, 10);
-    const key = `${date}|${defaultTitle}`;
+    // 1 ใบ = 1 ลูกค้า (รหัส) ต่อ 1 วัน - ผู้ใช้ 2026-09-27: กุญแจเดียวกับหน้ารับใบเสร็จ/ป้าย/เล่ม/Delivery เดิมรวมตามชื่อหัวใบ
+    // (ชื่อบริษัท) ลูกค้าคนละรายที่บริษัทเดียวกันจึงรวมเป็นใบเดียว แต่ขั้นอื่นแยก - ชื่อหัวใบใช้แสดงเท่านั้น
+    const key = `${date}|${r.vehicle.customer.id}`;
     if (!groups.has(key)) groups.set(key, { key, defaultTitle, date, records: [] });
     groups.get(key)!.records.push(r);
   }
@@ -151,10 +164,14 @@ function pageHtml(sheet: JobSheet, pageIndex: number): string {
   const start = pageIndex * perPage;
   const columns = sheet.kind === "moto" ? MOTO_COLUMNS : CAR_COLUMNS;
   const body = Array.from({ length: perPage }, (_, i) => {
-    const cells = rowCells(sheet.kind, sheet.rows[start + i]);
+    const row = sheet.rows[start + i];
+    const cells = rowCells(sheet.kind, row);
     // แบบ moto: ช่อง index 1 คือผู้ถือกรรมสิทธิ์
     const cellClass = (c: string, idx: number) => (sheet.kind === "moto" && idx === 1 ? ` class="${ownerCellClass(c)}"` : "");
-    return `<tr><td>${start + i + 1}</td>${cells.map((c, idx) => `<td${cellClass(c, idx)}>${escapeHtml(c)}</td>`).join("")}</tr>`;
+    // ช่องเลขทะเบียนเป็นช่องสุดท้าย - เลขจากงานสลับเลขพิมพ์หมายเหตุตัวเล็กบรรทัดล่าง (ผู้ใช้ 2026-09-27)
+    const plateIdx = cells.length - 1;
+    const note = (idx: number) => (idx === plateIdx && row?.plateNote ? `<br><span class="pnote">${escapeHtml(row.plateNote)}</span>` : "");
+    return `<tr><td>${start + i + 1}</td>${cells.map((c, idx) => `<td${cellClass(c, idx)}>${escapeHtml(c)}${note(idx)}</td>`).join("")}</tr>`;
   }).join("");
   const cols = columns.map(([, w]) => `<col style="width:${w}%">`).join("");
   const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
@@ -218,6 +235,8 @@ export function buildJobSheetHtml(sheets: JobSheet[]): string {
   .moto .grid td.owner { overflow: hidden; }
   .moto .grid td.owner.sm { font-size: 8.5pt; }
   .moto .grid td.owner.xs { font-size: 7pt; line-height: 1.1; white-space: normal; }
+  /* หมายเหตุใต้เลขทะเบียน (เลขจากงานสลับเลข) - ตัวเล็กให้อยู่ในความสูงแถวเดิม */
+  .grid td .pnote { font-size: 6.5pt; font-weight: 700; line-height: 1; }
   .pageno { position: absolute; right: 0; bottom: 0; font-size: 9pt; }
 </style>
 </head>

@@ -1,4 +1,5 @@
 import { getToken, redirectToLogin } from './auth';
+import type { DeliveryKind, DeliveryRow, DeliverySlip } from './billing-api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
@@ -9,11 +10,17 @@ export interface RowError {
 
 export class ApiError extends Error {
   rows?: RowError[];
+  // HTTP status ที่ backend ตอบ (ไม่มี = ติดต่อระบบไม่ได้) - 409 = มีคนแก้ข้อมูลไปก่อน หน้าจอควรโหลดรายการใหม่
+  status?: number;
+  // เนื้อคำตอบทั้งก้อน (เช่น 409 needsConfirm ตอนแก้ข้อมูลรถหลังขั้นตอนที่ใช้ข้อมูลเดิม - ผู้ใช้ 2026-09-27)
+  details?: Record<string, unknown>;
 
-  constructor(message: string, rows?: RowError[]) {
+  constructor(message: string, rows?: RowError[], status?: number, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.rows = rows;
+    this.status = status;
+    this.details = details;
   }
 }
 
@@ -50,11 +57,34 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = data as { error?: string; errors?: RowError[] };
-    const error = new ApiError(body?.error ?? 'ดำเนินการไม่สำเร็จ', body?.errors);
+    const details = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
+    const error = new ApiError(body?.error ?? 'ดำเนินการไม่สำเร็จ', body?.errors, res.status, details);
     throw error;
   }
 
   return data as T;
+}
+
+// รูป/ไฟล์หลัง backend (ต้องแนบ Authorization - <img src> ส่ง header เองไม่ได้) โหลดเป็น blob
+// 401 = token หมดอายุ/บัญชีถูกระงับ -> กลับไปหน้าล็อกอินเหมือน request() (พบ 2026-09-27: เดิมขึ้นแค่ "โหลดรูปไม่สำเร็จ")
+// url เต็ม (เช่น platePhotoImageUrl) หรือ path ที่ขึ้นต้นด้วย /api ก็ได้
+export async function fetchAuthedBlob(url: string): Promise<Blob> {
+  const token = getToken();
+  let res: Response;
+  try {
+    res = await fetch(url.startsWith('/') ? `${API_BASE_URL}${url}` : url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError('ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่');
+  }
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new ApiError('กรุณาเข้าสู่ระบบใหม่');
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(body?.error ?? 'โหลดไฟล์ไม่สำเร็จ', undefined, res.status);
+  }
+  return res.blob();
 }
 
 export interface Customer {
@@ -68,6 +98,11 @@ export interface Customer {
   email: string | null;
   createdAt: string;
   updatedAt: string;
+  // เงื่อนไขวางบิล (คอลัมน์ของ Customer ตามที่ GET /api/customers ส่งมา: ตัวเลข Decimal มาเป็นข้อความ เช่น "3")
+  billingVat?: boolean;
+  billingWhtRate?: string | number;
+  billingWhtSpecialRate?: string | number | null;
+  billingWhtSpecialUntil?: string | null; // ISO
 }
 
 export interface Brand {
@@ -221,7 +256,9 @@ export interface DocumentSubmissionPreviewResult {
 
 // Step 4 (ยื่นเอกสารจดทะเบียนรถใหม่): ค่าธรรมเนียม Bill/No bill - ดู
 // backend/src/document-submission/document-fee-calculator.ts สำหรับ logic การคำนวณจริง
-export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION";
+// SWAP_NORMAL / SWAP_AUCTION = "มีคนทำสลับเลขมาให้" ป้ายขาวดำ / ป้ายประมูล (ผู้ใช้ 2026-09-27, รถยนต์เท่านั้น): ต้องกรอกหมวด+เลข
+// ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ ไม่นับเป็นคำขอเพิ่ม
+export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION" | "SWAP_NORMAL" | "SWAP_AUCTION";
 export type NewPlateOption = "NONE" | "BLACKWHITE" | "AUCTION";
 
 export interface FeeItem {
@@ -252,8 +289,8 @@ export interface CreateDocumentSubmissionInput extends DocumentSubmissionOptions
   submitDate: string; // ค.ศ. YYYY-MM-DD
   plateCategory: string | null;
   plateNumber: string | null;
-  // ประเภทเจ้าของรถ - backend find-or-create VehicleOwner แบบไม่ระบุชื่อให้เอง undefined = ไม่แก้ไข
-  // เจ้าของรถเดิม (ใช้ตอนนำเข้าหลายคันพร้อมกัน ซึ่งไม่ทราบเจ้าของรถ) - undefined ถูกตัดออกจาก JSON โดย
+  // ประเภทเจ้าของรถของรถที่ยังไม่มีเจ้าของ - backend สร้าง VehicleOwner แบบไม่ระบุชื่อให้เอง (มีเจ้าของแล้วใช้ของเดิม
+  // ส่งมาคนละประเภท = error ให้โหลดใหม่) undefined = ใช้เจ้าของรถเดิม - undefined ถูกตัดออกจาก JSON โดย
   // JSON.stringify เอง จึง backend เห็นเป็น "ไม่ได้ส่งมา" พอดี
   ownerType?: OwnerType;
 }
@@ -289,9 +326,11 @@ export interface DocumentSubmission {
     body: string | null;
     plateCategory: string | null;
     plateNumber: string | null;
-    customer: { name: string; company: string | null };
+    // id = กุญแจใบยื่น/ใบส่งงาน (ผู้ใช้ 2026-09-27) ชื่อซ้ำกันได้ - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
+    customer: { id: string; name: string; company: string | null; branch: string | null };
     brand: { name: string };
     owner: { name: string | null; ownerType: OwnerType; hirerType: OwnerType | null; financeCompanyId: string | null } | null;
+    inspectionResultDate?: string | null; // วันที่ตรวจผ่าน (เวลาเต็ม - ใช้ slice(0, 10)) มีเฉพาะผลจาก listDocumentSubmissions
   };
   receipts?: ReceiptSummary[]; // รูปใบเสร็จที่แนบแล้ว (เก่าสุดก่อน) - มีเฉพาะผลจาก listDocumentSubmissions
 }
@@ -345,7 +384,28 @@ export type ReceiptExtraction = (
   duplicate?: ReceiptDuplicate | null; // ไม่มี = รูปก่อน 2026-09-24
 };
 
-export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'createdAt'>;
+// readPending = รูปที่จับคู่ระหว่าง AI ยังอ่านอยู่ - หน้ารับใบเสร็จถามผลต่อด้วย getReceipts
+export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'readPending' | 'createdAt'>;
+
+// แก้ข้อมูลใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ผู้ใช้ 2026-09-27) - ส่งเฉพาะช่องที่แก้, วันที่เป็น ค.ศ. YYYY-MM-DD
+export interface ReceiptFieldsFix {
+  plateCategory?: string;
+  plateNumber?: string;
+  receiptNo?: string;
+  receiptAmount?: string;
+  receiptDate?: string;
+  receiptReceivedDate?: string;
+  remark: string;
+}
+
+// liveSlips / liveInvoices = ใบส่งงาน (DL-xxxxx) / บิลที่ออกไปแล้วของรถคันนี้ ซึ่งยังพิมพ์ทะเบียน/เลขที่ใบเสร็จเดิม (บิล: รวมยอดเดิม) (ไม่แก้ตาม)
+export interface ReceiptFieldsFixResult {
+  submission: Pick<DocumentSubmission, 'id' | 'receiptNo' | 'receiptAmount' | 'receiptDate' | 'receiptReceivedDate'> & {
+    vehicle: Pick<DocumentSubmission['vehicle'], 'plateCategory' | 'plateNumber'>;
+  };
+  liveSlips: string[];
+  liveInvoices: string[];
+}
 
 export type ReceiptCheckEntry =
   | { submissionId: string; action: 'RECEIVED'; plateCategory: string; plateNumber: string; receiptAmount?: string; receiptNo?: string; receiptDate?: string }
@@ -356,8 +416,31 @@ export const receiptImageUrl = (id: string) => `${API_BASE_URL}/api/receipts/${i
 
 // รูปป้าย/รูปเล่มทะเบียน (Step 6/7) - ดู backend/src/plate-photos/, book-photos/ (ผู้ใช้ 2026-09-26: ไม่มี AI แล้ว)
 // POST /api/plate-photos/attach, /api/book-photos/attach (multipart: file, vehicleId, date YYYY-MM-DD) = แนบรูปให้รถคันนั้นแล้วบันทึกรับทันที
+// (วันที่ต้องไม่ก่อนวันที่ในใบเสร็จ/วันที่ยื่น และไม่เกินวันนี้ - พบ 2026-09-27)
+// แก้ก่อนส่งของให้ลูกค้า (ผู้ใช้ 2026-09-27, ต้องมีเหตุผล): PATCH .../vehicle/:vehicleId/received-date { date, remark }
+// POST .../vehicle/:vehicleId/detach { remark } = ถอดรูป รถกลับเข้าคิวรอรับ
 // GET /api/plate-photos/:id/image · GET /api/book-photos/:id/image
 export type PlateKind = "car" | "moto";
+
+export interface ReceivedAttachResult {
+  vehicleId: string;
+  chassis: string;
+  date: string; // YYYY-MM-DD วันที่รับที่บันทึก
+  // เฉพาะรูปป้าย: ส่งเล่มให้ลูกค้าไปแล้วแต่ป้ายยังไม่ได้ส่ง -> ป้ายไปพร้อมเล่มจริง = "ป้ายไปพร้อมเล่มแล้ว" ที่หน้ารายงานส่งงาน
+  // (ใบ DL เลข bookSlipNo วันที่ bookDeliveredDate) หรือยังไม่ได้ส่ง = ส่งป้ายอย่างเดียวที่หน้า Delivery
+  alreadyDelivered?: boolean;
+  customerName?: string;
+  bookDeliveredDate?: string | null;
+  bookSlipNo?: number | null;
+}
+
+// ถอดรูป: deleted = ลบรูปแล้ว (แนบไฟล์เดิมให้คันที่ถูกได้), shared = รูปเก่ายังเป็นรูปของรถคันอื่นจึงไม่ลบ (ต้องถ่ายใหม่),
+// none = แถวเก่าที่รับโดยไม่มีรูป
+export interface ReceivedDetachResult {
+  vehicleId: string;
+  chassis: string;
+  photo: 'deleted' | 'shared' | 'none';
+}
 
 export const platePhotoImageUrl = (id: string) => `${API_BASE_URL}/api/plate-photos/${id}/image`;
 export const bookPhotoImageUrl = (id: string) => `${API_BASE_URL}/api/book-photos/${id}/image`;
@@ -368,7 +451,10 @@ export type ReceivingStep = "plate" | "book" | "delivery";
 export interface ReceivingRow {
   id: string; // vehicleId
   date: string;
+  customerId: string; // กุญแจใบยื่น (ผู้ใช้ 2026-09-27) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
   customerName: string;
+  customerCompany: string | null;
+  customerBranch: string | null;
   chassis: string;
   brandName: string;
   body: string | null;
@@ -376,11 +462,14 @@ export interface ReceivingRow {
   plateNumber: string | null;
   receiptNo: string | null; // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด
   submitDate: string | null; // วันที่ยื่นของการยื่นครั้งล่าสุด - ใช้จัดกลุ่มตามใบยื่น (รับป้าย/รับเล่ม)
+  receiptDate: string | null; // วันที่ในใบเสร็จ - วันที่รับป้าย/เล่มต้องไม่ก่อนวันนี้ (ไม่มี = ใช้วันที่ยื่น)
   urgent: boolean;
   submittedAt: string | null; // เวลาที่บันทึกยื่น (ลำดับในใบส่งงาน) - ค่าเริ่มต้นของการเรียงในหน้ารับป้าย/รับเล่ม
   platePhotoId: string | null; // รูปป้ายที่ใช้ยืนยันการรับป้าย - ดูรูปที่ platePhotoImageUrl(id) (เฉพาะขั้น plate)
   bookPhotoId: string | null; // รูปเล่มที่ใช้ยืนยันการรับเล่ม - ดูรูปที่ bookPhotoImageUrl(id) (เฉพาะขั้น book)
   doneDate: string | null;
+  itemDeliveredDate: string | null; // วันที่ส่งป้าย (plate) / ส่งเล่ม (book) ให้ลูกค้าแล้ว - มีค่า = แก้วันที่รับ/ถอดรูปไม่ได้
+  bookDeliveredDate?: string | null; // เฉพาะ plate: ส่งเล่มให้ลูกค้าไปก่อนแล้ว - ป้ายไปพร้อมเล่ม = วันที่รับป้ายต้องไม่หลังวันนี้
   recipient: string | null; // เฉพาะ delivery
   note: string | null; // เฉพาะ delivery
 }
@@ -445,6 +534,31 @@ export interface TransferNoticeVehicle {
   transferDone: boolean;
   transferCompletedDate: string | null;
   transferCost: string | null;
+  // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
+  inspectionSentDate?: string | null;
+  submitted?: boolean;
+}
+
+// แก้ข้อมูลรถหลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ 2026-09-27): PATCH /api/vehicles/:id ตอบ 409 { needsConfirm: true, affected,
+// taxPreview? } - ส่งซ้ำพร้อม confirm: true + confirmedSteps (confirmKey ของทุกคำเตือนที่เห็น) เพื่อบันทึก
+export interface VehicleEditAffectedStep {
+  step: 'transfer' | 'inspection' | 'submission' | 'delivery' | 'billing';
+  label: string;
+  fields: string[];
+  note: string;
+  // คีย์ของคำเตือนนี้ - สถานะเปลี่ยนระหว่างที่ดูคำเตือน (เช่น ได้ใบเสร็จแล้ว) คีย์เปลี่ยน backend เตือนใหม่ (ผู้ใช้ 2026-09-27 รอบตรวจ)
+  confirmKey: string;
+  // เฉพาะ step 'submission' - submitDate = วันที่ยื่น / repriceable = รอใบเสร็จและช่องที่แก้มีผลกับค่าธรรมเนียม/ภาษี
+  // (ชี้ไปยกเลิกรายการยื่นแล้วยื่นใหม่ที่หน้า ดูข้อมูลที่ยื่นแล้ว เฉพาะเมื่อ repriceable)
+  submissionStatus?: string;
+  submitDate?: string | null;
+  repriceable?: boolean;
+}
+
+export interface VehicleEditWarning {
+  affected: VehicleEditAffectedStep[];
+  // ภาษีที่ยื่นไว้ (รายการรอใบเสร็จ) เทียบกับภาษีตามข้อมูลใหม่ (preview ไม่บันทึก) - new = null พร้อม reason ถ้าคิดไม่ได้
+  taxPreview?: { old: number | null; new: number | null; reason: string | null };
 }
 
 export interface InspectionVehicle {
@@ -457,6 +571,7 @@ export interface InspectionVehicle {
   brandName: string;
   body: string | null;
   registrationProvince: string | null;
+  transferCompletedDate: string | null; // วันที่แจ้งย้าย/ตัดบัญชีเสร็จ - วันส่งตรวจต้องไม่ก่อนวันนี้ (ไม่มี = วันที่รับงาน)
   suggestedCost: string | null; // ราคาตรวจรถ (No bill) ตามตาราง
   // รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน - inspectionRound บอกว่าข้อมูลส่งตรวจ/ผลตรวจชุดนี้เป็นของรอบไหน
   inspectionRound: 1 | 2;
@@ -473,6 +588,9 @@ export interface InspectionVehicle {
   inspectionFailRemark: string | null;
   submitted: boolean; // ยื่นเอกสารแล้ว (มีรายการยื่นที่ยังไม่ยกเลิก/ไม่สำเร็จ)
   submitDeadline: string | null; // วันสุดท้ายที่ยื่นได้ (ตรวจผ่าน + 89 วัน) - null = ไม่ผ่าน/ยังไม่มีผล/ยื่นแล้ว
+  // เฉพาะคิวส่งตรวจ (GET /api/vehicles/inspection/pending-send): ถึงกำหนดตรวจรอบ 2 แต่ยกเลิก/ยื่นไม่สำเร็จด้วยผลตรวจเดิม
+  // = ยังยื่นใหม่ด้วยวันที่ยื่นเดิมได้ถึง validUntil (ผู้ใช้ 2026-09-27 F19) - null/ไม่มี = ไม่เคยยื่นด้วยผลตรวจนี้
+  resubmitWith?: { submitDate: string; reason: 'FAILED' | 'CANCELLED'; validUntil: string } | null;
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -519,6 +637,25 @@ export interface NewCustomerInput {
   taxId: string;
   phone: string;
   email: string;
+}
+
+// แก้ข้อมูลลูกค้า (ADMIN, ผู้ใช้ 2026-09-27): 7 ช่องครบเหมือนตอนเพิ่ม + เหตุผล (บังคับ, เก็บลงประวัติ)
+// terms = เงื่อนไขวางบิล ไม่ส่ง = ไม่แก้ | whtSpecialUntil = ค.ศ. YYYY-MM-DD
+// expectedUpdatedAt = Customer.updatedAt ตอนเปิดหน้าแก้ - มีคนแก้ไปก่อน backend ตอบ 409 (ไม่ทับค่าของเขา)
+export interface UpdateCustomerInput extends NewCustomerInput {
+  remark: string;
+  expectedUpdatedAt: string;
+  terms?: { vat: boolean; whtRate: number; whtSpecialRate: number | null; whtSpecialUntil: string | null };
+}
+
+// ประวัติการแก้ไขลูกค้า (AuditLog) ใหม่สุดก่อน - changes = { ช่อง: { from, to } } วันที่ล้วนเป็น YYYY-MM-DD
+export interface CustomerHistoryEntry {
+  id: string;
+  action: string;
+  remark: string;
+  changes: Record<string, { from: unknown; to: unknown }>;
+  editedBy: string | null;
+  createdAt: string; // ISO
 }
 
 // --- ต่อภาษี ---------------------------------------------------------------------
@@ -597,6 +734,8 @@ export interface TaxRenewalInput {
   weight?: string | number | null;
   firstRegistrationDate?: string;
   ownerType?: 'INDIVIDUAL' | 'JURISTIC';
+  // ติดไฟแนนซ์ (เช่าซื้อ): ownerType = ประเภทผู้เช่าซื้อ - ใช้เมื่อกรอกรถเอง/รถในระบบที่ยังไม่มีเจ้าของ (พบ 2026-09-27)
+  financed?: boolean;
   ownerName?: string | null;
   taxExpiryDate: string;
   inspectionConfirmed?: boolean;
@@ -605,6 +744,8 @@ export interface TaxRenewalInput {
   paymentDate?: string | null;
 }
 
+// PATCH /api/tax-renewals/:id - ติ๊ก/กรอกวันที่ที่ยังว่าง = งานปกติ / ช่องข้อมูลรถ-ภาษี ลงขัน และแก้หรือล้างวันที่ที่มีแล้ว
+// = แก้ข้อมูล ต้องส่ง remark (ผู้ใช้ 2026-09-27) - chassis/engine แก้ได้เฉพาะรถที่กรอกเอง, ownerType/financed เฉพาะเจ้าของที่ไม่ได้มาจากข้อมูลรถ
 export interface TaxRenewalUpdateInput {
   inspectionConfirmed?: boolean;
   insuranceConfirmed?: boolean;
@@ -612,6 +753,23 @@ export interface TaxRenewalUpdateInput {
   paymentDate?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
+  submitDate?: string;
+  chassis?: string;
+  engine?: string | null;
+  plateCategory?: string;
+  plateNumber?: string;
+  vehicleType?: string;
+  fuel?: string;
+  cc?: string | number | null;
+  weight?: string | number | null;
+  firstRegistrationDate?: string;
+  ownerType?: 'INDIVIDUAL' | 'JURISTIC';
+  financed?: boolean;
+  ownerName?: string | null;
+  taxExpiryDate?: string;
+  remark?: string;
+  // ฟอร์ม ✎ แก้ส่ง updatedAt ที่โหลดมา - มีคนแก้/ติ๊กไปก่อนระหว่างที่เปิดฟอร์มอยู่ backend ตอบ 409 (พบ 2026-09-27)
+  expectedUpdatedAt?: string;
 }
 
 export interface TaxRenewal {
@@ -638,12 +796,24 @@ export interface TaxRenewal {
   billTotal: string | null;
   noBillTotal: string | null;
   customer?: { id: string; name: string; company: string | null } | null;
+  // ฟอร์ม ✎ แก้ (ผู้ใช้ 2026-09-27): ข้อมูลที่ใช้คิดภาษี + เจ้าของ (ownerFromVehicle = อ่านจากข้อมูลรถ แก้ที่งานนี้ไม่ได้)
+  cc: string | null;
+  weight: string | null;
+  ownerType: OwnerType;
+  ownerFromVehicle: boolean;
+  financed: boolean; // ติดไฟแนนซ์ - ownerType เป็นนิติบุคคล (ไฟแนนซ์) ประเภทผู้เช่าซื้ออยู่ที่ hirerType
+  hirerType: OwnerType | null;
+  updatedAt: string; // ส่งกลับเป็น expectedUpdatedAt ตอน ✎ แก้
 }
 
 export const api = {
   listCustomers: () => request<{ customers: Customer[] }>('/api/customers'),
   createCustomer: (data: NewCustomerInput) =>
     request<{ id: string }>('/api/customers', { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomer: (id: string, data: UpdateCustomerInput) =>
+    request<{ customer: Customer }>(`/api/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  customerHistory: (id: string) =>
+    request<{ entries: CustomerHistoryEntry[] }>(`/api/customers/${encodeURIComponent(id)}/history`),
 
   listBrands: () => request<{ brands: Brand[] }>('/api/brands'),
   createBrand: (name: string) =>
@@ -674,8 +844,12 @@ export const api = {
   },
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
-  updateVehicle: (id: string, data: Record<string, string>) =>
-    request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // 409 + details.needsConfirm = แก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (VehicleEditWarning) - ส่งซ้ำพร้อม confirm/confirmedSteps
+  updateVehicle: (id: string, data: Record<string, string>, confirm?: { confirmedSteps: string[] }) =>
+    request<{ id: string }>(`/api/vehicles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(confirm ? { ...data, confirm: true, confirmedSteps: confirm.confirmedSteps } : data),
+    }),
 
   // ลบข้อมูลรถ (ซ่อน ไม่ลบจริง) / กู้คืน / รายการที่ลบไว้ - ADMIN เท่านั้น ต้องระบุเหตุผลที่ลบทุกครั้ง
   deleteVehicle: (id: string, remark: string) =>
@@ -695,12 +869,8 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ chassisList, submitDate }) },
     ),
 
-  previewDocumentSubmissionFee: (vehicleId: string, options: DocumentSubmissionOptionsInput) =>
-    request<FeePreview>(`/api/vehicles/${vehicleId}/document-submission/preview`, {
-      method: 'POST',
-      body: JSON.stringify(options),
-    }),
   // ค่าธรรมเนียม + ภาษีหลายคันในคำขอเดียว (สูงสุด 1,000 คัน) - ownerType undefined = ใช้เจ้าของรถเดิม
+  // (ownerType ส่งได้เฉพาะรถที่ยังไม่มีเจ้าของ - มีแล้วคนละประเภท = error รายคัน "ข้อมูลเจ้าของรถถูกแก้ไขแล้ว กรุณาโหลดใหม่")
   previewDocumentSubmissionBulk: (
     entries: Array<DocumentSubmissionOptionsInput & { vehicleId: string; ownerType?: OwnerType }>,
   ) =>
@@ -708,40 +878,76 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ entries }),
     }),
-  createDocumentSubmission: (vehicleId: string, input: CreateDocumentSubmissionInput) =>
-    request<{ submission: DocumentSubmission; taxCalculation: TaxCalculation }>(`/api/vehicles/${vehicleId}/document-submission`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
+  // ยื่นหลายคัน (สูงสุด 1,000 คันต่อคำขอ) - backend บันทึกทีละคันตามลำดับที่ส่ง (ลำดับในใบส่งงาน)
   createDocumentSubmissionBulk: (entries: BulkDocumentSubmissionEntry[]) =>
     request<{ succeeded: Array<{ vehicleId: string; submission: DocumentSubmission }>; failed: Array<{ vehicleId: string; error: string }> }>(
       '/api/vehicles/document-submission/bulk',
       { method: 'POST', body: JSON.stringify({ entries }) },
     ),
-  listDocumentSubmissions: (date?: string, status?: DocumentSubmissionStatus) => {
-    const query = [date ? `date=${date}` : '', status ? `status=${status}` : ''].filter(Boolean).join('&');
-    return request<{ submissions: DocumentSubmission[] }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
+  // filters ใช้กับตาราง "ได้ใบเสร็จแล้ว": kind กรองประเภทรถ, q ค้นเลขตัวถัง/ทะเบียน/ลูกค้า/เลขที่ใบเสร็จ, offset โหลดเพิ่ม (hasMore)
+  listDocumentSubmissions: (
+    date?: string,
+    status?: DocumentSubmissionStatus,
+    filters: { kind?: 'car' | 'moto'; q?: string; offset?: number } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (status) params.set('status', status);
+    if (filters.kind) params.set('kind', filters.kind);
+    if (filters.q?.trim()) params.set('q', filters.q.trim());
+    if (filters.offset) params.set('offset', String(filters.offset));
+    const query = params.toString();
+    return request<{ submissions: DocumentSubmission[]; hasMore?: boolean }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
   },
-  // RECEIPT_RECEIVED ต้องมีเลขทะเบียน (ส่งมา หรือรถมีอยู่แล้ว) - FAILED ไม่ต้อง แต่ต้องมี failRemark (เหตุผล)
-  updateDocumentSubmissionStatus: (
-    submissionId: string,
-    status: Exclude<DocumentSubmissionStatus, "PENDING">,
-    options: { receivedDate?: string; plateCategory?: string; plateNumber?: string; receiptAmount?: string; failRemark?: string } = {},
-  ) =>
-    request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status, ...options }),
-    }),
+  // วันที่ยื่นทั้งหมดพร้อมจำนวนรายการ (ใหม่สุดก่อน) - หน้าดูข้อมูลที่ยื่นแล้วเลือกวันแล้วโหลดรายการด้วย listDocumentSubmissions(date)
+  listDocumentSubmissionDates: () => request<{ dates: Array<{ date: string; count: number }> }>('/api/vehicles/document-submission/dates'),
 
-  listReceivingPending: (step: ReceivingStep) => request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/pending`),
-  listReceivingCompleted: (step: ReceivingStep) => request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/completed`),
-  markReceivingDone: (id: string, step: ReceivingStep, data: { date: string; recipient?: string; note?: string }) =>
-    request<{ vehicle: ReceivingRow }>(`/api/vehicles/${id}/receiving/${step}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // kind = กรองประเภทรถที่ backend (หน้า /car, /moto) - ดำเนินการแล้ว: ทีละ 100 คัน ล่าสุดที่แนบก่อน, q = ค้นเลขตัวถัง/ทะเบียน/ลูกค้า/เลขที่ใบเสร็จ
+  // (PATCH /api/vehicles/:id/receiving/:step เดิมถูกถอดออก 2026-09-27 - ส่งงานต้องออกใบส่งงานที่หน้า Delivery)
+  listReceivingPending: (step: ReceivingStep, kind?: PlateKind) =>
+    request<{ vehicles: ReceivingRow[] }>(`/api/vehicles/receiving/${step}/pending${kind ? `?kind=${kind}` : ''}`),
+  // limit (ไม่ส่ง = 100, สูงสุด 1,000) = โหลดใหม่ด้วยจำนวนที่เปิดอยู่หลังแนบ/แก้
+  listReceivingCompleted: (step: ReceivingStep, options: { kind?: PlateKind; q?: string; offset?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.kind) params.set('kind', options.kind);
+    if (options.q?.trim()) params.set('q', options.q.trim());
+    if (options.offset) params.set('offset', String(options.offset));
+    if (options.limit) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return request<{ vehicles: ReceivingRow[]; hasMore: boolean }>(`/api/vehicles/receiving/${step}/completed${query ? `?${query}` : ''}`);
+  },
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
-  listRecentlyCompletedTransferNotice: () =>
-    request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/completed'),
-  updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null }) =>
+  // ดำเนินการแล้ว ทีละ 100 คัน ทำเสร็จล่าสุดก่อน - q ค้นเลขตัวถัง/ลูกค้า ฯลฯ ทั้งฐานข้อมูล (ผู้ใช้ 2026-09-27)
+  listRecentlyCompletedTransferNotice: (params: { q?: string; offset?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q?.trim()) qs.set('q', params.q.trim());
+    if (params.offset) qs.set('offset', String(params.offset));
+    if (params.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return request<{ vehicles: TransferNoticeVehicle[]; hasMore: boolean }>(
+      `/api/vehicles/transfer-notice/completed${query ? `?${query}` : ''}`,
+    );
+  },
+  // "✎ แก้" คันที่ดำเนินการแล้ว (ต้องมีเหตุผล): done = false ยกเลิกสถานะ (เฉพาะก่อนส่งตรวจ) / true แก้วันที่เสร็จ-ค่าใช้จ่าย (จนกว่าจะยื่น)
+  // expectedCompletedDate/expectedCost = ค่าที่ dialog แสดงอยู่ - มีคนแก้ไปก่อน = 409 (ผู้ใช้ 2026-09-27 รอบตรวจ)
+  correctTransferNotice: (
+    id: string,
+    data: {
+      done: boolean;
+      completedDate: string | null;
+      cost: string | null;
+      remark: string;
+      expectedCompletedDate: string | null;
+      expectedCost: string | null;
+    },
+  ) =>
+    request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
+      `/api/vehicles/${id}/transfer-notice/correct`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
+  // expectedTransferDone = สถานะที่หน้าจอโหลดมา - ไม่ตรงกับในระบบแล้ว (มีคนบันทึกไปก่อน) backend ตอบ 409
+  updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null; expectedTransferDone: boolean }) =>
     request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
       `/api/vehicles/${id}/transfer-notice`,
       { method: 'PATCH', body: JSON.stringify(data) },
@@ -760,6 +966,19 @@ export const api = {
         'id' | 'inspectionRound' | 'inspectionSentType' | 'inspectionSentDate' | 'inspectionSentCost' | 'inspectionSentBillCost'
       >;
     }>(`/api/vehicles/${id}/inspection-sent`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // แก้ประเภท/วันที่ส่งตรวจ และยกเลิกส่งตรวจ ของรถที่ยังรอผล - remark = เหตุผล (บังคับ, เก็บลงประวัติการแก้ไข)
+  correctInspectionSent: (id: string, data: { sentType: string; sentDate: string; remark: string }) =>
+    request<{
+      vehicle: Pick<
+        InspectionVehicle,
+        'id' | 'inspectionRound' | 'inspectionSentType' | 'inspectionSentDate' | 'inspectionSentCost' | 'inspectionSentBillCost'
+      >;
+    }>(`/api/vehicles/${id}/inspection-sent-correction`, { method: 'PATCH', body: JSON.stringify(data) }),
+  cancelInspectionSent: (id: string, remark: string) =>
+    request<{ vehicle: Pick<InspectionVehicle, 'id' | 'inspectionRound' | 'inspectionSentType' | 'inspectionSentDate'> }>(
+      `/api/vehicles/${id}/inspection-sent/cancel`,
+      { method: 'POST', body: JSON.stringify({ remark }) },
+    ),
   updateInspectionResult: (
     id: string,
     data: { result: string; resultDate: string | null; remark: string | null }, // ค่าใช้จ่าย backend คำนวณเอง (คงที่)
@@ -791,11 +1010,12 @@ export const api = {
       body: JSON.stringify({ remark }),
     }),
 
-  // แก้ย้อนหลังต้องมีเหตุผล (เก็บลง VehicleEditLog) และวันที่ต้องอยู่ระหว่างวันที่ยื่นกับวันที่รับใบเสร็จ
-  updateReceiptDate: (submissionId: string, receiptDate: string, remark: string) =>
-    request<DocumentSubmission>(`/api/vehicles/document-submission/${submissionId}/receipt-date`, {
+  // แก้ข้อมูลใบเสร็จที่บันทึกแล้ว (ทะเบียน/เลขที่/ยอด/วันที่ในใบเสร็จ/วันที่รับ) ต้องมีเหตุผล (เก็บลง VehicleEditLog)
+  // วันที่ต้องเรียง วันที่ยื่น <= วันที่ในใบเสร็จ <= วันที่รับใบเสร็จ <= วันนี้ - ไม่เปลี่ยนสถานะ
+  updateReceiptFields: (submissionId: string, fix: ReceiptFieldsFix) =>
+    request<ReceiptFieldsFixResult>(`/api/vehicles/document-submission/${submissionId}/receipt-fields`, {
       method: 'PATCH',
-      body: JSON.stringify({ receiptDate, remark }),
+      body: JSON.stringify(fix),
     }),
 
   // หน้ารับใบเสร็จ: บันทึกทั้งใบยื่นทีเดียว (best-effort) - RECEIVED ต้องแนบรูปแล้ว, FAILED ต้องมี failRemark,
@@ -815,25 +1035,51 @@ export const api = {
     return request<{ receipt: ReceiptImage }>('/api/receipts', { method: 'POST', body: form });
   },
   getReceipts: (ids: string[]) => request<{ receipts: ReceiptImage[] }>(`/api/receipts?ids=${ids.map(encodeURIComponent).join(',')}`),
-  listUnassignedReceipts: () => request<{ receipts: ReceiptImage[] }>('/api/receipts/unassigned'),
-  assignReceipt: (id: string, submissionId: string) =>
-    request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId }) }),
-  deleteReceipt: (id: string) => request<{ id: string }>(`/api/receipts/${id}`, { method: 'DELETE' }),
+  // ถาดรูปรอจับคู่: total = จำนวนทั้งหมด, โหลดเพิ่มด้วย offset (limit ไม่ส่ง = 200)
+  listUnassignedReceipts: (offset = 0, limit?: number) =>
+    request<{ receipts: ReceiptImage[]; total: number; hasMore: boolean }>(
+      `/api/receipts/unassigned?offset=${offset}${limit ? `&limit=${limit}` : ''}`,
+    ),
+  // unassignedOnly = จากถาด/หน้าถ่าย: รูปถูกจับคู่กับรถ (คันอื่น) ไปแล้ว backend ตอบ error ไม่ทำ
+  assignReceipt: (id: string, submissionId: string, unassignedOnly = false) =>
+    request<{ receipt: ReceiptImage }>(`/api/receipts/${id}`, { method: 'PATCH', body: JSON.stringify({ submissionId, unassignedOnly }) }),
+  deleteReceipt: (id: string, unassignedOnly = false) =>
+    request<{ id: string }>(`/api/receipts/${id}${unassignedOnly ? '?unassignedOnly=1' : ''}`, { method: 'DELETE' }),
 
   attachPlatePhoto: (vehicleId: string, image: Blob, fileName: string, date: string) => {
     const form = new FormData();
     form.append('file', image, fileName);
     form.append('vehicleId', vehicleId);
     form.append('date', date);
-    return request<{ vehicleId: string }>('/api/plate-photos/attach', { method: 'POST', body: form });
+    return request<ReceivedAttachResult>('/api/plate-photos/attach', { method: 'POST', body: form });
   },
   attachBookPhoto: (vehicleId: string, image: Blob, fileName: string, date: string) => {
     const form = new FormData();
     form.append('file', image, fileName);
     form.append('vehicleId', vehicleId);
     form.append('date', date);
-    return request<{ vehicleId: string }>('/api/book-photos/attach', { method: 'POST', body: form });
+    return request<ReceivedAttachResult>('/api/book-photos/attach', { method: 'POST', body: form });
   },
+  updatePlateReceivedDate: (vehicleId: string, date: string, remark: string) =>
+    request<{ vehicleId: string; chassis: string; date: string }>(`/api/plate-photos/vehicle/${encodeURIComponent(vehicleId)}/received-date`, {
+      method: 'PATCH',
+      body: JSON.stringify({ date, remark }),
+    }),
+  detachPlatePhoto: (vehicleId: string, remark: string) =>
+    request<ReceivedDetachResult>(`/api/plate-photos/vehicle/${encodeURIComponent(vehicleId)}/detach`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  updateBookReceivedDate: (vehicleId: string, date: string, remark: string) =>
+    request<{ vehicleId: string; chassis: string; date: string }>(`/api/book-photos/vehicle/${encodeURIComponent(vehicleId)}/received-date`, {
+      method: 'PATCH',
+      body: JSON.stringify({ date, remark }),
+    }),
+  detachBookPhoto: (vehicleId: string, remark: string) =>
+    request<ReceivedDetachResult>(`/api/book-photos/vehicle/${encodeURIComponent(vehicleId)}/detach`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
 
   listVehicleOwners: () => request<{ owners: VehicleOwner[] }>('/api/vehicle-owners'),
   createVehicleOwner: (data: VehicleOwnerInput) =>
@@ -847,11 +1093,6 @@ export const api = {
     firstRegistrationDate: string | null;
     owner: VehicleOwnerInput | null;
   }) => request<TaxBreakdown>('/api/tax-calculations/preview', { method: 'POST', body: JSON.stringify(data) }),
-
-  updateVehicleTaxInput: (
-    id: string,
-    data: { ownerId: string | null; isFactoryNew: boolean | null; firstRegistrationDate: string | null },
-  ) => request<{ taxCalculation: TaxCalculation }>(`/api/vehicles/${id}/tax-input`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   listVehicleTaxCalculations: (id: string) =>
     request<{ taxCalculations: TaxCalculation[] }>(`/api/vehicles/${id}/tax-calculations`),
@@ -870,6 +1111,23 @@ export const api = {
     form.append('report', data.report, data.report.name);
     return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
   },
+  // แก้/ยกเลิกรายการที่บันทึกผิด (ADMIN/STAFF_ENTRY, remark บังคับ - ผู้ใช้ 2026-09-27) ยกเลิกแล้วไฟล์เดิมแนบใหม่ได้
+  // expected* = ค่าที่ฟอร์มโหลดมา (ตารางนี้ไม่มี updatedAt) - ไม่ตรงกับในระบบ = มีคนแก้ไปก่อน backend ตอบ 409 (พบ 2026-09-27)
+  updateYamahaRelocation: (
+    id: string,
+    data: {
+      date?: string;
+      size?: YamahaRelocationSize;
+      count?: number;
+      remark: string;
+      expectedDate?: string;
+      expectedSize?: YamahaRelocationSize;
+      expectedCount?: number;
+    },
+  ) =>
+    request<{ entry: YamahaRelocationEntry }>(`/api/yamaha-relocation/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  cancelYamahaRelocation: (id: string, remark: string) =>
+    request<{ id: string }>(`/api/yamaha-relocation/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),
 
   // ต่อภาษี - preview คิดยอดสดให้ฟอร์ม (ไม่บันทึก), PATCH ใช้เติมวันที่/ติ๊กทีหลังจากหน้ารายการ
   listTaxRenewals: () => request<TaxRenewal[]>('/api/tax-renewals'),
@@ -881,4 +1139,20 @@ export const api = {
     request<TaxRenewal>('/api/tax-renewals', { method: 'POST', body: JSON.stringify(data) }),
   updateTaxRenewal: (id: string, data: TaxRenewalUpdateInput) =>
     request<TaxRenewal>(`/api/tax-renewals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // ยกเลิกงาน (ไม่ลบแถว, remark บังคับ - ผู้ใช้ 2026-09-27)
+  cancelTaxRenewal: (id: string, remark: string) =>
+    request<{ id: string }>(`/api/tax-renewals/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),
+
+  // Delivery: ส่งชนิดงานที่ผู้ใช้เห็นในป๊อปอัปยืนยันไปด้วย - สถานะรถเปลี่ยนไปแล้ว backend ไม่บันทึก (409) ให้โหลดใหม่ (พบ 2026-09-27)
+  // vehicleIds ส่งคู่ไปด้วยให้ backend รุ่นก่อนยังรับได้ระหว่างอัปเดต
+  submitDelivery: (data: { items: Array<{ vehicleId: string; kind: DeliveryKind }>; date: string; recipient: string; note: string }) =>
+    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>('/api/delivery', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, vehicleIds: data.items.map((i) => i.vehicleId) }),
+    }),
+  // ป้ายไปพร้อมเล่มแล้ว (ผู้ใช้ 2026-09-27): ติ๊กป้ายในใบส่งเล่มเดิม วันที่ส่งป้าย = วันที่ในใบ - ADMIN / STAFF_CAR / STAFF_MOTO
+  addPlateToDeliverySlip: (slipId: string, data: { vehicleId: string; remark?: string }) =>
+    request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(slipId)}/add-plate`, { method: 'POST', body: JSON.stringify(data) }),
+  // รายงานส่งงาน: ป้ายค้างส่ง ขอบเขตการอ่านเดียวกับใบส่งงาน (คิวหน้า Delivery จำกัดเฉพาะคันที่ติ๊กส่งได้ - พบ 2026-09-27)
+  deliveryPlatePending: () => request<{ vehicles: DeliveryRow[] }>('/api/delivery/plate-pending'),
 };

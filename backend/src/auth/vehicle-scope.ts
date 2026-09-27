@@ -25,10 +25,35 @@ export function vehicleScopeFor(roles: UserRole[]): VehicleScope {
   return 'NONE';
 }
 
+// ขอบเขตการ "บันทึก/แก้" แยกจากขอบเขตการอ่าน: ACCOUNTANT / DELIVERY อ่านได้ทุกคัน แต่ถ้าคนเดียวกันถือ STAFF_CAR / STAFF_MOTO ด้วย
+// ต้องไม่ทำให้สิทธิ์แก้ขยายไปอีกประเภท (พบ 2026-09-27: STAFF_MOTO + DELIVERY แก้/ยกเลิกใบส่งงานรถยนต์ได้)
+// ไม่มี STAFF_* เลย = ALL (access-policy.ts จำกัดว่าบทบาทนั้นบันทึกอะไรได้อยู่แล้ว)
+export function writeScopeFor(roles: UserRole[]): VehicleScope {
+  if (roles.includes('ADMIN')) return 'ALL';
+  const car = roles.includes('STAFF_CAR');
+  const moto = roles.includes('STAFF_MOTO');
+  if (car && moto) return 'ALL';
+  if (car) return 'CAR';
+  if (moto) return 'MOTO';
+  return roles.includes('ACCOUNTANT') || roles.includes('DELIVERY') ? 'ALL' : 'NONE';
+}
+
 // ขอบเขตของคำขอปัจจุบัน - นอกคำขอ HTTP (unit test/script) ไม่จำกัด
 export function currentVehicleScope(): VehicleScope {
   const user = currentUser();
   return user ? vehicleScopeFor(user.roles) : 'ALL';
+}
+
+export function currentWriteScope(): VehicleScope {
+  const user = currentUser();
+  return user ? writeScopeFor(user.roles) : 'ALL';
+}
+
+// ส่งงาน (Delivery): บทบาท DELIVERY ส่งได้ทุกประเภทรถ แม้ถือ STAFF_CAR / STAFF_MOTO ด้วย
+export function currentDeliveryScope(): VehicleScope {
+  const user = currentUser();
+  if (!user) return 'ALL';
+  return user.roles.includes('DELIVERY') ? 'ALL' : writeScopeFor(user.roles);
 }
 
 // เงื่อนไข Prisma สำหรับ where ของตาราง Vehicle - กระจายเข้า where เดิมได้เลย ({ ...where, ...vehicleTypeWhere() })
@@ -52,9 +77,14 @@ export function scopeErrorMessage(scope: VehicleScope): string {
   return 'บัญชีของคุณไม่มีสิทธิ์ทำงานขั้นยื่นเอกสาร/รับของ';
 }
 
-export function assertVehicleInScope(body: string | null | undefined) {
-  const scope = currentVehicleScope();
+// ใช้ก่อนบันทึก/แก้ข้อมูลรถ (ขอบเขตการแก้) - scope ส่งเข้ามาได้สำหรับกรณีพิเศษ เช่น currentDeliveryScope()
+export function assertVehicleInScope(body: string | null | undefined, scope: VehicleScope = currentWriteScope()) {
   if (!isVehicleInScope(body, scope)) throw new ForbiddenException({ error: scopeErrorMessage(scope) });
+}
+
+// ใช้ก่อนแสดงข้อมูลรถคันเดียว (ขอบเขตการอ่าน - ACCOUNTANT / DELIVERY เห็นทุกคัน)
+export function assertVehicleReadable(body: string | null | undefined) {
+  assertVehicleInScope(body, currentVehicleScope());
 }
 
 // ขั้น 2 แจ้งย้าย/ตัดบัญชี: ADMIN/STAFF_ENTRY ทุกคัน, STAFF_MOTO เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24)
@@ -73,7 +103,7 @@ export function assertTransferNoticeInScope(body: string | null | undefined) {
 
 // แท็บรูปป้าย (car | moto) ต้องอยู่ในขอบเขตเดียวกัน
 export function assertKindInScope(kind: VehicleKind) {
-  const scope = currentVehicleScope();
+  const scope = currentWriteScope();
   if (scope === 'ALL') return;
   if ((scope === 'CAR' && kind === 'car') || (scope === 'MOTO' && kind === 'moto')) return;
   throw new ForbiddenException({ error: scope === 'CAR' ? 'บัญชีของคุณดูแลเฉพาะรถยนต์' : scope === 'MOTO' ? 'บัญชีของคุณดูแลเฉพาะจักรยานยนต์' : scopeErrorMessage(scope) });

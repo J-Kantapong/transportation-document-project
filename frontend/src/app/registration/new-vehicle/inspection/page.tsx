@@ -6,7 +6,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PageTabs } from "@/components/PageTabs";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { api, ApiError, type InspectionVehicle } from "@/lib/api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
 import { DateInput } from "@/components/DateInput";
 
@@ -53,6 +54,15 @@ interface SendRowState {
   message: { text: string; error?: boolean };
 }
 
+// แก้การส่งตรวจ / ยกเลิกส่งตรวจ ของรถที่ยังรอผล 1 คัน (เปิดทีละคันใน dialog) - ต้องระบุเหตุผลทุกครั้ง
+interface EditSentState {
+  vehicle: InspectionVehicle;
+  mode: "edit" | "cancel";
+  sentType: SentType;
+  dateText: string;
+  remarkText: string;
+}
+
 // แก้ไขผลตรวจของรถที่ตรวจเสร็จไปแล้ว 1 คัน (เปิดทีละคันใน dialog)
 interface EditResultState {
   vehicle: InspectionVehicle;
@@ -95,10 +105,60 @@ function addDaysIso(iso: string, days: number): string {
 
 // วันส่งตรวจเริ่มต้น = วันถัดไปของวันที่รับงาน - ส่งตรวจใหม่หลังตรวจไม่ผ่านใช้วันถัดไปของวันที่ทราบผลแทน
 // ถึงกำหนดตรวจรอบ 2 ใช้วันนี้ (วันที่ผ่านรอบ 1 + 1 จะย้อนหลังไป 90 วัน)
+// และไม่ก่อนวันที่แจ้งย้าย/ตัดบัญชีเสร็จ (พบ 2026-09-27: แจ้งย้ายเสร็จช้ากว่าวันรับงานหลายวัน วันส่งตรวจเริ่มต้นเลยย้อนไป
+// ก่อนขั้นตอนที่ 2 ผลตรวจผ่านจึงเริ่มนับ 90 วันเร็วเกินจริง)
 function defaultSendDateIso(v: InspectionVehicle): string {
   if (v.round2Due) return todayIso();
   const base = v.inspectionResult === "ไม่ผ่าน" && v.inspectionResultDate ? v.inspectionResultDate : v.date;
-  return addDaysIso(base, 1);
+  const next = addDaysIso(base, 1);
+  return v.transferCompletedDate && v.transferCompletedDate > next ? v.transferCompletedDate : next;
+}
+
+// วันที่ส่งตรวจต้องมี และไม่ก่อนวันที่แจ้งย้าย/ตัดบัญชีเสร็จ (ไม่มี = วันที่รับงาน) - backend ตรวจแบบเดียวกัน (พบ 2026-09-27)
+function parseSendDate(dateText: string, v: InspectionVehicle): string {
+  const digits = dateText.replace(/\D/g, "");
+  const dateIso = digits ? displayDateToIso(digits) : "";
+  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
+  if (!dateIso) throw new Error("กรุณาระบุวันที่ส่งตรวจ");
+  const earliest = v.transferCompletedDate ?? v.date;
+  if (dateIso < earliest) {
+    const from = v.transferCompletedDate ? "วันที่แจ้งย้าย/ตัดบัญชีเสร็จ" : "วันที่รับงาน";
+    throw new Error(`วันที่ส่งตรวจต้องไม่ก่อน${from} (${isoToDisplayDate(earliest)})`);
+  }
+  return dateIso;
+}
+
+// วันที่ทราบผลต้องมี ไม่ก่อนวันที่ส่งตรวจ และไม่เกินวันนี้ - backend ตรวจแบบเดียวกัน (พบ 2026-09-27)
+function parseResultDate(dateText: string, v: InspectionVehicle): string {
+  const digits = dateText.replace(/\D/g, "");
+  const dateIso = digits ? displayDateToIso(digits) : "";
+  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
+  if (!dateIso) throw new Error("กรุณาระบุวันที่ทราบผล");
+  if (v.inspectionSentDate && dateIso < v.inspectionSentDate) {
+    throw new Error(`วันที่ทราบผลต้องไม่ก่อนวันที่ส่งตรวจ (${isoToDisplayDate(v.inspectionSentDate)})`);
+  }
+  if (dateIso > todayIso()) throw new Error("วันที่ทราบผลต้องไม่เกินวันนี้");
+  return dateIso;
+}
+
+// วันที่ส่งตรวจยังไม่ถึง (ส่งตรวจล่วงหน้า เช่น วันถัดไปของวันที่รับงาน) = ยังบันทึกผลไม่ได้ เพราะวันที่ทราบผลต้องไม่ก่อนวันส่งตรวจ
+// และไม่เกินวันนี้ - "เลือกทั้งหมด" ข้ามคันเหล่านี้ (พบ 2026-09-27: เดิมติ๊กไปด้วยแล้ว "บันทึกทั้งหมด" หยุดที่แถวแรกที่ติด)
+function resultNotDueYet(v: InspectionVehicle): boolean {
+  return !!v.inspectionSentDate && v.inspectionSentDate > todayIso();
+}
+
+// สรุปผลบันทึกหลายแถว - บอกเหตุผลของแถวที่ไม่สำเร็จด้วย เช่น มีคนบันทึกไปก่อน (แสดงไม่เกิน 3 แถว)
+function bulkResultMessage(results: PromiseSettledResult<unknown>[], chassisList: string[]): { text: string; error?: boolean } {
+  const failures = results.flatMap((r, i) =>
+    r.status === "rejected" ? [`${chassisList[i]}: ${r.reason instanceof ApiError ? r.reason.message : "บันทึกไม่สำเร็จ"}`] : [],
+  );
+  if (!failures.length) return { text: `บันทึกแล้ว ${results.length} รายการ` };
+  return {
+    text: `บันทึกสำเร็จ ${results.length - failures.length} จาก ${results.length} รายการ · ล้มเหลว ${failures.length} รายการ (${failures
+      .slice(0, 3)
+      .join(" / ")}${failures.length > 3 ? " …" : ""})`,
+    error: true,
+  };
 }
 
 
@@ -113,6 +173,15 @@ function sendQueueNote(v: InspectionVehicle): string {
     return `ตรวจ${round}ไม่ผ่าน ${date} · ${v.inspectionFailRemark || "—"} — ส่งตรวจใหม่`;
   }
   return "";
+}
+
+// ถึงกำหนดตรวจรอบ 2 แต่ยกเลิก/ยื่นไม่สำเร็จด้วยผลตรวจเดิม (ผู้ใช้ 2026-09-27 F19): ยังยื่นใหม่ด้วยวันที่ยื่นเดิมได้
+// ส่งตรวจรอบ 2 ไปก่อน = ผลตรวจผ่านเดิมถูกล้าง ยื่นด้วยวันที่เดิมไม่ได้อีก และเสียค่าตรวจรอบ 2 -> เตือนให้ถามฝ่ายยื่นก่อน
+function resubmitNote(v: InspectionVehicle): string {
+  const w = v.round2Due ? v.resubmitWith : null;
+  if (!w) return "";
+  const what = w.reason === "CANCELLED" ? "ยกเลิกการยื่น" : "ยื่นไม่สำเร็จ";
+  return `${what} (ยื่น ${isoToDisplayDate(w.submitDate)}) — ยื่นใหม่ด้วยวันที่ยื่นเดิมได้ถึง ${isoToDisplayDate(w.validUntil)} ถามฝ่ายยื่นเอกสารก่อนส่งตรวจรอบ 2`;
 }
 
 function roundLabel(v: InspectionVehicle): string {
@@ -181,17 +250,12 @@ function toResultRowState(): ResultRowState {
   };
 }
 
-function validateSendRow(row: SendRowState): { dateIso: string } {
-  const digits = row.dateText.replace(/\D/g, "");
-  const dateIso = digits ? displayDateToIso(digits) : "";
-  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
-  return { dateIso };
+function validateSendRow(row: SendRowState, v: InspectionVehicle): { dateIso: string } {
+  return { dateIso: parseSendDate(row.dateText, v) };
 }
 
-function validateResultRow(row: ResultRowState, panelResult: ResultType): { dateIso: string } {
-  const digits = row.dateText.replace(/\D/g, "");
-  const dateIso = digits ? displayDateToIso(digits) : "";
-  if (digits && !dateIso) throw new Error("วันที่ไม่ถูกต้อง");
+function validateResultRow(row: ResultRowState, panelResult: ResultType, v: InspectionVehicle): { dateIso: string } {
+  const dateIso = parseResultDate(row.dateText, v);
   if (panelResult === "ไม่ผ่าน" && !row.remarkText.trim()) throw new Error("กรุณาระบุ Remark เมื่อตรวจไม่ผ่าน");
   return { dateIso };
 }
@@ -248,6 +312,8 @@ function SendPanel({
   onProvinceFilterChange,
   selectAllDateText,
   onSelectAllDateTextChange,
+  canEdit,
+  onEditResult,
 }: {
   vehicles: InspectionVehicle[];
   rows: Record<string, SendRowState>;
@@ -262,6 +328,8 @@ function SendPanel({
   onProvinceFilterChange: (filter: ProvinceFilter) => void;
   selectAllDateText: string;
   onSelectAllDateTextChange: (text: string) => void;
+  canEdit: boolean;
+  onEditResult: (v: InspectionVehicle) => void;
 }) {
   const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedType).length;
   const allOut = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedType === "ส่งตรวจนอก");
@@ -278,9 +346,14 @@ function SendPanel({
               {bulkMessage.text}
             </span>
           )}
-          <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
-            บันทึกทั้งหมด
-          </button>
+          {/* บันทึกขั้น 1-3 ได้เฉพาะ ADMIN / STAFF_ENTRY - บทบาทอื่นดูอย่างเดียว (backend กันอีกชั้น) */}
+          {canEdit ? (
+            <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
+              บันทึกทั้งหมด
+            </button>
+          ) : (
+            <span className="muted">ดูอย่างเดียว</span>
+          )}
         </div>
       </div>
 
@@ -300,29 +373,35 @@ function SendPanel({
         <div className="empty-customers">ไม่มีรถที่ยังไม่ได้ตรวจตามตัวกรองนี้</div>
       ) : (
         <>
-          <div className="inspect-select-all">
-            <div className="inspect-select-all-info">
-              <label>
-                วันที่ (ใช้กับที่เลือกทั้งหมด)
-                <DateInput
-                  value={selectAllDateText}
-                  onChange={(value) => onSelectAllDateTextChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
-                  style={{ width: 100 }}
-                />
-              </label>
+          {canEdit ? (
+            <div className="inspect-select-all">
+              <div className="inspect-select-all-info">
+                <label>
+                  วันที่ (ใช้กับที่เลือกทั้งหมด)
+                  <DateInput
+                    value={selectAllDateText}
+                    onChange={(value) => onSelectAllDateTextChange(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
+                    style={{ width: 100 }}
+                  />
+                </label>
+                <span className="muted">({vehicles.length} คัน)</span>
+              </div>
+              <div className="inspect-row-checks">
+                <label>
+                  <input type="checkbox" checked={allOut} onChange={(e) => onSelectAll("ส่งตรวจนอก", e.target.checked)} />
+                  เลือกทั้งหมดเป็นส่งตรวจนอก
+                </label>
+                <label>
+                  <input type="checkbox" checked={allSelf} onChange={(e) => onSelectAll("เอารถมาตรวจเอง", e.target.checked)} />
+                  เลือกทั้งหมดเป็นเอารถมาตรวจเอง
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="inspect-select-all">
               <span className="muted">({vehicles.length} คัน)</span>
             </div>
-            <div className="inspect-row-checks">
-              <label>
-                <input type="checkbox" checked={allOut} onChange={(e) => onSelectAll("ส่งตรวจนอก", e.target.checked)} />
-                เลือกทั้งหมดเป็นส่งตรวจนอก
-              </label>
-              <label>
-                <input type="checkbox" checked={allSelf} onChange={(e) => onSelectAll("เอารถมาตรวจเอง", e.target.checked)} />
-                เลือกทั้งหมดเป็นเอารถมาตรวจเอง
-              </label>
-            </div>
-          </div>
+          )}
           {/* ตารางจริงแบบเดียวกับ "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" ด้านล่าง - คอลัมน์ข้อมูลตรงกันทุกแถว
               ช่องกรอกอยู่ท้ายแถว ตารางเลื่อนแนวนอนได้ (.table-wrap) ถ้าจอแคบ */}
           <div className="table-wrap">
@@ -336,11 +415,15 @@ function SendPanel({
                   <th>ประเภทรถ</th>
                   <th>จังหวัดที่จดทะเบียน</th>
                   <th>หมายเหตุ</th>
-                  <th>ประเภทการส่งตรวจ</th>
-                  <th>วันที่ส่งตรวจ</th>
-                  <th>ราคาตรวจรถ (No bill)</th>
-                  <th>ค่าตรวจรถ (Bill)</th>
-                  <th />
+                  {canEdit && (
+                    <>
+                      <th>ประเภทการส่งตรวจ</th>
+                      <th>วันที่ส่งตรวจ</th>
+                      <th>ราคาตรวจรถ (No bill)</th>
+                      <th>ค่าตรวจรถ (Bill)</th>
+                      <th />
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -348,6 +431,7 @@ function SendPanel({
                   const row = rows[v.id];
                   if (!row) return null;
                   const note = sendQueueNote(v);
+                  const resubmit = resubmitNote(v);
                   return (
                     <tr key={v.id}>
                       <td>{isoToDisplayDate(v.date) || v.date}</td>
@@ -356,54 +440,74 @@ function SendPanel({
                       <td>{v.brandName}</td>
                       <td>{v.body || "—"}</td>
                       <td>{v.registrationProvince || "—"}</td>
-                      <td className="inspect-note">{note ? <span className="customer-message error">{note}</span> : "—"}</td>
-                      <td>
-                        <div className="inspect-row-checks inspect-row-checks--stacked">
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={row.selectedType === "ส่งตรวจนอก"}
-                              onChange={(e) => onCheck(v.id, "ส่งตรวจนอก", e.target.checked)}
-                            />
-                            ส่งตรวจนอก
-                          </label>
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={row.selectedType === "เอารถมาตรวจเอง"}
-                              onChange={(e) => onCheck(v.id, "เอารถมาตรวจเอง", e.target.checked)}
-                            />
-                            เอารถมาตรวจเอง
-                          </label>
-                        </div>
-                      </td>
-                      <td>
-                        <DateInput
-                          className="inspect-input inspect-input--date"
-                          aria-label="วันที่ส่งตรวจ"
-                          value={row.dateText}
-                          onChange={(value) =>
-                            patchRow(v.id, { dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
-                          }
-                        />
-                      </td>
-                      {/* ค่าใช้จ่ายคงที่ แก้ไม่ได้ - ราคาตรวจรถ (No bill) ตามตาราง, ค่าตรวจรถ (Bill) เฉพาะรอบ 2 */}
-                      <td>{row.selectedType ? bahtText(row.costText) : "—"}</td>
-                      <td>{row.selectedType ? bahtText(row.billCostText) : "—"}</td>
-                      <td>
-                        <button
-                          className="text-button"
-                          disabled={!row.selectedType || row.saving || bulkSaving}
-                          onClick={() => onSave(v.id)}
-                        >
-                          บันทึก
-                        </button>
-                        {row.message.text && (
-                          <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
-                            {row.message.text}
+                      <td className="inspect-note">
+                        {note ? <span className="customer-message error">{note}</span> : "—"}
+                        {resubmit && (
+                          <div>
+                            <span className="customer-message error">{resubmit}</span>
+                          </div>
+                        )}
+                        {/* วันที่ตรวจผ่านพิมพ์ผิดจนรถถึงกำหนดตรวจรอบ 2 - แก้วันที่ตรวจผ่านได้ที่นี่แทนการส่งตรวจรอบ 2 โดยไม่จำเป็น
+                            (พบ 2026-09-27: รถคันนี้หลุดจากตารางตรวจเสร็จแล้ว จึงไม่มีทางแก้) */}
+                        {canEdit && v.round2Due && (
+                          <div>
+                            <button className="text-button" onClick={() => onEditResult(v)}>
+                              แก้ไขผลตรวจ
+                            </button>
                           </div>
                         )}
                       </td>
+                      {canEdit && (
+                        <>
+                          <td>
+                            <div className="inspect-row-checks inspect-row-checks--stacked">
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={row.selectedType === "ส่งตรวจนอก"}
+                                  onChange={(e) => onCheck(v.id, "ส่งตรวจนอก", e.target.checked)}
+                                />
+                                ส่งตรวจนอก
+                              </label>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={row.selectedType === "เอารถมาตรวจเอง"}
+                                  onChange={(e) => onCheck(v.id, "เอารถมาตรวจเอง", e.target.checked)}
+                                />
+                                เอารถมาตรวจเอง
+                              </label>
+                            </div>
+                          </td>
+                          <td>
+                            <DateInput
+                              className="inspect-input inspect-input--date"
+                              aria-label="วันที่ส่งตรวจ"
+                              value={row.dateText}
+                              onChange={(value) =>
+                                patchRow(v.id, { dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })
+                              }
+                            />
+                          </td>
+                          {/* ค่าใช้จ่ายคงที่ แก้ไม่ได้ - ราคาตรวจรถ (No bill) ตามตาราง, ค่าตรวจรถ (Bill) เฉพาะรอบ 2 */}
+                          <td>{row.selectedType ? bahtText(row.costText) : "—"}</td>
+                          <td>{row.selectedType ? bahtText(row.billCostText) : "—"}</td>
+                          <td>
+                            <button
+                              className="text-button"
+                              disabled={!row.selectedType || row.saving || bulkSaving}
+                              onClick={() => onSave(v.id)}
+                            >
+                              บันทึก
+                            </button>
+                            {row.message.text && (
+                              <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
+                                {row.message.text}
+                              </div>
+                            )}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -429,6 +533,7 @@ function ResultPanel({
   onSaveAll,
   bulkSaving,
   bulkMessage,
+  canEdit,
 }: {
   vehicles: InspectionVehicle[];
   rows: Record<string, ResultRowState>;
@@ -439,10 +544,13 @@ function ResultPanel({
   onSaveAll: () => void;
   bulkSaving: boolean;
   bulkMessage: { text: string; error?: boolean };
+  canEdit: boolean;
 }) {
   const selectedCount = vehicles.filter((v) => rows[v.id]?.selectedResult).length;
-  const allPass = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedResult === "ผ่าน");
-  const allFail = vehicles.length > 0 && vehicles.every((v) => rows[v.id]?.selectedResult === "ไม่ผ่าน");
+  // "เลือกทั้งหมด" นับเฉพาะคันที่ถึงวันส่งตรวจแล้ว (คันที่ยังไม่ถึงถูกข้าม - ดู resultNotDueYet)
+  const due = vehicles.filter((v) => !resultNotDueYet(v));
+  const allPass = due.length > 0 && due.every((v) => rows[v.id]?.selectedResult === "ผ่าน");
+  const allFail = due.length > 0 && due.every((v) => rows[v.id]?.selectedResult === "ไม่ผ่าน");
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
   return (
@@ -455,9 +563,13 @@ function ResultPanel({
               {bulkMessage.text}
             </span>
           )}
-          <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
-            บันทึกทั้งหมด
-          </button>
+          {canEdit ? (
+            <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
+              บันทึกทั้งหมด
+            </button>
+          ) : (
+            <span className="muted">ดูอย่างเดียว</span>
+          )}
         </div>
       </div>
 
@@ -467,16 +579,18 @@ function ResultPanel({
         <>
           <div className="inspect-select-all">
             <span className="muted">({vehicles.length} คัน)</span>
-            <div className="inspect-row-checks">
-              <label>
-                <input type="checkbox" checked={allPass} onChange={(e) => onSelectAll("ผ่าน", e.target.checked)} />
-                เลือกทั้งหมดเป็นผ่าน
-              </label>
-              <label>
-                <input type="checkbox" checked={allFail} onChange={(e) => onSelectAll("ไม่ผ่าน", e.target.checked)} />
-                เลือกทั้งหมดเป็นไม่ผ่าน
-              </label>
-            </div>
+            {canEdit && (
+              <div className="inspect-row-checks">
+                <label>
+                  <input type="checkbox" checked={allPass} onChange={(e) => onSelectAll("ผ่าน", e.target.checked)} />
+                  เลือกทั้งหมดเป็นผ่าน
+                </label>
+                <label>
+                  <input type="checkbox" checked={allFail} onChange={(e) => onSelectAll("ไม่ผ่าน", e.target.checked)} />
+                  เลือกทั้งหมดเป็นไม่ผ่าน
+                </label>
+              </div>
+            )}
           </div>
           <div className="table-wrap">
             <table className="inspect-table">
@@ -490,12 +604,16 @@ function ResultPanel({
                   <th>รอบตรวจ</th>
                   <th>ประเภทการส่งตรวจ</th>
                   <th>วันที่ส่งตรวจ</th>
-                  <th>ผลตรวจ</th>
-                  <th>วันที่ทราบผล</th>
-                  <th>ราคาตรวจรถ (No bill)</th>
-                  <th>ค่าตรวจรถ (Bill)</th>
-                  <th>Remark</th>
-                  <th />
+                  {canEdit && (
+                    <>
+                      <th>ผลตรวจ</th>
+                      <th>วันที่ทราบผล</th>
+                      <th>ราคาตรวจรถ (No bill)</th>
+                      <th>ค่าตรวจรถ (Bill)</th>
+                      <th>Remark</th>
+                      <th />
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -513,62 +631,66 @@ function ResultPanel({
                       <td>{roundLabel(v)}</td>
                       <td>{v.inspectionSentType || "—"}</td>
                       <td>{v.inspectionSentDate ? isoToDisplayDate(v.inspectionSentDate) : "—"}</td>
-                      <td>
-                        <div className="inspect-row-checks inspect-row-checks--stacked">
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={selected === "ผ่าน"}
-                              onChange={(e) => onCheck(v.id, "ผ่าน", e.target.checked)}
+                      {canEdit && (
+                        <>
+                          <td>
+                            <div className="inspect-row-checks inspect-row-checks--stacked">
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selected === "ผ่าน"}
+                                  onChange={(e) => onCheck(v.id, "ผ่าน", e.target.checked)}
+                                />
+                                ผ่าน
+                              </label>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selected === "ไม่ผ่าน"}
+                                  onChange={(e) => onCheck(v.id, "ไม่ผ่าน", e.target.checked)}
+                                />
+                                ไม่ผ่าน
+                              </label>
+                            </div>
+                          </td>
+                          <td>
+                            <DateInput
+                              className="inspect-input inspect-input--date"
+                              aria-label="วันที่ทราบผล"
+                              value={row.dateText}
+                              disabled={!selected}
+                              onChange={(value) =>
+                                patchRow(v.id, { dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })
+                              }
                             />
-                            ผ่าน
-                          </label>
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={selected === "ไม่ผ่าน"}
-                              onChange={(e) => onCheck(v.id, "ไม่ผ่าน", e.target.checked)}
-                            />
-                            ไม่ผ่าน
-                          </label>
-                        </div>
-                      </td>
-                      <td>
-                        <DateInput
-                          className="inspect-input inspect-input--date"
-                          aria-label="วันที่ทราบผล"
-                          value={row.dateText}
-                          disabled={!selected}
-                          onChange={(value) =>
-                            patchRow(v.id, { dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
-                          }
-                        />
-                      </td>
-                      {/* ค่าใช้จ่ายคงที่ แก้ไม่ได้ - ผ่าน = ราคาตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน) */}
-                      <td>{selected ? bahtText(row.costText) : "—"}</td>
-                      <td>{selected ? bahtText(resultDefaultBillCost(v, selected)) : "—"}</td>
-                      <td>
-                        {selected === "ไม่ผ่าน" && (
-                          <input
-                            className="inspect-input inspect-input--remark"
-                            type="text"
-                            aria-label="Remark"
-                            placeholder="เหตุผลที่ตรวจไม่ผ่าน"
-                            value={row.remarkText}
-                            onChange={(e) => patchRow(v.id, { remarkText: e.target.value })}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <button className="text-button" disabled={!selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
-                          บันทึก
-                        </button>
-                        {row.message.text && (
-                          <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
-                            {row.message.text}
-                          </div>
-                        )}
-                      </td>
+                          </td>
+                          {/* ค่าใช้จ่ายคงที่ แก้ไม่ได้ - ผ่าน = ราคาตอนส่งตรวจ, ไม่ผ่าน = 0 (ได้เงินคืน) */}
+                          <td>{selected ? bahtText(row.costText) : "—"}</td>
+                          <td>{selected ? bahtText(resultDefaultBillCost(v, selected)) : "—"}</td>
+                          <td>
+                            {selected === "ไม่ผ่าน" && (
+                              <input
+                                className="inspect-input inspect-input--remark"
+                                type="text"
+                                aria-label="Remark"
+                                placeholder="เหตุผลที่ตรวจไม่ผ่าน"
+                                value={row.remarkText}
+                                onChange={(e) => patchRow(v.id, { remarkText: e.target.value })}
+                              />
+                            )}
+                          </td>
+                          <td>
+                            <button className="text-button" disabled={!selected || row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                              บันทึก
+                            </button>
+                            {row.message.text && (
+                              <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
+                                {row.message.text}
+                              </div>
+                            )}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -582,9 +704,8 @@ function ResultPanel({
   );
 }
 
-// อ้างอิงอย่างเดียว (ไม่มี action) - ใช้แสดง "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" ใน Tab 1
-// - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
-// (คอลัมน์จัดแนวกันเองโดยธรรมชาติของ <table>, ไม่มี action/input ต่อแถวจึงไม่มีปัญหาแถวกว้างเกินไป)
+// ใช้แสดง "รถที่เพิ่งส่งตรวจ (รอผลตรวจ)" ใน Tab 1 - ตาราง <table> จริงแบบเดียวกับ "รถจดใหม่ที่บันทึกแล้ว" ในหน้า entry
+// (คอลัมน์จัดแนวกันเองโดยธรรมชาติของ <table>) rowActions = ปุ่มท้ายแถว (แก้/ยกเลิกการส่งตรวจ - พบ 2026-09-27)
 function ReferencePanel<T extends { id: string }>({
   title,
   columns,
@@ -592,6 +713,7 @@ function ReferencePanel<T extends { id: string }>({
   loading,
   error,
   action,
+  rowActions,
 }: {
   title: string;
   columns: Array<[string, (v: T) => string]>;
@@ -599,6 +721,7 @@ function ReferencePanel<T extends { id: string }>({
   loading: boolean;
   error: string;
   action?: ReactNode;
+  rowActions?: (v: T) => ReactNode;
 }) {
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
 
@@ -625,6 +748,7 @@ function ReferencePanel<T extends { id: string }>({
                   {columns.map(([label]) => (
                     <th key={label}>{label}</th>
                   ))}
+                  {rowActions && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -633,6 +757,7 @@ function ReferencePanel<T extends { id: string }>({
                     {columns.map(([label, getValue]) => (
                       <td key={label}>{getValue(v)}</td>
                     ))}
+                    {rowActions && <td>{rowActions(v)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -659,27 +784,53 @@ const PENDING_RESULT_COLUMNS: Array<[string, (v: InspectionVehicle) => string]> 
 ];
 
 // แสดงเป็นตารางล่าง "รถที่รอผลตรวจ" ใน Tab 2 - โครงเดียวกับ panel "ตัดบัญชีแล้วล่าสุด" ของหน้าแจ้งย้าย/ตัดบัญชี
+// รถที่ยังไม่ยื่นเอกสารมาครบทุกคัน เรียงจากตรวจเก่าสุด (ใกล้ครบกำหนดยื่นก่อน) แล้วต่อด้วยรถที่ยื่นแล้ว 100 คันล่าสุด
+// (พบ 2026-09-27: เดิมแสดงแค่ 100 ผลล่าสุด คันใกล้หมดอายุหลุดไปก่อนทั้งป้ายเตือนและปุ่มแก้ไขผลตรวจ) + ช่องค้นหาเลขตัวถัง/ลูกค้า
 function CompletedInspectionPanel({
   vehicles,
   loading,
   error,
   onOpenDetail,
   onEditResult,
+  canEdit,
 }: {
   vehicles: InspectionVehicle[];
   loading: boolean;
   error: string;
   onOpenDetail: (v: InspectionVehicle) => void;
   onEditResult: (v: InspectionVehicle) => void;
+  canEdit: boolean;
 }) {
-  const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
+  const [search, setSearch] = useState("");
+  const query = search.trim().toUpperCase();
+  const shown = query
+    ? vehicles.filter((v) => v.chassis.toUpperCase().includes(query) || v.customerName.toUpperCase().includes(query))
+    : vehicles;
+  const { pageItems, page, setPage, totalPages } = usePagedList(shown);
+  const unsubmittedCount = vehicles.filter((v) => !v.submitted).length;
 
   return (
     <section className="panel customer-list">
       <div className="panel-head">
         <h2>รายการรถที่ตรวจเสร็จเรียบร้อย</h2>
+        <input
+          type="search"
+          aria-label="ค้นหาเลขตัวถัง / ชื่อลูกค้า"
+          placeholder="ค้นหาเลขตัวถัง / ชื่อลูกค้า"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          style={{ maxWidth: 260 }}
+        />
       </div>
-      {!loading && !error && <p style={{ padding: "0 24px 12px", fontSize: 12 }}>แสดง {vehicles.length} รายการล่าสุด</p>}
+      {!loading && !error && (
+        <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
+          รถที่ยังไม่ยื่นเอกสาร {unsubmittedCount} คัน แสดงครบทุกคัน (ตรวจเก่าสุด = ใกล้ครบกำหนดยื่นก่อน) · รถที่ยื่นแล้วแสดง{" "}
+          {vehicles.length - unsubmittedCount} คันล่าสุด{query ? ` · ค้นพบ ${shown.length} รายการ` : ""}
+        </p>
+      )}
       {loading ? (
         <div className="empty-customers">กำลังโหลดรายการ…</div>
       ) : error ? (
@@ -688,6 +839,8 @@ function CompletedInspectionPanel({
         </div>
       ) : !vehicles.length ? (
         <div className="empty-customers">ยังไม่มีรายการที่ตรวจเสร็จ</div>
+      ) : !shown.length ? (
+        <div className="empty-customers">ไม่พบรถที่ตรงกับคำค้น</div>
       ) : (
         <>
           <div className="table-wrap">
@@ -728,10 +881,12 @@ function CompletedInspectionPanel({
                       <button className="text-button" onClick={() => onOpenDetail(v)}>
                         ดูข้อมูล
                       </button>
-                      {/* บันทึกผลตรวจผิด (เช่น ผ่าน ทั้งที่จริงไม่ผ่าน) แก้ได้ที่นี่ - ต้องระบุเหตุผลที่แก้ */}
-                      <button className="text-button" onClick={() => onEditResult(v)}>
-                        แก้ไขผลตรวจ
-                      </button>
+                      {/* บันทึกผลตรวจผิด (เช่น ผ่าน ทั้งที่จริงไม่ผ่าน) แก้ได้ที่นี่ - ต้องระบุเหตุผลที่แก้ (ยื่นเอกสารแล้วแก้ไม่ได้) */}
+                      {canEdit && !v.submitted && (
+                        <button className="text-button" onClick={() => onEditResult(v)}>
+                          แก้ไขผลตรวจ
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -781,6 +936,15 @@ export default function InspectionPage() {
   const [editResult, setEditResult] = useState<EditResultState | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editMessage, setEditMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+
+  // แก้การส่งตรวจ / ยกเลิกส่งตรวจ ของรถที่ยังรอผล (ต้องระบุเหตุผล - backend เก็บลงประวัติการแก้ไข)
+  const sentDialogRef = useRef<HTMLDialogElement>(null);
+  const [editSent, setEditSent] = useState<EditSentState | null>(null);
+  const [sentSaving, setSentSaving] = useState(false);
+  const [sentMessage, setSentMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+
+  // บันทึกขั้น 1-3 ได้เฉพาะ ADMIN / STAFF_ENTRY (พบ 2026-09-27: เดิมบทบาทอื่นเห็นปุ่มบันทึกแล้วกดได้ 403 ทุกแถว)
+  const [canEdit, setCanEdit] = useState(false);
 
   // พิมพ์ใบรายการรถส่งตรวจ (PDF) - เฉพาะรถส่งตรวจนอกที่รอผล รถที่เอามาตรวจเองไม่ต้องพิมพ์
   const sentOutPendingVehicles = pendingResultVehicles.filter((v) => v.inspectionSentType !== "เอารถมาตรวจเอง");
@@ -845,7 +1009,13 @@ export default function InspectionPage() {
     loadPendingSend();
     loadPendingResult();
     loadCompleted();
+    // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect (แบบเดียวกับหน้าเพิ่มข้อมูลรถ)
+    setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
+
+  function reloadAll() {
+    return Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
+  }
 
   function patchSendRow(id: string, patch: Partial<SendRowState>) {
     setSendRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -872,7 +1042,7 @@ export default function InspectionPage() {
 
   function handleSelectAllSend(type: SentType, checked: boolean) {
     // ถ้ากรอกวันที่ในช่อง "เลือกทั้งหมด" ไว้ ใช้ค่านั้นกับทุกแถวเลย (เขียนทับของเดิม) -
-    // ถ้าไม่กรอก แต่ละคันจะได้วันถัดไปของวันที่รับงานตัวเอง
+    // ถ้าไม่กรอก แถวที่พิมพ์วันที่ไว้แล้วคงค่าเดิม (พบ 2026-09-27: เดิมเขียนทับด้วยวันเริ่มต้น) ที่เหลือได้วันเริ่มต้นของคันนั้น
     setSendRows((prev) => {
       const next = { ...prev };
       for (const v of filteredSendVehicles) {
@@ -882,7 +1052,7 @@ export default function InspectionPage() {
           next[v.id] = {
             ...row,
             selectedType: type,
-            dateText: sendSelectAllDateText || isoToDisplayDate(defaultSendDateIso(v)),
+            dateText: sendSelectAllDateText || row.dateText || isoToDisplayDate(defaultSendDateIso(v)),
             costText: costForSentType(type, v.suggestedCost),
             billCostText: v.suggestedBillCost ?? "",
           };
@@ -896,10 +1066,11 @@ export default function InspectionPage() {
 
   async function handleSaveSend(id: string) {
     const row = sendRows[id];
-    if (!row || !row.selectedType) return;
+    const vehicle = pendingSendVehicles.find((v) => v.id === id);
+    if (!row || !row.selectedType || !vehicle) return;
     let dateIso: string;
     try {
-      ({ dateIso } = validateSendRow(row));
+      ({ dateIso } = validateSendRow(row, vehicle));
     } catch (err) {
       patchSendRow(id, { message: { text: (err as Error).message, error: true } });
       return;
@@ -909,14 +1080,18 @@ export default function InspectionPage() {
     try {
       await api.updateInspectionSent(id, {
         sentType: row.selectedType,
-        sentDate: dateIso || null,
+        sentDate: dateIso,
       });
       await Promise.all([loadPendingSend(), loadPendingResult()]);
     } catch (err) {
-      patchSendRow(id, {
-        saving: false,
-        message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true },
-      });
+      const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
+      if (err instanceof ApiError && err.status === 409) {
+        // มีคนบันทึกคันนี้ไปก่อนแล้ว - โหลดรายการใหม่ (ข้อความขึ้นที่หัวตาราง เพราะแถวนี้อาจหายไปแล้ว)
+        setSendBulkMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message}`, error: true });
+        await reloadAll();
+        return;
+      }
+      patchSendRow(id, { saving: false, message: { text: message, error: true } });
     }
   }
 
@@ -929,12 +1104,20 @@ export default function InspectionPage() {
       const row = sendRows[v.id];
       if (!row || !row.selectedType) continue;
       try {
-        const { dateIso } = validateSendRow(row);
+        const { dateIso } = validateSendRow(row, v);
         parsed.push({ id: v.id, chassis: v.chassis, type: row.selectedType, dateIso });
       } catch (err) {
         setSendBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
       }
+    }
+    // เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู - ยืนยันจำนวนแยกประเภทก่อนบันทึก (พบ 2026-09-27)
+    if (parsed.length > PAGE_SIZE) {
+      const out = parsed.filter((p) => p.type === "ส่งตรวจนอก").length;
+      const ok = window.confirm(
+        `บันทึกส่งตรวจ ${parsed.length} คัน (ส่งตรวจนอก ${out} · เอารถมาตรวจเอง ${parsed.length - out}) รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู - ยืนยันบันทึก?`,
+      );
+      if (!ok) return;
     }
 
     setSendBulkSaving(true);
@@ -944,17 +1127,12 @@ export default function InspectionPage() {
         parsed.map((p) =>
           api.updateInspectionSent(p.id, {
             sentType: p.type,
-            sentDate: p.dateIso || null,
+            sentDate: p.dateIso,
           }),
         ),
       );
-      const failed = results.filter((r) => r.status === "rejected").length;
-      setSendBulkMessage(
-        failed
-          ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
-          : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
-      );
-      await Promise.all([loadPendingSend(), loadPendingResult()]);
+      setSendBulkMessage(bulkResultMessage(results, parsed.map((p) => p.chassis)));
+      await reloadAll();
     } finally {
       setSendBulkSaving(false);
     }
@@ -978,12 +1156,16 @@ export default function InspectionPage() {
   }
 
   function handleSelectAllResult(panelResult: ResultType, checked: boolean) {
+    // คันที่ยังไม่ถึงวันส่งตรวจไม่ถูกติ๊ก (ยังบันทึกผลไม่ได้) - บอกจำนวนที่ข้ามไว้ที่หัวตาราง
+    const notDue = checked ? pendingResultVehicles.filter(resultNotDueYet).length : 0;
+    if (notDue) setResultBulkMessage({ text: `ข้าม ${notDue} คันที่ยังไม่ถึงวันที่ส่งตรวจ (บันทึกผลได้ตั้งแต่วันที่ส่งตรวจ)` });
     setResultRows((prev) => {
       const next = { ...prev };
       for (const v of pendingResultVehicles) {
         const row = next[v.id];
         if (!row) continue;
         if (checked) {
+          if (resultNotDueYet(v)) continue;
           next[v.id] = {
             ...row,
             selectedResult: panelResult,
@@ -1001,10 +1183,11 @@ export default function InspectionPage() {
 
   async function handleSaveResult(id: string) {
     const row = resultRows[id];
-    if (!row || !row.selectedResult) return;
+    const vehicle = pendingResultVehicles.find((v) => v.id === id);
+    if (!row || !row.selectedResult || !vehicle) return;
     let dateIso: string;
     try {
-      ({ dateIso } = validateResultRow(row, row.selectedResult));
+      ({ dateIso } = validateResultRow(row, row.selectedResult, vehicle));
     } catch (err) {
       patchResultRow(id, { message: { text: (err as Error).message, error: true } });
       return;
@@ -1014,16 +1197,20 @@ export default function InspectionPage() {
     try {
       await api.updateInspectionResult(id, {
         result: row.selectedResult,
-        resultDate: dateIso || null,
+        resultDate: dateIso,
         remark: row.selectedResult === "ไม่ผ่าน" ? row.remarkText : null,
       });
       // ตรวจไม่ผ่านกลับเข้าคิวส่งตรวจ จึงโหลดรายการรอส่งตรวจใหม่ด้วย
-      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
+      await reloadAll();
     } catch (err) {
-      patchResultRow(id, {
-        saving: false,
-        message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true },
-      });
+      const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
+      if (err instanceof ApiError && err.status === 409) {
+        // มีคนบันทึกผลคันนี้ไปก่อนแล้ว - โหลดรายการใหม่ (แก้ผลได้ที่ปุ่ม "แก้ไขผลตรวจ" ในตารางตรวจเสร็จ)
+        setResultBulkMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message}`, error: true });
+        await reloadAll();
+        return;
+      }
+      patchResultRow(id, { saving: false, message: { text: message, error: true } });
     }
   }
 
@@ -1031,17 +1218,25 @@ export default function InspectionPage() {
     const selected = pendingResultVehicles.filter((v) => resultRows[v.id]?.selectedResult);
     if (!selected.length) return;
 
-    const parsed: Array<{ id: string; result: ResultType; dateIso: string; remark: string }> = [];
+    const parsed: Array<{ id: string; chassis: string; result: ResultType; dateIso: string; remark: string }> = [];
     for (const v of selected) {
       const row = resultRows[v.id];
       if (!row?.selectedResult) continue;
       try {
-        const { dateIso } = validateResultRow(row, row.selectedResult);
-        parsed.push({ id: v.id, result: row.selectedResult, dateIso, remark: row.remarkText });
+        const { dateIso } = validateResultRow(row, row.selectedResult, v);
+        parsed.push({ id: v.id, chassis: v.chassis, result: row.selectedResult, dateIso, remark: row.remarkText });
       } catch (err) {
         setResultBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
       }
+    }
+    // เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู - ยืนยันจำนวนแยกผลก่อนบันทึก (พบ 2026-09-27)
+    if (parsed.length > PAGE_SIZE) {
+      const pass = parsed.filter((p) => p.result === "ผ่าน").length;
+      const ok = window.confirm(
+        `บันทึกผลตรวจ ${parsed.length} คัน (ผ่าน ${pass} · ไม่ผ่าน ${parsed.length - pass}) รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู - ยืนยันบันทึก?`,
+      );
+      if (!ok) return;
     }
 
     setResultBulkSaving(true);
@@ -1051,19 +1246,14 @@ export default function InspectionPage() {
         parsed.map((p) =>
           api.updateInspectionResult(p.id, {
             result: p.result,
-            resultDate: p.dateIso || null,
+            resultDate: p.dateIso,
             remark: p.result === "ไม่ผ่าน" ? p.remark : null,
           }),
         ),
       );
-      const failed = results.filter((r) => r.status === "rejected").length;
-      setResultBulkMessage(
-        failed
-          ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
-          : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
-      );
+      setResultBulkMessage(bulkResultMessage(results, parsed.map((p) => p.chassis)));
       // ตรวจไม่ผ่านกลับเข้าคิวส่งตรวจ จึงโหลดรายการรอส่งตรวจใหม่ด้วย
-      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
+      await reloadAll();
     } finally {
       setResultBulkSaving(false);
     }
@@ -1092,10 +1282,11 @@ export default function InspectionPage() {
 
   async function handleSaveEditResult() {
     if (!editResult) return;
-    const digits = editResult.dateText.replace(/\D/g, "");
-    const dateIso = digits ? displayDateToIso(digits) : "";
-    if (!dateIso) {
-      setEditMessage({ text: "วันที่ไม่ถูกต้อง", error: true });
+    let dateIso: string;
+    try {
+      dateIso = parseResultDate(editResult.dateText, editResult.vehicle);
+    } catch (err) {
+      setEditMessage({ text: (err as Error).message, error: true });
       return;
     }
     if (editResult.result === "ไม่ผ่าน" && !editResult.failRemarkText.trim()) {
@@ -1119,11 +1310,67 @@ export default function InspectionPage() {
       editDialogRef.current?.close();
       setEditResult(null);
       // แก้เป็นไม่ผ่านแล้วรถกลับเข้าคิวส่งตรวจ จึงโหลดใหม่ทุกลิสต์
-      await Promise.all([loadPendingSend(), loadPendingResult(), loadCompleted()]);
+      await reloadAll();
     } catch (err) {
       setEditMessage({ text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true });
+      // มีคนแก้/ยื่นเอกสาร/ส่งตรวจรอบ 2 ไปก่อนแล้ว - โหลดรายการใหม่ให้เห็นข้อมูลล่าสุด
+      if (err instanceof ApiError && err.status === 409) await reloadAll();
     } finally {
       setEditSaving(false);
+    }
+  }
+
+  // แก้การส่งตรวจ / ยกเลิกส่งตรวจ (พบ 2026-09-27: เดิมบันทึกประเภท/วันที่ส่งตรวจผิดแล้วแก้ไม่ได้เลย)
+  function openEditSent(vehicle: InspectionVehicle, mode: EditSentState["mode"]) {
+    setEditSent({
+      vehicle,
+      mode,
+      sentType: vehicle.inspectionSentType ?? "ส่งตรวจนอก",
+      dateText: vehicle.inspectionSentDate ? isoToDisplayDate(vehicle.inspectionSentDate) : "",
+      remarkText: "",
+    });
+    setSentMessage({ text: "" });
+    sentDialogRef.current?.showModal();
+  }
+
+  function patchEditSent(patch: Partial<EditSentState>) {
+    setEditSent((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function handleSaveEditSent() {
+    if (!editSent) return;
+    const remark = editSent.remarkText.trim();
+    let dateIso = "";
+    if (editSent.mode === "edit") {
+      try {
+        dateIso = parseSendDate(editSent.dateText, editSent.vehicle);
+      } catch (err) {
+        setSentMessage({ text: (err as Error).message, error: true });
+        return;
+      }
+    }
+    if (!remark) {
+      setSentMessage({ text: editSent.mode === "edit" ? "กรุณาระบุเหตุผลที่แก้การส่งตรวจ" : "กรุณาระบุเหตุผลที่ยกเลิกส่งตรวจ", error: true });
+      return;
+    }
+
+    setSentSaving(true);
+    setSentMessage({ text: "กำลังบันทึก…" });
+    try {
+      if (editSent.mode === "edit") {
+        await api.correctInspectionSent(editSent.vehicle.id, { sentType: editSent.sentType, sentDate: dateIso, remark });
+      } else {
+        await api.cancelInspectionSent(editSent.vehicle.id, remark);
+      }
+      sentDialogRef.current?.close();
+      setEditSent(null);
+      // ยกเลิกแล้วรถกลับเข้าคิวส่งตรวจ จึงโหลดใหม่ทุกลิสต์
+      await reloadAll();
+    } catch (err) {
+      setSentMessage({ text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true });
+      if (err instanceof ApiError && err.status === 409) await reloadAll();
+    } finally {
+      setSentSaving(false);
     }
   }
 
@@ -1189,6 +1436,8 @@ export default function InspectionPage() {
               onProvinceFilterChange={setSendProvinceFilter}
               selectAllDateText={sendSelectAllDateText}
               onSelectAllDateTextChange={setSendSelectAllDateText}
+              canEdit={canEdit}
+              onEditResult={openEditResult}
             />
           )}
 
@@ -1202,6 +1451,21 @@ export default function InspectionPage() {
               <button className="primary" disabled={resultLoading || !sentOutPendingVehicles.length} onClick={openPrintDialog}>
                 พิมพ์รายการส่งตรวจ (PDF)
               </button>
+            }
+            rowActions={
+              canEdit
+                ? (v) => (
+                    <>
+                      <button className="text-button" onClick={() => openEditSent(v, "edit")}>
+                        แก้การส่งตรวจ
+                      </button>
+                      {" · "}
+                      <button className="text-button danger" onClick={() => openEditSent(v, "cancel")}>
+                        ยกเลิกส่งตรวจ
+                      </button>
+                    </>
+                  )
+                : undefined
             }
           />
         </>
@@ -1228,6 +1492,7 @@ export default function InspectionPage() {
               onSaveAll={handleSaveAllResult}
               bulkSaving={resultBulkSaving}
               bulkMessage={resultBulkMessage}
+              canEdit={canEdit}
             />
           )}
 
@@ -1237,6 +1502,7 @@ export default function InspectionPage() {
             error={completedError}
             onOpenDetail={openDetail}
             onEditResult={openEditResult}
+            canEdit={canEdit}
           />
         </>
       )}
@@ -1304,7 +1570,7 @@ export default function InspectionPage() {
                 วันที่ทราบผล
                 <DateInput
                   value={editResult.dateText}
-                  onChange={(value) => patchEditResult({ dateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })}
+                  onChange={(value) => patchEditResult({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                 />
               </label>
               {editResult.result === "ไม่ผ่าน" && (
@@ -1339,6 +1605,89 @@ export default function InspectionPage() {
               )}
               <button className="primary" style={{ justifySelf: "end" }} disabled={editSaving} onClick={handleSaveEditResult}>
                 บันทึกการแก้ไข
+              </button>
+            </div>
+          </>
+        )}
+      </dialog>
+
+      {/* แก้การส่งตรวจ / ยกเลิกส่งตรวจ ของรถที่ยังรอผล - ค่าใช้จ่ายคิดใหม่ตามประเภท (แก้จากหน้าจอไม่ได้) ต้องระบุเหตุผลทุกครั้ง */}
+      <dialog
+        ref={sentDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) sentDialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => sentDialogRef.current?.close()}>
+          ×
+        </button>
+        {editSent && (
+          <>
+            <h2>{editSent.mode === "edit" ? "แก้การส่งตรวจ" : "ยกเลิกส่งตรวจ"}</h2>
+            <p className="muted" style={{ marginTop: -8, fontSize: 13 }}>
+              {editSent.vehicle.chassis} · {editSent.vehicle.customerName} · {editSent.vehicle.brandName} · {roundLabel(editSent.vehicle)}
+            </p>
+            <div style={{ display: "grid", gap: 16 }}>
+              {editSent.mode === "edit" ? (
+                <>
+                  <div className="inspect-row-checks">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={editSent.sentType === "ส่งตรวจนอก"}
+                        onChange={() => patchEditSent({ sentType: "ส่งตรวจนอก" })}
+                      />
+                      ส่งตรวจนอก
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={editSent.sentType === "เอารถมาตรวจเอง"}
+                        onChange={() => patchEditSent({ sentType: "เอารถมาตรวจเอง" })}
+                      />
+                      เอารถมาตรวจเอง
+                    </label>
+                  </div>
+                  <label className="field">
+                    วันที่ส่งตรวจ
+                    <DateInput
+                      value={editSent.dateText}
+                      onChange={(value) => patchEditSent({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
+                    />
+                  </label>
+                  <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                    ราคาตรวจรถ (No bill) {bahtText(costForSentType(editSent.sentType, editSent.vehicle.suggestedCost))} · ค่าตรวจรถ (Bill){" "}
+                    {bahtText(editSent.vehicle.inspectionSentBillCost ?? "")}
+                  </p>
+                </>
+              ) : (
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  ล้างข้อมูลส่งตรวจ ({editSent.vehicle.inspectionSentType ?? "—"} ·{" "}
+                  {editSent.vehicle.inspectionSentDate ? isoToDisplayDate(editSent.vehicle.inspectionSentDate) : "—"}) — รถจะกลับเข้าคิว
+                  &quot;รถที่ยังไม่ได้ตรวจ&quot; ให้ส่งตรวจใหม่
+                </p>
+              )}
+              <label className="field">
+                {editSent.mode === "edit" ? "เหตุผลที่แก้ (บังคับ)" : "เหตุผลที่ยกเลิก (บังคับ)"}
+                <input
+                  type="text"
+                  placeholder={editSent.mode === "edit" ? "เช่น ส่งตรวจนอกจริง บันทึกผิดเป็นเอารถมาตรวจเอง" : "เช่น ยังไม่ได้เอารถไปตรวจ"}
+                  value={editSent.remarkText}
+                  onChange={(e) => patchEditSent({ remarkText: e.target.value })}
+                />
+              </label>
+              {sentMessage.text && (
+                <div className={`customer-message${sentMessage.error ? " error" : " success"}`} role="status">
+                  {sentMessage.text}
+                </div>
+              )}
+              <button
+                className={editSent.mode === "edit" ? "primary" : "primary danger"}
+                style={{ justifySelf: "end" }}
+                disabled={sentSaving || !editSent.remarkText.trim()}
+                onClick={handleSaveEditSent}
+              >
+                {editSent.mode === "edit" ? "บันทึกการแก้ไข" : "ยืนยันยกเลิกส่งตรวจ"}
               </button>
             </div>
           </>

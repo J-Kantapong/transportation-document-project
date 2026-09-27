@@ -121,7 +121,8 @@ export function buildSteps(v: Row): PortalStep[] {
       title: 'ส่งมอบให้ลูกค้า',
       done: Boolean(v.deliveredDate) && Boolean(v.plateDeliveredDate),
       date: isoDate(v.plateDeliveredDate ?? v.deliveredDate),
-      note: v.deliveredDate && !v.plateDeliveredDate ? 'ส่งใบเสร็จ + เล่มแล้ว ป้ายจะส่งตามทีหลัง' : null,
+      // ใบเสร็จไม่ได้ไปกับงานแล้ว ไปพร้อมใบวางบิล (ผู้ใช้ 2026-09-26) - เดิมข้อความบอกว่าส่งใบเสร็จไปด้วย (พบ 2026-09-27)
+      note: v.deliveredDate && !v.plateDeliveredDate ? 'ส่งเล่มแล้ว ป้ายจะส่งตามทีหลัง' : null,
     },
   ];
   // ขั้นที่ยังไม่เสร็จขั้นแรก = CURRENT (ป้ายอาจออกช้ากว่าเล่มได้ จึงดูเป็นรายขั้น ไม่บังคับเรียงหลังใบเสร็จ)

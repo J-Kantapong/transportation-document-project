@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type BillingTerms, type RateVehicleKind, type ServiceFeeRate, type ServiceFeeRateInput } from "@/lib/billing-api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
 // ตั้งค่าวางบิลของลูกค้าหนึ่งราย (แสดงในหน้าวางบิล): เงื่อนไข VAT/หัก ณ ที่จ่าย และตารางค่าดำเนินการ
@@ -19,10 +19,13 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [whtText, setWhtText] = useState(String(terms.whtRate));
   const [specialText, setSpecialText] = useState(terms.whtSpecialRate === null ? "" : String(terms.whtSpecialRate));
   const [untilText, setUntilText] = useState(terms.whtSpecialUntil ? isoToDisplayDate(terms.whtSpecialUntil) : "");
+  const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSave() {
+    // เหตุผลบังคับ เก็บในประวัติลูกค้า (ผู้ใช้ 2026-09-27)
+    if (!remark.trim()) return setError("ใส่เหตุผลที่แก้เงื่อนไข");
     const whtRate = percent(whtText);
     if (whtRate === null) return setError("อัตราหัก ณ ที่จ่ายปกติต้องเป็นตัวเลข 0-100");
     let whtSpecialRate: number | null = null;
@@ -30,13 +33,14 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     if (specialText.trim() !== "") {
       whtSpecialRate = percent(specialText);
       if (whtSpecialRate === null) return setError("อัตราพิเศษต้องเป็นตัวเลข 0-100");
+      if (untilText.trim() === "") return setError("ใส่วันสุดท้ายที่ใช้อัตราพิเศษ");
       whtSpecialUntil = displayDateToIso(untilText.replace(/\D/g, "")) || null;
-      if (!whtSpecialUntil) return setError("ใส่วันสุดท้ายที่ใช้อัตราพิเศษ");
+      if (!whtSpecialUntil) return setError("วันสุดท้ายที่ใช้อัตราพิเศษไม่ถูกต้อง");
     }
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -63,11 +67,15 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
           ใช้อัตราพิเศษถึงวันที่
           <DateInput
             value={untilText}
-            onChange={(value) => setUntilText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+            onChange={(value) => setUntilText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
           />
         </label>
       </div>
       <p style={{ fontSize: 12 }}>ระบบเทียบวันสิ้นสุดกับวันที่ออกบิล พ้นวันนั้นแล้วกลับไปใช้อัตราปกติเอง บิลที่ออกไปแล้วไม่เปลี่ยน</p>
+      <label className="field">
+        เหตุผลที่แก้ *
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ลูกค้าแจ้งเปลี่ยนอัตราหัก ณ ที่จ่าย" maxLength={500} />
+      </label>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button className="primary" disabled={saving} onClick={handleSave}>
           บันทึกเงื่อนไข
@@ -91,11 +99,22 @@ interface RateState {
   vatInclusive: boolean;
 }
 
+// CC พิมพ์มีจุลภาคได้เหมือนราคา (1,601) แต่ทั้งช่องต้องเป็นตัวเลข - ว่าง = ไม่จำกัด, NaN = ไม่ถูกต้อง
+// (พบ 2026-09-27: เดิม parseFloat("1,601") = 1 บันทึกช่วง CC ผิดโดยไม่เตือน ราคาที่ระบบเสนอรายคันเลยผิดแถว)
+function parseCc(text: string): number | null {
+  const s = text.replace(/,/g, "").trim();
+  if (s === "") return null;
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : Number.NaN;
+}
+
+// แสดง CC ที่บันทึกไว้แบบมีจุลภาค ให้ค่าที่ผิด (เช่น 1 แทน 1,601) เห็นชัด
+const ccText = (cc: number | null) => (cc === null ? "" : cc.toLocaleString("en-US"));
+
 const toState = (r: ServiceFeeRate): RateState => ({
   label: r.label,
   vehicleKind: r.vehicleKind,
-  ccMinText: r.ccMin === null ? "" : String(r.ccMin),
-  ccMaxText: r.ccMax === null ? "" : String(r.ccMax),
+  ccMinText: ccText(r.ccMin),
+  ccMaxText: ccText(r.ccMax),
   amountText: String(r.amount),
   vatInclusive: r.vatInclusive,
 });
@@ -114,10 +133,10 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
       if (!r.label.trim()) return setError(`${at}: ใส่ชื่อรายการ`);
       const amount = Number.parseFloat(r.amountText.replace(/,/g, ""));
       if (!Number.isFinite(amount) || amount < 0) return setError(`${at}: ราคาไม่ถูกต้อง`);
-      const cc = (text: string) => (text.trim() === "" ? null : Number.parseFloat(text));
-      const ccMin = cc(r.ccMinText);
-      const ccMax = cc(r.ccMaxText);
-      if ((ccMin !== null && !Number.isFinite(ccMin)) || (ccMax !== null && !Number.isFinite(ccMax))) return setError(`${at}: ช่วง CC ไม่ถูกต้อง`);
+      const ccMin = parseCc(r.ccMinText);
+      const ccMax = parseCc(r.ccMaxText);
+      const ccInvalid = (ccMin !== null && !Number.isFinite(ccMin)) || (ccMax !== null && !Number.isFinite(ccMax));
+      if (ccInvalid || (ccMin !== null && ccMax !== null && ccMin >= ccMax)) return setError(`${at}: ช่วง CC ไม่ถูกต้อง`);
       payload.push({ label: r.label.trim(), vehicleKind: r.vehicleKind, ccMin, ccMax, amount, vatInclusive: r.vatInclusive });
     }
     setSaving(true);

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiError,
+  fetchAuthedBlob,
   yamahaRelocationAttachmentUrl,
   type YamahaRelocationAttachment,
   type YamahaRelocationEntry,
@@ -12,7 +13,7 @@ import {
   type YamahaRelocationSummary,
 } from "@/lib/api";
 import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { DateInput } from "@/components/DateInput";
 
@@ -50,13 +51,11 @@ function joinLabel(prefix: string, label: string): string {
 
 // ไฟล์อยู่หลัง backend ที่ต้องมี Authorization - <a href> ตรงๆ ส่ง header ไม่ได้ จึงโหลดเป็น blob แล้วเปิดในแท็บใหม่
 // (เปิดแท็บก่อน await เพื่อไม่ให้ browser บล็อก popup) ถ้า browser บล็อก popup อยู่ดี ให้ดาวน์โหลดไฟล์แทน
+// 401 (token หมดอายุ) fetchAuthedBlob พาไปหน้าล็อกอินเองและล้าง session แล้ว - ไม่ต้องเตือน "เปิดไม่สำเร็จ" ซ้ำ (พบ 2026-09-27)
 async function openAuthedFile(url: string, fileName: string) {
   const win = window.open("", "_blank");
   try {
-    const token = getToken();
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const objectUrl = URL.createObjectURL(await res.blob());
+    const objectUrl = URL.createObjectURL(await fetchAuthedBlob(url));
     if (win) {
       win.location.href = objectUrl;
     } else {
@@ -68,7 +67,7 @@ async function openAuthedFile(url: string, fileName: string) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch {
     win?.close();
-    window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -151,6 +150,8 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const [summary, setSummary] = useState<YamahaRelocationSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
+  // ✎ แก้ / ยกเลิกรายการที่บันทึกผิด (ผู้ใช้ 2026-09-27)
+  const [dialog, setDialog] = useState<{ kind: "edit" | "cancel"; entry: YamahaRelocationEntry } | null>(null);
 
   async function load(forMonth: string) {
     if (!forMonth) return;
@@ -184,8 +185,9 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
     setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
 
+  // พิมพ์ปี พ.ศ. ตามใบเสร็จได้ - ครบ 8 หลักแล้วแปลงเป็น ค.ศ. ให้ (เดิมขึ้น "กรุณากรอกวันที่ให้ถูกต้อง" - พบ 2026-09-27)
   function handleDateTextChange(raw: string) {
-    setDateText(formatDateDigits(raw.replace(/\D/g, "").slice(0, 8)));
+    setDateText(formatDateDigitsCe(raw.replace(/\D/g, "").slice(0, 8)));
   }
 
   const count = parseCount(countText);
@@ -330,6 +332,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
                   <th>จำนวนคัน</th>
                   <th>ใบเสร็จ</th>
                   <th>Report</th>
+                  {canEdit && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -343,6 +346,21 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
                     <td>
                       <AttachmentLink attachment={entry.report} />
                     </td>
+                    {canEdit && (
+                      <td>
+                        <button type="button" className="text-button" onClick={() => setDialog({ kind: "edit", entry })}>
+                          ✎ แก้
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button"
+                          style={{ color: "#b43434" }}
+                          onClick={() => setDialog({ kind: "cancel", entry })}
+                        >
+                          ยกเลิก
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -363,6 +381,149 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
           </div>
         )}
       </div>
+
+      {dialog && (
+        <EntryDialog
+          kind={dialog.kind}
+          entry={dialog.entry}
+          onClose={() => setDialog(null)}
+          onDone={(text) => {
+            setFormMessage({ text });
+            void load(month);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+const SIZE_LABEL: Record<YamahaRelocationSize, string> = { SMALL: "รถเล็ก", LARGE: "รถใหญ่" };
+
+// ✎ แก้ / ยกเลิกรายการที่บันทึกผิด (ผู้ใช้ 2026-09-27) - ADMIN / STAFF_ENTRY ต้องระบุเหตุผลเสมอ (เก็บประวัติ)
+// แก้ได้: วันที่ / รถเล็ก-รถใหญ่ / จำนวนคัน (ไฟล์แนบคงเดิม) - แนบไฟล์ผิดให้ยกเลิกแล้วบันทึกใหม่ (ไฟล์เดิมแนบใหม่ได้)
+function EntryDialog({
+  kind,
+  entry,
+  onClose,
+  onDone,
+}: {
+  kind: "edit" | "cancel";
+  entry: YamahaRelocationEntry;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [dateText, setDateText] = useState(() => isoToDisplayDate(entry.date));
+  const [size, setSize] = useState<YamahaRelocationSize>(entry.size);
+  const [countText, setCountText] = useState(String(entry.count));
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+  }, []);
+
+  async function confirm() {
+    setError("");
+    try {
+      if (kind === "edit") {
+        const date = displayDateToIso(dateText.replace(/\D/g, ""));
+        if (!date) return setError("วันที่ไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป");
+        const count = parseCount(countText);
+        if (count === 0) return setError("กรุณาระบุจำนวนคันอย่างน้อย 1 คัน");
+        if (date === entry.date && size === entry.size && count === entry.count) return setError("ไม่มีข้อมูลที่เปลี่ยน");
+        if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้");
+        setSaving(true);
+        // ส่งค่าที่โหลดมาด้วย - มีคนแก้ไปก่อนระหว่างที่เปิดฟอร์มค้างไว้ backend ตอบ 409 ไม่ทับของเขา (พบ 2026-09-27)
+        await api.updateYamahaRelocation(entry.id, {
+          date,
+          size,
+          count,
+          remark: remark.trim(),
+          expectedDate: entry.date,
+          expectedSize: entry.size,
+          expectedCount: entry.count,
+        });
+        onDone(
+          size !== entry.size
+            ? `แก้รายการแล้ว - ย้ายไปหน้า${SIZE_LABEL[size]}`
+            : date.slice(0, 7) !== entry.date.slice(0, 7)
+              ? `แก้รายการแล้ว - ย้ายไปเดือน ${date.slice(5, 7)}/${date.slice(0, 4)}`
+              : "แก้รายการแล้ว",
+        );
+      } else {
+        if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่ยกเลิก");
+        setSaving(true);
+        await api.cancelYamahaRelocation(entry.id, remark.trim());
+        onDone("ยกเลิกรายการแล้ว - ไฟล์ใบเสร็จ/Report เดิมนำไปแนบกับรายการใหม่ได้");
+      }
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>{kind === "edit" ? "แก้รายการแจ้งย้าย" : "ยกเลิกรายการแจ้งย้าย"}</h2>
+      <p className="muted">
+        {SIZE_LABEL[entry.size]} · {isoToDisplayDate(entry.date)} · {entry.count} คัน
+      </p>
+      {kind === "edit" ? (
+        <div className="customer-grid" style={{ marginTop: 12 }}>
+          <label className="field">
+            วันที่ *
+            <DateInput
+              value={dateText}
+              onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
+              required
+            />
+          </label>
+          <label className="field">
+            จำนวนคัน *
+            <input type="number" min={1} step={1} value={countText} onChange={(e) => setCountText(e.target.value)} required />
+          </label>
+          <label className="field">
+            รถเล็ก / รถใหญ่
+            <select value={size} onChange={(e) => setSize(e.target.value as YamahaRelocationSize)}>
+              <option value="SMALL">รถเล็ก</option>
+              <option value="LARGE">รถใหญ่</option>
+            </select>
+          </label>
+        </div>
+      ) : (
+        <p style={{ marginTop: 12 }}>
+          รายการนี้จะหายจากรายการและยอดรวมของเดือน (ยังเก็บไว้ในประวัติพร้อมเหตุผล) - ไฟล์ใบเสร็จและ Report เดิมนำไปแนบกับรายการที่บันทึกใหม่ได้
+        </p>
+      )}
+      <label className="field" style={{ marginTop: 12 }}>
+        {kind === "edit" ? "เหตุผลที่แก้ *" : "เหตุผลที่ยกเลิก *"}
+        <input
+          type="text"
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          placeholder={kind === "edit" ? "เช่น พิมพ์จำนวนคันเกิน" : "เช่น บันทึกซ้ำ / แนบไฟล์ผิด"}
+        />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={confirm} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : kind === "edit" ? "บันทึกการแก้ไข" : "ยืนยันยกเลิก"}
+        </button>
+      </div>
+    </dialog>
   );
 }

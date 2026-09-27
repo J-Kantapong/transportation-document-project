@@ -7,6 +7,7 @@ import { AuthedImage } from "@/components/AuthedImage";
 import { isoToDisplayDate } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { uploadReceiptsInBackground, usePendingReceipts } from "@/lib/receipt-upload";
+import { useCanEditReceipts } from "@/components/ReceiptPhotos";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
@@ -53,11 +54,15 @@ export function ReceiptCapturePage() {
   const [shots, setShots] = useState<Shot[]>([]); // ใหม่สุดอยู่บน - เฉพาะที่ส่งในรอบนี้
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const canEdit = useCanEditReceipts(); // ACCOUNTANT เปิดหน้านี้ได้แต่ส่งรูปไม่ได้ (backend ตอบ 403) - ซ่อนปุ่มถ่าย
   const addShot = (receipt: ReceiptImage) => setShots((prev) => [toShot(receipt), ...prev]);
   const pendingIds = shots.filter((s) => s.status === "reading").map((s) => s.receipt.id);
-  usePendingReceipts(pendingIds, (read) => {
+  // รูปที่หายจากผลลัพธ์ = อีกเครื่องลบไปแล้ว -> เอาออกจากรายการ ไม่ค้าง "กำลังอ่าน"
+  usePendingReceipts(pendingIds, (read, gone) => {
     const byId = new Map(read.map((r) => [r.id, r]));
-    setShots((prev) => prev.map((s) => (byId.has(s.receipt.id) ? toShot(byId.get(s.receipt.id)!) : s)));
+    setShots((prev) =>
+      prev.filter((s) => !gone.includes(s.receipt.id)).map((s) => (byId.has(s.receipt.id) ? toShot(byId.get(s.receipt.id)!) : s)),
+    );
   });
 
   // ถ่ายจากกล้อง (ทีละใบ) = อ่านทันที คนถ่ายรู้ผลตอนใบเสร็จยังอยู่ในมือ
@@ -95,14 +100,19 @@ export function ReceiptCapturePage() {
   }
 
   // ถ่ายใหม่ = ลบรูปที่ยังไม่ได้จับคู่ทิ้ง แล้วเปิดกล้องอีกครั้ง (รูปที่จับคู่กับรถแล้วให้ออฟฟิศเป็นคนลบ)
+  // unassignedOnly: ระหว่างนี้ออฟฟิศจับคู่รูปนี้กับรถไปแล้ว -> backend ตอบ 409 ไม่ลบ: เปลี่ยนเป็น "จับคู่แล้ว" ซ่อนปุ่มถ่ายใหม่
+  // (พบ 2026-09-27: เดิมขึ้น error ให้โหลดหน้าใหม่ ซึ่งหน้านี้โหลดใหม่แล้วรายการที่ถ่ายรอบนี้หาย)
   async function retake(shot: Shot) {
     setError("");
     try {
-      await api.deleteReceipt(shot.receipt.id);
+      await api.deleteReceipt(shot.receipt.id, true);
       setShots((prev) => prev.filter((s) => s.receipt.id !== shot.receipt.id));
       cameraRef.current?.click();
     } catch (err) {
-      setError(errorText(err));
+      if (err instanceof ApiError && err.status === 409) {
+        const text = "ออฟฟิศจับคู่กับรถแล้ว - ถ้าต้องถ่ายใหม่ ให้ออฟฟิศลบรูปจากแถวของรถคันนั้นก่อน";
+        setShots((prev) => prev.map((s) => (s.receipt.id === shot.receipt.id ? { ...s, status: "matched", text } : s)));
+      } else setError(errorText(err));
     }
   }
 
@@ -122,10 +132,15 @@ export function ReceiptCapturePage() {
               วางใบเสร็จให้เต็มจอ ตัวหนังสือชัด ไม่มีเงาทับ - ถ่ายทีละใบ ระบบจะอ่านและจับคู่กับรถที่รอใบเสร็จให้เอง
             </p>
 
+            {canEdit === false && (
+              <div className="customer-message error" role="status">
+                บัญชีนี้ดูได้อย่างเดียว - ส่งรูปใบเสร็จได้เฉพาะพนักงานยื่นเอกสาร (ADMIN / รถยนต์ / มอเตอร์ไซค์)
+              </div>
+            )}
             {/* capture="environment" = เปิดกล้องหลังทันที ไม่ต้องผ่านหน้าเลือกไฟล์ */}
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
             <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleGallery(e.target.files)} />
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: canEdit === false ? "none" : "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               <button
                 type="button"
                 className="primary"

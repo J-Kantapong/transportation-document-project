@@ -1,12 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
+import type { CorrectTransferNoticeDto } from './dto/correct-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
+import type { CorrectInspectionSentDto } from './dto/correct-inspection-sent.dto.js';
+import type { CancelInspectionSentDto } from './dto/cancel-inspection-sent.dto.js';
 import type { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import type { CorrectInspectionResultDto } from './dto/correct-inspection-result.dto.js';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import type { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
-import type { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
 @Controller('api/vehicles')
@@ -74,14 +76,21 @@ export class VehiclesController {
     return { vehicles: await this.vehiclesService.findPendingTransferNotice() };
   }
 
+  // ดำเนินการแล้ว: ทีละ 100 คัน ทำเสร็จล่าสุดก่อน -> { vehicles, hasMore } (q ค้นเลขตัวถัง/ลูกค้า ฯลฯ, offset โหลดเพิ่ม)
   @Get('transfer-notice/completed')
-  async findRecentlyCompletedTransferNotice() {
-    return { vehicles: await this.vehiclesService.findRecentlyCompletedTransferNotice() };
+  findRecentlyCompletedTransferNotice(@Query('q') q?: string, @Query('offset') offset?: string, @Query('limit') limit?: string) {
+    return this.vehiclesService.findRecentlyCompletedTransferNotice({ q, offset, limit });
   }
 
   @Patch(':id/transfer-notice')
   async updateTransferNotice(@Param('id') id: string, @Body() body: UpdateTransferNoticeDto) {
     return { vehicle: await this.vehiclesService.updateTransferNotice(id, body) };
+  }
+
+  // แก้วันที่/ค่าใช้จ่าย หรือยกเลิกสถานะของคันที่ดำเนินการแล้ว (ต้องมีเหตุผล - ผู้ใช้ 2026-09-27) สิทธิ์เท่ากับ PATCH ด้านบน
+  @Patch(':id/transfer-notice/correct')
+  async correctTransferNotice(@Param('id') id: string, @Body() body: CorrectTransferNoticeDto) {
+    return { vehicle: await this.vehiclesService.correctTransferNotice(id, body) };
   }
 
   @Get('inspection/pending-send')
@@ -104,6 +113,17 @@ export class VehiclesController {
     return { vehicle: await this.vehiclesService.updateInspectionSent(id, body) };
   }
 
+  // แก้ประเภท/วันที่ส่งตรวจ และยกเลิกส่งตรวจ ของรถที่ยังรอผล (ต้องมีเหตุผล) - สิทธิ์เท่ากับขั้น 1-3 คือ ADMIN + STAFF_ENTRY
+  @Patch(':id/inspection-sent-correction')
+  async correctInspectionSent(@Param('id') id: string, @Body() body: CorrectInspectionSentDto) {
+    return { vehicle: await this.vehiclesService.correctInspectionSent(id, body) };
+  }
+
+  @Post(':id/inspection-sent/cancel')
+  async cancelInspectionSent(@Param('id') id: string, @Body() body: CancelInspectionSentDto) {
+    return { vehicle: await this.vehiclesService.cancelInspectionSent(id, body) };
+  }
+
   @Patch(':id/inspection-result')
   async updateInspectionResult(@Param('id') id: string, @Body() body: UpdateInspectionResultDto) {
     return { vehicle: await this.vehiclesService.updateInspectionResult(id, body) };
@@ -113,10 +133,5 @@ export class VehiclesController {
   @Patch(':id/inspection-result-correction')
   async correctInspectionResult(@Param('id') id: string, @Body() body: CorrectInspectionResultDto) {
     return { vehicle: await this.vehiclesService.correctInspectionResult(id, body) };
-  }
-
-  @Patch(':id/tax-input')
-  async updateTaxInput(@Param('id') id: string, @Body() body: UpdateTaxInputDto) {
-    return { taxCalculation: await this.vehiclesService.updateTaxInput(id, body) };
   }
 }

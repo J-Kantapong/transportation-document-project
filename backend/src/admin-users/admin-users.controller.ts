@@ -17,4 +17,10 @@ export class AdminUsersController {
   update(@CurrentUser() admin: RequestUser, @Param('id') id: string, @Body() body: unknown) {
     return this.adminUsersService.update(admin.id, id, body);
   }
+
+  // ตั้งรหัสผ่านชั่วคราวให้ผู้ใช้คนอื่น { password, confirmPassword, remark } -> { user } (ผู้ใช้ 2026-09-27)
+  @Patch(':id/password')
+  setPassword(@CurrentUser() admin: RequestUser, @Param('id') id: string, @Body() body: unknown) {
+    return this.adminUsersService.setPassword(admin.id, id, body);
+  }
 }

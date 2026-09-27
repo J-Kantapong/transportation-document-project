@@ -5,10 +5,13 @@ import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2, sortLin
 // ใบวางบิล/ใบแจ้งหนี้ + เอกสารแนบรายคัน (A4 แนวตั้ง) ตามแบบที่บริษัทใช้อยู่ใน Google Sheet "Invoice Tradeinter":
 // หน้าบิลรวมยอดเป็นไม่กี่บรรทัด รายละเอียดรถรายคันอยู่ในเอกสารแนบ (บิล 100 คัน = หน้าบิล 1 หน้า + เอกสารแนบ 3 หน้า)
 // ใช้ HTML ชุดเดียวกันทั้งแสดงตัวอย่างบนจอ (iframe srcDoc) และพิมพ์จริง
+// status / voidReason ไม่มีในตัวอย่างบิลที่ยังไม่ได้ออก - บิลที่ยกเลิกแล้วพิมพ์ซ้ำได้แต่มีลายน้ำ "ยกเลิก" ทุกหน้า
+// (พบ 2026-09-27: เดิมพิมพ์ออกมาเหมือนบิลปกติ ถ้าหลุดไปถึงลูกค้าจะเท่ากับเรียกเก็บรถชุดเดียวกันซ้ำกับบิลใบใหม่)
 export type PrintableInvoice = Pick<
   Invoice,
   "invoiceNo" | "issueDate" | "customer" | "jobLabel" | "extras" | "vatRate" | "whtRate" | "feeTotal" | "serviceTotal" | "vatAmount" | "whtAmount" | "netTotal" | "lines"
->;
+> &
+  Partial<Pick<Invoice, "status" | "voidReason">>;
 
 export const ATTACHMENT_ROWS_PER_PAGE = 40;
 
@@ -18,11 +21,17 @@ function escapeHtml(text: string): string {
 
 const customerTitle = (c: PrintableInvoice["customer"]) => `${c.name}${c.branch ? ` (${c.branch})` : ""}`;
 
+const isVoid = (inv: PrintableInvoice) => inv.status === "VOID";
+const voidMarkHtml = (inv: PrintableInvoice) => (isVoid(inv) ? `<div class="void-mark" aria-hidden="true">ยกเลิก</div>` : "");
+const voidNoteHtml = (inv: PrintableInvoice) =>
+  isVoid(inv) ? `<span class="void-note">บิลนี้ยกเลิกแล้ว${inv.voidReason ? ` – ${escapeHtml(inv.voidReason)}` : ""}</span>` : "";
+
 function headHtml(inv: PrintableInvoice, docTitle: string): string {
   const co = COMPANY_PROFILE;
   return `<div class="co"><div><b class="en">${escapeHtml(co.nameEn)}</b><br>${escapeHtml(co.nameTh)}<br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>
 <div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
+${isVoid(inv) ? `<div style="margin-top:3mm">${voidNoteHtml(inv)}</div>` : ""}
 <div class="meta"><span class="k">ชื่อลูกค้า</span><br><b>${escapeHtml(customerTitle(inv.customer))}</b><br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(inv.customer.taxId || "—")}<br>${escapeHtml(inv.customer.address || "")}</span></div>`;
 }
@@ -31,7 +40,7 @@ function invoicePageHtml(inv: PrintableInvoice): string {
   const rows = invoiceFaceLines(inv)
     .map((l) => `<tr><td>${escapeHtml(l.name)}</td><td class="r">${l.qty}</td><td class="r">${formatMoney(l.unit)}</td><td class="r">${formatMoney(round2(l.qty * l.unit))}</td></tr>`)
     .join("");
-  return `<section class="page">${headHtml(inv, "ใบวางบิล/ใบแจ้งหนี้")}
+  return `<section class="page">${voidMarkHtml(inv)}${headHtml(inv, "ใบวางบิล/ใบแจ้งหนี้")}
 <table class="items"><colgroup><col><col style="width:12%"><col style="width:18%"><col style="width:20%"></colgroup>
 <thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th class="r">จำนวนเงิน (บาท)</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="foot"><div><span class="k">เงื่อนไขการชำระเงิน :</span><br>${COMPANY_PROFILE.paymentLines.map(escapeHtml).join("<br>")}<br>
@@ -71,7 +80,7 @@ function attachmentPagesHtml(inv: PrintableInvoice): string[] {
       ? `${deductions.length ? `<div class="k note">* ${deductions.map(escapeHtml).join(" / ")}</div>` : ""}
 ${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื่นๆ ของบิล (${inv.extras.map((e) => `${escapeHtml(e.label)} ${formatMoney(e.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้ VAT รายคันปัดเศษแยกกัน ยอดที่ใช้เรียกเก็บคือยอดในหน้าใบวางบิล</div>` : `<div class="k note">VAT รายคันปัดเศษแยกกัน ยอดที่ใช้เรียกเก็บคือยอดในหน้าใบวางบิล</div>`}`
       : "";
-    return `<section class="page att"><div class="atthead"><div><b>เอกสารแนบ ${escapeHtml(inv.invoiceNo)}</b> · ${escapeHtml(customerTitle(inv.customer))}<br>
+    return `<section class="page att">${voidMarkHtml(inv)}<div class="atthead"><div><b>เอกสารแนบ ${escapeHtml(inv.invoiceNo)}</b> · ${escapeHtml(customerTitle(inv.customer))}${isVoid(inv) ? ` · ${voidNoteHtml(inv)}` : ""}<br>
 <span class="k">${escapeHtml(inv.jobLabel)} ${lines.length} คัน · วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div><div class="k">หน้า ${p + 1}/${pageCount}</div></div>
 <table class="grid"><colgroup><col style="width:5%"><col style="width:10%"><col style="width:21%"><col style="width:11%"><col style="width:13%"><col style="width:10%"><col style="width:11%"><col style="width:8%"><col style="width:11%"></colgroup>
 <thead><tr><th>#</th><th>ยี่ห้อ</th><th>เลขตัวรถ</th><th>ทะเบียน</th><th>เลขที่ใบเสร็จ</th><th class="r">ใบเสร็จ</th><th class="r">ค่าดำเนินการ</th><th class="r">VAT ${inv.vatRate}%</th><th class="r">รวม</th></tr></thead>
@@ -84,7 +93,7 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(inv.invoiceNo || "ใบวางบิล")}</title>
+<title>${isVoid(inv) ? "ยกเลิก - " : ""}${escapeHtml(inv.invoiceNo || "ใบวางบิล")}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
@@ -93,7 +102,9 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
   body { font-family: "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif; color: #111; font-size: 10pt; line-height: 1.5; font-variant-numeric: tabular-nums; }
-  .page { page-break-after: always; break-after: page; }
+  .page { position: relative; page-break-after: always; break-after: page; }
+  .void-mark { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 110pt; font-weight: 600; color: rgba(190, 0, 0, .16); transform: rotate(-30deg); pointer-events: none; z-index: 1; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .void-note { color: #b00000; font-weight: 600; }
   .page:last-child { page-break-after: auto; break-after: auto; }
   .k { color: #555; }
   .small { font-size: 10pt; font-weight: 400; }

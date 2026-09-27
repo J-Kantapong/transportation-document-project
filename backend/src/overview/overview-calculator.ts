@@ -48,11 +48,47 @@ export function agingBuckets(items: Array<{ date: string; amount: number }>, tod
   return out.map((b) => ({ ...b, amount: round2(b.amount) }));
 }
 
+// --- ยอดเงินของงานยื่นเอกสาร ------------------------------------------------------------
+
+export interface SubmissionMoney {
+  status: string;
+  receiptAmount: unknown; // Prisma Decimal | null
+  billFeeTotal: unknown;
+  taxAmount: unknown;
+}
+
+const money = (d: unknown) => (d === null || d === undefined ? 0 : Number(d));
+
+// ยอด Bill ของการยื่นหนึ่งครั้ง: ได้ใบเสร็จแล้วและกรอกยอดไว้ = ยอดบนใบเสร็จจริง (เหมือนหน้าวางบิล) ไม่งั้นใช้ค่าธรรมเนียม + ภาษี
+// ที่ระบบคำนวณตอนยื่น - ทุกช่องของภาพรวม (ใช้เงิน / ระหว่างดำเนินการ / รอวางบิล) ใช้กฎเดียวกัน รถคันเดียวจึงไม่เปลี่ยนยอด
+// ตอนย้ายช่อง (พบ 2026-09-27)
+export function billValueOf(sub: SubmissionMoney): number {
+  if (sub.status === 'RECEIPT_RECEIVED' && sub.receiptAmount !== null && sub.receiptAmount !== undefined) return round2(money(sub.receiptAmount));
+  return round2(money(sub.billFeeTotal) + money(sub.taxAmount));
+}
+
+// งานที่ยื่นแล้วแต่ยังไม่ส่งงาน = เงินที่จ่ายไปแล้วระหว่างดำเนินการ - งานที่คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้ ผู้ใช้ให้คีย์ล่วงหน้าได้
+// 2026-09-25) ยังไม่ได้จ่ายจริง จึงแยกเป็น advance ไม่นับรวม (พบ 2026-09-27)
+export function inProcessMoney(subs: Array<SubmissionMoney & { submitDate: Date }>, today: string) {
+  const inProcess = { amount: 0, count: 0 };
+  const advance = { amount: 0, count: 0 };
+  for (const s of subs) {
+    const target = isoOf(s.submitDate) > today ? advance : inProcess;
+    target.amount += billValueOf(s);
+    target.count += 1;
+  }
+  return {
+    inProcess: { amount: round2(inProcess.amount), count: inProcess.count },
+    advance: { amount: round2(advance.amount), count: advance.count },
+  };
+}
+
 // --- ประมาณการรับเงิน ---------------------------------------------------------------
 
 export const DEFAULT_PAY_DAYS = 30; // ยังไม่มีประวัติชำระเงินเลย
 export const DEFAULT_BILLING_LAG_DAYS = 7; // ยังไม่มีประวัติส่งงาน -> วางบิล
 export const MIN_PAY_SAMPLES = 3; // ลูกค้าที่มีประวัติน้อยกว่านี้ใช้ค่าเฉลี่ยรวมแทน
+export const FORECAST_SPEND_DAYS = 28; // เงินออกที่คาด = ค่าเฉลี่ยใช้เงินต่อวันของกี่วันล่าสุด (ถึงวันนี้)
 export const FORECAST_MAX_AGE_DAYS = 90; // ค้างเกินนี้ไม่นับเป็นเงินที่จะได้ (แยกเป็น "เสี่ยง")
 
 export interface PaidSample {

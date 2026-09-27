@@ -2,8 +2,10 @@ import {
   addDays,
   agingBuckets,
   bangkokToday,
+  billValueOf,
   buildForecast,
   daysBetween,
+  inProcessMoney,
   paymentBehaviour,
   pctChange,
   type PaidSample,
@@ -44,6 +46,38 @@ describe('agingBuckets', () => {
     );
     expect(b.map((x) => x.amount)).toEqual([100, 200, 300, 400]);
     expect(b.map((x) => x.count)).toEqual([1, 1, 1, 1]);
+  });
+});
+
+describe('billValueOf / inProcessMoney (พบ 2026-09-27)', () => {
+  const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const sub = (o: Partial<{ status: string; receiptAmount: unknown; submitDate: Date }> = {}) => ({
+    status: 'PENDING',
+    receiptAmount: null,
+    billFeeTotal: 250,
+    taxAmount: 2150,
+    submitDate: d('2026-09-20'),
+    ...o,
+  });
+
+  it('ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จจริง ยังไม่ได้/ไม่ได้กรอกยอดใช้ Bill + ภาษีที่ระบบคำนวณ', () => {
+    expect(billValueOf(sub())).toBe(2400);
+    expect(billValueOf(sub({ status: 'RECEIPT_RECEIVED', receiptAmount: 2450 }))).toBe(2450);
+    expect(billValueOf(sub({ status: 'RECEIPT_RECEIVED', receiptAmount: null }))).toBe(2400);
+    expect(billValueOf({ status: 'PENDING', receiptAmount: null, billFeeTotal: 250, taxAmount: null })).toBe(250);
+  });
+
+  it('งานคีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ไม่นับเป็นเงินที่จ่ายแล้ว - แยกเป็น advance', () => {
+    const m = inProcessMoney(
+      [
+        sub({ submitDate: d('2026-09-27') }), // วันนี้ = จ่ายแล้ว
+        sub({ status: 'RECEIPT_RECEIVED', receiptAmount: 2450, submitDate: d('2026-09-20') }),
+        sub({ submitDate: d('2026-09-28') }), // พรุ่งนี้ = ยังไม่จ่าย
+      ],
+      '2026-09-27',
+    );
+    expect(m.inProcess).toEqual({ amount: 4850, count: 2 });
+    expect(m.advance).toEqual({ amount: 2400, count: 1 });
   });
 });
 

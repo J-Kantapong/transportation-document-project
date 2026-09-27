@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   api,
   ApiError,
@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 import { canAccessPage, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
-import { focusHref, stagePageFor } from "@/lib/vehicle-focus";
+import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
 
 // หน้าค้นหารถ (ผู้ใช้ 2026-09-25): ค้นรถจดใหม่ทั้งฐานข้อมูล + ดูว่าตอนนี้ค้างขั้นไหน ค้างกี่วัน มีปัญหาอะไร
@@ -47,10 +47,6 @@ function queryString(params: VehicleSearchParams): string {
 // กรองทันทีระหว่างพิมพ์ (ผู้ใช้ 2026-09-25): หยุดพิมพ์ครู่หนึ่งแล้วค้นเอง ไม่ต้องกดปุ่ม
 const TYPING_DELAY_MS = 300;
 
-// URL ที่หน้านี้เขียนเองระหว่างพิมพ์/กดกรอง - ไม่ต้องสร้างหน้าใหม่ (ช่องค้นหาจะหลุดโฟกัส) ส่วน URL ที่เปลี่ยนจากภายนอก
-// (กดย้อนกลับ / เปิดลิงก์ / กดเมนูค้นหารถซ้ำ) ให้สร้างหน้าใหม่ให้ช่องกรอกตรงกับ URL
-let lastWrittenQuery: string | null = null;
-
 // useSearchParams ต้องอยู่ใต้ Suspense ตอน prerender
 export default function VehicleSearchPage() {
   return (
@@ -60,15 +56,31 @@ export default function VehicleSearchPage() {
   );
 }
 
+// URL ที่หน้านี้เขียนเองระหว่างพิมพ์/กดกรอง - ไม่ต้องสร้างหน้าใหม่ (ช่องค้นหาจะหลุดโฟกัส) ส่วน URL ที่เปลี่ยนจากภายนอก
+// (กดย้อนกลับ/ไปข้างหน้า / เปิดลิงก์ / กดเมนูค้นหารถซ้ำ) ให้สร้างหน้าใหม่ให้ช่องกรอกตรงกับ URL
+// Next เก็บหน้านี้ไว้ตัวเดิมเมื่อ query เปลี่ยน และ router เปลี่ยน URL ตามทีหลัง (async) จึงจำ URL ที่เขียนเองแต่ยังไม่เห็นเป็นรายการ:
+// URL ใหม่ตรงกับรายการ = URL ตามทันที่เขียนเอง, ไม่ตรง (รวมถึงย้อนกลับไปคำค้นที่ URL เคยผ่านแล้ว) = เปลี่ยนจากภายนอก
+// (พบ 2026-09-27: เดิมจำแค่ query ล่าสุดที่เขียน กดย้อนกลับ/ไปข้างหน้าแล้วหน้าจอไม่ตรง URL)
+interface UrlView {
+  key: number; // รอบที่สร้างหน้า
+  query: string; // เงื่อนไขตอนสร้างหน้า
+  seen: string; // URL ล่าสุดที่เห็น
+  pending: string[]; // URL ที่หน้าตัวนี้เขียนเองแล้ว แต่ URL ยังไม่เปลี่ยนตาม
+}
+
 function VehicleSearchFromUrl() {
   const current = useSearchParams().toString();
-  const [seen, setSeen] = useState(current);
-  const [mountKey, setMountKey] = useState(current);
-  if (current !== seen) {
-    setSeen(current);
-    if (current !== lastWrittenQuery) setMountKey(current);
+  const [view, setView] = useState<UrlView>(() => ({ key: 0, query: current, seen: current, pending: [] }));
+  if (current !== view.seen) {
+    const at = view.pending.indexOf(current);
+    setView(
+      at >= 0
+        ? { ...view, seen: current, pending: view.pending.slice(at + 1) }
+        : { key: view.key + 1, query: current, seen: current, pending: [] },
+    );
   }
-  return <VehicleSearch key={mountKey} initial={paramsFrom(new URLSearchParams(mountKey))} />;
+  const onWrite = useCallback((query: string) => setView((v) => ({ ...v, pending: [...v.pending, query] })), []);
+  return <VehicleSearch key={view.key} initial={paramsFrom(new URLSearchParams(view.query))} onWrite={onWrite} />;
 }
 
 // วันที่ในช่อง: ว่าง = ไม่กรอง, ครบ 8 หลักและมีจริง = กรอง, นอกนั้น = ยังพิมพ์ไม่เสร็จ (null = ยังไม่ค้น)
@@ -77,7 +89,7 @@ function dateParam(text: string): string | null {
   return displayDateToIso(text.replace(/\D/g, "")) || null;
 }
 
-function VehicleSearch({ initial }: { initial: VehicleSearchParams }) {
+function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onWrite: (query: string) => void }) {
   const router = useRouter();
   const [searchText, setSearchText] = useState(initial.q ?? "");
   const [fromText, setFromText] = useState(isoToDisplayDate(initial.from ?? ""));
@@ -132,7 +144,7 @@ function VehicleSearch({ initial }: { initial: VehicleSearchParams }) {
   function apply(next: VehicleSearchParams, history: "push" | "replace" = "replace") {
     const qs = queryString(next);
     if (qs === appliedKey) return;
-    lastWrittenQuery = qs.replace(/^\?/, "");
+    onWrite(qs.replace(/^\?/, "")); // ก่อนเปลี่ยน URL - ตัวแม่จะได้รู้ว่า URL ใหม่นี้หน้าเขียนเอง
     router[history](`/vehicles${qs}`, { scroll: false });
     setSearching(true);
     setApplied(next);
@@ -400,9 +412,8 @@ function VehicleStatusCell({ row, roles }: { row: VehicleSearchRow; roles: UserR
         const done = doneText(s);
         const sameAsPrevious = i > 0 && doneText(row.statuses[i - 1]) === done;
         // ไปหน้าที่มีรายการรถของขั้นนั้นพร้อมเลขตัวถัง - หน้าปลายทางเลื่อนไปที่รถคันนี้และไฮไลต์ให้ (lib/vehicle-focus.ts)
-        // หน้ารับใบเสร็จ/รับป้าย/รับเล่มแยกหน้ารถยนต์/จักรยานยนต์ (.../car, .../moto) จึงต่อประเภทรถท้าย path
-        const base = stagePageFor(s.stage, s.href);
-        const page = ["receipt", "plate", "book"].includes(s.stage) ? `${base}/${row.kind}` : base;
+        // รอเอกสารสลับเลขไปหน้ารับเอกสารกลับ เพราะคิวยื่นซ่อนรถคันนี้ไว้ (ดู workPageFor)
+        const page = workPageFor(s.stage, row.kind, s.flags, s.href);
         const href = focusHref(page, row.chassis);
         return (
           <div key={s.stage}>

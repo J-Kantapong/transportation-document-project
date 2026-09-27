@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
 
 const SUBMIT_HREF = "/registration/new-vehicle/submit-documents/submit";
 const RECORDS_HREF = "/registration/new-vehicle/submit-documents/records";
@@ -6,7 +10,17 @@ const RECORDS_HREF = "/registration/new-vehicle/submit-documents/records";
 // เมนูของขั้นตอนยื่นเอกสาร - ผู้ใช้ 2026-09-22: ปุ่ม "ยื่นเอกสารจดทะเบียนรถ" และ "ดูข้อมูลที่ยื่นแล้ว" ต้องเป็นการเข้าหน้าถัดไป
 // (คนละ URL) ให้กด back ของเบราว์เซอร์กลับมาหน้านี้ได้ จึงเป็น Link แทนการสลับ phase ในหน้าเดียว
 // ไม่มีร่างที่บันทึกค้างในเครื่องแล้ว (ผู้ใช้ 2026-09-25) - รายการที่เลือกอยู่ระหว่าง 3 ขั้นของการยื่นเท่านั้น
+// การ์ดยื่นเอกสารแสดงเฉพาะบทบาทที่ยื่นได้ (พบ 2026-09-27: ACCOUNTANT กดเข้าไปแล้วคำนวณ/ยื่นไม่ได้ทุกคัน) - กฎอยู่ใน lib/auth.ts
 export default function SubmitDocumentsMenuPage() {
+  const [roles, setRoles] = useState<UserRole[] | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
+    setRoles(getCachedUser()?.roles ?? []);
+  }, []);
+
+  const canSubmit = roles === null || canAccessPage(SUBMIT_HREF, roles);
+
   return (
     <section className="content">
       <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
@@ -19,10 +33,12 @@ export default function SubmitDocumentsMenuPage() {
 
       <section className="panel">
         <div className="choices" style={{ padding: 22 }}>
-          <Link href={SUBMIT_HREF}>
-            <strong>ยื่นเอกสารจดทะเบียนรถ</strong>
-            <div className="muted">เลือกรถ → ตรวจทานและตั้งค่า → ยืนยันยื่น</div>
-          </Link>
+          {canSubmit && (
+            <Link href={SUBMIT_HREF}>
+              <strong>ยื่นเอกสารจดทะเบียนรถ</strong>
+              <div className="muted">เลือกรถ → ตรวจทานและตั้งค่า → ยืนยันยื่น</div>
+            </Link>
+          )}
           <Link href={RECORDS_HREF}>
             <strong>ดูข้อมูลที่ยื่นแล้ว</strong>
             <div className="muted">ดูรายการที่ยื่นแล้ว แยกรถยนต์ / มอเตอร์ไซค์ ตามแบบใบส่งงาน และพิมพ์ใบส่งงาน</div>

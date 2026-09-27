@@ -16,6 +16,9 @@ export function normalizeVehicleRow(input: Record<string, unknown>): NormalizedV
     row[key] = String(input?.[key] ?? '').trim();
   }
   row.ownerType = normalizeOwnerType(row.ownerType);
+  // เลขตัวถังเก็บเป็นตัวพิมพ์ใหญ่ไม่มีช่องว่าง (พบ 2026-09-27: "mr0ha3..." กับ "MR0HA3..." เคยถูกบันทึกเป็นรถ 2 คัน
+  // และใบเสร็จจับคู่อัตโนมัติไม่เจอรถที่คีย์ตัวเล็ก) - frontend/src/lib/vehicle-validation.ts ทำแบบเดียวกัน
+  row.chassis = row.chassis.toUpperCase().replace(/\s+/g, '');
   return row;
 }
 
@@ -52,7 +55,7 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
     errors.push('กรุณาเลือกประเภทเชื้อเพลิงจากรายการที่กำหนด');
   }
   if (!isValidDate(row.date)) {
-    errors.push('วันที่ต้องเป็น DD-MM-YYYY ที่ถูกต้อง');
+    errors.push('วันที่ต้องเป็น วว/ดด/ปปปป ที่ถูกต้อง');
   }
   if (!row.customerId) errors.push('กรุณาเลือกลูกค้า');
   if (!row.chassis) errors.push('กรุณากรอกเลขตัวถัง');
@@ -82,6 +85,10 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   }
   if (sizeField === 'weight' && !row.weight) {
     errors.push(`กรุณากรอกน้ำหนักรถ (จำเป็นสำหรับ ${row.body} ${row.fuel})`);
+  }
+  // ช่องที่ใช้คิดภาษีต้องมากกว่า 0 (พบ 2026-09-27: ใส่ 0 แล้วขั้นยื่นเอกสารคิดภาษี 0 บาท/ขั้นต่ำสุดเหมือนเป็นตัวเลขจริง)
+  if (sizeField && row[sizeField] && isValidNumeric(row[sizeField]) && !(Number(row[sizeField]) > 0)) {
+    errors.push(sizeField === 'cc' ? 'ขนาด CC ต้องมากกว่า 0' : 'น้ำหนักรถต้องมากกว่า 0');
   }
 
   for (const [key, label] of VEHICLE_COLUMNS) {

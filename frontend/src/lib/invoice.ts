@@ -92,7 +92,9 @@ const TH_POS = ["", "สิบ", "ร้อย", "พัน", "หมื่น",
 function thaiInteger(n: number): string {
   if (n === 0) return "";
   let s = "";
-  if (n >= 1_000_000) {
+  // มีหลักล้านนำหน้า = หลักหน่วย 1 อ่าน "เอ็ด" แม้เศษหลังหลักล้านจะเหลือหลักเดียว (พบ 2026-09-27: 1,000,001 เคยเป็น "หนึ่งล้านหนึ่ง")
+  const hasMillions = n >= 1_000_000;
+  if (hasMillions) {
     s += `${thaiInteger(Math.floor(n / 1_000_000))}ล้าน`;
     n %= 1_000_000;
   }
@@ -103,7 +105,7 @@ function thaiInteger(n: number): string {
     if (!v) continue;
     if (p === 1 && v === 1) s += "สิบ";
     else if (p === 1 && v === 2) s += "ยี่สิบ";
-    else if (p === 0 && v === 1 && d.length > 1) s += "เอ็ด"; // 11 สิบเอ็ด, 101 หนึ่งร้อยเอ็ด
+    else if (p === 0 && v === 1 && (d.length > 1 || hasMillions)) s += "เอ็ด"; // 11 สิบเอ็ด, 101 หนึ่งร้อยเอ็ด, 1,000,001 หนึ่งล้านเอ็ด
     else s += TH_NUM[v] + TH_POS[p];
   }
   return s;

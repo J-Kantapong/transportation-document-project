@@ -6,6 +6,10 @@
 
 const PX_PER_MM = 96 / 25.4;
 const SCALE = 2; // ความละเอียดรูป 2 เท่า - ตัวหนังสือคมพอสำหรับพิมพ์
+// เพดานขนาดรูปต่อการวาด 1 ครั้ง (px ของรูป): Firefox ยาวได้ไม่เกิน 32,767 ต่อด้าน, Safari บน iPhone/iPad พื้นที่ราว 16.7 ล้าน px
+// เกินแล้วเบราว์เซอร์ไม่ error แต่ได้รูปว่าง (พบ 2026-09-27: รายงานยาวได้ PDF หน้าขาวทุกหน้า) -> วาดทีละช่วง ช่วงละหลายหน้า
+const MAX_CANVAS_SIDE = 16_000;
+const MAX_CANVAS_AREA = 16_000_000;
 const BREAK_AFTER = "tr, h1, h2, p, .head, .info, .sign, .tail";
 // .tail = กลุ่มที่ห้ามตัดกลาง (ท้ายใบส่งงาน: หมายเหตุ + ช่องลงชื่อ) - จุดตัดข้างในไม่นับ ตัดได้แค่หลังทั้งกลุ่ม
 const KEEP_TOGETHER = ".tail";
@@ -64,41 +68,76 @@ export async function downloadHtmlAsPdf(html: string, fileName: string, setup: P
     const doc = iframe.contentDocument!;
     await Promise.race([doc.fonts.ready, new Promise((resolve) => setTimeout(resolve, 3000))]);
     iframe.style.height = `${doc.documentElement.scrollHeight}px`;
-    const canvas = await html2canvas(doc.body, { scale: SCALE, backgroundColor: "#ffffff", logging: false });
-    const totalH = canvas.height / SCALE;
+    const totalH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
+    const docW = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth);
     const { soft, forced, tables } = layoutOf(doc);
 
-    const pdf = new jsPDF({ orientation: setup.orientation, unit: "mm", format: "a4", compress: true });
+    // 1) วางหน้าก่อน (px ของเอกสาร): ตัดตรงขอบล่างของแถว/หัวข้อ, หน้าที่เริ่มกลางตาราง (หลังหัวตาราง) วาดหัวตารางซ้ำไว้บนสุด
+    //    จึงเหลือที่ให้เนื้อหาน้อยลงเท่าความสูงหัวตาราง
+    const pages: Array<{ start: number; end: number; table?: Layout["tables"][number] }> = [];
     let start = 0;
-    let first = true;
     while (start < totalH - 1) {
-      // หน้านี้เริ่มกลางตาราง (หลังหัวตาราง) -> วาดหัวตารางซ้ำก่อน แล้วเหลือที่ให้เนื้อหาน้อยลงเท่าความสูงหัวตาราง
-      const table = first ? undefined : tables.find((t) => start >= t.headBottom - 1 && start < t.bottom - 1);
+      const table = pages.length === 0 ? undefined : tables.find((t) => start >= t.headBottom - 1 && start < t.bottom - 1);
       const headH = table ? table.headBottom - table.headTop : 0;
       const limit = start + contentHpx - headH;
       const forcedHere = forced.find((y) => y > start + 1 && y <= limit);
       const softHere = soft.filter((y) => y > start + 1 && y <= limit).pop();
       const end = forcedHere ?? (limit >= totalH ? totalH : (softHere ?? limit));
+      pages.push({ start, end, table });
+      start = end;
+    }
+
+    // 2) วาดเป็นช่วง ช่วงละหลายหน้าเท่าที่ไม่เกินเพดานรูป แล้วตัดเป็นหน้า - หัวตารางวาดแยกครั้งเดียวต่อตาราง
+    const render = async (y: number, height: number) => {
+      const canvas = await html2canvas(doc.body, {
+        scale: SCALE,
+        backgroundColor: "#ffffff",
+        logging: false,
+        x: 0,
+        y,
+        width: docW,
+        height: Math.max(1, Math.ceil(height)),
+      });
+      if (!canvas.width || !canvas.height) throw new Error("วาดหน้าเอกสารไม่สำเร็จ");
+      return canvas;
+    };
+    const maxChunk = Math.floor(Math.min(MAX_CANVAS_SIDE, MAX_CANVAS_AREA / (docW * SCALE)) / SCALE);
+    const heads = new Map<Layout["tables"][number], HTMLCanvasElement>();
+    const pdf = new jsPDF({ orientation: setup.orientation, unit: "mm", format: "a4", compress: true });
+    let chunk: { canvas: HTMLCanvasElement; top: number; bottom: number } | null = null;
+    for (const [n, page] of pages.entries()) {
+      if (!chunk || page.end > chunk.bottom + 0.5) {
+        let bottom = page.end;
+        for (const next of pages.slice(n + 1)) {
+          if (next.end - page.start > maxChunk) break;
+          bottom = next.end;
+        }
+        chunk = { canvas: await render(page.start, bottom - page.start), top: page.start, bottom };
+      }
+      const table = page.table;
+      const headH = table ? table.headBottom - table.headTop : 0;
+      let head = table ? heads.get(table) : undefined;
+      if (table && !head) {
+        head = await render(table.headTop, headH);
+        heads.set(table, head);
+      }
 
       const slice = document.createElement("canvas");
-      slice.width = canvas.width;
-      slice.height = Math.ceil((headH + end - start) * SCALE);
+      slice.width = chunk.canvas.width;
+      slice.height = Math.ceil((headH + page.end - page.start) * SCALE);
       const ctx = slice.getContext("2d")!;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, slice.width, slice.height);
-      if (table) {
-        const sy = Math.floor(table.headTop * SCALE);
-        const sh = Math.ceil(headH * SCALE);
-        ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
-      }
+      if (head) ctx.drawImage(head, 0, 0);
       const dy = Math.floor(headH * SCALE);
-      const sy = Math.floor(start * SCALE);
-      const sh = Math.min(canvas.height - sy, slice.height - dy);
-      ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, dy, canvas.width, sh);
-      if (!first) pdf.addPage();
-      first = false;
-      pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", setup.marginMm, setup.marginMm, contentWmm, slice.height / SCALE / PX_PER_MM);
-      start = end;
+      const sy = Math.floor((page.start - chunk.top) * SCALE);
+      const sh = Math.min(chunk.canvas.height - sy, slice.height - dy);
+      ctx.drawImage(chunk.canvas, 0, sy, chunk.canvas.width, sh, 0, dy, chunk.canvas.width, sh);
+      // รูปใหญ่เกินที่เบราว์เซอร์รับได้ได้ "data:," - โยน error ให้หน้าเว็บบอกให้ใช้ปุ่มพิมพ์แทน ไม่บันทึกไฟล์หน้าว่าง
+      const image = slice.toDataURL("image/jpeg", 0.92);
+      if (!image.startsWith("data:image/")) throw new Error("สร้างรูปหน้าเอกสารไม่สำเร็จ");
+      if (n > 0) pdf.addPage();
+      pdf.addImage(image, "JPEG", setup.marginMm, setup.marginMm, contentWmm, slice.height / SCALE / PX_PER_MM);
     }
     pdf.save(fileName);
   } finally {

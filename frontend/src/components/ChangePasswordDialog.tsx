@@ -45,6 +45,10 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
         ✕
       </button>
       <h2>เปลี่ยนรหัสผ่าน</h2>
+      {/* ผู้ดูแลระบบตั้งรหัสผ่านชั่วคราวให้ได้ (ผู้ใช้ 2026-09-27) - ผู้ใช้เปลี่ยนเป็นรหัสของตัวเองที่นี่ */}
+      <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>
+        ถ้าได้รหัสผ่านชั่วคราวจากผู้ดูแลระบบ ให้ใส่รหัสนั้นในช่อง &quot;รหัสผ่านเดิม&quot;
+      </p>
       <form onSubmit={submit} className="auth-fields">
         <label className="field">
           รหัสผ่านเดิม

@@ -8,7 +8,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import { PageTabs } from "@/components/PageTabs";
 import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
+import { compareSubmittedOrder, dutyOfItems, savedTotalExcludingDuty, swapPlateLabel, useReadScope } from "@/components/submit-flow/shared";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
+import { customerDisplayNames } from "@/lib/job-sheet";
 
 function formatMoney(amount: number): string {
   return amount.toLocaleString("th-TH", { maximumFractionDigits: 2 });
@@ -28,14 +30,20 @@ export function classify(body: string | null): Family {
 
 type Tab = "car" | "moto" | "unknown";
 
-function recordTotal(r: DocumentSubmission): number {
-  return Number(r.billFeeTotal) + Number(r.noBillTotal) + Number(r.taxAmount ?? 0);
-}
-
 // ตารางตามแบบใบส่งงานมีแค่ PENDING/RECEIPT_RECEIVED - FAILED แยกไปอยู่ FailedTable
 function StatusBadge({ status }: { status: DocumentSubmission["status"] }) {
   if (status === "PENDING") return <span className="badge warn">รอใบเสร็จ</span>;
   return <span className="badge done">ได้รับใบเสร็จแล้ว</span>;
+}
+
+// ยอดรวมไม่รวมค่าอากรแบบเดียวกับขั้นตรวจทานและใบส่งงาน (พบ 2026-09-27) - ภาษีคำนวณไม่ได้ขึ้น "ยังไม่รวมภาษี" ไม่ให้ดูเหมือนยอดครบ
+function TotalCell({ record }: { record: DocumentSubmission }) {
+  return (
+    <td>
+      {formatMoney(savedTotalExcludingDuty(record))} บาท
+      {record.taxAmount === null && <div className="field-error">ยังไม่รวมภาษี</div>}
+    </td>
+  );
 }
 
 export function GroupTable({
@@ -44,14 +52,18 @@ export function GroupTable({
   showUrgent,
   onPrint,
   onCancel,
+  canCancel,
 }: {
   title: string;
   rows: DocumentSubmission[];
   showUrgent: boolean;
   onPrint?: () => void;
   onCancel?: (record: DocumentSubmission) => void;
+  canCancel?: (record: DocumentSubmission) => boolean; // ไม่ส่ง = ทุกแถวที่รอใบเสร็จ
 }) {
-  const total = rows.reduce((sum, r) => sum + recordTotal(r), 0);
+  const total = rows.reduce((sum, r) => sum + savedTotalExcludingDuty(r), 0);
+  const duty = rows.reduce((sum, r) => sum + dutyOfItems(r.noBillItems), 0);
+  const taxMissing = rows.filter((r) => r.taxAmount === null).length;
   return (
     <section className="panel" style={{ marginBottom: 20 }}>
       <div className="panel-head">
@@ -78,7 +90,7 @@ export function GroupTable({
                 <th>เจ้าของรถ</th>
                 {showUrgent && <th>ด่วน</th>}
                 <th>เลขทะเบียนที่ขอ</th>
-                <th>ยอดรวม</th>
+                <th>ยอดรวม (ไม่รวมอากร)</th>
                 <th>สถานะ</th>
                 {onCancel && <th aria-label="ยกเลิก" />}
               </tr>
@@ -95,15 +107,23 @@ export function GroupTable({
                     {ownerDisplayLabel(r.vehicle.owner, r.vehicle.owner?.name) ?? "ยังไม่ระบุ"}
                   </td>
                   {showUrgent && <td>{r.urgent ? <span className="badge warn">ด่วน</span> : "—"}</td>}
-                  <td>{r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}</td>
-                  <td>{formatMoney(recordTotal(r))} บาท</td>
+                  <td>
+                    {r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}
+                    {/* เลขจากงานสลับเลขที่คนอื่นทำมาให้ (ผู้ใช้ 2026-09-27) - ไม่ใช่การขอใช้เลข แสดงให้เห็นชัด */}
+                    {swapPlateLabel(r.plateNumberOption) && (
+                      <div>
+                        <span className="badge warn">{swapPlateLabel(r.plateNumberOption)}</span>
+                      </div>
+                    )}
+                  </td>
+                  <TotalCell record={r} />
                   <td>
                     <StatusBadge status={r.status} />
                   </td>
                   {onCancel && (
                     <td>
-                      {/* ยกเลิกได้เฉพาะที่ยังรอใบเสร็จ ทั้งรถยนต์และจักรยานยนต์ - backend เช็กซ้ำ */}
-                      {r.status === "PENDING" && (
+                      {/* ยกเลิกได้เฉพาะที่ยังรอใบเสร็จ ในประเภทรถที่บัญชีนี้บันทึกได้ - backend เช็กซ้ำ */}
+                      {r.status === "PENDING" && (canCancel?.(r) ?? true) && (
                         <button type="button" className="text-button" style={{ color: "#c2410c" }} onClick={() => onCancel(r)}>
                           ยกเลิก
                         </button>
@@ -117,7 +137,11 @@ export function GroupTable({
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "14px 23px", borderTop: "1px solid #eef0f6" }}>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>รวม</span>
+        <span style={{ fontSize: 14, fontWeight: 500 }}>
+          รวม (ไม่รวมอากร)
+          {taxMissing > 0 && <span className="field-error"> ({taxMissing} คันยังไม่รวมภาษี)</span>}
+          {duty > 0 && <span className="muted" style={{ fontWeight: 400 }}> · ค่าอากรแยกต่างหาก {formatMoney(duty)} บาท</span>}
+        </span>
         <span style={{ fontSize: 16, fontWeight: 500, color: "#2854d9" }}>{formatMoney(total)} บาท</span>
       </div>
     </section>
@@ -147,7 +171,7 @@ function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
                 <th>เจ้าของงาน</th>
                 <th>วันที่ยื่นเอกสาร</th>
                 <th>ด่วน</th>
-                <th>ยอดรวม</th>
+                <th>ยอดรวม (ไม่รวมอากร)</th>
                 <th>เหตุผลที่ยื่นไม่สำเร็จ</th>
               </tr>
             </thead>
@@ -160,7 +184,7 @@ function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
                   <td>{r.vehicle.customer.name}</td>
                   <td>{isoToDisplayDate(r.submitDate.slice(0, 10))}</td>
                   <td>{r.urgent ? <span className="badge warn">ด่วน</span> : "—"}</td>
-                  <td>{formatMoney(recordTotal(r))} บาท</td>
+                  <TotalCell record={r} />
                   <td style={{ whiteSpace: "normal", minWidth: 200 }}>{r.failRemark || "—"}</td>
                 </tr>
               ))}
@@ -172,26 +196,40 @@ function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
   );
 }
 
+// หน้าดูข้อมูลที่ยื่นแล้ว: เลือกวันที่จากรายการวันที่ทั้งหมด (dates) แล้วแสดงรายการของวันนั้น (records) - โหลดทีละวันที่หน้า records
+// (พบ 2026-09-27: เดิมโหลด 2,000 รายการล่าสุดแล้วสร้างวันที่เอง วันเก่าหาย วันที่อยู่ขอบพิมพ์ใบส่งงานไม่ครบ)
 export function SubmittedRecordsView({
+  dates,
+  date,
+  onDateChange,
   records,
   loading,
-  canCancel = false,
+  loadError = "",
+  onRetry,
+  truncated = false,
+  canCancel,
   onRecordRemoved,
 }: {
+  dates: Array<{ date: string; count: number }>;
+  date: string; // "" = ยังไม่มีวันที่ให้เลือก
+  onDateChange: (date: string) => void;
   records: DocumentSubmission[];
   loading: boolean;
-  canCancel?: boolean;
+  loadError?: string;
+  onRetry?: () => void;
+  truncated?: boolean; // วันนั้นมีรายการเกินที่โหลดมา
+  canCancel?: (record: DocumentSubmission) => boolean; // ไม่ส่ง = ไม่มีปุ่มยกเลิก
   onRecordRemoved?: (id: string) => void;
 }) {
   // แท็บอยู่ใน URL (?tab=moto) ให้กดย้อนกลับ/ส่งลิงก์ได้ (ผู้ใช้ 2026-09-25) - เปลี่ยนแค่ query จึงไม่ล้างตัวกรองวันที่/เจ้าของงาน
+  // บัญชีที่เห็นแต่มอเตอร์ไซค์เปิดมาเจอแท็บมอเตอร์ไซค์ (พบ 2026-09-27: เดิมเจอแท็บรถยนต์ที่ว่างเปล่าทุกครั้ง)
   const pathname = usePathname();
   const tabParam = useSearchParams().get("tab");
-  const tab: Tab = tabParam === "moto" || tabParam === "unknown" ? tabParam : "car";
+  const defaultTab: Tab = useReadScope() === "MOTO" ? "moto" : "car";
+  const tab: Tab = tabParam === "car" || tabParam === "moto" || tabParam === "unknown" ? tabParam : defaultTab;
   // รายการที่กำลังจะยกเลิก (เปิด SubmissionCancelDialog)
   const [cancelling, setCancelling] = useState<DocumentSubmission | null>(null);
   const onCancel = canCancel ? setCancelling : undefined;
-  // undefined = ยังไม่ได้เลือก -> ใช้วันที่ล่าสุดที่มีข้อมูล, "" = ทุกวันที่
-  const [dateChoice, setDateChoice] = useState<string | undefined>(undefined);
   const [ownerChoice, setOwnerChoice] = useState("");
   // ใบส่งงานที่กำลังจะพิมพ์ (เปิด dialog) - แบบรถยนต์/มอเตอร์ไซค์ตามตัวอย่างที่ผู้ใช้ให้มา
   const [printGroup, setPrintGroup] = useState<{
@@ -202,27 +240,19 @@ export function SubmittedRecordsView({
     note: string;
   } | null>(null);
 
-  const dateCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of records) {
-      const d = r.submitDate.slice(0, 10);
-      map.set(d, (map.get(d) ?? 0) + 1);
-    }
-    return map;
-  }, [records]);
-  const dates = useMemo(() => Array.from(dateCounts.keys()).sort().reverse(), [dateCounts]);
-  const date = dateChoice === undefined ? (dates[0] ?? "") : dateChoice;
-
-  const inDate = useMemo(() => (date ? records.filter((r) => r.submitDate.slice(0, 10) === date) : records), [records, date]);
-  const owners = useMemo(() => Array.from(new Set(inDate.map((r) => r.vehicle.customer.name))).sort((a, b) => a.localeCompare(b, "th")), [inDate]);
-  const owner = owners.includes(ownerChoice) ? ownerChoice : "";
+  // เจ้าของงานเลือกตามรหัสลูกค้า (ผู้ใช้ 2026-09-27: ใบยื่นใช้รหัสลูกค้าทุกหน้า) - ชื่อซ้ำต่อบริษัท · สาขาให้แยกออก
+  const owners = useMemo(
+    () =>
+      Array.from(customerDisplayNames(records.map((r) => r.vehicle.customer)), ([id, label]) => ({ id, label })).sort((a, b) =>
+        a.label.localeCompare(b.label, "th"),
+      ),
+    [records],
+  );
+  const owner = owners.some((o) => o.id === ownerChoice) ? ownerChoice : "";
   // คันที่ยื่นก่อนอยู่บนสุด (ตาราง + ใบส่งงานที่ปริ้นใช้ลำดับเดียวกัน)
   const filtered = useMemo(
-    () =>
-      (owner ? inDate.filter((r) => r.vehicle.customer.name === owner) : inDate)
-        .slice()
-        .sort((a, b) => a.submitDate.localeCompare(b.submitDate) || a.createdAt.localeCompare(b.createdAt)),
-    [inDate, owner],
+    () => (owner ? records.filter((r) => r.vehicle.customer.id === owner) : records).slice().sort(compareSubmittedOrder),
+    [records, owner],
   );
 
   // ยื่นไม่สำเร็จ (FAILED) แยกออกจากตารางตามแบบใบส่งงาน ไปอยู่ตารางล่างสุดของแท็บตัวเอง
@@ -250,7 +280,7 @@ export function SubmittedRecordsView({
   if (byFamily.unknown.length > 0 || failedByTab.unknown.length > 0) {
     tabs.push(["unknown", `ไม่ระบุประเภทรถ · ${byFamily.unknown.length} คัน${failedNote(failedByTab.unknown.length)}`]);
   }
-  const activeTab = tabs.some(([t]) => t === tab) ? tab : "car";
+  const activeTab = tabs.some(([t]) => t === tab) ? tab : defaultTab;
 
   return (
     <>
@@ -258,11 +288,11 @@ export function SubmittedRecordsView({
         <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label className="field" style={{ minWidth: 220 }}>
             วันที่ยื่นเอกสาร
-            <select value={date} onChange={(e) => setDateChoice(e.target.value)} disabled={loading}>
-              <option value="">ทุกวันที่</option>
+            <select value={date} onChange={(e) => onDateChange(e.target.value)} disabled={dates.length === 0}>
+              {dates.length === 0 && <option value="">—</option>}
               {dates.map((d) => (
-                <option key={d} value={d}>
-                  {isoToDisplayDate(d) || d} ({dateCounts.get(d)} คัน)
+                <option key={d.date} value={d.date}>
+                  {isoToDisplayDate(d.date) || d.date} ({d.count} คัน)
                 </option>
               ))}
             </select>
@@ -272,19 +302,37 @@ export function SubmittedRecordsView({
             <select value={owner} onChange={(e) => setOwnerChoice(e.target.value)} disabled={loading}>
               <option value="">ทุกเจ้าของงาน</option>
               {owners.map((o) => (
-                <option key={o} value={o}>
-                  {o}
+                <option key={o.id} value={o.id}>
+                  {o.label}
                 </option>
               ))}
             </select>
           </label>
           <span className="muted" role="status">
-            {loading ? "กำลังโหลด..." : `พบ ${filtered.length} คัน`}
+            {loading ? "กำลังโหลด..." : loadError ? "" : `พบ ${filtered.length} คัน`}
           </span>
         </div>
+        {truncated && !loading && (
+          <p className="customer-message error" role="alert" style={{ margin: "14px 0 0" }}>
+            วันที่ยื่น {isoToDisplayDate(date) || date} มีรายการมากกว่าที่แสดง - ตารางและใบส่งงานของวันที่นี้ยังไม่ครบ
+          </p>
+        )}
       </section>
 
-      {!loading && records.length === 0 ? (
+      {loadError ? (
+        <div className="empty-customers" role="alert">
+          <p className="customer-message error" style={{ marginBottom: 12 }}>
+            โหลดรายการที่ยื่นไม่สำเร็จ: {loadError}
+          </p>
+          {onRetry && (
+            <button type="button" className="primary" disabled={loading} onClick={onRetry}>
+              {loading ? "กำลังโหลด…" : "ลองใหม่"}
+            </button>
+          )}
+        </div>
+      ) : loading && records.length === 0 ? (
+        <p className="muted">กำลังโหลด...</p>
+      ) : !loading && dates.length === 0 ? (
         <p className="muted">ยังไม่มีข้อมูลที่ยื่นแล้ว</p>
       ) : (
         <>
@@ -292,7 +340,7 @@ export function SubmittedRecordsView({
             label="แบบใบส่งงาน"
             style={{ marginTop: 0, marginBottom: 20 }}
             tabs={tabs.map(([key, label]) => ({
-              href: key === "car" ? pathname : `${pathname}?tab=${key}`,
+              href: key === defaultTab ? pathname : `${pathname}?tab=${key}`,
               label,
               selected: activeTab === key,
             }))}
@@ -311,6 +359,7 @@ export function SubmittedRecordsView({
                   rows={g.rows}
                   showUrgent={g.showUrgent}
                   onCancel={onCancel}
+                  canCancel={canCancel}
                   onPrint={() => setPrintGroup({ kind: "car", urgent: g.urgent, title: g.title, rows: g.rows, note: g.note })}
                 />
               ))}
@@ -329,6 +378,7 @@ export function SubmittedRecordsView({
                   rows={g.rows}
                   showUrgent={false}
                   onCancel={onCancel}
+                  canCancel={canCancel}
                   onPrint={() => setPrintGroup({ kind: "moto", urgent: g.urgent, title: g.title, rows: g.rows, note: "" })}
                 />
               ))}
@@ -337,7 +387,7 @@ export function SubmittedRecordsView({
           )}
           {activeTab === "unknown" && (
             <>
-              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent onCancel={onCancel} />
+              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent onCancel={onCancel} canCancel={canCancel} />
               <FailedTable rows={failedByTab.unknown} />
             </>
           )}
@@ -349,6 +399,7 @@ export function SubmittedRecordsView({
           record={cancelling}
           onClose={() => setCancelling(null)}
           onCancelled={(id) => onRecordRemoved?.(id)}
+          onStale={onRetry}
         />
       )}
       {printGroup && (

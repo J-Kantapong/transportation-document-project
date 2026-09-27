@@ -1,15 +1,23 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { assertVehicleInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
 
 export const RECEIVING_STEPS = ['plate', 'book', 'delivery'] as const;
 export type ReceivingStep = (typeof RECEIVING_STEPS)[number];
+type VehicleKindParam = 'car' | 'moto';
 
 const DONE_DATE_FIELD = {
   plate: 'plateReceivedDate',
   book: 'bookReceivedDate',
   delivery: 'deliveredDate',
 } as const;
+
+// ตาราง "ดำเนินการแล้ว" แสดงทีละ 100 คัน (ผู้ใช้กด "โหลดเพิ่ม" ได้)
+export const COMPLETED_PAGE_SIZE = 100;
+// limit สูงสุด - หน้าเว็บโหลดรายการใหม่หลังแนบ/แก้ ด้วยจำนวนที่เปิดอยู่ (กด "โหลดเพิ่ม" ไว้แล้วไม่หดกลับเหลือ 100 - พบ 2026-09-27)
+export const COMPLETED_MAX_LIMIT = 1000;
 
 function parseStep(raw: string): ReceivingStep {
   if (!(RECEIVING_STEPS as readonly string[]).includes(raw)) {
@@ -18,29 +26,49 @@ function parseStep(raw: string): ReceivingStep {
   return raw as ReceivingStep;
 }
 
-function parseIsoDate(raw: unknown): Date {
-  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
-    throw new BadRequestException({ error: 'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
-  }
-  return new Date(`${raw}T00:00:00.000Z`);
+// หน้ารับป้าย/รับเล่มแยกรถยนต์กับจักรยานยนต์ (/car, /moto) - กรองในฐานข้อมูลก่อนตัด 100 คัน
+// (พบ 2026-09-27: เดิมตัด 100 คันรวมทั้งสองประเภทแล้วค่อยกรองในเบราว์เซอร์ รายการของอีกประเภทเบียดจนคันที่เพิ่งแนบหายไป)
+function parseKind(raw: unknown): VehicleKindParam | undefined {
+  const kind = typeof raw === 'string' ? raw.trim() : '';
+  if (!kind) return undefined;
+  if (kind !== 'car' && kind !== 'moto') throw new BadRequestException({ error: 'kind ต้องเป็น car หรือ moto' });
+  return kind;
 }
 
-function optionalText(raw: unknown): string | null {
-  if (raw === null || raw === undefined) return null;
-  if (typeof raw !== 'string') throw new BadRequestException({ error: 'ข้อมูลต้องเป็นข้อความ' });
-  return raw.trim() || null;
+function parseOffset(raw: unknown): number {
+  const text = typeof raw === 'string' ? raw.trim() || '0' : '0';
+  if (!/^\d{1,6}$/.test(text)) throw new BadRequestException({ error: 'offset ต้องเป็นจำนวนเต็มตั้งแต่ 0' });
+  return Number(text);
+}
+
+function parseLimit(raw: unknown): number {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return COMPLETED_PAGE_SIZE;
+  const limit = /^\d{1,4}$/.test(text) ? Number(text) : 0;
+  if (limit < 1 || limit > COMPLETED_MAX_LIMIT) throw new BadRequestException({ error: `limit ต้องเป็นจำนวนเต็ม 1-${COMPLETED_MAX_LIMIT}` });
+  return limit;
 }
 
 const VEHICLE_INCLUDE = {
-  customer: { select: { name: true } },
+  // id = กุญแจใบยื่น (วันที่ยื่น + กลุ่ม + รหัสลูกค้า ทุกหน้าเหมือนกัน - ผู้ใช้ 2026-09-27) ชื่อซ้ำกันได้ จึงใช้ชื่อแค่แสดง
+  // company/branch = แยกลูกค้าที่ชื่อซ้ำกันในการ์ดใบยื่น/ตัวกรองเจ้าของงาน
+  customer: { select: { id: true, name: true, company: true, branch: true } },
   brand: { select: { name: true } },
   // แถวล่าสุดแถวเดียวพอ - ใช้เช็คว่าได้รับใบเสร็จแล้วหรือยัง (ขั้น plate/book ต้องมีใบเสร็จก่อน)
   // submitDate + urgent = ใบยื่นที่รถคันนี้อยู่ (หน้ารับป้าย/รับเล่มจัดกลุ่มตามใบยื่น ผู้ใช้ 2026-09-26)
-  documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true } },
+  // receiptDate = วันที่ในใบเสร็จ - วันที่รับป้าย/เล่มต้องไม่ก่อนวันนี้ (หน้าเว็บตรวจก่อนอัปโหลด พบ 2026-09-27)
+  documentSubmissions: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { status: true, receiptNo: true, submitDate: true, receiptDate: true, urgent: true, createdAt: true },
+  },
 } as const;
 
 // รับป้ายทะเบียน/รับเล่มทะเบียน เข้าคิวเมื่อได้รับใบเสร็จแล้ว (ยื่นเอกสารครั้งล่าสุด = RECEIPT_RECEIVED)
 // ส่วน Delivery เข้าคิวเมื่อรับทั้งป้ายและเล่มแล้ว - ลำดับป้าย/เล่มไม่บังคับ ทำสลับกันได้
+// บันทึกรับป้าย/เล่มทำที่ POST /api/plate-photos/attach, /api/book-photos/attach (ต้องมีรูปทุกคัน)
+// ส่วน Delivery บันทึกที่ POST /api/delivery (ออกใบส่งงาน) - PATCH /api/vehicles/:id/receiving/:step เดิมถูกถอดออกแล้ว
+// (พบ 2026-09-27: ยังบันทึกส่งงานได้โดยไม่มีใบส่งงาน หน้าเว็บเลิกเรียกไปนานแล้ว)
 @Injectable()
 export class ReceivingService {
   constructor(private readonly prisma: PrismaService) {}
@@ -50,6 +78,23 @@ export class ReceivingService {
       return { plateReceivedDate: { not: null }, bookReceivedDate: { not: null }, deliveredDate: null };
     }
     return { [DONE_DATE_FIELD[step]]: null, documentSubmissions: { some: { status: 'RECEIPT_RECEIVED' } } };
+  }
+
+  // ขอบเขตประเภทรถของผู้ใช้ (STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทของตัวเอง) + ประเภทของหน้า (?kind=)
+  private scopeWhere(kind: VehicleKindParam | undefined): Prisma.VehicleWhereInput[] {
+    return [vehicleTypeWhere(), ...(kind ? [vehicleTypeWhere(kind === 'moto' ? 'MOTO' : 'CAR')] : [])];
+  }
+
+  // ตาราง "ดำเนินการแล้ว" เรียงตามเวลาที่แนบรูป (ล่าสุดก่อน) ไม่ใช่วันที่รับที่พิมพ์ - แนบวันย้อนหลังแล้วยังเห็นอยู่บนสุด
+  // (พบ 2026-09-27) รถที่รับก่อนมีรูป (ติ๊กเองก่อน 2026-09-21) ไม่มีรูป -> ไว้ท้ายสุด เรียงตามวันที่รับ
+  private completedOrder(step: ReceivingStep): Prisma.VehicleOrderByWithRelationInput[] {
+    if (step === 'plate') {
+      return [{ platePhoto: { closedAt: { sort: 'desc', nulls: 'last' } } }, { plateReceivedDate: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }];
+    }
+    if (step === 'book') {
+      return [{ bookPhoto: { closedAt: { sort: 'desc', nulls: 'last' } } }, { bookReceivedDate: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }];
+    }
+    return [{ deliveredDate: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }];
   }
 
   private mapRow(
@@ -66,18 +111,24 @@ export class ReceivingService {
       bookPhotoId: string | null;
       bookReceivedDate: Date | null;
       deliveredDate: Date | null;
+      plateDeliveredDate: Date | null;
       deliveryRecipient: string | null;
       deliveryNote: string | null;
-      customer: { name: string };
+      customer: { id: string; name: string; company: string | null; branch: string | null };
       brand: { name: string };
-      documentSubmissions: Array<{ receiptNo?: string | null; submitDate?: Date; urgent?: boolean; createdAt?: Date }>;
+      documentSubmissions: Array<{ receiptNo?: string | null; submitDate?: Date; receiptDate?: Date | null; urgent?: boolean; createdAt?: Date }>;
     },
   ) {
     const doneDate = vehicle[DONE_DATE_FIELD[step]];
+    // วันที่ส่งของชิ้นนี้ให้ลูกค้าแล้ว (ป้าย = plateDeliveredDate, เล่ม = deliveredDate) - ส่งแล้วแก้วันที่รับ/ถอดรูปไม่ได้
+    const itemDeliveredDate = step === 'plate' ? vehicle.plateDeliveredDate : step === 'book' ? vehicle.deliveredDate : null;
     return {
       id: vehicle.id,
       date: vehicle.date.toISOString().slice(0, 10),
+      customerId: vehicle.customer.id, // กุญแจใบยื่น (ผู้ใช้ 2026-09-27) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
       customerName: vehicle.customer.name,
+      customerCompany: vehicle.customer.company,
+      customerBranch: vehicle.customer.branch,
       chassis: vehicle.chassis,
       brandName: vehicle.brand.name,
       body: vehicle.body,
@@ -85,21 +136,27 @@ export class ReceivingService {
       plateNumber: vehicle.plateNumber,
       receiptNo: vehicle.documentSubmissions[0]?.receiptNo ?? null, // เลขที่ใบเสร็จของการยื่นครั้งล่าสุด - เรียงไปห้องรับป้าย
       submitDate: vehicle.documentSubmissions[0]?.submitDate?.toISOString().slice(0, 10) ?? null, // วันที่ยื่นของใบยื่นล่าสุด
+      receiptDate: vehicle.documentSubmissions[0]?.receiptDate?.toISOString().slice(0, 10) ?? null, // วันที่ในใบเสร็จ
       urgent: vehicle.documentSubmissions[0]?.urgent ?? false,
       // ลำดับที่บันทึกยื่น (= ลำดับในใบส่งงานที่ปริ้น) - หน้ารับป้าย/รับเล่มเรียงตามนี้เป็นค่าเริ่มต้น
       submittedAt: vehicle.documentSubmissions[0]?.createdAt?.toISOString() ?? null,
       platePhotoId: step === 'plate' ? vehicle.platePhotoId : null, // รูปป้ายที่ใช้ยืนยันการรับป้าย (หลักฐาน)
       bookPhotoId: step === 'book' ? vehicle.bookPhotoId : null, // รูปเล่มที่ใช้ยืนยันการรับเล่ม (หลักฐาน)
       doneDate: doneDate?.toISOString().slice(0, 10) ?? null,
+      itemDeliveredDate: itemDeliveredDate?.toISOString().slice(0, 10) ?? null,
+      // รับป้าย: ส่งเล่มให้ลูกค้าไปก่อนแล้ว - หน้ารับป้ายเตือนว่าถ้าป้ายไปพร้อมเล่ม (แนบรูปช้า) วันที่รับป้ายต้องไม่หลังวันนี้
+      // ("ป้ายไปพร้อมเล่มแล้ว" ตั้งวันที่ส่งป้าย = วันที่ในใบส่งเล่ม - พบ 2026-09-27)
+      bookDeliveredDate: step === 'plate' ? (vehicle.deliveredDate?.toISOString().slice(0, 10) ?? null) : null,
       recipient: step === 'delivery' ? vehicle.deliveryRecipient : null,
       note: step === 'delivery' ? vehicle.deliveryNote : null,
     };
   }
 
-  async listPending(stepRaw: string) {
+  async listPending(stepRaw: string, kindRaw?: unknown) {
     const step = parseStep(stepRaw);
+    const kind = parseKind(kindRaw);
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { ...this.pendingWhere(step), ...vehicleTypeWhere() }, // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
+      where: { ...this.pendingWhere(step), deletedAt: null, AND: this.scopeWhere(kind) },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: VEHICLE_INCLUDE,
     });
@@ -108,46 +165,24 @@ export class ReceivingService {
     return eligible.map((v) => this.mapRow(step, v));
   }
 
-  async listCompleted(stepRaw: string) {
+  // q = ค้นเลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อลูกค้า (กฎเดียวกับหน้าค้นหารถ) หรือเลขที่ใบเสร็จ
+  // limit (ไม่ส่ง = 100) = โหลดใหม่ด้วยจำนวนที่เปิดอยู่
+  async listCompleted(stepRaw: string, query: { kind?: unknown; q?: unknown; offset?: unknown; limit?: unknown } = {}) {
     const step = parseStep(stepRaw);
-    const field = DONE_DATE_FIELD[step];
+    const kind = parseKind(query.kind);
+    const offset = parseOffset(query.offset);
+    const limit = parseLimit(query.limit);
+    const q = typeof query.q === 'string' ? query.q.trim() : '';
+    const search: Prisma.VehicleWhereInput[] = q
+      ? [{ OR: [vehicleListWhere({ q }), { documentSubmissions: { some: { receiptNo: { contains: q, mode: 'insensitive' } } } }] }]
+      : [];
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { [field]: { not: null }, ...vehicleTypeWhere() },
-      orderBy: [{ [field]: 'desc' }, { updatedAt: 'desc' }],
-      take: 100,
+      where: { [DONE_DATE_FIELD[step]]: { not: null }, deletedAt: null, AND: [...this.scopeWhere(kind), ...search] },
+      orderBy: this.completedOrder(step),
+      skip: offset,
+      take: limit + 1, // เกินมา 1 คัน = ยังมีหน้าถัดไป
       include: VEHICLE_INCLUDE,
     });
-    return vehicles.map((v) => this.mapRow(step, v));
-  }
-
-  async markDone(id: string, stepRaw: string, dto: { date?: unknown; recipient?: unknown; note?: unknown }) {
-    const step = parseStep(stepRaw);
-    // ผู้ใช้ 2026-09-21: รับป้ายต้องมีรูปป้ายทุกคัน -> บันทึกได้ทางเดียวคือ POST /api/plate-photos/attach (ติ๊กเองปิดแล้ว)
-    if (step === 'plate') {
-      throw new BadRequestException({ error: 'รับป้ายทะเบียนต้องแนบรูปป้ายทุกคัน - กด "แนบรูปป้าย" ที่แถวของรถคันนั้น' });
-    }
-    // รับเล่มใช้วิธีเดียวกับรับป้าย (ต้องมีรูปเล่มทุกคัน) -> บันทึกได้ทางเดียวคือ POST /api/book-photos/attach
-    if (step === 'book') {
-      throw new BadRequestException({ error: 'รับเล่มทะเบียนต้องแนบรูปเล่มทุกคัน - กด "แนบรูปเล่ม" ที่แถวของรถคันนั้น' });
-    }
-    const date = parseIsoDate(dto?.date);
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { id }, include: VEHICLE_INCLUDE });
-    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
-    assertVehicleInScope(vehicle.body);
-
-    if (step === 'delivery') {
-      if (!vehicle.plateReceivedDate || !vehicle.bookReceivedDate) {
-        throw new BadRequestException({ error: 'ต้องรับป้ายทะเบียนและเล่มทะเบียนให้ครบก่อนจึงจะ Delivery ได้' });
-      }
-    } else if (vehicle.documentSubmissions[0]?.status !== 'RECEIPT_RECEIVED') {
-      throw new BadRequestException({ error: 'ต้องได้รับใบเสร็จก่อนจึงจะรับป้าย/เล่มทะเบียนได้' });
-    }
-
-    const data =
-      step === 'delivery'
-        ? { deliveredDate: date, deliveryRecipient: optionalText(dto.recipient), deliveryNote: optionalText(dto.note) }
-        : { [DONE_DATE_FIELD[step]]: date };
-    const updated = await this.prisma.vehicle.update({ where: { id }, data, include: VEHICLE_INCLUDE });
-    return this.mapRow(step, updated);
+    return { vehicles: vehicles.slice(0, limit).map((v) => this.mapRow(step, v)), hasMore: vehicles.length > limit };
   }
 }

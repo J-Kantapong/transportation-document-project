@@ -19,9 +19,10 @@ export class ReceiptsController {
     return this.receiptsService.findByIds(ids);
   }
 
+  // ถาดรูปรอจับคู่ - ตอบ { receipts, total, hasMore } โหลดเพิ่มด้วย offset (limit ไม่ส่ง = 200)
   @Get('unassigned')
-  listUnassigned() {
-    return this.receiptsService.listUnassigned();
+  listUnassigned(@Query('offset') offset?: string, @Query('limit') limit?: string) {
+    return this.receiptsService.listUnassigned(offset, limit);
   }
 
   @Get(':id/image')
@@ -30,13 +31,15 @@ export class ReceiptsController {
     return new StreamableFile(data, { type: mimeType, disposition: 'inline' });
   }
 
+  // unassignedOnly = จับคู่จากถาด: รูปถูกจับคู่กับรถคันอื่นไปแล้วตอบ 409
   @Patch(':id')
-  assign(@Param('id') id: string, @Body() body: { submissionId?: unknown }) {
-    return this.receiptsService.assign(id, body?.submissionId);
+  assign(@Param('id') id: string, @Body() body: { submissionId?: unknown; unassignedOnly?: unknown }) {
+    return this.receiptsService.assign(id, body?.submissionId, body?.unassignedOnly);
   }
 
+  // ?unassignedOnly=1 = ลบจากถาด/หน้าถ่าย: รูปถูกจับคู่กับรถไปแล้วตอบ 409 ไม่ลบ
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.receiptsService.remove(id);
+  remove(@Param('id') id: string, @Query('unassignedOnly') unassignedOnly?: string) {
+    return this.receiptsService.remove(id, unassignedOnly);
   }
 }

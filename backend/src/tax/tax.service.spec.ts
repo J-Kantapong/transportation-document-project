@@ -72,4 +72,26 @@ describe('TaxService.preview', () => {
     expect(result.status).toBe('MISSING_INPUT');
     expect(result.amount).toBeNull();
   });
+
+  // พบ 2026-09-27: cc 0 ผ่านหน้าเพิ่มข้อมูลรถได้ แล้วขั้นยื่นบันทึกภาษี 0 บาทเป็นยอดปกติ
+  it('cc 0 -> MISSING_INPUT (หน้ายื่นขึ้น "คำนวณไม่ได้") ไม่ใช่ CALCULATED 0 บาท', async () => {
+    const prisma = mockPrisma({
+      governmentTaxCcBracket: {
+        findMany: vi.fn().mockResolvedValue([{ fuelGroup: GovTaxFuelGroup.ICE, ccFrom: decimal(0), ccTo: null, ratePerCc: decimal(0.5) }]),
+      },
+    });
+    const service = new TaxService(prisma);
+
+    const result = await service.preview({
+      body: 'รย.1-เก๋ง 2 ตอน',
+      fuel: 'เบนซิน',
+      cc: '0',
+      weight: null,
+      firstRegistrationDate: null,
+      owner: { ownerType: 'INDIVIDUAL', isHirePurchaseBusiness: false, hirerType: null },
+    });
+
+    expect(result.status).toBe('MISSING_INPUT');
+    expect(result.amount).toBeNull();
+  });
 });

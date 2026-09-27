@@ -95,6 +95,20 @@ describe('VehicleSearchService.search', () => {
     await expect(svc.search({ kind: 'truck' }, TODAY)).rejects.toMatchObject({ status: 400 });
   });
 
+  // ผู้ใช้ 2026-09-27: ปิดงาน - วางบิลนอกระบบ = จบงาน ไม่ค้าง "วางบิล" / งานสลับเลขที่ยกเลิกแล้วไม่ทำให้รอ
+  it('รถที่ปิดงาน - วางบิลนอกระบบไม่ค้างวางบิล และนับเป็นจบงาน', async () => {
+    const closed = { ...finished('closed'), invoiceLines: [], billingClosedAt: new Date('2026-09-20T03:00:00.000Z') };
+    const open = { ...finished('open'), invoiceLines: [], billingClosedAt: null };
+    const { svc, findMany } = service([closed, open]);
+    const result = await svc.search({}, TODAY);
+    expect(result.vehicles.find((v) => v.id === 'closed')!.statuses).toEqual([]);
+    expect(result.vehicles.find((v) => v.id === 'open')!.statuses.map((s) => s.stage)).toEqual(['billing']);
+    expect(result.counts).toMatchObject({ billing: 1, done: 1 });
+    const select = findMany.mock.calls[0][0].select;
+    expect(select.billingClosedAt).toBe(true);
+    expect(select.plateSwapsAsNew.where).toEqual({ returnedDate: null, cancelledAt: null });
+  });
+
   it('ส่งคำค้นและช่วงวันที่ไปที่ query และไม่รวมรถที่ถูกลบ', async () => {
     const { svc, findMany } = service([]);
     await svc.search({ q: 'ABC', from: '2026-09-01', to: '2026-09-30' }, TODAY);

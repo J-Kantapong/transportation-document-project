@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 import { isoToDisplayDate } from "@/lib/date";
 import type { ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
+import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 
 // ภาพรวมผู้บริหาร - งานแต่ละขั้นตอน + คันที่ติดขัด แยกรถยนต์/จักรยานยนต์ (ผู้ใช้ขอ 2026-09-24)
 
@@ -151,9 +152,28 @@ export function ProcessBoard({ rows, dayWord }: { rows: ProcessRow[]; dayWord: s
 
 type KindFilter = "all" | VehicleKind;
 
-export function StuckList({ total, byKind, items }: { total: number; byKind: { car: number; moto: number }; items: StuckItem[] }) {
+// "ไปจัดการ" พาไปหน้าที่มีรถคันนั้นจริงพร้อม ?focus= แบบเดียวกับหน้าค้นหารถ (พบ 2026-09-27: เดิมไปหน้าเมนู/หน้าเลือกประเภทรถ)
+// ต่อภาษีไม่แสดงเลขตัวถังในตาราง จึงเปิดหน้าอย่างเดียว
+function stuckHref(s: StuckItem): string {
+  if (s.source === "taxRenewal") return s.href;
+  return focusHref(workPageFor(s.stage, s.kind, s.flags, s.href), s.chassis);
+}
+
+export function StuckList({
+  total,
+  byKind,
+  limit,
+  items,
+}: {
+  total: number;
+  byKind: { car: number; moto: number };
+  limit: number;
+  items: StuckItem[];
+}) {
   const [filter, setFilter] = useState<KindFilter>("all");
-  const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
+  // items มาไม่เกิน limit คันต่อประเภทรถ เรียงตามความด่วน - "ทั้งหมด" แสดง limit คันแรก (พบ 2026-09-27)
+  const shown = filter === "all" ? items.slice(0, limit) : items.filter((i) => i.kind === filter);
+  const count = filter === "all" ? total : byKind[filter];
   const chips: Array<{ key: KindFilter; label: string; count: number }> = [
     { key: "all", label: "ทั้งหมด", count: total },
     { key: "car", label: "รถยนต์", count: byKind.car },
@@ -223,7 +243,7 @@ export function StuckList({ total, byKind, items }: { total: number; byKind: { c
                   </td>
                   <td className="stuck-reason">{s.reason}</td>
                   <td>
-                    <Link href={s.href} className="text-button">
+                    <Link href={stuckHref(s)} className="text-button">
                       ไปจัดการ →
                     </Link>
                   </td>
@@ -233,9 +253,9 @@ export function StuckList({ total, byKind, items }: { total: number; byKind: { c
           </table>
         </div>
       )}
-      {total > items.length && (
+      {count > shown.length && (
         <p className="exec-note stuck-more">
-          แสดง {items.length} คันที่เร่งด่วนที่สุด จากทั้งหมด {total} คัน
+          แสดง {shown.length} คันที่เร่งด่วนที่สุด จากทั้งหมด {count} คัน{filter === "all" ? "" : `ในกลุ่ม${KIND_LABEL[filter]}`}
         </p>
       )}
     </section>

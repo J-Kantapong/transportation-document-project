@@ -78,6 +78,7 @@ export interface StuckItem {
   overdueDays: number;
   severity: "high" | "medium";
   reason: string;
+  flags: string[]; // ปัญหาของคันนี้ (เช่น PLATE_SWAP_PENDING) - ใช้เลือกหน้าที่ลิงก์ไปจัดการ
 }
 
 export interface OverviewAlert {
@@ -119,6 +120,7 @@ export interface Overview {
   };
   workingCapital: {
     inProcess: { amount: number; count: number };
+    advance: { amount: number; count: number }; // คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ยังไม่ได้จ่าย ไม่นับรวมใน total
     unbilled: { amount: number; count: number };
     receivable: { amount: number; count: number };
     total: number;
@@ -137,7 +139,8 @@ export interface Overview {
     assumptions: { payDays: number; payDaysFromHistory: boolean; billingLagDays: number; paySamples: number };
   };
   process: ProcessRow[];
-  stuck: { total: number; byKind: { car: number; moto: number }; high: number; items: StuckItem[] };
+  // items = คันที่ด่วนที่สุดไม่เกิน limit คันต่อประเภทรถ (limit แถวแรกคือคันที่ด่วนที่สุดของทั้งหมด)
+  stuck: { total: number; byKind: { car: number; moto: number }; high: number; limit: number; items: StuckItem[] };
   alerts: OverviewAlert[];
 }
 

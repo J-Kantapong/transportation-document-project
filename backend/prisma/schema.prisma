@@ -71,15 +71,20 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer           Customer?          @relation(fields: [customerId], references: [id])
-  approvedBy         User?              @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers      User[]             @relation("ApprovedUsers")
-  assignedCases      Case[]             @relation("AssignedStaff")
-  deletedVehicles    Vehicle[]          @relation("DeletedVehicles")
-  vehicleEdits       VehicleEditLog[]   @relation("VehicleEdits")
-  deliverySlips      DeliverySlip[]     @relation("DeliverySlips")
-  cancelledSlips     DeliverySlip[]     @relation("DeliverySlipCancels")
-  cancelledSlipItems DeliverySlipItem[] @relation("DeliverySlipItemCancels")
+  customer           Customer?               @relation(fields: [customerId], references: [id])
+  approvedBy         User?                   @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers      User[]                  @relation("ApprovedUsers")
+  assignedCases      Case[]                  @relation("AssignedStaff")
+  deletedVehicles    Vehicle[]               @relation("DeletedVehicles")
+  vehicleEdits       VehicleEditLog[]        @relation("VehicleEdits")
+  deliverySlips      DeliverySlip[]          @relation("DeliverySlips")
+  cancelledSlips     DeliverySlip[]          @relation("DeliverySlipCancels")
+  cancelledSlipItems DeliverySlipItem[]      @relation("DeliverySlipItemCancels")
+  auditLogs          AuditLog[]              @relation("AuditLogs")
+  cancelledTaxRenews TaxRenewal[]            @relation("TaxRenewalCancels")
+  cancelledYamaha    YamahaRelocationEntry[] @relation("YamahaRelocationCancels")
+  cancelledSwaps     PlateSwap[]             @relation("PlateSwapCancels")
+  billingClosures    Vehicle[]               @relation("VehicleBillingClosures")
 
   @@index([status])
   @@index([customerId])
@@ -176,17 +181,25 @@ model Vehicle {
   // Step 6-8 (หลังได้รับใบเสร็จ): รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - วันที่ไม่ว่าง = ดำเนินการแล้ว
   // (คิวของแต่ละขั้นและเงื่อนไขก่อนหน้าอยู่ใน backend/src/receiving/receiving.service.ts)
   plateReceivedDate   DateTime?
-  platePhotoId        String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (AI อ่านเลขทะเบียนแล้วจับคู่ - ดู PlatePhoto)
+  platePhotoId        String? // รูปป้ายที่ใช้ยืนยันการรับป้าย (บังคับทุกคัน - แนบรายคันจากคิว ไม่ใช้ AI แล้ว ผู้ใช้ 2026-09-26)
   bookReceivedDate    DateTime?
-  bookPhotoId         String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (AI อ่านเลขตัวรถ/ทะเบียนแล้วจับคู่ - ดู BookPhoto)
+  bookPhotoId         String? // รูปเล่มที่ใช้ยืนยันการรับเล่ม (บังคับทุกคัน - แนบรายคันจากคิว ไม่ใช้ AI แล้ว ผู้ใช้ 2026-09-26)
   deliveredDate       DateTime?
   deliveryRecipient   String? // ผู้รับของ Delivery
   deliveryNote        String?
-  // ส่งงาน = ส่งใบเสร็จ + เล่ม (deliveredDate) ป้ายส่งพร้อมกันถ้ารับป้ายแล้ว ถ้าป้ายยังไม่ออกจะส่งตามทีหลัง
+  // ส่งงาน = ส่งเล่ม (deliveredDate) ป้ายส่งพร้อมกันถ้ารับป้ายแล้ว ถ้าป้ายยังไม่ออกจะส่งตามทีหลัง
+  // ใบเสร็จไม่ได้ส่งไปกับงานแล้ว (ผู้ใช้ 2026-09-26) ส่งให้ลูกค้าพร้อมใบวางบิล แต่ต้องได้ใบเสร็จก่อนจึงส่งงานได้
   // plateDeliveredDate ว่าง ทั้งที่ deliveredDate ไม่ว่าง = ป้ายค้างส่ง (ดู backend/src/delivery)
   plateDeliveredDate  DateTime?
   // ลูกค้ากดยืนยันรับของใน portal (ดู backend/src/portal) - ไม่บังคับ พนักงานยังปิดงานได้โดยไม่ต้องรอ
   deliveryConfirmedAt DateTime?
+
+  // ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-09-27): รถที่ส่งงานแล้วแต่วางบิลนอกระบบ (บัญชีส่วนตัว / Google Sheet / เหมาจ่าย)
+  // ADMIN/ACCOUNTANT ปิดพร้อมหมายเหตุ -> ออกจากคิวรอวางบิล ยอดค้างรับในภาพรวม และสถานะรอ "วางบิล" ในหน้าค้นหารถ
+  // billingClosedAt ไม่ว่าง = ปิดแล้ว ADMIN เปิดกลับได้พร้อมเหตุผล (ล้างทั้ง 3 ช่อง) ทุกครั้งที่ปิด/เปิดบันทึกลง VehicleEditLog
+  billingClosedAt   DateTime?
+  billingClosedNote String? // หมายเหตุตอนปิด เช่น วางบิลที่ไหน เลขที่อะไร - บังคับกรอกที่ระดับ service
+  billingClosedById String? // ผู้ใช้ที่กดปิดงาน
 
   // ลบข้อมูลรถ (soft delete - ผู้ใช้ 2026-09-23): ADMIN เท่านั้น ต้องระบุเหตุผลทุกครั้ง และลบได้เฉพาะรถที่ยัง
   // ไม่ยื่นเอกสารจดทะเบียน (ดู VehiclesService.deleteVehicle) deletedAt ไม่ว่าง = ถูกลบแล้ว ซ่อนจากทุกหน้าจอ
@@ -200,6 +213,7 @@ model Vehicle {
 
   customer            Customer             @relation(fields: [customerId], references: [id])
   deletedBy           User?                @relation("DeletedVehicles", fields: [deletedById], references: [id])
+  billingClosedBy     User?                @relation("VehicleBillingClosures", fields: [billingClosedById], references: [id], onDelete: SetNull)
   brand               Brand                @relation(fields: [brandId], references: [id])
   owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
   platePhoto          PlatePhoto?          @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
@@ -563,7 +577,9 @@ model DocumentSubmission {
   receiptNo           String? // เลขที่ใบเสร็จ ("เลขที่" มุมขวาบน เช่น 69/0035358) - AI กรอกให้ พนักงานแก้ได้ ใช้เรียงตอนไปห้องรับป้าย
   failRemark          String? // เหตุผลที่ยื่นไม่สำเร็จ - บังคับกรอกตอน status -> FAILED แล้วรถกลับไปทำ Step 4 ใหม่ได้
   receiptCarriedAt    DateTime? // ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จและยังไม่รู้สาเหตุ -> ย้ายไป "ค้างจากใบก่อน" (ยัง PENDING)
-  plateNumberOption   String // NONE | NORMAL | AUCTION
+  // NONE | NORMAL | AUCTION | SWAP_NORMAL | SWAP_AUCTION - SWAP_* = "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27) แผ่นป้าย
+  // ขาวดำ / ประมูล ต้องมีหมวด+เลข ไม่มีค่าขอใช้เลข ไม่นับเป็นคำขอเพิ่ม (ค่าคำขอ/อากรตามปกติ) คิดค่าแผ่นป้ายตามปกติ
+  plateNumberOption   String
   includePlateFee     Boolean   @default(true)
   newPlateOption      String? // NONE | BLACKWHITE | AUCTION - รถยนต์เท่านั้น, null สำหรับมอเตอร์ไซค์
   relocateAddon       Boolean   @default(false) // แจ้งย้ายออกต่างจังหวัดพร้อมกัน - รถยนต์เท่านั้น
@@ -663,11 +679,18 @@ model PlateSwap {
   // รับเอกสารกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปใบเสร็จผ่าน ReceiptImage.plateSwapId)
   returnedDate DateTime?
 
+  // ยกเลิกงาน (soft cancel - ผู้ใช้ 2026-09-27 ห้ามลบแถว): ADMIN/STAFF_CAR ต้องระบุเหตุผล บันทึกประวัติลง AuditLog
+  // cancelledAt ไม่ว่าง = ยกเลิกแล้ว ไม่แสดงในรายการ ยอดรวม และภาพรวม และไม่ล็อกการยื่นเอกสารของรถใหม่ที่ผูกไว้
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  newVehicle Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
-  receipts   ReceiptImage[]
+  newVehicle  Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
+  cancelledBy User?          @relation("PlateSwapCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  receipts    ReceiptImage[]
 
   @@index([newVehicleId])
   @@index([submitDate])
@@ -698,7 +721,15 @@ model YamahaRelocationEntry {
   noBillFee Decimal              @db.Decimal(10, 2) // count x อัตรา No bill ณ ตอนบันทึก
   createdAt DateTime             @default(now())
 
+  // ยกเลิกรายการ (soft cancel - ผู้ใช้ 2026-09-27 ห้ามลบแถว): ADMIN/STAFF_ENTRY ต้องระบุเหตุผล บันทึกประวัติลง AuditLog
+  // cancelledAt ไม่ว่าง = ยกเลิกแล้ว ไม่แสดงในรายการ ยอดรวม และภาพรวม - ตอนยกเลิกล้าง contentHash ของไฟล์แนบ
+  // (YamahaRelocationAttachment) ให้แนบไฟล์เดิมกับรายการที่ถูกต้องได้อีก
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
   attachments YamahaRelocationAttachment[]
+  cancelledBy User?                        @relation("YamahaRelocationCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   @@index([size, date])
 }
@@ -732,6 +763,8 @@ model YamahaRelocationAttachment {
 // จากทะเบียนที่รู้แล้วใน Step 5 (Vehicle.plateCategory/plateNumber). extraction เก็บแค่ผลอ่าน ส่วนการจับคู่
 // คำนวณใหม่ทุกครั้งที่เปิดดู (คิวเปลี่ยนได้). AI ไม่บันทึกเอง - พนักงานกดยืนยันแล้วจึงตั้ง Vehicle.plateReceivedDate
 // พร้อม Vehicle.platePhotoId เป็นหลักฐาน. closedAt ไม่ว่าง = ยืนยัน/ปิดรูปนี้แล้ว ไม่แสดงในถาดรอยืนยัน
+// ตั้งแต่ 2026-09-26 (ผู้ใช้) ไม่ใช้ AI แล้ว: แนบรูปรายคันจากคิว (POST /api/plate-photos/attach) รูปถูกปิดทันที
+// extraction/readPending เหลือไว้สำหรับแถวเก่า
 model PlatePhoto {
   id               String    @id @default(cuid())
   storageKey       String    @unique
@@ -755,6 +788,8 @@ model PlatePhoto {
 // โครงเดียวกับ PlatePhoto: ถ่ายรูปเล่มที่ได้รับ (รูปเดียวมีได้หลายเล่ม) -> AI อ่านเลขตัวรถ (VIN) + ทะเบียน -> ระบบจับคู่
 // กับรถที่รอรับเล่ม (VIN ไม่ซ้ำ จึงไม่ต้องแยกรถยนต์/มอเตอร์ไซค์). พนักงานกดยืนยันแล้วจึงตั้ง Vehicle.bookReceivedDate
 // พร้อม Vehicle.bookPhotoId เป็นหลักฐาน. closedAt ไม่ว่าง = ยืนยัน/ปิดรูปนี้แล้ว ไม่แสดงในถาดรอยืนยัน
+// ตั้งแต่ 2026-09-26 (ผู้ใช้) ไม่ใช้ AI แล้ว: แนบรูปรายคันจากคิว (POST /api/book-photos/attach) รูปถูกปิดทันที
+// extraction/readPending เหลือไว้สำหรับแถวเก่า
 model BookPhoto {
   id               String    @id @default(cuid())
   storageKey       String    @unique
@@ -797,12 +832,11 @@ model ServiceFeeRate {
   @@index([customerId])
 }
 
-// ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
-// invoiceNo พิมพ์เอง (ช่วงแรกล้อเลขกับ Google Sheet "Invoice Tradeinter") ห้ามซ้ำ
-// status: ISSUED (วางบิลแล้ว รอรับเงิน) -> PAID (รับเงินแล้ว) | VOID (ยกเลิก - รถกลับเข้าคิวรอวางบิล)
 // --- ใบส่งงาน Delivery (ผู้ใช้ 2026-09-25) -------------------------------------------
 // กดบันทึกส่งงาน 1 ครั้ง = 1 ใบ (ลูกค้าเดียว ผู้รับคนเดียว วันเดียว) พิมพ์ให้ผู้รับเซ็น และใช้ทำรายงานส่งงานย้อนหลัง
-// แต่ละคันบอกแยกว่ารอบนี้ส่งอะไร (ใบเสร็จ / เล่ม / ป้าย) - ส่งป้ายตามทีหลังเป็นอีกใบที่มีแค่ป้าย
+// แต่ละคันบอกแยกว่ารอบนี้ส่งอะไร (เล่ม / ป้าย) - ส่งป้ายตามทีหลังเป็นอีกใบที่มีแค่ป้าย
+// ใบเสร็จไม่ส่งไปกับงานแล้ว (ผู้ใช้ 2026-09-26) ส่งพร้อมใบวางบิล - DeliverySlipItem.receipt ของใบใหม่เป็น false เสมอ
+// ใบเดียวห้ามปนรถยนต์กับจักรยานยนต์ (ผู้ใช้ 2026-09-27 - บังคับใน DeliveryService)
 // วันที่/ผู้รับบน Vehicle (deliveredDate, plateDeliveredDate ...) ยังเป็นสถานะปัจจุบันที่คิวและบัญชีใช้เหมือนเดิม
 // ใบของการส่งก่อนมีตารางนี้ถูกสร้างย้อนหลังจาก Vehicle ใน migration 20260925200000_add_delivery_slips
 model DeliverySlip {
@@ -832,7 +866,7 @@ model DeliverySlipItem {
   id            String    @id @default(cuid())
   slipId        String
   vehicleId     String
-  receipt       Boolean // ส่งใบเสร็จรอบนี้
+  receipt       Boolean // ส่งใบเสร็จรอบนี้ - เฉพาะใบก่อน 2026-09-26 ใบใหม่เป็น false เสมอ (ใบเสร็จไปกับใบวางบิล)
   book          Boolean // ส่งเล่มทะเบียนรอบนี้
   plate         Boolean // ส่งป้ายรอบนี้
   // snapshot ตอนส่ง - พิมพ์ใบซ้ำภายหลังได้ตรงกับที่ส่งจริง
@@ -854,6 +888,11 @@ model DeliverySlipItem {
   @@index([vehicleId])
 }
 
+// ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
+// invoiceNo พิมพ์เอง (ช่วงแรกล้อเลขกับ Google Sheet "Invoice Tradeinter") ห้ามซ้ำ
+// status: ISSUED (วางบิลแล้ว รอรับเงิน) -> PAID (รับเงินแล้ว) | VOID (ยกเลิก - รถกลับเข้าคิวรอวางบิล)
+// ผู้ใช้ 2026-09-27: บิล ISSUED แก้ในใบเดิมได้ (เลขเดิม) และ ADMIN/ACCOUNTANT ย้อน PAID -> ISSUED ได้ ทั้งคู่ต้องระบุเหตุผล
+// และบันทึกประวัติลง AuditLog (entity 'Invoice') - customerSnapshot ไม่เปลี่ยนตามการแก้ข้อมูลลูกค้าทีหลัง
 model Invoice {
   id               String    @id @default(cuid())
   invoiceNo        String    @unique
@@ -958,14 +997,41 @@ model TaxRenewal {
   receivedDate  DateTime? // รับป้ายภาษี/ใบเสร็จ
   deliveredDate DateTime? // คืนเอกสารให้ลูกค้า
 
+  // ยกเลิกงาน (soft cancel - ผู้ใช้ 2026-09-27 ห้ามลบแถว): ADMIN/STAFF_CAR/STAFF_MOTO (ตามประเภทรถของตัวเอง) ต้องระบุ
+  // เหตุผล บันทึกประวัติลง AuditLog - cancelledAt ไม่ว่าง = ยกเลิกแล้ว ไม่แสดงในรายการ ยอดรวม และภาพรวม
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vehicle  Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
-  customer Customer? @relation(fields: [customerId], references: [id])
+  vehicle     Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  cancelledBy User?     @relation("TaxRenewalCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   @@index([vehicleId])
   @@index([customerId])
   @@index([taxExpiryDate])
   @@index([paymentDate])
+}
+
+// --- ประวัติการแก้ไข/ยกเลิกทั่วไป (ผู้ใช้ 2026-09-27) ---------------------------------------
+// ใช้กับข้อมูลที่ไม่ใช่รถจดใหม่ (รถใช้ VehicleEditLog): ลูกค้า, ใบวางบิล, ต่อภาษี, แจ้งย้ายยามาฮ่า, สลับเลข, ผู้ใช้
+// ทุกการแก้/ยกเลิกต้องมีเหตุผล (remark) บังคับที่ระดับ service - เขียนผ่าน writeAudit() ใน backend/src/audit/audit-log.ts
+// แถวไม่ถูกแก้หรือลบ (append only) และไม่ผูก FK กับแถวต้นทาง จึงอยู่ครบแม้ต้นทางถูกลบ
+model AuditLog {
+  id         String   @id @default(cuid())
+  entity     String // 'Customer' | 'Invoice' | 'TaxRenewal' | 'YamahaRelocation' | 'PlateSwap' | 'User'
+  entityId   String // id ของแถวต้นทาง
+  action     String // คำกริยาสั้นภาษาอังกฤษ เช่น 'update' | 'cancel' | 'unpay' | 'set-password' | 'undo-return'
+  remark     String // เหตุผลที่แก้/ยกเลิก
+  changes    Json // { field: { from, to } } เฉพาะฟิลด์ที่เปลี่ยนจริง หรือ snapshot ก่อนยกเลิก - ห้ามเก็บรหัสผ่าน/hash
+  editedById String? // ผู้ใช้ที่ทำ - งานที่รันนอกคำขอ HTTP (script) เป็น null
+  createdAt  DateTime @default(now())
+
+  editedBy User? @relation("AuditLogs", fields: [editedById], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
 }

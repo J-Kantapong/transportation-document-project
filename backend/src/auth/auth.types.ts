@@ -78,4 +78,5 @@ export interface RequestUser {
   roles: UserRole[];
   customerId: string | null;
   name: string;
+  tokenExp?: number; // วันหมดอายุของ token ในคำขอนี้ (วินาที) - /api/auth/me ออก token ใหม่อายุเท่าเดิม
 }

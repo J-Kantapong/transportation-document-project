@@ -200,7 +200,8 @@ export function calculateGovernmentTax(
 
   if (vehicleFamily === GovTaxVehicleFamily.RY1 && fuelGroup !== GovTaxFuelGroup.BEV) {
     const cc = toNumber(vehicle.cc);
-    if (cc === null) return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ไม่มีข้อมูลขนาด CC ของรถคันนี้' };
+    // cc 0/ติดลบ = ยังไม่รู้ขนาดจริง ไม่ใช่รถ 0 cc - ห้ามคิดออกมาเป็นภาษี 0 บาท (พบ 2026-09-27)
+    if (cc === null || cc <= 0) return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ไม่มีข้อมูลขนาด CC ของรถคันนี้' };
     const baseMicro = calcCcProgressiveMicroBaht(cc, rules.ccBrackets, fuelGroup);
     if (baseMicro === null) {
       return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ยังไม่มีตารางอัตราภาษีตาม CC สำหรับกลุ่มนี้ (ยังไม่ยืนยัน)' };
@@ -223,7 +224,8 @@ export function calculateGovernmentTax(
 
   // ที่เหลือคำนวณจากน้ำหนัก: RY1-BEV, RY2, RY3
   const weight = toNumber(vehicle.weight);
-  if (weight === null) return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ไม่มีข้อมูลน้ำหนักรถของรถคันนี้' };
+  // น้ำหนัก 0 จะตกช่วงล่างสุด (0-500 กก.) เงียบๆ - ถือว่ายังไม่มีข้อมูลเหมือน cc (พบ 2026-09-27)
+  if (weight === null || weight <= 0) return { vehicleFamily, fuelGroup, ...empty, juristicReason: juristic.reason, reason: 'ไม่มีข้อมูลน้ำหนักรถของรถคันนี้' };
 
   const weightFuelGroup = vehicleFamily === GovTaxVehicleFamily.RY1 ? fuelGroup : null;
   const bracket = findWeightBracket(weight, rules.weightBrackets, vehicleFamily, weightFuelGroup);

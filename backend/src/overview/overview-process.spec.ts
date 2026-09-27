@@ -1,4 +1,14 @@
-import { sortStuck, stuckItemFor, summarizeBacklog, waitsFor, type OpenVehicle, type StuckSubject } from './overview-process.js';
+import {
+  limitStuckPerKind,
+  sortStuck,
+  STAGES,
+  stuckItemFor,
+  summarizeBacklog,
+  waitsFor,
+  type OpenVehicle,
+  type StuckItem,
+  type StuckSubject,
+} from './overview-process.js';
 
 const TODAY = '2026-09-24';
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -79,6 +89,16 @@ describe('waitsFor - ขั้นที่รถค้างอยู่', () =>
     expect(w.flags).toEqual(['RECEIPT_UNKNOWN']);
   });
 
+  it('ค้างจากใบก่อนแต่แนบรูปใบเสร็จแล้ว - ยังรอบันทึกแต่ไม่ติดธง', () => {
+    const w = waitsFor(
+      { ...passed('2026-09-01'), latestSubmission: sub('PENDING', { receiptCarriedAt: d('2026-09-20'), _count: { receipts: 1 } }) },
+      TODAY,
+    )[0];
+    expect(w.stage).toBe('receipt');
+    expect(w.flags).toEqual([]);
+    expect(w.reason).toBeNull();
+  });
+
   it('ได้ใบเสร็จแล้ว: รอป้ายและเล่มพร้อมกัน, ได้เล่มแล้วรอส่งงาน, ส่งงานแล้วรอส่งป้าย + วางบิล', () => {
     const base = { ...passed('2026-09-01'), latestSubmission: sub('RECEIPT_RECEIVED') };
     expect(stages(base)).toEqual(['plate', 'book']);
@@ -88,6 +108,20 @@ describe('waitsFor - ขั้นที่รถค้างอยู่', () =>
       'billing',
     ]);
     expect(stages({ ...base, bookReceivedDate: d('2026-09-18'), plateReceivedDate: d('2026-09-18'), deliveredDate: d('2026-09-20'), plateDeliveredDate: d('2026-09-20'), billed: true })).toEqual([]);
+  });
+
+  // ผู้ใช้ 2026-09-27: ปิดงาน - วางบิลนอกระบบ = ไม่ค้างวางบิล แต่ยังรอส่งป้ายตามปกติ
+  it('ปิดงาน - วางบิลนอกระบบแล้วไม่รอวางบิล', () => {
+    const delivered = {
+      ...passed('2026-09-01'),
+      latestSubmission: sub('RECEIPT_RECEIVED'),
+      bookReceivedDate: d('2026-09-18'),
+      plateReceivedDate: d('2026-09-22'),
+      deliveredDate: d('2026-09-20'),
+    };
+    expect(stages({ ...delivered, billingClosed: true })).toEqual(['plateDelivery']);
+    expect(stages({ ...delivered, plateDeliveredDate: d('2026-09-22'), billingClosed: true })).toEqual([]);
+    expect(stages({ ...delivered, billingClosed: false })).toEqual(['plateDelivery', 'billing']);
   });
 
   it('รอป้าย/เล่มนับจากวันที่ในใบเสร็จ (ไม่มีค่อยใช้วันที่รับใบเสร็จ)', () => {
@@ -136,5 +170,38 @@ describe('stuckItemFor / sortStuck', () => {
     expect(urgent).toMatchObject({ severity: 'high', overdueDays: 0, reason: 'ผลตรวจจะหมดอายุใน 3 วัน' });
 
     expect(sortStuck([item, urgent]).map((i) => i.stage)).toEqual(['submit', 'plate']);
+  });
+
+  it('ขั้นผลตรวจรถพาไปแท็บกรอกผลตรวจ ไม่ใช่แท็บส่งตรวจ (พบ 2026-09-27)', () => {
+    expect(STAGES.inspectResult.href).toBe('/registration/new-vehicle/inspection/result');
+  });
+});
+
+describe('limitStuckPerKind (พบ 2026-09-27)', () => {
+  const item = (id: string, kind: 'car' | 'moto', overdueDays: number): StuckItem => ({
+    id,
+    source: 'vehicle',
+    kind,
+    customerName: '-',
+    brandName: null,
+    chassis: id,
+    plate: null,
+    stage: 'receipt',
+    stageLabel: 'รับใบเสร็จ',
+    href: '',
+    since: TODAY,
+    days: overdueDays + 7,
+    overdueDays,
+    severity: 'medium',
+    reason: '-',
+    flags: [],
+  });
+
+  it('ตัดทีละประเภทรถ: จักรยานยนต์ที่ด่วนน้อยกว่ารถยนต์ทุกคันยังถูกส่งไปให้ปุ่มกรองแสดงได้', () => {
+    const sorted = sortStuck([item('c1', 'car', 30), item('c2', 'car', 20), item('c3', 'car', 10), item('m1', 'moto', 5), item('m2', 'moto', 1)]);
+    const limited = limitStuckPerKind(sorted, 2);
+    expect(limited.map((i) => i.id)).toEqual(['c1', 'c2', 'm1', 'm2']);
+    // แถวแรกๆ ยังเป็นคันที่ด่วนที่สุดของทั้งหมดตามลำดับเดิม
+    expect(limited.slice(0, 2).map((i) => i.id)).toEqual(sorted.slice(0, 2).map((i) => i.id));
   });
 });

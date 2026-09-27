@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { fetchAuthedBlob } from "@/lib/api";
 
 // รูปใบเสร็จ/ป้าย/เล่ม อยู่หลัง backend endpoint ที่ต้องมี Authorization header (ดู auth.guard.ts)
 // <img src="..."> ส่ง header เองไม่ได้ - เคยชี้ตรงไปที่ endpoint แล้วขึ้น 401 (รูปพัง) จึงต้องโหลดเป็น blob เองก่อน
+// fetchAuthedBlob พาไปหน้าล็อกอินเองเมื่อ token หมดอายุ (401) - ที่นี่แสดงแค่ว่าโหลดไม่สำเร็จ
 export function AuthedImage({
   src,
   alt,
@@ -27,11 +28,10 @@ export function AuthedImage({
     setFailed(false);
     (async () => {
       try {
-        const token = getToken();
-        const res = await fetch(src, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        url = URL.createObjectURL(await res.blob());
-        if (!cancelled) setObjectUrl(url);
+        const blob = await fetchAuthedBlob(src);
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setObjectUrl(url);
       } catch {
         if (!cancelled) setFailed(true);
       }

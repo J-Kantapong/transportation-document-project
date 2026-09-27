@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { assertVehicleInScope } from '../auth/vehicle-scope.js';
+import { assertVehicleReadable } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import { GovTaxRuleStatus } from '../generated/prisma/enums.js';
 import {
   calculateGovernmentTax,
@@ -70,10 +71,16 @@ export class TaxService {
     });
   }
 
-  // เรียกหลังบันทึก ownerId/isFactoryNew/firstRegistrationDate ของรถแล้ว (PATCH /api/vehicles/:id/tax-input)
+  // เรียกหลังบันทึก ownerId/isFactoryNew/firstRegistrationDate ของรถแล้ว (ยื่นเอกสาร Step 4)
   // สร้าง TaxCalculation แถวใหม่เสมอ (immutable snapshot) ไม่ update ของเดิม
-  async calculateAndSave(vehicleId: string) {
-    const vehicleRow = await this.prisma.vehicle.findUnique({ where: { id: vehicleId }, include: { owner: true } });
+  // client = transaction ของผู้เรียก (ยื่นเอกสารบันทึกเจ้าของรถ + ภาษี + รายการยื่นใน transaction เดียว - พบ 2026-09-27)
+  // rules = ตารางอัตราที่โหลดไว้แล้ว (ยื่นหลายคันโหลดครั้งเดียว ไม่ยิง query ต่อคัน)
+  async calculateAndSave(
+    vehicleId: string,
+    options: { client?: Pick<Prisma.TransactionClient, 'vehicle' | 'taxCalculation'>; rules?: GovernmentTaxRuleSet } = {},
+  ) {
+    const client = options.client ?? this.prisma;
+    const vehicleRow = await client.vehicle.findUnique({ where: { id: vehicleId }, include: { owner: true } });
     if (!vehicleRow) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     const vehicleInput: GovernmentTaxVehicleInput = {
@@ -91,11 +98,11 @@ export class TaxService {
         }
       : null;
 
-    const rules = await this.loadRuleSet();
+    const rules = options.rules ?? (await this.loadRuleSet());
     const result = calculateGovernmentTax(vehicleInput, ownerInput, rules);
     const status = deriveStatus(result);
 
-    const snapshot = await this.prisma.taxCalculation.create({
+    const snapshot = await client.taxCalculation.create({
       data: {
         vehicleId,
         status,
@@ -125,7 +132,7 @@ export class TaxService {
   async listForVehicle(vehicleId: string) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { id: true, body: true } });
     if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
-    assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ดูภาษีได้เฉพาะประเภทรถของตัวเอง
+    assertVehicleReadable(vehicle.body); // STAFF_CAR / STAFF_MOTO ดูภาษีได้เฉพาะประเภทรถของตัวเอง
     return this.prisma.taxCalculation.findMany({ where: { vehicleId }, orderBy: { createdAt: 'desc' } });
   }
 }

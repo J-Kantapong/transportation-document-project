@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { billingApi, type BillingCustomer, type BillingVehicle, type Invoice } from "@/lib/billing-api";
+import { getCachedUser } from "@/lib/auth";
+import { billingApi, type BillingCustomer, type BillingVehicle, type ClosedBillingVehicle } from "@/lib/billing-api";
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
 import { BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { computeTotals, formatMoney, round2, termsSummary } from "@/lib/invoice";
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { comparePlate } from "@/lib/plate-order";
@@ -24,6 +26,9 @@ interface RowState {
   serviceText: string;
   label: string;
   deduct: boolean;
+  // ค่าที่ระบบเสนอตอนสร้างแถว - ใช้ดูว่าบัญชีแก้ช่องนั้นเองหรือยังตอนโหลดคิวใหม่ (mergeRow)
+  receiptBase: string;
+  serviceBase: string;
 }
 
 interface ExtraState {
@@ -38,13 +43,25 @@ const money = (text: string): number | null => {
 
 const plateText = (v: BillingVehicle) => (v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : "");
 
-const newRow = (v: BillingVehicle): RowState => ({
-  checked: false,
-  receiptText: v.receiptAmount === null ? "" : formatMoney(v.receiptAmount),
-  serviceText: v.suggestedServiceFee === null ? "" : formatMoney(v.suggestedServiceFee),
-  label: "",
-  deduct: false,
-});
+const newRow = (v: BillingVehicle): RowState => {
+  const receiptText = v.receiptAmount === null ? "" : formatMoney(v.receiptAmount);
+  const serviceText = v.suggestedServiceFee === null ? "" : formatMoney(v.suggestedServiceFee);
+  return { checked: false, receiptText, serviceText, label: "", deduct: false, receiptBase: receiptText, serviceBase: serviceText };
+};
+
+// โหลดคิวใหม่ระหว่างเตรียมบิล: คันที่ยังอยู่ในคิวเก็บที่ติ๊ก/กรอกไว้ ช่องที่บัญชียังไม่ได้แก้เองใช้ค่าใหม่จากระบบ
+// (เช่น ราคาใหม่หลังแก้ตารางค่าดำเนินการ) ช่องที่แก้เองแล้วคงไว้
+function mergeRow(prev: RowState | undefined, v: BillingVehicle): RowState {
+  const fresh = newRow(v);
+  if (!prev) return fresh;
+  return {
+    ...prev,
+    receiptText: prev.receiptText === prev.receiptBase ? fresh.receiptText : prev.receiptText,
+    serviceText: prev.serviceText === prev.serviceBase ? fresh.serviceText : prev.serviceText,
+    receiptBase: fresh.receiptBase,
+    serviceBase: fresh.serviceBase,
+  };
+}
 
 function defaultJobLabel(vehicles: BillingVehicle[]): string {
   if (vehicles.length > 0 && vehicles.every((v) => v.isMoto)) return "จดทะเบียนรถจักรยานยนต์";
@@ -54,7 +71,7 @@ function defaultJobLabel(vehicles: BillingVehicle[]): string {
 
 export function BillingPage() {
   const [customers, setCustomers] = useState<BillingCustomer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoiceReload, setInvoiceReload] = useState(0); // เพิ่มค่า = ให้รายการบิลที่ออกแล้วโหลดใหม่
   const [customerId, setCustomerId] = useState("");
   const focusApplied = useRef(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -63,16 +80,28 @@ export function BillingPage() {
   const [issueDateText, setIssueDateText] = useState(isoToDisplayDate(todayIso()));
   const [jobLabelEdit, setJobLabelEdit] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<"" | "terms" | "rates">("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // โหลดคิวครั้งแรก
+  const [refreshing, setRefreshing] = useState(false); // โหลดคิวใหม่ - ตารางยังแสดงอยู่ แต่ยังออกบิลไม่ได้จนกว่าจะเสร็จ
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  // ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-09-27): คันที่กำลังจะปิด / เพิ่มค่า = รายการรถที่ปิดไว้โหลดใหม่ / เปิดงานกลับได้เฉพาะ ADMIN
+  const [closing, setClosing] = useState<BillingVehicle | null>(null);
+  const [closedReload, setClosedReload] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  async function loadAll(keepInvoiceNo = false) {
-    setLoading(true);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
+    setIsAdmin((getCachedUser()?.roles ?? []).includes("ADMIN"));
+  }, []);
+
+  // reset = เริ่มบิลใหม่ (เปิดหน้า / หลังออกบิล): ทุกแถวกลับเป็นค่าจากระบบ ล้างค่าใช้จ่ายอื่นๆ/ชื่องาน และใช้เลขที่ IV ที่ระบบเสนอใหม่
+  // ไม่ reset = โหลดคิวใหม่ระหว่างเตรียมบิล (หลังแก้ตารางค่าดำเนินการ / ยกเลิกบิล): เก็บงานที่กำลังเตรียมไว้และอยู่ที่ลูกค้าเดิม (shownId)
+  // (พบ 2026-09-27: เดิมโหลดใหม่ทุกครั้งแล้วคันที่ติ๊ก ราคาที่แก้ ข้อความต่อท้าย ค่าใช้จ่ายอื่นๆ หายหมดโดยไม่เตือน)
+  async function loadQueue(reset: boolean, shownId = "") {
+    setRefreshing(true);
     try {
-      const [q, inv] = await Promise.all([billingApi.billingQueue(), billingApi.listInvoices()]);
+      const q = await billingApi.billingQueue();
       setCustomers(q.customers);
-      setInvoices(inv.invoices);
       // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกลูกค้าของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
       if (!focusApplied.current) {
         focusApplied.current = true;
@@ -80,21 +109,34 @@ export function BillingPage() {
         const owner = chassis ? q.customers.find((c) => c.vehicles.some((v) => sameChassis(v.chassis, chassis))) : undefined;
         if (owner) setCustomerId(owner.id);
       }
-      setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
-      setExtras([]);
-      setJobLabelEdit(null);
-      if (!keepInvoiceNo) setInvoiceNo(q.suggestedInvoiceNo);
+      if (reset) {
+        setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
+        setExtras([]);
+        setJobLabelEdit(null);
+        setInvoiceNo(q.suggestedInvoiceNo);
+      } else {
+        // คันที่ออกจากคิวแล้วหายไป คันใหม่ (เช่น รถจากบิลที่เพิ่งยกเลิก) ได้แถวใหม่ที่ยังไม่ติ๊ก
+        setRows((prev) => Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, mergeRow(prev[v.id], v)]))));
+        if (q.customers.some((c) => c.id === shownId)) {
+          setCustomerId(shownId); // ลูกค้าอื่นเพิ่งเข้าคิวก็ยังอยู่ที่ลูกค้าเดิม
+        } else {
+          // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องานของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
+          setExtras([]);
+          setJobLabelEdit(null);
+        }
+      }
     } catch (err) {
       setMessage({ text: err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ", error: true });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
-    // Standard fetch-on-mount; loadAll sets the loading flag before its first await.
+    // Standard fetch-on-mount; loadQueue sets the refreshing flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadAll();
+    loadQueue(true);
   }, []);
 
   const customer = customers.find((c) => c.id === customerId) ?? customers[0] ?? null;
@@ -221,7 +263,8 @@ export function BillingPage() {
         })),
         extras: draftExtras.map((e) => ({ label: e.label, amount: e.amount! })),
       });
-      await loadAll();
+      await loadQueue(true);
+      setInvoiceReload((n) => n + 1);
       setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน ยอด ${formatMoney(invoice.netTotal)} บาท` });
       printInvoice(invoice);
     } catch (err) {
@@ -236,7 +279,14 @@ export function BillingPage() {
   return (
     <section className="content">
       <h1 tabIndex={-1}>วางบิล</h1>
-      <p>รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน</p>
+      <p>
+        รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน - คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด
+        &quot;ปิดงาน&quot; พร้อมหมายเหตุ
+      </p>
+      {/* บัญชีเปิดรายงานส่งงาน/ใบส่งงานได้แบบอ่านอย่างเดียว ไว้ตรวจก่อนวางบิล (ผู้ใช้ 2026-09-27) - หน้า Delivery ไม่มีในเมนูของบัญชี */}
+      <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+        รายงานส่งงาน / ใบส่งงาน →
+      </Link>
 
       {loading ? (
         <div className="customer-message" role="status" style={{ marginTop: 20 }}>
@@ -296,7 +346,7 @@ export function BillingPage() {
                 rates={customer.rates}
                 onSaved={() => {
                   setSettingsOpen("");
-                  loadAll(true); // ราคาที่เสนอรายคันคำนวณฝั่ง backend - โหลดคิวใหม่ให้ราคาใหม่มีผล
+                  loadQueue(false, customer.id); // ราคาที่เสนอรายคันคำนวณฝั่ง backend - โหลดคิวใหม่ให้ราคาใหม่มีผล (คันที่แก้ราคาเองแล้วคงไว้)
                 }}
               />
             )}
@@ -327,6 +377,7 @@ export function BillingPage() {
                       <th>ค่าใบเสร็จ</th>
                       <th>ค่าดำเนินการ</th>
                       <th>ข้อความต่อท้ายบนบิล</th>
+                      <th>วางบิลนอกระบบ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -335,7 +386,7 @@ export function BillingPage() {
                       return (
                         <Fragment key={date}>
                           <tr>
-                            <td colSpan={8} style={{ background: "#f5f7fb", padding: "8px 20px", fontSize: 12, color: "#576781" }}>
+                            <td colSpan={9} style={{ background: "#f5f7fb", padding: "8px 20px", fontSize: 12, color: "#576781" }}>
                               ส่งเมื่อ <b>{isoToDisplayDate(date)}</b> · {group.length} คัน · ผู้รับ {group[0].recipient || "—"}
                               <button className="text-button" onClick={() => setChecked(group.map((v) => v.id), true)}>
                                 เลือกทั้งวันนี้
@@ -404,6 +455,16 @@ export function BillingPage() {
                                     aria-label={`ข้อความต่อท้ายบนบิล ${plateText(v) || v.chassis}`}
                                   />
                                 </td>
+                                <td>
+                                  <button
+                                    className="text-button"
+                                    title="วางบิลที่อื่นแล้ว หรือไม่ต้องวางบิล - เอาออกจากคิวพร้อมหมายเหตุ"
+                                    onClick={() => setClosing(v)}
+                                    aria-label={`ปิดงาน วางบิลนอกระบบ ${plateText(v) || v.chassis}`}
+                                  >
+                                    ปิดงาน
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })}
@@ -460,8 +521,13 @@ export function BillingPage() {
                   วันที่ออกบิล
                   <DateInput
                     value={issueDateText}
-                    onChange={(value) => setIssueDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+                    onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
                   />
+                  {!issueDateIso && issueDateText.replace(/\D/g, "").length === 8 && (
+                    <span className="customer-message error" style={{ fontSize: 11 }}>
+                      วันที่ออกบิลไม่ถูกต้อง - ยอดด้านล่างคิดตามวันนี้
+                    </span>
+                  )}
                 </label>
                 <label className="field">
                   ชื่องานบนบิล
@@ -479,7 +545,7 @@ export function BillingPage() {
                     </div>
                   </div>
                 )}
-                <button className="primary" style={{ justifyContent: "center" }} disabled={saving} onClick={handleIssue}>
+                <button className="primary" style={{ justifyContent: "center" }} disabled={saving || refreshing} onClick={handleIssue}>
                   ออกใบวางบิลและพิมพ์
                 </button>
                 {message.text && (
@@ -505,8 +571,306 @@ export function BillingPage() {
         </>
       )}
 
-      <BillingInvoiceList invoices={invoices} onChanged={() => loadAll(true)} />
+      {/* รับเงินแล้วไม่กระทบคิว - ยกเลิกบิล / เอารถออกจากบิลตอนแก้ รถกลับเข้าคิว จึงโหลดคิวใหม่แบบเก็บงานที่เตรียมไว้ */}
+      <BillingInvoiceList reloadKey={invoiceReload} onQueueChanged={() => loadQueue(false, customer?.id)} />
+
+      <ClosedBillingPanel reloadKey={closedReload} canReopen={isAdmin} onReopened={() => loadQueue(false, customer?.id)} />
+
+      {closing && (
+        <CloseBillingDialog
+          vehicle={closing}
+          customerName={customer ? customer.company || customer.name : ""}
+          onClose={() => setClosing(null)}
+          onClosed={(v) => {
+            setMessage({ text: `ปิดงาน ${v.plateText || v.chassis} แล้ว - ออกจากคิวรอวางบิล (ดูได้ที่ "ปิดงานแล้ว - วางบิลนอกระบบ" ด้านล่าง)` });
+            setClosedReload((n) => n + 1);
+            loadQueue(false, customer?.id);
+          }}
+          onRefused={() => loadQueue(false, customer?.id)}
+        />
+      )}
     </section>
+  );
+}
+
+function useModal() {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return ref;
+}
+
+const errorText = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
+// backend ปฏิเสธ (มีคนปิด/ออกบิล/เปิดกลับไปก่อน) = รายการบนจอเก่าแล้ว ให้หน้าหลักโหลดใหม่
+const refusedByServer = (err: unknown) => err instanceof ApiError && err.status !== undefined;
+
+// ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-09-27): รถที่ส่งงานแล้วแต่วางบิลที่อื่น (บัญชีส่วนตัว / Google Sheet / เหมาจ่าย)
+// หรือไม่ต้องวางบิล - หมายเหตุบังคับ ออกจากคิวรอวางบิล ยอดส่งงานแล้วยังไม่วางบิลในภาพรวม และสถานะรอ "วางบิล" ในหน้าค้นหารถ
+// เปิดกลับได้เฉพาะ ADMIN พร้อมเหตุผล - ทุกครั้งเก็บในประวัติการแก้ไขของรถ
+function CloseBillingDialog({
+  vehicle,
+  customerName,
+  onClose,
+  onClosed,
+  onRefused,
+}: {
+  vehicle: BillingVehicle;
+  customerName: string;
+  onClose: () => void;
+  onClosed: (vehicle: ClosedBillingVehicle) => void;
+  onRefused: () => void;
+}) {
+  const dialogRef = useModal();
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleConfirm() {
+    setError("");
+    if (!note.trim()) return setError("ต้องใส่หมายเหตุ เช่น วางบิลที่ไหน เลขที่อะไร");
+    setSaving(true);
+    try {
+      const { vehicle: closed } = await billingApi.closeVehicleBilling(vehicle.id, note.trim());
+      onClosed(closed);
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(errorText(err, "ปิดงานไม่สำเร็จ"));
+      if (refusedByServer(err)) onRefused();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>ปิดงาน - วางบิลนอกระบบ</h2>
+      <p className="muted">
+        {plateText(vehicle) || "ยังไม่มีทะเบียน"} · {vehicle.chassis} · {vehicle.brandName}
+        <br />
+        {customerName} · ส่งงานเมื่อ {isoToDisplayDate(vehicle.deliveredDate)}
+      </p>
+      <p style={{ fontSize: 13, marginTop: 8 }}>
+        ใช้กับรถที่วางบิลที่อื่นแล้ว (บัญชีส่วนตัว / Google Sheet / เหมาจ่าย) หรือไม่ต้องวางบิล - รถจะออกจากคิวรอวางบิล และไม่นับเป็นยอดส่งงานแล้วยังไม่วางบิล
+        เปิดงานกลับได้เฉพาะ ADMIN
+      </p>
+      <label className="field" style={{ marginTop: 12 }}>
+        หมายเหตุ *
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น วางบิลใน Google Sheet IV2026-130" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : "ปิดงาน"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+// รายการรถที่ปิดงานไว้ ใหม่สุดก่อนทีละ 100 คัน - ไม่มีเลยไม่แสดง / ADMIN กด "เปิดงานกลับ" พร้อมเหตุผล แล้วรถกลับเข้าคิวรอวางบิล
+function ClosedBillingPanel({ reloadKey, canReopen, onReopened }: { reloadKey: number; canReopen: boolean; onReopened: () => void }) {
+  const [vehicles, setVehicles] = useState<ClosedBillingVehicle[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
+  const [reopening, setReopening] = useState<ClosedBillingVehicle | null>(null);
+  const [notice, setNotice] = useState("");
+
+  async function reload() {
+    try {
+      const next = await billingApi.closedVehicles(0);
+      setVehicles(next.vehicles);
+      setHasMore(next.hasMore);
+      setError("");
+    } catch (err) {
+      setError(errorText(err, "โหลดรายการรถที่ปิดงานไม่สำเร็จ"));
+    }
+  }
+
+  useEffect(() => {
+    // Standard fetch-on-mount / on reloadKey change; state is only set after the await.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reload();
+  }, [reloadKey]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const next = await billingApi.closedVehicles(vehicles?.length ?? 0);
+      setVehicles((prev) => {
+        const known = new Set((prev ?? []).map((v) => v.id));
+        return [...(prev ?? []), ...next.vehicles.filter((v) => !known.has(v.id))];
+      });
+      setHasMore(next.hasMore);
+    } catch (err) {
+      setError(errorText(err, "โหลดรายการรถที่ปิดงานไม่สำเร็จ"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  if (!error && (!vehicles || vehicles.length === 0) && !notice) return null;
+  const list = vehicles ?? [];
+
+  return (
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-head">
+        <h2>
+          ปิดงานแล้ว - วางบิลนอกระบบ ({list.length}
+          {hasMore ? "+" : ""})
+        </h2>
+        <button className="text-button" onClick={() => setExpanded((x) => !x)}>
+          {expanded ? "ซ่อน" : "แสดงรายการ"}
+        </button>
+      </div>
+      {error && (
+        <div className="customer-message error" role="alert" style={{ padding: "0 23px 12px" }}>
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="customer-message success" role="status" style={{ padding: "0 23px 12px" }}>
+          {notice}
+        </div>
+      )}
+      {expanded && list.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ปิดเมื่อ</th>
+                <th>ลูกค้า</th>
+                <th>ทะเบียน</th>
+                <th>เลขตัวถัง</th>
+                <th>ส่งงานเมื่อ</th>
+                <th>หมายเหตุ</th>
+                <th>ผู้ปิด</th>
+                {canReopen && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((v) => (
+                <tr key={v.id}>
+                  <td>{timestampToDisplayDate(v.closedAt)}</td>
+                  <td>{v.customerName}</td>
+                  <td>{v.plateText || "—"}</td>
+                  <td>
+                    {v.chassis}
+                    <div className="muted">{v.brandName}</div>
+                  </td>
+                  <td>{v.deliveredDate ? isoToDisplayDate(v.deliveredDate) : "—"}</td>
+                  <td>{v.note || "—"}</td>
+                  <td>{v.closedBy || "—"}</td>
+                  {canReopen && (
+                    <td>
+                      <button className="text-button" onClick={() => setReopening(v)}>
+                        เปิดงานกลับ
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {expanded && hasMore && (
+        <div className="inspect-pagination">
+          <button className="text-button" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? "กำลังโหลด..." : "โหลดเพิ่มอีก 100 คัน"}
+          </button>
+        </div>
+      )}
+      {reopening && (
+        <ReopenBillingDialog
+          vehicle={reopening}
+          onClose={() => setReopening(null)}
+          onReopened={() => {
+            setNotice(`เปิดงาน ${reopening.plateText || reopening.chassis} กลับแล้ว - รถกลับเข้าคิวรอวางบิล`);
+            reload();
+            onReopened();
+          }}
+          onRefused={reload}
+        />
+      )}
+    </section>
+  );
+}
+
+function ReopenBillingDialog({
+  vehicle,
+  onClose,
+  onReopened,
+  onRefused,
+}: {
+  vehicle: ClosedBillingVehicle;
+  onClose: () => void;
+  onReopened: () => void;
+  onRefused: () => void;
+}) {
+  const dialogRef = useModal();
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleConfirm() {
+    setError("");
+    if (!remark.trim()) return setError("ต้องใส่เหตุผลที่เปิดงานกลับ");
+    setSaving(true);
+    try {
+      await billingApi.reopenVehicleBilling(vehicle.id, remark.trim());
+      onReopened();
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(errorText(err, "เปิดงานกลับไม่สำเร็จ"));
+      if (refusedByServer(err)) onRefused();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>เปิดงานกลับ</h2>
+      <p className="muted">
+        {vehicle.plateText || "ยังไม่มีทะเบียน"} · {vehicle.chassis} · {vehicle.customerName}
+        <br />
+        ปิดไว้เมื่อ {timestampToDisplayDate(vehicle.closedAt)}: {vehicle.note || "—"}
+      </p>
+      <p style={{ fontSize: 13, marginTop: 8 }}>รถจะกลับเข้าคิวรอวางบิล และนับเป็นยอดส่งงานแล้วยังไม่วางบิลอีกครั้ง</p>
+      <label className="field" style={{ marginTop: 12 }}>
+        เหตุผลที่เปิดงานกลับ *
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ปิดผิดคัน ต้องวางบิลในระบบ" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : "เปิดงานกลับ"}
+        </button>
+      </div>
+    </dialog>
   );
 }
 

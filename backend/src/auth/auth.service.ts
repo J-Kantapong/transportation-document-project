@@ -1,12 +1,25 @@
-import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AttemptLimiter, waitMinutes } from './attempt-limiter.js';
 import { authSecret, TOKEN_TTL_SECONDS } from './auth-config.js';
 import { type PublicUser, toPublicUser, USER_SELECT } from './auth.types.js';
-import { signToken } from './jwt.js';
+import { resignToken, signToken } from './jwt.js';
 import { hashPassword, verifyPassword } from './password.js';
 
 const bad = (error: string) => new BadRequestException({ error });
+const tooMany = (error: string) => new HttpException({ error }, HttpStatus.TOO_MANY_REQUESTS);
+
+// จำกัดการเดารหัสผ่าน (พบ 2026-09-27): ผิด 5 ครั้งใน 15 นาทีจากอีเมล + IP เดียวกัน = รอจนครบ 15 นาที
+// สมัครได้ 20 ครั้งต่อชั่วโมงต่อ IP (สมัครทุกครั้งคำนวณ scrypt + บอกได้ว่าอีเมลไหนมีบัญชีแล้ว)
+// เผื่อพนักงานทั้งออฟฟิศสมัครพร้อมกันผ่าน IP เดียว (NAT) - ครั้งที่ข้อมูลไม่ครบไม่นับ
+export const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 15 * 60_000;
+export const REGISTER_MAX_PER_IP = 20;
+const REGISTER_WINDOW_MS = 60 * 60_000;
+
+// hash หลอกรูปแบบเดียวกับของจริง: อีเมลที่ไม่มีในระบบก็คำนวณ scrypt เท่ากัน จับเวลาตอบแล้วเดาไม่ได้ว่าอีเมลไหนมีบัญชี
+const DUMMY_HASH = `scrypt$${'0'.repeat(32)}$${'0'.repeat(128)}`;
 
 const text = (max: number) => z.string().trim().max(max, `ข้อความยาวเกิน ${max} ตัวอักษร`);
 const email = z
@@ -53,11 +66,19 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 @Injectable()
 export class AuthService {
   private readonly secret = authSecret();
+  private readonly loginFailures = new AttemptLimiter(LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS);
+  private readonly registrations = new AttemptLimiter(REGISTER_MAX_PER_IP, REGISTER_WINDOW_MS);
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async register(body: unknown): Promise<{ user: PublicUser }> {
+  // ip = clientIp() ของคำขอ (auth.controller.ts) - ว่าง = ไม่รู้ IP (เช่น script) ไม่จำกัด
+  async register(body: unknown, ip = ''): Promise<{ user: PublicUser }> {
     const dto = parse(RegisterSchema, body);
+    if (ip) {
+      const wait = this.registrations.blockedFor(ip);
+      if (wait > 0) throw tooMany(`สมัครจากเครื่องนี้หลายครั้งเกินไป กรุณารอ ${waitMinutes(wait)} นาทีแล้วลองใหม่`);
+      this.registrations.hit(ip);
+    }
     const exists = await this.prisma.user.findUnique({ where: { email: dto.email }, select: { id: true } });
     if (exists) throw bad('อีเมลนี้ถูกใช้สมัครแล้ว');
 
@@ -78,15 +99,22 @@ export class AuthService {
     return { user: toPublicUser(user) };
   }
 
-  async login(body: unknown): Promise<{ token: string; user: PublicUser }> {
+  async login(body: unknown, ip = ''): Promise<{ token: string; user: PublicUser }> {
     const dto = parse(LoginSchema, body);
+    // ตรวจก่อนดูรหัสผ่าน: ถูกจำกัดอยู่ก็ไม่บอกว่ารหัสที่ลองครั้งนี้ถูกหรือผิด
+    const key = `${dto.email}|${ip}`;
+    const wait = this.loginFailures.blockedFor(key);
+    if (wait > 0) throw tooMany(`ลองเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอ ${waitMinutes(wait)} นาทีแล้วลองใหม่`);
+    // นับก่อนตรวจรหัส กันยิงพร้อมกันหลายคำขอ: ถ้านับหลัง await ทุกคำขอที่มาพร้อมกันผ่านการตรวจด้านบนไปหมด - รหัสถูกค่อยล้าง
+    this.loginFailures.hit(key);
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       select: { ...USER_SELECT, passwordHash: true },
     });
-    if (!user || !(await verifyPassword(dto.password, user.passwordHash))) {
-      throw new UnauthorizedException({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
-    }
+    const valid = await verifyPassword(dto.password, user?.passwordHash ?? DUMMY_HASH);
+    if (!user || !valid) throw new UnauthorizedException({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
+    this.loginFailures.reset(key);
     if (user.status === 'PENDING') throw new ForbiddenException({ error: 'บัญชีนี้ยังรอผู้ดูแลระบบอนุมัติ' });
     if (user.status === 'REJECTED') throw new ForbiddenException({ error: 'บัญชีนี้ไม่ได้รับการอนุมัติ กรุณาติดต่อผู้ดูแลระบบ' });
     if (user.status === 'DISABLED') throw new ForbiddenException({ error: 'บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' });
@@ -96,10 +124,15 @@ export class AuthService {
     return { token: signToken(user.id, user.roles, this.secret, TOKEN_TTL_SECONDS), user: toPublicUser(rest) };
   }
 
-  async me(userId: string): Promise<{ user: PublicUser }> {
+  // ส่ง token ที่มี roles ล่าสุดกลับไปด้วย (พบ 2026-09-27): หน้าเว็บ (proxy.ts, หน้าแรก) เลือกหน้าจาก roles ใน token
+  // ที่ออกตอนล็อกอิน ถ้า Admin เปลี่ยนบทบาทระหว่างวัน AppShell จะเก็บ token นี้แทน - หมดอายุเวลาเดิม ไม่ต่ออายุการล็อกอิน
+  async me(userId: string, tokenExp?: number): Promise<{ user: PublicUser; token: string }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: USER_SELECT });
     if (!user) throw new UnauthorizedException({ error: 'กรุณาเข้าสู่ระบบ' });
-    return { user: toPublicUser(user) };
+    const token = tokenExp
+      ? resignToken(user.id, user.roles, this.secret, tokenExp)
+      : signToken(user.id, user.roles, this.secret, TOKEN_TTL_SECONDS);
+    return { user: toPublicUser(user), token };
   }
 
   async changePassword(userId: string, body: unknown): Promise<{ ok: true }> {
