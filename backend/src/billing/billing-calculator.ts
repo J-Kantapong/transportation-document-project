@@ -39,16 +39,26 @@ export interface RateRow {
 }
 
 // ราคาหลัก 1 แถวต่อคัน + ค่าเพิ่มที่บวกให้เองตามการยื่นของรถคันนั้น (ผู้ใช้ 2026-09-28, TWE: ขอใช้ +100, ด่วน +100 - "ขอใช้" = ขอใช้จังหวัดอื่น)
-export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT'] as const;
+// PLATE_REQUEST (ผู้ใช้ 2026-09-28, Spac EV: "ขอใช้เลข" +98.13 แยกจาก "ขอใช้" ทางจังหวัด) = ขอใช้เลขทะเบียน (requestsPlateNumber)
+// - คนละเรื่องกับช่องหักยอด "ลูกค้าชำระค่าขอใช้เลขเอง" (PLATE_REQUEST_DEDUCTION ในหน้าจอ) ซึ่งหักยอดที่คิดไปแล้ว ไม่ใช่การเสนอราคา
+export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT', 'PLATE_REQUEST'] as const;
 
 // ค่าเพิ่มที่ใช้กับรถคันนี้: แถว OTHER_PROVINCE เมื่อเป็นรถขอใช้ (จดจังหวัดอื่น เช่น กรุงเทพฯ - ใบเสร็จมีค่าธรรมเนียมอื่นๆ 20 + ค่าคำขอ 10
-// แทน 5, ผู้ใช้ 2026-09-28: ไม่ใช่ขอใช้เลขทะเบียน), URGENT เมื่อยื่นด่วน (ชนิดรถต้องตรงหรือ ANY)
-export function suggestAddOns(rates: RateRow[], vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean }): RateRow[] {
+// แทน 5, ผู้ใช้ 2026-09-28: ไม่ใช่ขอใช้เลขทะเบียน), URGENT เมื่อยื่นด่วน, PLATE_REQUEST เมื่อยื่นแบบขอใช้เลขทะเบียน (ชนิดรถต้องตรงหรือ ANY)
+export function suggestAddOns(
+  rates: RateRow[],
+  vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean; requestedPlateNumber: boolean },
+): RateRow[] {
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
   return [...rates]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .filter((r) => r.vehicleKind === 'ANY' || r.vehicleKind === kind)
-    .filter((r) => (r.kind === 'OTHER_PROVINCE' && vehicle.otherProvince) || (r.kind === 'URGENT' && vehicle.urgent));
+    .filter(
+      (r) =>
+        (r.kind === 'OTHER_PROVINCE' && vehicle.otherProvince) ||
+        (r.kind === 'URGENT' && vehicle.urgent) ||
+        (r.kind === 'PLATE_REQUEST' && vehicle.requestedPlateNumber),
+    );
 }
 
 // ค่าดำเนินการ (ก่อน VAT) ที่เสนอจากแถวราคา - ราคาเหมารวมใบเสร็จ (ผู้ใช้ 2026-09-27): ค่าดำเนินการ = ราคา - ค่าใบเสร็จจริงของคันนั้น

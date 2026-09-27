@@ -98,8 +98,9 @@ export interface BillingTerms {
 }
 
 export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
-// BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) = ค่าเพิ่มที่บวกให้เอง (ผู้ใช้ 2026-09-28)
-export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT";
+// BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) / PLATE_REQUEST (ขอใช้เลขทะเบียน,
+// ผู้ใช้ 2026-09-28 Spac EV - คนละเรื่องกับ OTHER_PROVINCE) = ค่าเพิ่มที่บวกให้เอง
+export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST";
 
 export interface ServiceFeeRate {
   id: string;

@@ -310,7 +310,7 @@ export class BillingService {
             const urgent = sub?.urgent ?? false;
             // ขอใช้ = จดจังหวัดอื่น (จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ) เงื่อนไขเดียวกับค่าธรรมเนียมอื่นๆ 20 ตอนยื่น (document-fee-calculator)
             const otherProvince = !!v.registrationProvince && !!v.ownerProvince && v.registrationProvince !== v.ownerProvince;
-            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent });
+            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber });
             const base = rate ? serviceFeeFromRate(rate, receiptAmount ?? estimate) : null;
             return {
               id: v.id,
@@ -451,7 +451,7 @@ export class BillingService {
       const label = optionalText(r?.label, 'ชื่อรายการ');
       if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
       const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
-      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE หรือ URGENT`);
+      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT หรือ PLATE_REQUEST`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
       if (!vehicleKind) throw bad(`แถวที่ ${i + 1}: ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);

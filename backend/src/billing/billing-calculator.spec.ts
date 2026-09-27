@@ -105,9 +105,15 @@ describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด�
   });
 
   it('adds the ขอใช้ (other-province) add-on for other-province cars and the urgent add-on for urgent submissions', () => {
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false })).toEqual([]);
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true }).map((r) => r.id)).toEqual(['plate', 'urgent']);
-    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true })).toEqual([]); // motorcycle-only add-ons
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false })).toEqual([]);
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true, requestedPlateNumber: false }).map((r) => r.id)).toEqual(['plate', 'urgent']);
+    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true, requestedPlateNumber: false })).toEqual([]); // motorcycle-only add-ons
+  });
+
+  it('adds the ขอใช้เลข (plate number request) add-on when the vehicle requested a plate number (Spac EV)', () => {
+    const withPlateRow = [...rates, row({ id: 'plateReq', kind: 'PLATE_REQUEST', amount: 98.13, sortOrder: 4 })];
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: true }).map((r) => r.id)).toEqual(['plateReq']);
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false })).toEqual([]);
   });
 });
 
