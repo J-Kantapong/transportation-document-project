@@ -175,6 +175,15 @@ function sendQueueNote(v: InspectionVehicle): string {
   return "";
 }
 
+// ถึงกำหนดตรวจรอบ 2 แต่ยกเลิก/ยื่นไม่สำเร็จด้วยผลตรวจเดิม (ผู้ใช้ 2026-09-27 F19): ยังยื่นใหม่ด้วยวันที่ยื่นเดิมได้
+// ส่งตรวจรอบ 2 ไปก่อน = ผลตรวจผ่านเดิมถูกล้าง ยื่นด้วยวันที่เดิมไม่ได้อีก และเสียค่าตรวจรอบ 2 -> เตือนให้ถามฝ่ายยื่นก่อน
+function resubmitNote(v: InspectionVehicle): string {
+  const w = v.round2Due ? v.resubmitWith : null;
+  if (!w) return "";
+  const what = w.reason === "CANCELLED" ? "ยกเลิกการยื่น" : "ยื่นไม่สำเร็จ";
+  return `${what} (ยื่น ${isoToDisplayDate(w.submitDate)}) — ยื่นใหม่ด้วยวันที่ยื่นเดิมได้ถึง ${isoToDisplayDate(w.validUntil)} ถามฝ่ายยื่นเอกสารก่อนส่งตรวจรอบ 2`;
+}
+
 function roundLabel(v: InspectionVehicle): string {
   return v.inspectionRound === 2 ? "รอบ 2" : "รอบ 1";
 }
@@ -422,6 +431,7 @@ function SendPanel({
                   const row = rows[v.id];
                   if (!row) return null;
                   const note = sendQueueNote(v);
+                  const resubmit = resubmitNote(v);
                   return (
                     <tr key={v.id}>
                       <td>{isoToDisplayDate(v.date) || v.date}</td>
@@ -432,6 +442,11 @@ function SendPanel({
                       <td>{v.registrationProvince || "—"}</td>
                       <td className="inspect-note">
                         {note ? <span className="customer-message error">{note}</span> : "—"}
+                        {resubmit && (
+                          <div>
+                            <span className="customer-message error">{resubmit}</span>
+                          </div>
+                        )}
                         {/* วันที่ตรวจผ่านพิมพ์ผิดจนรถถึงกำหนดตรวจรอบ 2 - แก้วันที่ตรวจผ่านได้ที่นี่แทนการส่งตรวจรอบ 2 โดยไม่จำเป็น
                             (พบ 2026-09-27: รถคันนี้หลุดจากตารางตรวจเสร็จแล้ว จึงไม่มีทางแก้) */}
                         {canEdit && v.round2Due && (

@@ -65,7 +65,7 @@ function service(o: { spendSubs?: unknown[]; inProcessSubs?: unknown[]; openVehi
     invoiceLine: empty(),
     user: { count: vi.fn().mockResolvedValue(0) },
   } as unknown as PrismaService;
-  return { svc: new OverviewService(prisma), subFind };
+  return { svc: new OverviewService(prisma), subFind, vehicleFind, prisma: prisma as unknown as Record<string, { findMany: ReturnType<typeof vi.fn> }> };
 }
 
 describe('OverviewService.overview', () => {
@@ -145,5 +145,41 @@ describe('OverviewService.overview', () => {
     expect(result.stuck.limit).toBe(100);
     expect(result.stuck.items).toHaveLength(101); // รถยนต์ 100 คันที่ด่วนสุด + จักรยานยนต์ 1 คัน
     expect(result.stuck.items.filter((i) => i.kind === 'moto').map((i) => i.id)).toEqual(['m1']);
+  });
+
+  // ผู้ใช้ 2026-09-27: ปิดงาน - วางบิลนอกระบบ ไม่นับเป็นส่งงานแล้วยังไม่วางบิล และไม่ค้างขั้นวางบิล
+  it('รถที่ปิดงาน - วางบิลนอกระบบไม่อยู่ในยอดยังไม่วางบิลและไม่ติดขัดขั้นวางบิล', async () => {
+    const delivered = (id: string, billingClosedAt: Date | null) => ({
+      ...openVehicle(id, 'รย.1-เก๋ง 2 ตอน', '2026-08-01'),
+      transferDone: true,
+      plateReceivedDate: d('2026-08-10'),
+      bookReceivedDate: d('2026-08-10'),
+      deliveredDate: d('2026-08-11'),
+      plateDeliveredDate: d('2026-08-11'),
+      documentSubmissions: [
+        { status: 'RECEIPT_RECEIVED', submitDate: d('2026-08-05'), receiptDate: d('2026-08-05'), receiptReceivedDate: d('2026-08-06'), failRemark: null, receiptCarriedAt: null, _count: { receipts: 1 } },
+      ],
+      billingClosedAt,
+    });
+    const { svc, vehicleFind } = service({ openVehicles: [delivered('closed', d('2026-08-20')), delivered('open', null)] });
+    const result = await svc.overview();
+    expect(result.stuck.items.map((i) => i.id)).toEqual(['open']);
+    const wheres = vehicleFind.mock.calls.map(([a]) => a.where as Where);
+    // ยอดส่งงานแล้วยังไม่วางบิล
+    expect(wheres.find((w) => 'deliveredDate' in w && !w.OR)).toMatchObject({ billingClosedAt: null });
+    // รถที่ยังไม่จบงาน: ทางค้างวางบิลตัดรถที่ปิดงานออก
+    const open = wheres.find((w) => w.OR?.some((c) => 'plateDeliveredDate' in c && c.plateDeliveredDate === null))!;
+    expect(open.OR).toContainEqual(expect.objectContaining({ billingClosedAt: null }));
+  });
+
+  // ผู้ใช้ 2026-09-27: งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอดในภาพรวม
+  it('ไม่นับงานสลับเลข ต่อภาษี และยามาฮ่าที่ยกเลิกแล้ว', async () => {
+    const { svc, prisma } = service();
+    await svc.overview();
+    for (const model of ['plateSwap', 'taxRenewal', 'yamahaRelocationEntry']) {
+      const calls = prisma[model].findMany.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [args] of calls) expect(args.where).toMatchObject({ cancelledAt: null });
+    }
   });
 });

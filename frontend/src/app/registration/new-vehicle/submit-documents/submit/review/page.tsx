@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
 import { ChecksNote } from "@/components/submit-flow/ChecksNote";
+import { EligibilityNotice } from "@/components/submit-flow/EligibilityNotice";
 import { DONE_HREF, dutyAmount, formatMoney, PICK_HREF, SETTINGS_HREF } from "@/components/submit-flow/shared";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -16,7 +17,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Bill = ค่าธรรมเนียม (Bill) + ภาษี, No bill = No bill ไม่รวมค่าอากร, รวม = Bill + No bill (ไม่รวมค่าอากร ตามแบบเดิม)
 export default function SubmitReviewPage() {
   const router = useRouter();
-  const { submitDate, today, selected, rowState, checks, verifyPrices, submitting, submitProgress, submitSelected } = useSubmitFlow();
+  const { submitDate, today, selected, rowState, eligibilityOf, checks, verifyPrices, submitting, submitProgress, submitSelected } =
+    useSubmitFlow();
   const [verifying, setVerifying] = useState(false);
   const [submitError, setSubmitError] = useState("");
   // คันที่ยอดเปลี่ยนตอนคำนวณใหม่ก่อนยืนยัน (ข้อมูลรถถูกแก้ระหว่างนี้) - ไฮไลต์ให้ตรวจแล้วกดยืนยันอีกครั้ง
@@ -70,22 +72,28 @@ export default function SubmitReviewPage() {
     if (mounted.current) router.push(DONE_HREF);
   }
 
-  // ยอดของแต่ละคัน (คันที่ยังคำนวณไม่เสร็จ/คำนวณไม่ได้ = null)
+  // ยอดของแต่ละคัน (คันที่ยังคำนวณไม่เสร็จ/คำนวณไม่ได้ = null) + เหตุผลที่ยื่นไม่ได้ ณ วันที่ยื่น (ผู้ใช้ 2026-09-27)
   const lines = selected.map((v) => {
     const state = rowState(v);
-    if (state.kind !== "ok") return { vehicle: v, amounts: null, taxMissing: false, error: state.kind === "error" ? state.message : null };
+    const eligibility = eligibilityOf(v);
+    const blockedReason = eligibility.kind === "blocked" ? eligibility.reason : null;
+    if (state.kind !== "ok") {
+      return { vehicle: v, amounts: null, taxMissing: false, error: state.kind === "error" ? state.message : null, blockedReason };
+    }
     const duty = dutyAmount(state.fee);
     return {
       vehicle: v,
       amounts: { bill: state.fee.billTotal + (state.taxAmount ?? 0), noBill: state.fee.noBillTotal - duty, duty, total: state.total },
       taxMissing: state.taxAmount === null,
       error: null,
+      blockedReason,
     };
   });
   const sum = (key: "bill" | "noBill" | "duty" | "total") => lines.reduce((acc, l) => acc + (l.amounts?.[key] ?? 0), 0);
   // วันที่ยื่นไม่ใช่วันนี้ (กรอกล่วงหน้า/ย้อนหลัง) - เตือนสีส้มในหน้าต่างยืนยันแบบเดียวกับหน้า Delivery
   const dayDiff = submitDate && today ? Math.round((Date.parse(submitDate) - Date.parse(today)) / DAY_MS) : 0;
-  const changedCount = selected.filter((v) => changedIds.has(v.id)).length;
+  // คันที่ยื่นไม่ได้ ณ วันที่ยื่นแจ้งแยก (EligibilityNotice) ไม่นับเป็น "ยอดเปลี่ยน"
+  const changedCount = selected.filter((v) => changedIds.has(v.id) && !checks.dateBlockedIds.includes(v.id)).length;
   // ส่งทีละชุด (50 คัน) - บอกความคืบหน้าระหว่างชุด ไม่ให้ดูเหมือนค้าง
   const submittingLabel = submitProgress ? `กำลังยื่น… ${submitProgress.done}/${submitProgress.total} คัน` : "กำลังยื่น…";
 
@@ -105,6 +113,7 @@ export default function SubmitReviewPage() {
           ยอดเปลี่ยน {changedCount} คัน เพราะข้อมูลรถถูกแก้ระหว่างนี้ (แถวสีส้ม) - ตรวจยอดใหม่แล้วกด &quot;ยืนยันยื่น&quot; อีกครั้ง
         </p>
       )}
+      <EligibilityNotice />
 
       <section className="panel">
         <div className="table-wrap">
@@ -122,14 +131,21 @@ export default function SubmitReviewPage() {
               </tr>
             </thead>
             <tbody>
-              {lines.map(({ vehicle: v, amounts, taxMissing, error }, index) => (
+              {lines.map(({ vehicle: v, amounts, taxMissing, error, blockedReason }, index) => (
                 <tr
                   key={v.id}
                   className={checks.problemIds.has(v.id) ? "row-failed" : undefined}
                   style={changedIds.has(v.id) && !checks.problemIds.has(v.id) ? { background: "#fff4e5" } : undefined}
                 >
                   <td>{index + 1}</td>
-                  <td>{v.chassis}</td>
+                  <td>
+                    {v.chassis}
+                    {blockedReason && (
+                      <div className="field-error" style={{ whiteSpace: "normal" }}>
+                        ยื่นไม่ได้ ณ วันที่ยื่นนี้: {blockedReason}
+                      </div>
+                    )}
+                  </td>
                   <td>{v.customerName}</td>
                   <td>
                     {v.brandName} · {v.body || "—"}

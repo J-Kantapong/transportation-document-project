@@ -1,5 +1,7 @@
 import {
   computeDocumentFees,
+  isSwapPlateOption,
+  requestsPlateNumber,
   type DocumentFeeRuleSet,
   type DocumentSubmissionOptionsInput,
   type DocumentSubmissionVehicleInput,
@@ -164,5 +166,40 @@ describe('computeDocumentFees - ค่าแผ่นป้ายทะเบี
       baseRules(),
     );
     expect(result.billItems.some((i) => i.label.includes('ค่าแผ่นป้ายทะเบียนรถ'))).toBe(true);
+  });
+});
+
+// "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27): ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ ไม่นับเป็นคำขอเพิ่ม
+describe('computeDocumentFees - มีคนทำสลับเลขมาให้ (SWAP_NORMAL / SWAP_AUCTION)', () => {
+  it.each(['SWAP_NORMAL', 'SWAP_AUCTION'] as const)('%s -> ยอดเท่ากับไม่ขอเลข: ค่าคำขอ/อากรปกติ มีค่าป้าย ไม่มีค่าขอใช้เลข', (option) => {
+    const swap = computeDocumentFees(carVehicle(), baseOptions({ plateNumberOption: option }), baseRules());
+    const none = computeDocumentFees(carVehicle(), baseOptions({ plateNumberOption: 'NONE' }), baseRules());
+    expect(swap.hasExtraRequest).toBe(false);
+    expect(swap.billItems.find((i) => i.label.includes('ค่าคำขอ'))?.amount).toBe(5);
+    expect(swap.noBillItems.find((i) => i.label.includes('ค่าอากร'))?.amount).toBe(10);
+    expect(swap.billItems.find((i) => i.label === 'ค่าแผ่นป้ายทะเบียนรถ')?.amount).toBe(200);
+    expect(swap.billItems.some((i) => i.label.includes('ขอใช้เลข'))).toBe(false);
+    expect(swap.billTotal).toBe(none.billTotal);
+    expect(swap.noBillTotal).toBe(none.noBillTotal);
+  });
+
+  it('คิดค่าแผ่นป้ายเสมอ แม้ส่ง includePlateFee = false มา', () => {
+    const result = computeDocumentFees(carVehicle(), baseOptions({ plateNumberOption: 'SWAP_AUCTION', includePlateFee: false }), baseRules());
+    expect(result.billItems.some((i) => i.label === 'ค่าแผ่นป้ายทะเบียนรถ')).toBe(true);
+  });
+
+  it('ตัวเลือกอื่นยังนับเป็นคำขอเพิ่มตามเดิม (จังหวัดอื่น / ทำป้ายใหม่)', () => {
+    const otherProvince = computeDocumentFees(carVehicle({ ownerProvince: 'เชียงใหม่' }), baseOptions({ plateNumberOption: 'SWAP_NORMAL' }), baseRules());
+    expect(otherProvince.hasExtraRequest).toBe(true);
+    const newPlate = computeDocumentFees(carVehicle(), baseOptions({ plateNumberOption: 'SWAP_NORMAL', newPlateOption: 'BLACKWHITE' }), baseRules());
+    expect(newPlate.hasExtraRequest).toBe(true);
+    expect(newPlate.noBillItems.find((i) => i.label.includes('ค่าอากร'))?.amount).toBe(30);
+  });
+});
+
+describe('requestsPlateNumber / isSwapPlateOption', () => {
+  it('ขอใช้เลข = NORMAL/AUCTION เท่านั้น, สลับเลข = SWAP_*', () => {
+    expect(['NONE', 'NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION'].map(requestsPlateNumber)).toEqual([false, true, true, false, false]);
+    expect(['NONE', 'NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION', null].map(isSwapPlateOption)).toEqual([false, false, false, true, true, false]);
   });
 });

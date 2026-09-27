@@ -7,8 +7,20 @@
 import { classifyVehicleFamily } from '../tax/government-tax-reference-data.js';
 import { GovTaxVehicleFamily } from '../generated/prisma/enums.js';
 
-export type PlateNumberOption = 'NONE' | 'NORMAL' | 'AUCTION';
+// SWAP_NORMAL / SWAP_AUCTION = "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27): คนอื่นทำสลับเลขแล้วส่งเลขมาให้ แผ่นป้ายขาวดำ / ประมูล
+// ต้องกรอกหมวด+เลข ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ และไม่นับเป็นคำขอเพิ่ม (ค่าคำขอ/ค่าอากรตามปกติ) - รถยนต์เท่านั้น
+export type PlateNumberOption = 'NONE' | 'NORMAL' | 'AUCTION' | 'SWAP_NORMAL' | 'SWAP_AUCTION';
 export type NewPlateOption = 'NONE' | 'BLACKWHITE' | 'AUCTION';
+
+// เลขจากงานสลับเลขที่คนอื่นทำมาให้ (ไม่ใช่การขอใช้เลข)
+export function isSwapPlateOption(option: string | null | undefined): boolean {
+  return option === 'SWAP_NORMAL' || option === 'SWAP_AUCTION';
+}
+
+// ขอใช้เลขทะเบียนจริง (มีค่าขอใช้เลข + นับเป็นคำขอเพิ่ม) - ใช้แทนการเทียบ !== 'NONE' ทุกที่ที่หมายถึง "ขอใช้เลข"
+export function requestsPlateNumber(option: string | null | undefined): boolean {
+  return option === 'NORMAL' || option === 'AUCTION';
+}
 
 export interface DocumentSubmissionVehicleInput {
   body: string | null;
@@ -69,7 +81,7 @@ export function computeHasExtraRequest(vehicle: DocumentSubmissionVehicleInput, 
   const isOtherProvince = !!vehicle.registrationProvince && !!vehicle.ownerProvince && vehicle.registrationProvince !== vehicle.ownerProvince;
   return (
     isOtherProvince ||
-    options.plateNumberOption !== 'NONE' ||
+    requestsPlateNumber(options.plateNumberOption) || // เลขจากงานสลับเลข (SWAP_*) ไม่นับเป็นคำขอเพิ่ม (ผู้ใช้ 2026-09-27)
     (!isMoto && options.newPlateOption !== null && options.newPlateOption !== 'NONE') ||
     (!isMoto && options.relocateAddon)
   );
@@ -98,7 +110,8 @@ export function computeDocumentFees(
 
   // ค่าแผ่นป้ายทะเบียน(รถ): บังคับรวมเสมอเมื่อ "ไม่ขอ" เลขทะเบียน แต่ถ้าติ๊กขอใช้เลขทะเบียนแล้ว เลือกได้
   // ว่าจะรวมค่าป้ายนี้ด้วยหรือไม่ (ดู memory/project_fee_pricing_workflow.md)
-  const includePlate = options.plateNumberOption === 'NONE' || options.includePlateFee;
+  // เลขจากงานสลับเลข (SWAP_*) คิดค่าแผ่นป้ายตามปกติเสมอ (ผู้ใช้ 2026-09-27)
+  const includePlate = options.plateNumberOption === 'NONE' || isSwapPlateOption(options.plateNumberOption) || options.includePlateFee;
   if (isMoto) {
     billItems.push({ label: 'ค่าตรวจสภาพรถ (จยย.)', amount: lookupFee(bill, 'ค่าตรวจสภาพรถ (จยย.)') });
     if (includePlate) billItems.push({ label: 'ค่าแผ่นป้ายทะเบียน', amount: lookupFee(bill, 'ค่าแผ่นป้ายทะเบียน') });

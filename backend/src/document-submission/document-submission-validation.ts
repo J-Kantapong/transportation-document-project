@@ -1,9 +1,9 @@
 // Hand-rolled validation matching the convention in tax/tax-validation.ts and
 // vehicles/vehicle-validation.ts (plain functions + Thai error messages, no class-validator).
 import { BadRequestException } from '@nestjs/common';
-import type { DocumentSubmissionOptionsInput, NewPlateOption, PlateNumberOption } from './document-fee-calculator.js';
+import { isSwapPlateOption, type DocumentSubmissionOptionsInput, type NewPlateOption, type PlateNumberOption } from './document-fee-calculator.js';
 
-const PLATE_NUMBER_OPTIONS: PlateNumberOption[] = ['NONE', 'NORMAL', 'AUCTION'];
+const PLATE_NUMBER_OPTIONS: PlateNumberOption[] = ['NONE', 'NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION'];
 const NEW_PLATE_OPTIONS: NewPlateOption[] = ['NONE', 'BLACKWHITE', 'AUCTION'];
 
 export function parseDocumentSubmissionOptions(raw: unknown, isMoto: boolean): DocumentSubmissionOptionsInput {
@@ -12,13 +12,19 @@ export function parseDocumentSubmissionOptions(raw: unknown, isMoto: boolean): D
 
   const plateNumberOption = body.plateNumberOption;
   if (!PLATE_NUMBER_OPTIONS.includes(plateNumberOption as PlateNumberOption)) {
-    throw new BadRequestException({ error: 'plateNumberOption ต้องเป็น NONE, NORMAL หรือ AUCTION' });
+    throw new BadRequestException({ error: 'plateNumberOption ต้องเป็น NONE, NORMAL, AUCTION, SWAP_NORMAL หรือ SWAP_AUCTION' });
   }
   if (isMoto && plateNumberOption === 'AUCTION') {
     throw new BadRequestException({ error: 'มอเตอร์ไซค์มีค่าขอใช้เลขทะเบียนราคาเดียว ไม่มีตัวเลือกเลขประมูล' });
   }
+  // "มีคนทำสลับเลขมาให้" มีเฉพาะรถยนต์ (ผู้ใช้ 2026-09-27: แผ่นป้ายขาวดำ/ประมูล - งานสลับเลขยังรับแต่รถยนต์)
+  if (isMoto && isSwapPlateOption(plateNumberOption as string)) {
+    throw new BadRequestException({ error: 'ตัวเลือก "มีคนทำสลับเลขมาให้" ใช้ได้เฉพาะรถยนต์' });
+  }
 
-  const includePlateFee = body.includePlateFee === undefined ? true : Boolean(body.includePlateFee);
+  // เลขจากงานสลับเลขคิดค่าแผ่นป้ายตามปกติเสมอ (ผู้ใช้ 2026-09-27) - เก็บ true ไว้ใน snapshot ให้ตรงกับรายการที่คิดจริง
+  const includePlateFee =
+    isSwapPlateOption(plateNumberOption as string) || body.includePlateFee === undefined ? true : Boolean(body.includePlateFee);
 
   let newPlateOption: NewPlateOption | null = null;
   if (!isMoto) {
@@ -82,8 +88,16 @@ export function parseReceiptNo(raw: unknown): string | null {
 
 // ตาม mockup: ถ้าเลือกขอใช้เลขทะเบียน (NORMAL/AUCTION) ต้องกรอกหมวดทะเบียน+เลขทะเบียนก่อนบันทึกจริง
 // (ต่างจากกรณี "ไม่ขอ" ที่เว้นว่างได้ เพราะกรมขนส่งรันเลขให้เองแล้วมากรอกทีหลัง)
+// เลขจากงานสลับเลขที่คนอื่นทำมาให้ (SWAP_*) ต้องกรอกเหมือนกัน (ผู้ใช้ 2026-09-27) - ทุกตัวเลือกที่ไม่ใช่ "ไม่ขอ" ตรวจรูปแบบด้วย
+// แบบเดียวกับช่องกรอกฝั่งหน้าเว็บ (หน้ารับใบเสร็จตรวจรูปแบบเดียวกัน)
 export function assertPlateNumberProvided(plateNumberOption: PlateNumberOption, plateCategory: string | null, plateNumber: string | null) {
-  if (plateNumberOption !== 'NONE' && (!plateCategory || !plateNumber)) {
-    throw new BadRequestException({ error: 'กรุณากรอกหมวดทะเบียนและเลขทะเบียนที่ขอก่อนบันทึก' });
+  if (plateNumberOption === 'NONE') return;
+  if (!plateCategory || !plateNumber) {
+    throw new BadRequestException({
+      error: isSwapPlateOption(plateNumberOption)
+        ? 'กรุณากรอกหมวดทะเบียนและเลขทะเบียนที่ได้จากการสลับเลขก่อนบันทึก'
+        : 'กรุณากรอกหมวดทะเบียนและเลขทะเบียนที่ขอก่อนบันทึก',
+    });
   }
+  assertPlateFormat(plateCategory, plateNumber);
 }

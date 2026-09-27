@@ -25,7 +25,7 @@ function vehicle(overrides: Record<string, unknown> = {}) {
     plateDeliveredDate: null,
     deliveryRecipient: null,
     deliveryNote: null,
-    customer: { name: 'ลูกค้า' },
+    customer: { id: 'c1', name: 'ลูกค้า', company: null, branch: null },
     brand: { name: 'Toyota' },
     documentSubmissions: [{ status: 'RECEIPT_RECEIVED' }],
     ...overrides,
@@ -136,5 +136,21 @@ describe('ReceivingService - รับป้ายของรถที่ส่
     // ขั้นอื่นไม่ใช้
     const book = await service([bookSent]).svc.listCompleted('book');
     expect(book.vehicles[0].bookDeliveredDate).toBeNull();
+  });
+});
+
+describe('ReceivingService - กุญแจใบยื่นเป็นรหัสลูกค้า (ผู้ใช้ 2026-09-27)', () => {
+  it('แถวคิว/ดำเนินการแล้วมี customerId + บริษัท/สาขาไว้แยกลูกค้าที่ชื่อซ้ำกัน', async () => {
+    const branchA = vehicle({ id: 'a', customer: { id: 'c1', name: 'เอสพี', company: 'บริษัท เอสพี จำกัด', branch: 'บางนา' } });
+    const branchB = vehicle({ id: 'b', customer: { id: 'c2', name: 'เอสพี', company: 'บริษัท เอสพี จำกัด', branch: 'รังสิต' } });
+    const { svc, findMany } = service([branchA, branchB]);
+    const rows = await svc.listPending('plate');
+    expect(findMany.mock.calls[0][0].include.customer).toEqual({ select: { id: true, name: true, company: true, branch: true } });
+    expect(rows.map((r) => [r.customerId, r.customerName, r.customerBranch])).toEqual([
+      ['c1', 'เอสพี', 'บางนา'],
+      ['c2', 'เอสพี', 'รังสิต'],
+    ]);
+    const done = await service([vehicle({ bookReceivedDate: new Date('2026-09-20T00:00:00.000Z') })]).svc.listCompleted('book');
+    expect(done.vehicles[0]).toMatchObject({ customerId: 'c1', customerName: 'ลูกค้า', customerCompany: null, customerBranch: null });
   });
 });

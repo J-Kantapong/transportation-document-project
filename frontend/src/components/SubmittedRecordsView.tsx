@@ -8,8 +8,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import { PageTabs } from "@/components/PageTabs";
 import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
-import { compareSubmittedOrder, dutyOfItems, savedTotalExcludingDuty, useReadScope } from "@/components/submit-flow/shared";
+import { compareSubmittedOrder, dutyOfItems, savedTotalExcludingDuty, swapPlateLabel, useReadScope } from "@/components/submit-flow/shared";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
+import { customerDisplayNames } from "@/lib/job-sheet";
 
 function formatMoney(amount: number): string {
   return amount.toLocaleString("th-TH", { maximumFractionDigits: 2 });
@@ -106,7 +107,15 @@ export function GroupTable({
                     {ownerDisplayLabel(r.vehicle.owner, r.vehicle.owner?.name) ?? "ยังไม่ระบุ"}
                   </td>
                   {showUrgent && <td>{r.urgent ? <span className="badge warn">ด่วน</span> : "—"}</td>}
-                  <td>{r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}</td>
+                  <td>
+                    {r.vehicle.plateCategory ? `${r.vehicle.plateCategory} ${r.vehicle.plateNumber ?? ""}` : "—"}
+                    {/* เลขจากงานสลับเลขที่คนอื่นทำมาให้ (ผู้ใช้ 2026-09-27) - ไม่ใช่การขอใช้เลข แสดงให้เห็นชัด */}
+                    {swapPlateLabel(r.plateNumberOption) && (
+                      <div>
+                        <span className="badge warn">{swapPlateLabel(r.plateNumberOption)}</span>
+                      </div>
+                    )}
+                  </td>
                   <TotalCell record={r} />
                   <td>
                     <StatusBadge status={r.status} />
@@ -231,11 +240,18 @@ export function SubmittedRecordsView({
     note: string;
   } | null>(null);
 
-  const owners = useMemo(() => Array.from(new Set(records.map((r) => r.vehicle.customer.name))).sort((a, b) => a.localeCompare(b, "th")), [records]);
-  const owner = owners.includes(ownerChoice) ? ownerChoice : "";
+  // เจ้าของงานเลือกตามรหัสลูกค้า (ผู้ใช้ 2026-09-27: ใบยื่นใช้รหัสลูกค้าทุกหน้า) - ชื่อซ้ำต่อบริษัท · สาขาให้แยกออก
+  const owners = useMemo(
+    () =>
+      Array.from(customerDisplayNames(records.map((r) => r.vehicle.customer)), ([id, label]) => ({ id, label })).sort((a, b) =>
+        a.label.localeCompare(b.label, "th"),
+      ),
+    [records],
+  );
+  const owner = owners.some((o) => o.id === ownerChoice) ? ownerChoice : "";
   // คันที่ยื่นก่อนอยู่บนสุด (ตาราง + ใบส่งงานที่ปริ้นใช้ลำดับเดียวกัน)
   const filtered = useMemo(
-    () => (owner ? records.filter((r) => r.vehicle.customer.name === owner) : records).slice().sort(compareSubmittedOrder),
+    () => (owner ? records.filter((r) => r.vehicle.customer.id === owner) : records).slice().sort(compareSubmittedOrder),
     [records, owner],
   );
 
@@ -286,8 +302,8 @@ export function SubmittedRecordsView({
             <select value={owner} onChange={(e) => setOwnerChoice(e.target.value)} disabled={loading}>
               <option value="">ทุกเจ้าของงาน</option>
               {owners.map((o) => (
-                <option key={o} value={o}>
-                  {o}
+                <option key={o.id} value={o.id}>
+                  {o.label}
                 </option>
               ))}
             </select>

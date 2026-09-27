@@ -1,6 +1,7 @@
 import { slipNoText, type DeliveryRow, type DeliverySlip, type DeliverySlipItem } from "@/lib/billing-api";
 import { DELIVERY_HEADER } from "@/lib/company-profile";
 import { isoToDisplayDate } from "@/lib/date";
+import { customerDisplayNames } from "@/lib/job-sheet";
 import { downloadHtmlAsPdf } from "@/lib/pdf-export";
 import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 
@@ -18,6 +19,38 @@ export interface DeliveryCounts {
   vehicles: number;
   book: number;
   plate: number;
+}
+
+// ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ (ก่อนห้ามรวม ผู้ใช้ 2026-09-27): backend ส่ง hiddenItems = คันอีกประเภทที่ยังไม่ยกเลิก
+// ซึ่งบัญชีนี้ไม่เห็น (STAFF_CAR / STAFF_MOTO อย่างเดียว) - พิมพ์ซ้ำจึงบอกว่าใบเต็มมีกี่คัน ไม่ให้ดูเหมือนใบที่ลูกค้าเซ็น
+export const hiddenItemsOf = (slip: DeliverySlip): number => slip.hiddenItems ?? 0;
+
+// ใบที่ยังไม่ยกเลิกทั้งใบ แต่คันที่บัญชีนี้เห็นถูกยกเลิกครบแล้ว (ใบเก่าที่รวมสองประเภท: STAFF_CAR ยกเลิกคันรถยนต์ครบ
+// จักรยานยนต์ที่มองไม่เห็นยังอยู่ backend จึงไม่ปิดทั้งใบ) - สำหรับบัญชีนี้ถือว่ายกเลิกแล้ว ไม่นับ/ไม่พิมพ์ใบว่าง (พบ 2026-09-27)
+export const slipCancelledForViewer = (slip: DeliverySlip): boolean => !!slip.cancelledAt || slip.items.every((i) => i.cancelledAt);
+
+// ลูกค้าของแถวในคิว Delivery / ป้ายค้างส่ง: backend ส่ง customer { id, name, company, branch } มาด้วย (F47 2026-09-27)
+// DeliveryRow ใน lib/billing-api.ts ยังไม่มีช่องนี้ - ไม่มี (backend รุ่นก่อน) ใช้ชื่อที่แสดงเดิมแทน
+export interface DeliveryCustomer {
+  id: string;
+  name: string;
+  company?: string | null;
+  branch?: string | null;
+}
+
+export function deliveryRowCustomer(r: DeliveryRow): DeliveryCustomer {
+  return (r as DeliveryRow & { customer?: DeliveryCustomer }).customer ?? { id: r.customerId, name: r.customerName };
+}
+
+// ชื่อลูกค้าที่แสดงตามรหัสลูกค้า (F47 ผู้ใช้ 2026-09-27): ชื่อบริษัท (ไม่มี = ชื่อลูกค้า) แบบหัวใบส่งงาน
+// ชื่อซ้ำกับลูกค้ารายอื่นในรายการเดียวกัน = ต่อชื่อผู้ติดต่อ · สาขา (หลักเดียวกับ customerDisplayNames ของหน้ารับใบเสร็จ/ป้าย/เล่ม)
+export function deliveryCustomerLabels(customers: Iterable<DeliveryCustomer>): Map<string, string> {
+  return customerDisplayNames(
+    Array.from(customers, (c) => {
+      const company = c.company?.trim();
+      return { id: c.id, name: company || c.name, company: company ? c.name : null, branch: c.branch };
+    }),
+  );
 }
 
 export function countItems(items: DeliverySlipItem[]): DeliveryCounts {
@@ -100,6 +133,7 @@ const FIT_SCRIPT = `<script>
 function slipHtml(slip: DeliverySlip): string {
   const c = countItems(slip.items);
   const platePending = slip.items.filter((i) => !i.plate).length;
+  const hidden = hiddenItemsOf(slip);
   const customer = slip.customer;
   const customerName = customer.displayName + (customer.branch ? ` (สาขา ${customer.branch})` : "");
   const rows = slip.items
@@ -138,6 +172,7 @@ ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(s
 <div class="tail">
 <p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
 ${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
+${hidden ? `<p class="note">* ฉบับพิมพ์ซ้ำนี้แสดงเฉพาะ ${c.vehicles} คัน - ใบนี้มีรถอีกประเภทรวมอยู่ ${hidden} คัน (ใบเต็ม ${c.vehicles + hidden} คัน)</p>` : ""}
 <div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", slip.recipient)}</div>
 </div>
 </section>`;
@@ -209,6 +244,8 @@ export interface DeliveryReportInput {
   customerName: string | null; // null = ทุกลูกค้า
   slips: DeliverySlip[];
   platePending: DeliveryRow[]; // ส่งเล่มไปแล้ว ป้ายยังไม่ได้ส่ง
+  // ชื่อลูกค้าที่แสดงตามรหัสลูกค้า (deliveryCustomerLabels - ชื่อซ้ำต่อผู้ติดต่อ/สาขา) ไม่ส่ง = ชื่อเดิม
+  customerLabels?: Map<string, string>;
   truncated?: boolean; // ใบในช่วงนี้เกินที่ระบบแสดงได้ครั้งเดียว (500 ใบล่าสุด) - พิมพ์บอกไว้ในรายงาน
 }
 
@@ -222,26 +259,28 @@ function rangeText(from: string, to: string): string {
 export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
   const items = r.slips.flatMap((s) => s.items);
   const c = countItems(items);
+  const hidden = r.slips.reduce((sum, s) => sum + hiddenItemsOf(s), 0);
   const range = rangeText(r.from, r.to);
   const rows = r.slips
     .flatMap((s) =>
       s.items.map(
         (i, n) => `<tr${n === 0 ? ' class="first"' : ""}><td>${n === 0 ? esc(isoToDisplayDate(s.date)) : ""}</td><td>${n === 0 ? esc(slipNoText(s.slipNo)) : ""}</td>
-<td>${n === 0 ? esc(s.customer.displayName) : ""}</td><td>${n === 0 ? esc(s.recipient) : ""}</td><td>${esc(i.plateText) || "—"}</td><td>${esc(i.chassis)}</td>
+<td>${n === 0 ? esc(r.customerLabels?.get(s.customer.id) ?? s.customer.displayName) : ""}</td><td>${n === 0 ? esc(s.recipient) : ""}</td><td>${esc(i.plateText) || "—"}</td><td>${esc(i.chassis)}</td>
 <td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
       ),
     )
     .join("");
   const pending = r.platePending
     .map(
-      (v) => `<tr><td>${esc(v.customerName)}</td><td>${v.plateCategory && v.plateNumber ? esc(`${v.plateCategory} ${v.plateNumber}`) : "—"}</td><td>${esc(v.chassis)}</td>
+      (v) => `<tr><td>${esc(r.customerLabels?.get(v.customerId) ?? v.customerName)}</td><td>${v.plateCategory && v.plateNumber ? esc(`${v.plateCategory} ${v.plateNumber}`) : "—"}</td><td>${esc(v.chassis)}</td>
 <td>${v.deliveredDate ? esc(isoToDisplayDate(v.deliveredDate)) : "—"}</td><td>${v.kind === "PLATE_ONLY" ? "ป้ายมาแล้ว รอส่ง" : "รอป้ายออก"}</td></tr>`,
     )
     .join("");
   const body = `<h1>รายงานส่งงาน</h1>
 <p>วันที่ส่ง ${esc(range)} · ลูกค้า ${esc(r.customerName ?? "ทั้งหมด")}<br>
 ${r.slips.length} ใบ · ${c.vehicles} รายการ · เล่ม ${c.book} · ป้าย ${c.plate}
-${r.truncated ? "<br><b>* ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ รายงานนี้มีเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงเพื่อให้ครบ</b>" : ""}</p>
+${r.truncated ? "<br><b>* ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ รายงานนี้มีเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงเพื่อให้ครบ</b>" : ""}
+${hidden ? `<br>* ใบเก่าที่รวมรถยนต์กับจักรยานยนต์ แสดงเฉพาะคันในขอบเขตบัญชีนี้ (ไม่แสดงอีก ${hidden} คัน)` : ""}</p>
 <table class="grid"><thead><tr><th>วันที่ส่ง</th><th>เลขที่ใบ</th><th>ลูกค้า</th><th>ผู้รับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th>
 <th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows || '<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>

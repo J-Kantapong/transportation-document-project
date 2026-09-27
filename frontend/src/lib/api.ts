@@ -12,12 +12,15 @@ export class ApiError extends Error {
   rows?: RowError[];
   // HTTP status ที่ backend ตอบ (ไม่มี = ติดต่อระบบไม่ได้) - 409 = มีคนแก้ข้อมูลไปก่อน หน้าจอควรโหลดรายการใหม่
   status?: number;
+  // เนื้อคำตอบทั้งก้อน (เช่น 409 needsConfirm ตอนแก้ข้อมูลรถหลังขั้นตอนที่ใช้ข้อมูลเดิม - ผู้ใช้ 2026-09-27)
+  details?: Record<string, unknown>;
 
-  constructor(message: string, rows?: RowError[], status?: number) {
+  constructor(message: string, rows?: RowError[], status?: number, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.rows = rows;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -54,7 +57,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = data as { error?: string; errors?: RowError[] };
-    const error = new ApiError(body?.error ?? 'ดำเนินการไม่สำเร็จ', body?.errors, res.status);
+    const details = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
+    const error = new ApiError(body?.error ?? 'ดำเนินการไม่สำเร็จ', body?.errors, res.status, details);
     throw error;
   }
 
@@ -94,6 +98,11 @@ export interface Customer {
   email: string | null;
   createdAt: string;
   updatedAt: string;
+  // เงื่อนไขวางบิล (คอลัมน์ของ Customer ตามที่ GET /api/customers ส่งมา: ตัวเลข Decimal มาเป็นข้อความ เช่น "3")
+  billingVat?: boolean;
+  billingWhtRate?: string | number;
+  billingWhtSpecialRate?: string | number | null;
+  billingWhtSpecialUntil?: string | null; // ISO
 }
 
 export interface Brand {
@@ -247,7 +256,9 @@ export interface DocumentSubmissionPreviewResult {
 
 // Step 4 (ยื่นเอกสารจดทะเบียนรถใหม่): ค่าธรรมเนียม Bill/No bill - ดู
 // backend/src/document-submission/document-fee-calculator.ts สำหรับ logic การคำนวณจริง
-export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION";
+// SWAP_NORMAL / SWAP_AUCTION = "มีคนทำสลับเลขมาให้" ป้ายขาวดำ / ป้ายประมูล (ผู้ใช้ 2026-09-27, รถยนต์เท่านั้น): ต้องกรอกหมวด+เลข
+// ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ ไม่นับเป็นคำขอเพิ่ม
+export type PlateNumberOption = "NONE" | "NORMAL" | "AUCTION" | "SWAP_NORMAL" | "SWAP_AUCTION";
 export type NewPlateOption = "NONE" | "BLACKWHITE" | "AUCTION";
 
 export interface FeeItem {
@@ -315,7 +326,8 @@ export interface DocumentSubmission {
     body: string | null;
     plateCategory: string | null;
     plateNumber: string | null;
-    customer: { name: string; company: string | null };
+    // id = กุญแจใบยื่น/ใบส่งงาน (ผู้ใช้ 2026-09-27) ชื่อซ้ำกันได้ - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
+    customer: { id: string; name: string; company: string | null; branch: string | null };
     brand: { name: string };
     owner: { name: string | null; ownerType: OwnerType; hirerType: OwnerType | null; financeCompanyId: string | null } | null;
     inspectionResultDate?: string | null; // วันที่ตรวจผ่าน (เวลาเต็ม - ใช้ slice(0, 10)) มีเฉพาะผลจาก listDocumentSubmissions
@@ -439,7 +451,10 @@ export type ReceivingStep = "plate" | "book" | "delivery";
 export interface ReceivingRow {
   id: string; // vehicleId
   date: string;
+  customerId: string; // กุญแจใบยื่น (ผู้ใช้ 2026-09-27) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
   customerName: string;
+  customerCompany: string | null;
+  customerBranch: string | null;
   chassis: string;
   brandName: string;
   body: string | null;
@@ -519,6 +534,31 @@ export interface TransferNoticeVehicle {
   transferDone: boolean;
   transferCompletedDate: string | null;
   transferCost: string | null;
+  // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
+  inspectionSentDate?: string | null;
+  submitted?: boolean;
+}
+
+// แก้ข้อมูลรถหลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ 2026-09-27): PATCH /api/vehicles/:id ตอบ 409 { needsConfirm: true, affected,
+// taxPreview? } - ส่งซ้ำพร้อม confirm: true + confirmedSteps (confirmKey ของทุกคำเตือนที่เห็น) เพื่อบันทึก
+export interface VehicleEditAffectedStep {
+  step: 'transfer' | 'inspection' | 'submission' | 'delivery' | 'billing';
+  label: string;
+  fields: string[];
+  note: string;
+  // คีย์ของคำเตือนนี้ - สถานะเปลี่ยนระหว่างที่ดูคำเตือน (เช่น ได้ใบเสร็จแล้ว) คีย์เปลี่ยน backend เตือนใหม่ (ผู้ใช้ 2026-09-27 รอบตรวจ)
+  confirmKey: string;
+  // เฉพาะ step 'submission' - submitDate = วันที่ยื่น / repriceable = รอใบเสร็จและช่องที่แก้มีผลกับค่าธรรมเนียม/ภาษี
+  // (ชี้ไปยกเลิกรายการยื่นแล้วยื่นใหม่ที่หน้า ดูข้อมูลที่ยื่นแล้ว เฉพาะเมื่อ repriceable)
+  submissionStatus?: string;
+  submitDate?: string | null;
+  repriceable?: boolean;
+}
+
+export interface VehicleEditWarning {
+  affected: VehicleEditAffectedStep[];
+  // ภาษีที่ยื่นไว้ (รายการรอใบเสร็จ) เทียบกับภาษีตามข้อมูลใหม่ (preview ไม่บันทึก) - new = null พร้อม reason ถ้าคิดไม่ได้
+  taxPreview?: { old: number | null; new: number | null; reason: string | null };
 }
 
 export interface InspectionVehicle {
@@ -548,6 +588,9 @@ export interface InspectionVehicle {
   inspectionFailRemark: string | null;
   submitted: boolean; // ยื่นเอกสารแล้ว (มีรายการยื่นที่ยังไม่ยกเลิก/ไม่สำเร็จ)
   submitDeadline: string | null; // วันสุดท้ายที่ยื่นได้ (ตรวจผ่าน + 89 วัน) - null = ไม่ผ่าน/ยังไม่มีผล/ยื่นแล้ว
+  // เฉพาะคิวส่งตรวจ (GET /api/vehicles/inspection/pending-send): ถึงกำหนดตรวจรอบ 2 แต่ยกเลิก/ยื่นไม่สำเร็จด้วยผลตรวจเดิม
+  // = ยังยื่นใหม่ด้วยวันที่ยื่นเดิมได้ถึง validUntil (ผู้ใช้ 2026-09-27 F19) - null/ไม่มี = ไม่เคยยื่นด้วยผลตรวจนี้
+  resubmitWith?: { submitDate: string; reason: 'FAILED' | 'CANCELLED'; validUntil: string } | null;
 }
 
 export type YamahaRelocationSize = 'SMALL' | 'LARGE';
@@ -594,6 +637,25 @@ export interface NewCustomerInput {
   taxId: string;
   phone: string;
   email: string;
+}
+
+// แก้ข้อมูลลูกค้า (ADMIN, ผู้ใช้ 2026-09-27): 7 ช่องครบเหมือนตอนเพิ่ม + เหตุผล (บังคับ, เก็บลงประวัติ)
+// terms = เงื่อนไขวางบิล ไม่ส่ง = ไม่แก้ | whtSpecialUntil = ค.ศ. YYYY-MM-DD
+// expectedUpdatedAt = Customer.updatedAt ตอนเปิดหน้าแก้ - มีคนแก้ไปก่อน backend ตอบ 409 (ไม่ทับค่าของเขา)
+export interface UpdateCustomerInput extends NewCustomerInput {
+  remark: string;
+  expectedUpdatedAt: string;
+  terms?: { vat: boolean; whtRate: number; whtSpecialRate: number | null; whtSpecialUntil: string | null };
+}
+
+// ประวัติการแก้ไขลูกค้า (AuditLog) ใหม่สุดก่อน - changes = { ช่อง: { from, to } } วันที่ล้วนเป็น YYYY-MM-DD
+export interface CustomerHistoryEntry {
+  id: string;
+  action: string;
+  remark: string;
+  changes: Record<string, { from: unknown; to: unknown }>;
+  editedBy: string | null;
+  createdAt: string; // ISO
 }
 
 // --- ต่อภาษี ---------------------------------------------------------------------
@@ -682,6 +744,8 @@ export interface TaxRenewalInput {
   paymentDate?: string | null;
 }
 
+// PATCH /api/tax-renewals/:id - ติ๊ก/กรอกวันที่ที่ยังว่าง = งานปกติ / ช่องข้อมูลรถ-ภาษี ลงขัน และแก้หรือล้างวันที่ที่มีแล้ว
+// = แก้ข้อมูล ต้องส่ง remark (ผู้ใช้ 2026-09-27) - chassis/engine แก้ได้เฉพาะรถที่กรอกเอง, ownerType/financed เฉพาะเจ้าของที่ไม่ได้มาจากข้อมูลรถ
 export interface TaxRenewalUpdateInput {
   inspectionConfirmed?: boolean;
   insuranceConfirmed?: boolean;
@@ -689,6 +753,23 @@ export interface TaxRenewalUpdateInput {
   paymentDate?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
+  submitDate?: string;
+  chassis?: string;
+  engine?: string | null;
+  plateCategory?: string;
+  plateNumber?: string;
+  vehicleType?: string;
+  fuel?: string;
+  cc?: string | number | null;
+  weight?: string | number | null;
+  firstRegistrationDate?: string;
+  ownerType?: 'INDIVIDUAL' | 'JURISTIC';
+  financed?: boolean;
+  ownerName?: string | null;
+  taxExpiryDate?: string;
+  remark?: string;
+  // ฟอร์ม ✎ แก้ส่ง updatedAt ที่โหลดมา - มีคนแก้/ติ๊กไปก่อนระหว่างที่เปิดฟอร์มอยู่ backend ตอบ 409 (พบ 2026-09-27)
+  expectedUpdatedAt?: string;
 }
 
 export interface TaxRenewal {
@@ -715,12 +796,24 @@ export interface TaxRenewal {
   billTotal: string | null;
   noBillTotal: string | null;
   customer?: { id: string; name: string; company: string | null } | null;
+  // ฟอร์ม ✎ แก้ (ผู้ใช้ 2026-09-27): ข้อมูลที่ใช้คิดภาษี + เจ้าของ (ownerFromVehicle = อ่านจากข้อมูลรถ แก้ที่งานนี้ไม่ได้)
+  cc: string | null;
+  weight: string | null;
+  ownerType: OwnerType;
+  ownerFromVehicle: boolean;
+  financed: boolean; // ติดไฟแนนซ์ - ownerType เป็นนิติบุคคล (ไฟแนนซ์) ประเภทผู้เช่าซื้ออยู่ที่ hirerType
+  hirerType: OwnerType | null;
+  updatedAt: string; // ส่งกลับเป็น expectedUpdatedAt ตอน ✎ แก้
 }
 
 export const api = {
   listCustomers: () => request<{ customers: Customer[] }>('/api/customers'),
   createCustomer: (data: NewCustomerInput) =>
     request<{ id: string }>('/api/customers', { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomer: (id: string, data: UpdateCustomerInput) =>
+    request<{ customer: Customer }>(`/api/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  customerHistory: (id: string) =>
+    request<{ entries: CustomerHistoryEntry[] }>(`/api/customers/${encodeURIComponent(id)}/history`),
 
   listBrands: () => request<{ brands: Brand[] }>('/api/brands'),
   createBrand: (name: string) =>
@@ -751,8 +844,12 @@ export const api = {
   },
   createVehicles: (vehicles: Record<string, string>[]) =>
     request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
-  updateVehicle: (id: string, data: Record<string, string>) =>
-    request<{ id: string }>(`/api/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // 409 + details.needsConfirm = แก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (VehicleEditWarning) - ส่งซ้ำพร้อม confirm/confirmedSteps
+  updateVehicle: (id: string, data: Record<string, string>, confirm?: { confirmedSteps: string[] }) =>
+    request<{ id: string }>(`/api/vehicles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(confirm ? { ...data, confirm: true, confirmedSteps: confirm.confirmedSteps } : data),
+    }),
 
   // ลบข้อมูลรถ (ซ่อน ไม่ลบจริง) / กู้คืน / รายการที่ลบไว้ - ADMIN เท่านั้น ต้องระบุเหตุผลที่ลบทุกครั้ง
   deleteVehicle: (id: string, remark: string) =>
@@ -821,8 +918,34 @@ export const api = {
   },
 
   listPendingTransferNotice: () => request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/pending'),
-  listRecentlyCompletedTransferNotice: () =>
-    request<{ vehicles: TransferNoticeVehicle[] }>('/api/vehicles/transfer-notice/completed'),
+  // ดำเนินการแล้ว ทีละ 100 คัน ทำเสร็จล่าสุดก่อน - q ค้นเลขตัวถัง/ลูกค้า ฯลฯ ทั้งฐานข้อมูล (ผู้ใช้ 2026-09-27)
+  listRecentlyCompletedTransferNotice: (params: { q?: string; offset?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q?.trim()) qs.set('q', params.q.trim());
+    if (params.offset) qs.set('offset', String(params.offset));
+    if (params.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return request<{ vehicles: TransferNoticeVehicle[]; hasMore: boolean }>(
+      `/api/vehicles/transfer-notice/completed${query ? `?${query}` : ''}`,
+    );
+  },
+  // "✎ แก้" คันที่ดำเนินการแล้ว (ต้องมีเหตุผล): done = false ยกเลิกสถานะ (เฉพาะก่อนส่งตรวจ) / true แก้วันที่เสร็จ-ค่าใช้จ่าย (จนกว่าจะยื่น)
+  // expectedCompletedDate/expectedCost = ค่าที่ dialog แสดงอยู่ - มีคนแก้ไปก่อน = 409 (ผู้ใช้ 2026-09-27 รอบตรวจ)
+  correctTransferNotice: (
+    id: string,
+    data: {
+      done: boolean;
+      completedDate: string | null;
+      cost: string | null;
+      remark: string;
+      expectedCompletedDate: string | null;
+      expectedCost: string | null;
+    },
+  ) =>
+    request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
+      `/api/vehicles/${id}/transfer-notice/correct`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
   // expectedTransferDone = สถานะที่หน้าจอโหลดมา - ไม่ตรงกับในระบบแล้ว (มีคนบันทึกไปก่อน) backend ตอบ 409
   updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null; expectedTransferDone: boolean }) =>
     request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
@@ -988,6 +1111,23 @@ export const api = {
     form.append('report', data.report, data.report.name);
     return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
   },
+  // แก้/ยกเลิกรายการที่บันทึกผิด (ADMIN/STAFF_ENTRY, remark บังคับ - ผู้ใช้ 2026-09-27) ยกเลิกแล้วไฟล์เดิมแนบใหม่ได้
+  // expected* = ค่าที่ฟอร์มโหลดมา (ตารางนี้ไม่มี updatedAt) - ไม่ตรงกับในระบบ = มีคนแก้ไปก่อน backend ตอบ 409 (พบ 2026-09-27)
+  updateYamahaRelocation: (
+    id: string,
+    data: {
+      date?: string;
+      size?: YamahaRelocationSize;
+      count?: number;
+      remark: string;
+      expectedDate?: string;
+      expectedSize?: YamahaRelocationSize;
+      expectedCount?: number;
+    },
+  ) =>
+    request<{ entry: YamahaRelocationEntry }>(`/api/yamaha-relocation/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  cancelYamahaRelocation: (id: string, remark: string) =>
+    request<{ id: string }>(`/api/yamaha-relocation/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),
 
   // ต่อภาษี - preview คิดยอดสดให้ฟอร์ม (ไม่บันทึก), PATCH ใช้เติมวันที่/ติ๊กทีหลังจากหน้ารายการ
   listTaxRenewals: () => request<TaxRenewal[]>('/api/tax-renewals'),
@@ -999,6 +1139,9 @@ export const api = {
     request<TaxRenewal>('/api/tax-renewals', { method: 'POST', body: JSON.stringify(data) }),
   updateTaxRenewal: (id: string, data: TaxRenewalUpdateInput) =>
     request<TaxRenewal>(`/api/tax-renewals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // ยกเลิกงาน (ไม่ลบแถว, remark บังคับ - ผู้ใช้ 2026-09-27)
+  cancelTaxRenewal: (id: string, remark: string) =>
+    request<{ id: string }>(`/api/tax-renewals/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),
 
   // Delivery: ส่งชนิดงานที่ผู้ใช้เห็นในป๊อปอัปยืนยันไปด้วย - สถานะรถเปลี่ยนไปแล้ว backend ไม่บันทึก (409) ให้โหลดใหม่ (พบ 2026-09-27)
   // vehicleIds ส่งคู่ไปด้วยให้ backend รุ่นก่อนยังรับได้ระหว่างอัปเดต

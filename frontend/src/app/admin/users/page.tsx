@@ -1,9 +1,125 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { api, ApiError, type Customer } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { api, ApiError, request, type Customer } from "@/lib/api";
 import { type AuthUser, ROLE_LABELS, STATUS_LABELS, type UserRole, type UserStatus, getCachedUser } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
+
+// ADMIN ตั้งรหัสผ่านชั่วคราวให้ผู้ใช้ที่ลืมรหัส (ผู้ใช้ 2026-09-27) - backend เก็บประวัติ (ไม่เก็บรหัสผ่าน)
+// บัญชีตัวเองใช้ไม่ได้ ต้องเปลี่ยนที่เมนู "เปลี่ยนรหัสผ่าน" ซึ่งถามรหัสผ่านเดิม
+const EMPTY_PASSWORD_FORM = { password: "", confirmPassword: "", remark: "" };
+
+// PATCH /api/admin/users/:id/password - ใช้หน้านี้หน้าเดียว จึงเก็บไว้ที่นี่แทน lib/auth-api.ts
+function setUserPassword(id: string, data: { password: string; confirmPassword: string; remark: string }) {
+  return request<{ user: AuthUser }>(`/api/admin/users/${encodeURIComponent(id)}/password`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+function SetPasswordDialog({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [form, setForm] = useState(EMPTY_PASSWORD_FORM);
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (user && !dialog.open) {
+      setForm(EMPTY_PASSWORD_FORM);
+      setShow(false);
+      setMessage({ text: "" });
+      dialog.showModal();
+    } else if (!user && dialog.open) {
+      dialog.close();
+    }
+  }, [user]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user) return;
+    if (form.password.length < 8) return setMessage({ text: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร", error: true });
+    if (form.password !== form.confirmPassword) return setMessage({ text: "รหัสผ่านทั้งสองช่องไม่ตรงกัน", error: true });
+    if (!form.remark.trim()) return setMessage({ text: "กรุณาระบุเหตุผลที่ตั้งรหัสผ่านใหม่", error: true });
+    setSaving(true);
+    setMessage({ text: "กำลังบันทึก…" });
+    try {
+      await setUserPassword(user.id, { ...form, remark: form.remark.trim() });
+      setForm(EMPTY_PASSWORD_FORM);
+      setMessage({
+        text: `ตั้งรหัสผ่านใหม่ให้ ${user.name} แล้ว - แจ้งรหัสนี้ให้ผู้ใช้โดยตรง และให้ผู้ใช้เปลี่ยนเองที่เมนู "เปลี่ยนรหัสผ่าน" หลังเข้าสู่ระบบ`,
+      });
+    } catch (err) {
+      setMessage({ text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={ref} onClose={onClose}>
+      <button type="button" className="close" aria-label="ปิด" onClick={onClose}>
+        ✕
+      </button>
+      <h2>ตั้งรหัสผ่านใหม่</h2>
+      {user && (
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+          {user.name} · {user.email}
+          <br />
+          รหัสนี้เป็นรหัสชั่วคราว ผู้ใช้ควรเปลี่ยนเองหลังเข้าสู่ระบบ
+        </p>
+      )}
+      <form onSubmit={submit} className="auth-fields" style={{ marginTop: 12 }}>
+        <label className="field">
+          รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)
+          <input
+            type={show ? "text" : "password"}
+            autoComplete="new-password"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            required
+            minLength={8}
+            maxLength={200}
+          />
+        </label>
+        <label className="field">
+          ยืนยันรหัสผ่านใหม่
+          <input
+            type={show ? "text" : "password"}
+            autoComplete="new-password"
+            value={form.confirmPassword}
+            onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+            required
+            maxLength={200}
+          />
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+          <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
+          แสดงรหัสผ่าน
+        </label>
+        <label className="field">
+          เหตุผล *
+          <textarea
+            required
+            maxLength={500}
+            rows={2}
+            value={form.remark}
+            onChange={(e) => setForm({ ...form, remark: e.target.value })}
+            placeholder="เช่น ผู้ใช้ลืมรหัสผ่าน"
+          />
+        </label>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <button type="submit" className="primary" disabled={saving || !form.remark.trim()}>
+            บันทึกรหัสผ่านใหม่
+          </button>
+          {message.text && <span className={`customer-message${message.error ? " error" : " success"}`}>{message.text}</span>}
+        </div>
+      </form>
+    </dialog>
+  );
+}
 
 const STAFF_ROLES: UserRole[] = ["ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT", "DELIVERY"];
 const FILTERS: Array<{ key: UserStatus | "ALL"; label: string }> = [
@@ -29,11 +145,13 @@ function UserRow({
   customers,
   self,
   onSaved,
+  onSetPassword,
 }: {
   user: AuthUser;
   customers: Customer[];
   self: boolean;
   onSaved: (u: AuthUser) => void;
+  onSetPassword: () => void;
 }) {
   // ประเภทบัญชี (พนักงาน / ลูกค้า) Admin สลับได้ (พบ 2026-09-27): สมัครผิดแท็บแล้วไม่ต้องสมัครใหม่ด้วยอีเมลอื่น
   // เริ่มจากบทบาทที่มีอยู่ ถ้ายังไม่มีบทบาทใช้ตามแท็บที่สมัคร - backend กันลูกค้าปนบทบาทพนักงาน / ลูกค้าไม่มีบริษัทอยู่แล้ว
@@ -174,7 +292,13 @@ function UserRow({
               เปิดใช้งาน
             </button>
           )}
+          {!self && (
+            <button type="button" className="text-button" disabled={busy} onClick={onSetPassword}>
+              ตั้งรหัสผ่านใหม่
+            </button>
+          )}
         </div>
+        {self && <div className="sub">เปลี่ยนรหัสผ่านของตัวเองที่เมนู &quot;เปลี่ยนรหัสผ่าน&quot;</div>}
         {error && <div className="customer-message error">{error}</div>}
       </td>
     </tr>
@@ -187,6 +311,7 @@ export default function AdminUsersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
+  const [passwordTarget, setPasswordTarget] = useState<AuthUser | null>(null);
   const selfId = useMemo(() => getCachedUser()?.id, []);
 
   async function load() {
@@ -261,6 +386,7 @@ export default function AdminUsersPage() {
                     customers={customers}
                     self={u.id === selfId}
                     onSaved={(saved) => setUsers((prev) => prev.map((x) => (x.id === saved.id ? saved : x)))}
+                    onSetPassword={() => setPasswordTarget(u)}
                   />
                 ))}
               </tbody>
@@ -268,6 +394,7 @@ export default function AdminUsersPage() {
           </div>
         )}
       </div>
+      <SetPasswordDialog user={passwordTarget} onClose={() => setPasswordTarget(null)} />
     </div>
   );
 }

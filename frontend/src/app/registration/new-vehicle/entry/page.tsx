@@ -4,8 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PageTabs } from "@/components/PageTabs";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { api, ApiError, type Brand, type Customer, type DeletedVehicle, type FinanceCompany, type Vehicle } from "@/lib/api";
-import { canDeleteVehicle, canEditEntrySteps, getCachedUser } from "@/lib/auth";
+import {
+  api,
+  ApiError,
+  type Brand,
+  type Customer,
+  type DeletedVehicle,
+  type FinanceCompany,
+  type Vehicle,
+  type VehicleEditWarning,
+} from "@/lib/api";
+import { canDeleteVehicle, canEditEntrySteps, getCachedUser, type UserRole } from "@/lib/auth";
+import { EditImpactWarning, editWarningOf } from "./EditImpactWarning";
 import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
@@ -373,6 +383,9 @@ export default function VehicleEntryPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editMessage, setEditMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
   const editDialogRef = useRef<HTMLDialogElement>(null);
+  // คำเตือนเมื่อแก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ 2026-09-27) - ตั้งจาก 409 needsConfirm, แก้ช่องใดๆ ต่อ = ล้าง (ผลกระทบอาจเปลี่ยน)
+  const [editWarning, setEditWarning] = useState<VehicleEditWarning | null>(null);
+  const [roles, setRoles] = useState<UserRole[]>([]);
 
   // ลบข้อมูลรถ (ผู้ใช้ 2026-09-23): ADMIN เท่านั้น ต้องระบุเหตุผลทุกครั้ง - ลบแล้วซ่อนไว้ ไม่หายจากฐานข้อมูล
   // และกู้คืนได้จากรายการ "รถที่ลบแล้ว" ด้านล่าง (backend กันสิทธิ์อีกชั้นใน auth/access-policy.ts)
@@ -496,6 +509,7 @@ export default function VehicleEntryPage() {
     setCanDelete(canDeleteVehicle(getCachedUser()?.roles ?? []));
     // แก้ไขรถที่บันทึกแล้ว: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน PATCH อยู่แล้ว - ซ่อนปุ่มให้กลุ่มอื่น)
     setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
+    setRoles(getCachedUser()?.roles ?? []);
     // โหลดครั้งแรกตอนเปิดหน้าเท่านั้น - หลังจากนั้นโหลดใหม่ตามปุ่มค้นหา/โหลดเพิ่ม
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -782,15 +796,19 @@ export default function VehicleEntryPage() {
     setEditDateText(isoToDisplayDate(vehicle.date));
     setEditRemark("");
     setEditMessage({ text: "" });
+    setEditWarning(null);
     editDialogRef.current?.showModal();
   }
 
+  // แก้ช่องใดๆ หลังเห็นคำเตือน = ล้างคำเตือน ให้กดบันทึกใหม่แล้วดูผลกระทบของข้อมูลล่าสุด (ไม่ยืนยันคำเตือนของข้อมูลชุดก่อน)
   function updateEditRow<K extends keyof NormalizedVehicleRow>(key: K, value: string) {
     setEditRow((prev) => ({ ...prev, [key]: value }));
+    setEditWarning(null);
   }
 
   function toggleEditFinance(checked: boolean) {
     setEditFinanceOn(checked);
+    setEditWarning(null);
     if (!checked) setEditRow((prev) => ({ ...prev, financeId: "", hirerName: "" }));
   }
 
@@ -800,8 +818,10 @@ export default function VehicleEntryPage() {
     updateEditRow("date", displayDateToIso(text.replace(/\D/g, "")));
   }
 
-  async function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // FormEvent = กดบันทึก (ถ้าแก้หลังขั้นตอนที่ใช้ข้อมูลเดิม backend ตอบ 409 needsConfirm แล้วแสดงคำเตือน)
+  // confirmed = กด "ยืนยันบันทึกการแก้ไข" ในคำเตือน - ส่งซ้ำพร้อม confirm + ขั้นตอนที่เห็นในคำเตือน (ผู้ใช้ 2026-09-27)
+  async function handleEditSubmit(event?: FormEvent<HTMLFormElement>, confirmed?: VehicleEditWarning) {
+    event?.preventDefault();
     if (!editingId) return;
     const remark = editRemark.trim();
     if (!remark) {
@@ -819,12 +839,28 @@ export default function VehicleEntryPage() {
     setEditSaving(true);
     setEditMessage({ text: "กำลังบันทึก…" });
     try {
-      await api.updateVehicle(editingId, { ...row, remark });
+      await api.updateVehicle(
+        editingId,
+        { ...row, remark },
+        // ส่ง confirmKey ของคำเตือนที่เห็น - สถานะของขั้นตอนเปลี่ยนระหว่างนั้น (เช่น ได้ใบเสร็จแล้ว) = backend เตือนใหม่
+        confirmed ? { confirmedSteps: confirmed.affected.map((a) => a.confirmKey) } : undefined,
+      );
+      setEditWarning(null);
       setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
       await loadVehicles();
       editDialogRef.current?.close();
     } catch (error) {
-      setEditMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+      const warning = editWarningOf(error);
+      if (warning) {
+        // ยังไม่บันทึก - แสดงผลกระทบให้ผู้ใช้ตัดสินใจ (ยืนยันแล้วมีขั้นตอนเพิ่มจากที่เห็น = เตือนชุดใหม่)
+        setEditWarning(warning);
+        setEditMessage({
+          text: confirmed ? "มีขั้นตอนที่กระทบเพิ่มระหว่างนั้น - ตรวจสอบคำเตือนอีกครั้ง" : "ยังไม่ได้บันทึก - ตรวจสอบผลกระทบด้านล่างแล้วกดยืนยัน",
+          error: true,
+        });
+      } else {
+        setEditMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+      }
     } finally {
       setEditSaving(false);
     }
@@ -1374,10 +1410,27 @@ export default function VehicleEntryPage() {
               placeholder="ระบุเหตุผลที่แก้ไขข้อมูลรถคันนี้ - จำเป็นต้องกรอกทุกครั้ง"
             />
           </label>
+          {editWarning && (
+            <EditImpactWarning
+              warning={editWarning}
+              roles={roles}
+              isMotorcycle={editRow.body.startsWith("รย.12-")}
+              chassis={editRow.chassis}
+              saving={editSaving}
+              onConfirm={() => handleEditSubmit(undefined, editWarning)}
+              onCancel={() => {
+                setEditWarning(null);
+                setEditMessage({ text: "" });
+              }}
+            />
+          )}
           <div className="form-actions" style={{ marginTop: 16 }}>
-            <button type="submit" className="primary" disabled={editSaving || !editRemark.trim()}>
-              บันทึกการแก้ไข
-            </button>
+            {/* มีคำเตือนอยู่ = ใช้ปุ่มยืนยันในคำเตือนแทน ไม่ให้กดบันทึกซ้ำแล้วได้คำเตือนเดิม */}
+            {!editWarning && (
+              <button type="submit" className="primary" disabled={editSaving || !editRemark.trim()}>
+                บันทึกการแก้ไข
+              </button>
+            )}
             <span
               className={`customer-message${editMessage.error ? " error" : editMessage.text ? " success" : ""}`}
               role="status"

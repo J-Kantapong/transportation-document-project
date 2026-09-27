@@ -28,8 +28,15 @@ export class TaxRenewalController {
   }
 
   // เติมวันที่ชำระ/รับป้าย/คืนลูกค้า และติ๊ก ตรอ./พ.ร.บ. จากหน้ารายการ
+  // + แก้งานที่บันทึกผิด (ข้อมูลรถ/ภาษี, แก้หรือล้างวันที่ที่มีแล้ว) ต้องส่ง remark (ผู้ใช้ 2026-09-27)
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.taxRenewalService.update(id, body);
+    return this.taxRenewalService.update(id, body ?? {});
+  }
+
+  // ยกเลิกงาน { remark } - แถวยังอยู่ (cancelledAt) แต่ไม่แสดงในรายการ ยอดรวม และภาพรวม (ผู้ใช้ 2026-09-27)
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string, @Body() body: { remark?: unknown }) {
+    return this.taxRenewalService.cancel(id, body?.remark);
   }
 }

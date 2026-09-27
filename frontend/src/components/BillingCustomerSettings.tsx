@@ -19,10 +19,13 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [whtText, setWhtText] = useState(String(terms.whtRate));
   const [specialText, setSpecialText] = useState(terms.whtSpecialRate === null ? "" : String(terms.whtSpecialRate));
   const [untilText, setUntilText] = useState(terms.whtSpecialUntil ? isoToDisplayDate(terms.whtSpecialUntil) : "");
+  const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSave() {
+    // เหตุผลบังคับ เก็บในประวัติลูกค้า (ผู้ใช้ 2026-09-27)
+    if (!remark.trim()) return setError("ใส่เหตุผลที่แก้เงื่อนไข");
     const whtRate = percent(whtText);
     if (whtRate === null) return setError("อัตราหัก ณ ที่จ่ายปกติต้องเป็นตัวเลข 0-100");
     let whtSpecialRate: number | null = null;
@@ -37,7 +40,7 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -69,6 +72,10 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
         </label>
       </div>
       <p style={{ fontSize: 12 }}>ระบบเทียบวันสิ้นสุดกับวันที่ออกบิล พ้นวันนั้นแล้วกลับไปใช้อัตราปกติเอง บิลที่ออกไปแล้วไม่เปลี่ยน</p>
+      <label className="field">
+        เหตุผลที่แก้ *
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ลูกค้าแจ้งเปลี่ยนอัตราหัก ณ ที่จ่าย" maxLength={500} />
+      </label>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button className="primary" disabled={saving} onClick={handleSave}>
           บันทึกเงื่อนไข

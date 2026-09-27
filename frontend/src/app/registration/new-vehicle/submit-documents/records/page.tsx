@@ -37,6 +37,10 @@ export default function SubmitDocumentsRecordsPage() {
       .then((r) => {
         if (cancelled) return;
         setDates(r.dates);
+        // ?date=YYYY-MM-DD (ลิงก์จากคำเตือนแก้ข้อมูลรถ, ผู้ใช้ 2026-09-27) เปิดวันที่นั้นแทนวันล่าสุด ถ้ามีรายการของวันนั้น
+        // อ่านจาก window ครั้งแรกเท่านั้น (เหมือน focusChassis) - ผู้ใช้เลือกวันเองแล้วไม่ถูกทับ
+        const urlDate = new URLSearchParams(window.location.search).get("date");
+        if (urlDate && r.dates.some((d) => d.date === urlDate)) setDateChoice((prev) => prev ?? urlDate);
         setDatesLoaded(true);
         if (r.dates.length === 0) setLoading(false);
       })

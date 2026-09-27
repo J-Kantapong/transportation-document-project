@@ -127,6 +127,28 @@ describe('DeliveryService.submit', () => {
     expect($transaction).not.toHaveBeenCalled();
   });
 
+  // ผู้ใช้ 2026-09-27: ใบรวมสองประเภท พนักงานประเภทเดียวพิมพ์ซ้ำได้ไม่ครบและแก้ใบไม่ได้ -> ห้ามรวมตั้งแต่ตอนบันทึก
+  it('ส่งรถยนต์กับจักรยานยนต์ในใบเดียวไม่ได้ แม้ลูกค้าเดียวกันและผู้ใช้ส่งได้ทุกประเภท', async () => {
+    const moto = vehicle({ id: 'v2', chassis: 'CH2', body: 'รย.12-รถจักรยานยนต์' });
+    const { svc, $transaction } = service([vehicle(), moto]);
+    await expect(asUser(['ADMIN'], () => svc.submit(dto(['v1', 'v2'])))).rejects.toMatchObject({
+      status: 400,
+      response: { error: 'ส่งรถยนต์กับจักรยานยนต์คนละใบ' },
+    });
+    await expect(asUser(['DELIVERY'], () => svc.submit(dto(['v1', 'v2'])))).rejects.toMatchObject({ status: 400 });
+    expect($transaction).not.toHaveBeenCalled();
+  });
+
+  it('จักรยานยนต์หลายคันของลูกค้าเดียวกัน ส่งในใบเดียวได้ (body ว่าง = รถยนต์)', async () => {
+    const motos = service([
+      vehicle({ body: 'รย.12-รถจักรยานยนต์' }),
+      vehicle({ id: 'v2', chassis: 'CH2', body: 'รย.12-รถจักรยานยนต์' }),
+    ]);
+    await expect(motos.svc.submit(dto(['v1', 'v2']))).resolves.toMatchObject({ delivered: 2 });
+    const cars = service([vehicle(), vehicle({ id: 'v2', chassis: 'CH2', body: null })]);
+    await expect(cars.svc.submit(dto(['v1', 'v2']))).resolves.toMatchObject({ delivered: 2 });
+  });
+
   it('ต้องมีผู้รับงาน', async () => {
     const { svc } = service([vehicle()]);
     await expect(svc.submit({ ...dto(['v1']), recipient: ' ' })).rejects.toMatchObject({ response: { error: expect.stringContaining('ผู้รับ') } });
@@ -279,6 +301,34 @@ describe('DeliveryService.slips (รายงานส่งงาน)', () => {
     const byId = Object.fromEntries(result.slips[0].items.map((i) => [i.vehicleId, i.plateSentLater]));
     expect(byId).toEqual({ v1: { slipNo: 18, date: '2026-09-25' }, v2: null });
   });
+
+  // ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ (ก่อนห้ามรวม ผู้ใช้ 2026-09-27): บอกว่ามีคันที่ผู้ใช้นี้ไม่เห็นกี่คัน
+  describe('ใบเก่าที่รวมสองประเภท', () => {
+    const mixed = () =>
+      slipRow(40, [
+        slipItemRow(),
+        slipItemRow({ id: 'i2', vehicleId: 'v2', chassis: 'CH2', body: 'รย.12-รถจักรยานยนต์' }),
+        slipItemRow({ id: 'i3', vehicleId: 'v3', chassis: 'CH3', body: 'รย.12-รถจักรยานยนต์' }),
+        // ยกเลิกแล้ว = ไม่นับเป็นคันที่ซ่อน (ไม่อยู่ในใบเต็มแล้ว)
+        slipItemRow({ id: 'i4', vehicleId: 'v4', chassis: 'CH4', body: 'รย.12-รถจักรยานยนต์', cancelledAt: new Date() }),
+      ]);
+
+    it('STAFF_CAR เห็นเฉพาะรถยนต์ และ hiddenItems = จักรยานยนต์ที่ยังไม่ยกเลิก', async () => {
+      const { svc } = setup([mixed()]);
+      const result = await asUser(['STAFF_CAR'], () => svc.slips({}));
+      expect(result.slips[0].items.map((i) => i.vehicleId)).toEqual(['v1']);
+      expect(result.slips[0].hiddenItems).toBe(2);
+    });
+
+    it('ADMIN / ACCOUNTANT / DELIVERY / STAFF_CAR + STAFF_MOTO เห็นครบทุกคัน (hiddenItems = 0)', async () => {
+      for (const roles of [['ADMIN'], ['ACCOUNTANT'], ['DELIVERY'], ['STAFF_CAR', 'STAFF_MOTO']] as UserRole[][]) {
+        const { svc } = setup([mixed()]);
+        const result = await asUser(roles, () => svc.slips({}));
+        expect(result.slips[0].items).toHaveLength(4);
+        expect(result.slips[0].hiddenItems).toBe(0);
+      }
+    });
+  });
 });
 
 describe('DeliveryService.queue', () => {
@@ -293,6 +343,23 @@ describe('DeliveryService.queue', () => {
     const rows = await svc.queue();
     expect(findMany.mock.calls[0][0].where.deletedAt).toBeNull();
     expect(rows[0]).toMatchObject({ kind: 'PLATE_ONLY', bookSlip: { id: 's5', slipNo: 5, date: '2026-09-19' } });
+  });
+
+  // F47 (ผู้ใช้ 2026-09-27): ใบยื่นแบ่งด้วย customerId - แถวต้องมีชื่อ/บริษัท/สาขา ให้หน้าเว็บแยกลูกค้าชื่อซ้ำกันตอนแสดง
+  it('แถวมี customer { id, name, company, branch } และยังส่ง customerName แบบเดิม', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      vehicle({ customer: { id: 'c9', name: 'คุณเอ', company: 'บจก. เอ', branch: 'สาขาบางนา' } }),
+      vehicle({ id: 'v2', customer: { id: 'c1', name: 'ลูกค้า', company: null } }),
+    ]);
+    const svc = new DeliveryService({ vehicle: { findMany } } as unknown as PrismaService);
+    const rows = await svc.queue();
+    expect(findMany.mock.calls[0][0].include.customer.select).toMatchObject({ id: true, name: true, company: true, branch: true });
+    expect(rows[0]).toMatchObject({
+      customerId: 'c9',
+      customerName: 'บจก. เอ',
+      customer: { id: 'c9', name: 'คุณเอ', company: 'บจก. เอ', branch: 'สาขาบางนา' },
+    });
+    expect(rows[1].customer).toEqual({ id: 'c1', name: 'ลูกค้า', company: null, branch: null });
   });
 });
 
@@ -430,6 +497,34 @@ describe('DeliveryService แก้ / ยกเลิกใบส่งงาน
     expect(vehicleUpdate.mock.calls[0][0].data).toEqual({ plateDeliveredDate: null, deliveryNote: null });
   });
 
+  // ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ (ก่อนแยกใบ ผู้ใช้ 2026-09-27): ยกเลิกตรวจขอบเขตการแก้เฉพาะคันที่เลือก
+  // หน้ารายงานจึงให้ STAFF_CAR (+ ACCOUNTANT/DELIVERY ที่เห็นทุกคัน) ยกเลิกคันรถยนต์ของตัวเองได้ - ใบยังไม่ยกเลิกทั้งใบ
+  // เพราะจักรยานยนต์ยังอยู่ (หน้ารายงานถือว่าใบนั้นยกเลิกครบสำหรับบัญชีที่ไม่เห็นคันที่เหลือ)
+  describe('ใบเก่าที่รวมสองประเภท', () => {
+    const moto = () => slipItem({ id: 'i2', vehicleId: 'v2', chassis: 'CH2', body: 'รย.12-รถจักรยานยนต์' });
+
+    it('STAFF_CAR + ACCOUNTANT ยกเลิกคันรถยนต์ได้ ใบยังไม่ยกเลิกทั้งใบ', async () => {
+      const { svc, itemUpdate, slipUpdate } = setup([slipItem(), moto()], [delivered]);
+      await asUser(['STAFF_CAR', 'ACCOUNTANT'], () => svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'ติ๊กผิดคัน' }));
+      expect(itemUpdate).toHaveBeenCalledTimes(1);
+      expect(slipUpdate).not.toHaveBeenCalled();
+    });
+
+    it('STAFF_CAR ยกเลิกรถยนต์ครบทุกคันที่เห็น: ใบยังไม่ยกเลิกทั้งใบ (จักรยานยนต์ยังไม่ได้ยกเลิก)', async () => {
+      const { svc, slipUpdate } = setup([slipItem(), moto()], [delivered]);
+      await asUser(['STAFF_CAR'], () => svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'ติ๊กผิดคัน' }));
+      expect(slipUpdate).not.toHaveBeenCalled();
+    });
+
+    it('คันอีกประเภทยกเลิกไม่ได้ (403) แม้เห็นทุกคัน', async () => {
+      for (const roles of [['STAFF_CAR', 'ACCOUNTANT'], ['STAFF_CAR', 'DELIVERY']] as UserRole[][]) {
+        const { svc, $transaction } = setup([slipItem(), moto()], [delivered]);
+        await expect(asUser(roles, () => svc.cancelSlip('s1', { vehicleIds: ['v2'], remark: 'x' }))).rejects.toMatchObject({ status: 403 });
+        expect($transaction).not.toHaveBeenCalled();
+      }
+    });
+  });
+
   it('วางบิลแล้ว ยกเลิกไม่ได้', async () => {
     const { svc, $transaction } = setup([slipItem({ vehicle: { invoiceLines: [{ invoice: { invoiceNo: 'IV-001' } }] } })], [delivered]);
     await expect(svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'x' })).rejects.toMatchObject({
@@ -495,11 +590,27 @@ describe('DeliveryService แก้ / ยกเลิกใบส่งงาน
       status: 409,
       response: { error: expect.stringContaining('เพิ่งวางบิล') },
     });
-    expect(a.vehicleUpdate.mock.calls[0][0].where).toEqual({ id: 'v1', invoiceLines: { none: { invoice: { status: { not: 'VOID' } } } } });
+    expect(a.vehicleUpdate.mock.calls[0][0].where).toEqual({ id: 'v1', invoiceLines: { none: { invoice: { status: { not: 'VOID' } } } }, billingClosedAt: null });
     expect(a.itemUpdate).not.toHaveBeenCalled();
     const b = setup([slipItem()], [delivered], [], 0);
     await expect(b.svc.updateSlip('s1', { recipient: 'คุณนก', date: '2026-09-22', remark: 'x' })).rejects.toMatchObject({ status: 409 });
     expect(b.slipUpdate).not.toHaveBeenCalled();
+  });
+
+  // 2026-09-27: รถที่ปิดงาน - วางบิลนอกระบบ ไม่กลับเข้าคิววางบิลอีก - ห้ามยกเลิก/เปลี่ยนวันที่ใบส่งเล่มจนกว่า ADMIN เปิดงานกลับ
+  it('ปิดงาน - วางบิลนอกระบบแล้ว: ใบส่งเล่มยกเลิกหรือเปลี่ยนวันที่ไม่ได้ แต่แก้ชื่อผู้รับได้', async () => {
+    const closed = slipItem({ vehicle: { invoiceLines: [], billingClosedAt: day('2026-09-25') } });
+    const a = setup([closed], [delivered]);
+    await expect(a.svc.cancelSlip('s1', { vehicleIds: ['v1'], remark: 'x' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('ปิดงาน - วางบิลนอกระบบแล้ว') },
+    });
+    await expect(a.svc.updateSlip('s1', { recipient: 'คุณนก', date: '2026-09-22', remark: 'x' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('เปิดงานกลับก่อน') },
+    });
+    expect(a.$transaction).not.toHaveBeenCalled();
+    const b = setup([closed], [delivered]);
+    await b.svc.updateSlip('s1', { recipient: 'คุณเอก', date: '2026-09-21', remark: 'x' });
+    expect(b.$transaction).toHaveBeenCalled();
   });
 
   it('รายการถูกยกเลิกไปแล้วจากอีกเครื่อง: ไม่ยกเลิกซ้ำ', async () => {

@@ -49,7 +49,9 @@ function service(options: { existing?: Array<{ chassis: string }>[]; createError
   );
   const tx = {
     vehicleOwner: { createManyAndReturn: vi.fn().mockResolvedValue([{ id: 'o1' }]), create: vi.fn().mockResolvedValue({ id: 'o2' }) },
-    vehicle: { createMany, update },
+    vehicle: { createMany, update, findFirst },
+    // แก้ไขรถล็อกแถวรถก่อนอ่านสถานะขั้นตอน (ผู้ใช้ 2026-09-27 - เตือนเมื่อแก้หลังขั้นตอนที่ใช้ข้อมูลเดิม)
+    $queryRaw: vi.fn().mockResolvedValue([]),
     vehicleEditLog: { create: vi.fn().mockResolvedValue({ id: 'log1' }) },
   };
   const prisma = {
@@ -124,7 +126,18 @@ describe('VehiclesService.createBatch', () => {
 });
 
 describe('VehiclesService.updateVehicle', () => {
-  const current = { id: 'v1', chassis: 'mr0ha3cd100123456', ownerId: 'o1', owner: null, deletedAt: null };
+  const current = {
+    id: 'v1',
+    chassis: 'mr0ha3cd100123456',
+    ownerId: 'o1',
+    owner: null,
+    deletedAt: null,
+    transferDone: false,
+    inspectionSentDate: null,
+    documentSubmissions: [],
+    deliverySlipItems: [],
+    invoiceLines: [],
+  };
 
   it('ตรวจเลขตัวถังซ้ำแบบไม่สนตัวพิมพ์ และไม่นับรถคันที่กำลังแก้', async () => {
     const { service: svc, findFirst, update } = service({ current });

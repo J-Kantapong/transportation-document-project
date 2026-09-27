@@ -151,16 +151,17 @@ export class OverviewService {
         where: { status: { not: 'FAILED' }, OR: spendWindows.map((w) => ({ submitDate: w })), vehicle: live },
         select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, noBillTotal: true, taxAmount: true, vehicle: bodyOf },
       }),
+      // งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอด (ผู้ใช้ 2026-09-27: ยกเลิกแบบไม่ลบแถว)
       this.prisma.plateSwap.findMany({
-        where: { OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
+        where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
         select: { submitDate: true, returnedDate: true, billTotal: true, noBillTotal: true },
       }),
       this.prisma.taxRenewal.findMany({
-        where: { OR: spendWindows.map((w) => ({ paymentDate: w })) },
+        where: { cancelledAt: null, OR: spendWindows.map((w) => ({ paymentDate: w })) },
         select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true },
       }),
       this.prisma.yamahaRelocationEntry.findMany({
-        where: { OR: spendWindows.map((w) => ({ date: w })) },
+        where: { cancelledAt: null, OR: spendWindows.map((w) => ({ date: w })) },
         select: { date: true, count: true, billFee: true, noBillFee: true },
       }),
       this.prisma.vehicle.findMany({
@@ -190,8 +191,9 @@ export class OverviewService {
         where: { status: 'PAID', paidDate: { gte: toDate(addDays(today, -180)) } },
         select: { customerId: true, issueDate: true, paidDate: true, lines: { select: { deliveredDate: true } } },
       }),
+      // ส่งงานแล้วยังไม่วางบิล - ไม่รวมรถที่ปิดงาน - วางบิลนอกระบบ (billingClosedAt, ผู้ใช้ 2026-09-27)
       this.prisma.vehicle.findMany({
-        where: { ...live, deliveredDate: { not: null }, invoiceLines: { none: NOT_VOID } },
+        where: { ...live, deliveredDate: { not: null }, invoiceLines: { none: NOT_VOID }, billingClosedAt: null },
         select: {
           customerId: true,
           deliveredDate: true,
@@ -219,8 +221,9 @@ export class OverviewService {
         select: { receiptAmount: true, billFeeTotal: true, taxAmount: true },
       }),
       // --- รถที่ยังไม่จบงาน (ยังไม่ส่งงาน / ป้ายค้างส่ง / ยังไม่วางบิล) -> คิวค้าง + คันที่ติดขัด ---
+      // ปิดงาน - วางบิลนอกระบบแล้ว = ไม่ค้างวางบิล (ผู้ใช้ 2026-09-27)
       this.prisma.vehicle.findMany({
-        where: { ...live, OR: [{ deliveredDate: null }, { plateDeliveredDate: null }, { invoiceLines: { none: NOT_VOID } }] },
+        where: { ...live, OR: [{ deliveredDate: null }, { plateDeliveredDate: null }, { invoiceLines: { none: NOT_VOID }, billingClosedAt: null }] },
         select: {
           id: true,
           date: true,
@@ -253,8 +256,9 @@ export class OverviewService {
               _count: { select: { receipts: true } },
             },
           },
-          plateSwapsAsNew: { where: { returnedDate: null }, take: 1, select: { id: true } },
+          plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null }, take: 1, select: { id: true } },
           invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
+          billingClosedAt: true,
         },
       }),
       // --- งานที่ทำในวันที่เลือก ---
@@ -290,11 +294,11 @@ export class OverviewService {
       this.prisma.invoiceLine.findMany({ where: { invoice: { status: { not: 'VOID' }, issueDate: day } }, select: { body: true } }),
       // --- งานอื่นที่ค้าง ---
       this.prisma.plateSwap.findMany({
-        where: { returnedDate: null },
+        where: { returnedDate: null, cancelledAt: null },
         select: { id: true, submitDate: true, oldOwnerName: true, oldChassis: true, oldBrand: true, oldPlateCategory: true, oldPlateNumber: true },
       }),
       this.prisma.taxRenewal.findMany({
-        where: { paymentDate: null },
+        where: { paymentDate: null, cancelledAt: null },
         select: {
           id: true,
           submitDate: true,
@@ -479,6 +483,7 @@ export class OverviewService {
           latestSubmission: sub,
           hasPendingPlateSwap: v.plateSwapsAsNew.length > 0,
           billed: v.invoiceLines.length > 0,
+          billingClosed: !!v.billingClosedAt,
         },
         today,
       );

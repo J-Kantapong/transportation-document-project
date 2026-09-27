@@ -6,6 +6,7 @@ import {
   currentVehicleScope,
   currentWriteScope,
   isVehicleInScope,
+  vehicleKindOf,
   vehicleTypeWhere,
 } from '../auth/vehicle-scope.js';
 import type { Prisma } from '../generated/prisma/client.js';
@@ -28,12 +29,18 @@ const SLIP_LIMIT = 500; // รายงานส่งงานแสดงไ�
 
 const NOT_VOID = { invoice: { status: { not: 'VOID' } } };
 // เงื่อนไขของ updateMany: รถยังไม่อยู่ในบิลที่ใช้อยู่ - กันแก้/ยกเลิกใบส่งเล่มพร้อมกับที่บัญชีออกบิล (พบ 2026-09-27)
-const NOT_BILLED = { invoiceLines: { none: NOT_VOID } };
+// และยังไม่ปิดงาน - วางบิลนอกระบบ (billingClosedAt) - ปิดแล้วรถไม่กลับเข้าคิววางบิลอีก ต้องให้ ADMIN เปิดงานกลับก่อน (2026-09-27)
+const NOT_BILLED = { invoiceLines: { none: NOT_VOID }, billingClosedAt: null };
+const CLOSED_OUTSIDE = (chassis: string, what: string) => `รถ ${chassis} ปิดงาน - วางบิลนอกระบบแล้ว ให้ ADMIN เปิดงานกลับก่อนจึงจะ${what}ได้`;
+// บิลรอรับเงินแก้ในที่ได้แล้ว (ผู้ใช้ 2026-09-27 F53a) - เอารถออกจากบิลแทนการยกเลิกทั้งบิล (บิลต้องเหลืออย่างน้อย 1 คัน)
+const BILLED_FIX =
+  '(ให้ฝ่ายบัญชีเอารถออกจากบิลก่อน: "แก้ไขบิล" ติ๊ก "เอาออกจากบิล" - รับเงินแล้วให้ "ยกเลิกการรับเงิน" ก่อน, เป็นคันเดียวในบิลให้ยกเลิกบิล)';
 
 type Tx = Prisma.TransactionClient;
 
 const VEHICLE_INCLUDE = {
-  customer: { select: { id: true, name: true, company: true } },
+  // branch: ลูกค้าชื่อซ้ำกัน (เช่นคนละสาขา) หน้า Delivery / รายงานส่งงานต่อสาขาให้แยกออก (F47 ผู้ใช้ 2026-09-27)
+  customer: { select: { id: true, name: true, company: true, branch: true } },
   brand: { select: { name: true } },
   // submitDate + urgent + createdAt = ใบยื่น (lot) ที่รถคันนี้อยู่ - หน้า Delivery จัดการ์ดตามใบยื่นแบบหน้ารับป้าย (ผู้ใช้ 2026-09-26)
   documentSubmissions: {
@@ -64,6 +71,7 @@ const SLIP_INCLUDE = {
       vehicle: {
         select: {
           invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } },
+          billingClosedAt: true,
           // ชื่อเจ้าของบนใบส่งงาน (ผู้ใช้ 2026-09-26) - อ่านสดจาก VehicleOwner
           owner: { select: { name: true, hirerName: true } },
         },
@@ -234,6 +242,9 @@ export class DeliveryService {
     for (const v of vehicles) assertVehicleInScope(v.body, scope);
     // บันทึก 1 ครั้ง = ใบส่งงาน 1 ใบของลูกค้ารายเดียว (ผู้รับคนเดียว)
     if (new Set(vehicles.map((v) => v.customer.id)).size > 1) throw bad('ส่งงานได้ครั้งละ 1 ลูกค้า');
+    // ใบส่งงาน 1 ใบ = รถประเภทเดียว (ผู้ใช้ 2026-09-27): ใบรวมรถยนต์ + จักรยานยนต์ พนักงานประเภทเดียวพิมพ์ซ้ำได้ไม่ครบ
+    // (เห็นเฉพาะคันในขอบเขต) และแก้ใบไม่ได้ ส่วนกติกาแก้/ยกเลิกใบถือว่าใบหนึ่งเป็นรถประเภทเดียวอยู่แล้ว
+    if (new Set(vehicles.map((v) => vehicleKindOf(v.body))).size > 1) throw bad('ส่งรถยนต์กับจักรยานยนต์คนละใบ');
 
     // สถานะรถตอนนี้ต้องตรงกับที่ผู้ใช้ยืนยันในป๊อปอัป ไม่ตรงคันเดียว = ไม่บันทึกทั้งชุด (พบ 2026-09-27: หน้าเปิดค้างไว้
     // แล้วระบบคิดใหม่เงียบๆ - ป้ายเพิ่งแนบ "เล่ม (ป้ายตามทีหลัง)" กลายเป็นส่งป้ายด้วย, คันที่ส่งครบแล้วได้ใบส่งป้ายซ้ำ)
@@ -455,7 +466,8 @@ export class DeliveryService {
       // บิลเก็บเฉพาะวันส่งเล่ม - ใบส่งป้ายตามทีหลังของรถที่วางบิลแล้วเปลี่ยนวันที่ได้ (ผู้ใช้ 2026-09-27)
       const invoiceNo = i.vehicle.invoiceLines[0]?.invoice.invoiceNo;
       const lockedByInvoice = dateChanged && i.book;
-      if (lockedByInvoice && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ`);
+      if (lockedByInvoice && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ ${BILLED_FIX}`);
+      if (lockedByInvoice && i.vehicle.billingClosedAt) throw bad(CLOSED_OUTSIDE(i.chassis, 'เปลี่ยนวันที่ส่ง'));
       const data: { deliveredDate?: Date; deliveryRecipient?: string; plateDeliveredDate?: Date; deliveryNote?: string } = {};
       if (i.book) {
         // ใบนี้ส่งเล่ม - ถ้าส่งป้ายตามไปทีหลังแล้ว วันที่ใหม่ต้องไม่หลังวันส่งป้าย
@@ -487,7 +499,7 @@ export class DeliveryService {
       if (!i.book && slip.recipient !== recipient) changes['deliverySlip.recipient'] = { from: slip.recipient, to: recipient };
       writes.push(async (tx) => {
         const { count } = await tx.vehicle.updateMany({ where: { id: v.id, ...(lockedByInvoice ? NOT_BILLED : {}) }, data });
-        if (count !== 1) throw conflict(`รถ ${i.chassis} เพิ่งวางบิล เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ`);
+        if (count !== 1) throw conflict(`รถ ${i.chassis} เพิ่งวางบิลหรือปิดงาน เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ`);
         await this.editLog(v.id, `แก้ใบส่งงาน ${slipNoLabel(slip.slipNo)}: ${remark}`, changes, tx);
       });
     }
@@ -527,7 +539,8 @@ export class DeliveryService {
       this.assertItemInScope(i.body, `รถ ${i.chassis} `);
       // ล็อกเฉพาะรายการส่งเล่ม (บิลเก็บวันส่งเล่ม) - ใบส่งป้ายตามทีหลังยกเลิกได้แม้วางบิลแล้ว (ผู้ใช้ 2026-09-27)
       const invoiceNo = i.vehicle.invoiceLines[0]?.invoice.invoiceNo;
-      if (i.book && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) ต้องยกเลิกบิลก่อนจึงจะยกเลิกการส่งได้`);
+      if (i.book && invoiceNo) throw bad(`รถ ${i.chassis} วางบิลแล้ว (${invoiceNo}) ยกเลิกการส่งไม่ได้ ${BILLED_FIX}`);
+      if (i.book && i.vehicle.billingClosedAt) throw bad(CLOSED_OUTSIDE(i.chassis, 'ยกเลิกการส่ง'));
       const v = byId.get(i.vehicleId);
       if (!v) continue;
       const changes: Record<string, { from: string | null; to: string | null }> = {
@@ -543,7 +556,7 @@ export class DeliveryService {
             where: { id: v.id, ...NOT_BILLED },
             data: { deliveredDate: null, deliveryRecipient: null, deliveryNote: null, plateDeliveredDate: null, deliveryConfirmedAt: null },
           });
-          if (count !== 1) throw conflict(`รถ ${i.chassis} เพิ่งวางบิล ต้องยกเลิกบิลก่อนจึงจะยกเลิกการส่งได้`);
+          if (count !== 1) throw conflict(`รถ ${i.chassis} เพิ่งวางบิลหรือปิดงาน ยกเลิกการส่งไม่ได้`);
         });
       } else {
         if (v.plateDeliveredDate) changes.plateDeliveredDate = { from: isoDay(v.plateDeliveredDate), to: null };
@@ -613,7 +626,11 @@ export class DeliveryService {
       cancelledAt: Date | null;
       cancelReason: string | null;
       cancelledBy: { name: string; displayName: string | null } | null;
-      vehicle: { invoiceLines: Array<{ invoice: { invoiceNo: string } }>; owner: { name: string | null; hirerName: string | null } | null };
+      vehicle: {
+        invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
+        billingClosedAt: Date | null;
+        owner: { name: string | null; hirerName: string | null } | null;
+      };
     }>;
   }, later = new Map<string, { slipNo: number; date: string }>()) {
     return {
@@ -628,6 +645,9 @@ export class DeliveryService {
       cancelReason: s.cancelReason,
       cancelledBy: userName(s.cancelledBy),
       customer: { ...s.customer, displayName: s.customer.company || s.customer.name },
+      // ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ (ก่อนห้ามรวม ผู้ใช้ 2026-09-27): คันอีกประเภทที่ยังไม่ยกเลิกซึ่งผู้ใช้นี้ไม่เห็น
+      // หน้ารายงานซ่อนปุ่มแก้ (updateSlip ต้องการทุกคันในขอบเขต) และพิมพ์ซ้ำบอกว่าใบเต็มมีกี่คัน - ADMIN เห็นครบทุกคัน = 0
+      hiddenItems: s.items.filter((i) => !i.cancelledAt && !isVehicleInScope(i.body)).length,
       items: s.items
         .filter((i) => isVehicleInScope(i.body))
         .sort((a, b) => a.plateText.localeCompare(b.plateText, 'th') || a.chassis.localeCompare(b.chassis))
@@ -645,6 +665,8 @@ export class DeliveryService {
           cancelReason: i.cancelReason,
           cancelledBy: userName(i.cancelledBy),
           invoiceNo: i.vehicle.invoiceLines[0]?.invoice.invoiceNo ?? null,
+          // ปิดงาน - วางบิลนอกระบบ = ล็อกใบส่งเล่มเหมือนวางบิลแล้ว (2026-09-27)
+          billingClosed: i.vehicle.billingClosedAt !== null,
           ownerName: ownerNameOf(i.vehicle.owner),
           // ส่งเล่มในใบนี้ ป้ายส่งตามไปในใบอื่น (อ่านสด) - null = ป้ายไปในใบนี้แล้ว / ยังค้างส่ง
           plateSentLater: i.book && !i.plate && !i.cancelledAt ? (later.get(i.vehicleId) ?? null) : null,
@@ -664,7 +686,7 @@ export class DeliveryService {
     deliveryRecipient: string | null;
     deliveryNote: string | null;
     bookReceivedDate: Date | null;
-    customer: { id: string; name: string; company: string | null };
+    customer: { id: string; name: string; company: string | null; branch?: string | null };
     brand: { name: string };
     documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date }>;
     invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
@@ -675,6 +697,8 @@ export class DeliveryService {
       id: v.id,
       customerId: v.customer.id,
       customerName: v.customer.company || v.customer.name,
+      // ใบยื่นแบ่งด้วย customerId - หน้าเว็บใช้ชื่อ/บริษัท/สาขาแยกลูกค้าชื่อซ้ำกันตอนแสดง (F47 ผู้ใช้ 2026-09-27)
+      customer: { id: v.customer.id, name: v.customer.name, company: v.customer.company, branch: v.customer.branch ?? null },
       chassis: v.chassis,
       brandName: v.brand.name,
       body: v.body,

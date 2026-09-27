@@ -7,7 +7,7 @@ import { slipNoText } from "@/lib/billing-api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
-import { jobSheetGroup } from "@/lib/job-sheet";
+import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { printReceivingList } from "@/lib/receiving-print";
 import { comparePlate } from "@/lib/plate-order";
@@ -18,7 +18,11 @@ import { comparePlate } from "@/lib/plate-order";
 export interface QueueRow {
   id: string;
   date: string; // ISO - วันที่รับงาน
+  // กุญแจใบยื่น + ตัวกรองเจ้าของงาน (ผู้ใช้ 2026-09-27: รหัสลูกค้าทุกหน้า) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
+  customerId: string;
   customerName: string;
+  customerCompany?: string | null;
+  customerBranch?: string | null;
   chassis: string;
   body: string | null;
   plateCategory: string | null;
@@ -92,7 +96,8 @@ function receivedDateError(label: string, iso: string, r: QueueRow): string {
 
 // จัดคิวตามวันที่ยื่น (เก่าสุดก่อน) แล้วแยกเป็นใบยื่น = กลุ่ม (รย.1 ธรรมดา/ด่วน ...) + เจ้าของงาน ตรงกับใบส่งงานที่ปริ้น
 // ลำดับรถในแต่ละใบคงตามที่ loadPending เรียงมา (รับป้าย: หมวด+เลขทะเบียน)
-const sheetKeyOf = (date: string, label: string, owner: string) => `${date}|${label}|${owner}`;
+// เจ้าของงาน = รหัสลูกค้า ไม่ใช่ชื่อ (ผู้ใช้ 2026-09-27 - ลูกค้าชื่อซ้ำกันเคยถูกรวมเป็นใบเดียว แต่หน้า Delivery แยก)
+const sheetKeyOf = (r: QueueRow) => jobSheetKey(r.submitDate ?? "", jobSheetGroup(r.body, r.urgent ?? false).label, r.customerId);
 
 // ยอดของทั้งใบยื่น (ทุกคันที่ยื่นไปในใบนั้น ไม่ใช่แค่คันที่อยู่ในคิวนี้) - ใช้บอก "ยื่นกี่คัน" และเตือนใบที่ยังไม่ครบ
 interface SheetStats {
@@ -107,7 +112,7 @@ function sheetStatsOf(submissions: DocumentSubmission[]): Record<string, SheetSt
   // และใบค้างเตือน "ยื่นไม่สำเร็จ" ทั้งที่รถยื่นใหม่ไปแล้ว)
   const latest = new Map<string, { key: string; s: DocumentSubmission }>();
   for (const s of submissions) {
-    const key = sheetKeyOf(s.submitDate.slice(0, 10), jobSheetGroup(s.vehicle.body, s.urgent).label, s.vehicle.customer.name);
+    const key = jobSheetKey(s.submitDate.slice(0, 10), jobSheetGroup(s.vehicle.body, s.urgent).label, s.vehicle.customer.id);
     const id = `${key}|${s.vehicleId}`;
     const prev = latest.get(id);
     if (!prev || s.createdAt > prev.s.createdAt) latest.set(id, { key, s });
@@ -123,15 +128,16 @@ function sheetStatsOf(submissions: DocumentSubmission[]): Record<string, SheetSt
   return stats;
 }
 
-function groupByDateAndSheet(list: QueueRow[]) {
+// ownerNames = ชื่อเจ้าของงานที่แสดงตามรหัสลูกค้า (customerDisplayNames - ชื่อซ้ำต่อบริษัท/สาขา)
+function groupByDateAndSheet(list: QueueRow[], ownerNames: Map<string, string>) {
   const days = new Map<string, Map<string, { key: string; label: string; owner: string; rows: QueueRow[] }>>();
   for (const r of list) {
     const date = r.submitDate ?? "";
     const { label } = jobSheetGroup(r.body, r.urgent ?? false);
-    const key = sheetKeyOf(date, label, r.customerName);
+    const key = sheetKeyOf(r);
     if (!days.has(date)) days.set(date, new Map());
     const sheets = days.get(date)!;
-    if (!sheets.has(key)) sheets.set(key, { key, label, owner: r.customerName, rows: [] });
+    if (!sheets.has(key)) sheets.set(key, { key, label, owner: ownerNames.get(r.customerId) ?? r.customerName, rows: [] });
     sheets.get(key)!.rows.push(r);
   }
   return [...days.entries()]
@@ -181,6 +187,8 @@ export function ReceivingQueuePage({
   printTitle,
 }: Props) {
   const [pending, setPending] = useState<QueueRow[]>([]);
+  // คิวล่าสุดที่ตั้งไว้ (ไม่รอ render) - แนบหลายแถวติดกันแล้วเอาแถวออกจากคิวต่อจากรายการล่าสุดเสมอ
+  const pendingRef = useRef<QueueRow[]>([]);
   const [completed, setCompleted] = useState<QueueRow[]>([]);
   const [completedHasMore, setCompletedHasMore] = useState(false);
   const [completedLoading, setCompletedLoading] = useState(true);
@@ -213,7 +221,7 @@ export function ReceivingQueuePage({
   const [receiptQuery, setReceiptQuery] = useState("");
   const [chassisQuery, setChassisQuery] = useState("");
   const [plateQuery, setPlateQuery] = useState("");
-  const [ownerFilter, setOwnerFilter] = useState(""); // เจ้าของงาน (ลูกค้า) - "" = ทุกราย
+  const [ownerFilter, setOwnerFilter] = useState(""); // เจ้าของงาน = รหัสลูกค้า - "" = ทุกราย
   const [sortMode, setSortMode] = useState<"submit" | "plate">("submit");
   // ใบยื่น (ชุดงาน) ที่ติ๊กไว้จะปริ้น - key = sheetKeyOf(...)
   const [selectedSheets, setSelectedSheets] = useState<Set<string>>(new Set());
@@ -246,6 +254,15 @@ export function ReceivingQueuePage({
     }
   }
 
+  // ตั้งคิวใหม่ทุกครั้งผ่านตรงนี้: ลูกค้าที่เลือกกรองไว้ไม่เหลือรถในคิวแล้ว (แนบคันสุดท้ายไปแล้ว) = ล้างตัวกรองเป็นทุกราย
+  // ที่ state เลย ไม่ใช่แค่ซ่อนตอนแสดง (พบ 2026-09-27: ตัวกรองที่ค้างอยู่กลับมากรองเองเงียบๆ เมื่อโหลดใหม่แล้วมีรถของลูกค้านั้นเข้าคิวอีก
+  // ทั้งที่ช่องเจ้าของงานขึ้นทุกราย)
+  function showPending(next: QueueRow[]) {
+    pendingRef.current = next;
+    setPending(next);
+    setOwnerFilter((prev) => (prev && !next.some((r) => r.customerId === prev) ? "" : prev));
+  }
+
   // คิวรอดำเนินการ + ยอดใบยื่น
   // background = โหลดใหม่หลังบันทึก: ไม่ขึ้น "กำลังโหลด..." ทั้งคิว และคงวันที่/สถานะที่พิมพ์ไว้ในแถวอื่น
   // (พบ 2026-09-27: เดิมทุกแถวกลับเป็นวันนี้หลังแนบแต่ละคัน แถวถัดไปจึงถูกบันทึกเป็นวันนี้โดยไม่รู้ตัว)
@@ -258,7 +275,7 @@ export function ReceivingQueuePage({
     try {
       const p = await loadPending();
       if (seq !== pendingSeq.current) return;
-      setPending(p);
+      showPending(p);
       setRows((prev) => Object.fromEntries(p.map((r) => [r.id, prev[r.id] ?? newRowState()])));
       setError("");
       // มาจากหน้าค้นหารถ (?focus=เลขตัวถัง): เปิดใบยื่นของรถคันนั้นให้ FocusVehicleRow หาแถวเจอ - ครั้งแรกที่โหลดเท่านั้น
@@ -266,7 +283,7 @@ export function ReceivingQueuePage({
         focusApplied.current = true;
         const chassis = focusChassis();
         const target = chassis ? p.find((r) => sameChassis(r.chassis, chassis)) : undefined;
-        if (target) setOpenSheets((prev) => new Set(prev).add(sheetKeyOf(target.submitDate ?? "", jobSheetGroup(target.body, target.urgent ?? false).label, target.customerName)));
+        if (target) setOpenSheets((prev) => new Set(prev).add(sheetKeyOf(target)));
       }
       if (groupBySheet) {
         // ยอดทั้งใบยื่นของวันที่ที่มีรถรออยู่ - โหลดไม่ได้ก็แค่ไม่แสดงยอด/คำเตือน คิวยังใช้ได้
@@ -318,7 +335,7 @@ export function ReceivingQueuePage({
     try {
       const res = await attachPhoto.upload(r.id, file, dateIso);
       // เอาเฉพาะแถวนี้ออกจากคิวทันที แถวอื่นคงวันที่/สถานะเดิม แล้วค่อยโหลดใหม่เบื้องหลัง (ตาราง "ดำเนินการแล้ว" + ยอดใบยื่น)
-      setPending((prev) => prev.filter((p) => p.id !== r.id));
+      showPending(pendingRef.current.filter((p) => p.id !== r.id));
       setRows((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== r.id)));
       setLastSavedId(r.id);
       setNotice({ text: `✓ บันทึก${doneLabel.replace(/แล้ว$/, "")} ${res.chassis} วันที่ ${isoToDisplayDate(res.date)} แล้ว` });
@@ -352,13 +369,19 @@ export function ReceivingQueuePage({
   const chassisNeedle = chassisQuery.replace(/\s/g, "").toUpperCase();
   const plateNeedle = plateQuery.replace(/\s/g, "");
   const searching = !!(receiptNeedle || chassisNeedle || plateNeedle);
-  const filtering = !!(fromIso || toIso || searching || ownerFilter);
-  const owners = [...new Set(pending.map((r) => r.customerName))].sort((a, b) => a.localeCompare(b, "th"));
+  // เจ้าของงานเลือกตามรหัสลูกค้า (ผู้ใช้ 2026-09-27) แสดงชื่อ - ชื่อซ้ำกันต่อบริษัท/สาขาให้แยกออก
+  // ลูกค้าที่ไม่เหลือรถในคิวแล้วถูกล้างเป็นทุกรายที่ showPending ตัวกรองจึงเป็นลูกค้าที่อยู่ในตัวเลือกเสมอ
+  const ownerNames = customerDisplayNames(
+    pending.map((r) => ({ id: r.customerId, name: r.customerName, company: r.customerCompany, branch: r.customerBranch })),
+  );
+  const owners = [...ownerNames].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  const owner = ownerFilter;
+  const filtering = !!(fromIso || toIso || searching || owner);
   const shown = pending.filter(
     (r) =>
       (!fromIso || (r.submitDate ?? "") >= fromIso) &&
       (!toIso || (r.submitDate ?? "") <= toIso) &&
-      (!ownerFilter || r.customerName === ownerFilter) &&
+      (!owner || r.customerId === owner) &&
       (!receiptNeedle || (r.receiptNo ?? "").includes(receiptNeedle)) &&
       (!chassisNeedle || r.chassis.toUpperCase().includes(chassisNeedle)) &&
       (!plateNeedle || `${r.plateCategory ?? ""}${r.plateNumber ?? ""}`.replace(/\s/g, "").includes(plateNeedle)),
@@ -366,14 +389,14 @@ export function ReceivingQueuePage({
   // จำนวนรถในคิวของแต่ละใบก่อนกรอง - ใช้คำนวณ "รับแล้ว" ให้ถูกแม้กำลังกรองอยู่
   const pendingPerSheet: Record<string, number> = {};
   for (const r of pending) {
-    const key = sheetKeyOf(r.submitDate ?? "", jobSheetGroup(r.body, r.urgent ?? false).label, r.customerName);
+    const key = sheetKeyOf(r);
     pendingPerSheet[key] = (pendingPerSheet[key] ?? 0) + 1;
   }
   // ลำดับรถในแต่ละใบ: ตามที่บันทึกยื่น (ลำดับในใบส่งงาน) เป็นค่าเริ่มต้น หรือเรียงตามหมวด+เลขทะเบียน (ผู้ใช้ 2026-09-26)
   const ordered = [...shown].sort(
     sortMode === "plate" ? comparePlate : (a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? "") || a.chassis.localeCompare(b.chassis),
   );
-  const days = groupBySheet ? groupByDateAndSheet(ordered) : [];
+  const days = groupBySheet ? groupByDateAndSheet(ordered, ownerNames) : [];
   const orderText = sortMode === "plate" ? "เรียงตามหมวดและเลขทะเบียน" : "เรียงตามลำดับที่ยื่น";
   // การ์ดใบยื่นเรียงตามวันที่ยื่น (เก่าสุดก่อน) แล้วตามกลุ่ม/ลูกค้า
   const sheetList = days.flatMap((day) => day.sheets.map((sheet) => ({ ...sheet, date: day.date })));
@@ -555,11 +578,11 @@ export function ReceivingQueuePage({
             </label>
             <label className="field">
               <span>เจ้าของงาน</span>
-              <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
+              <select value={owner} onChange={(e) => setOwnerFilter(e.target.value)}>
                 <option value="">ทุกราย</option>
-                {owners.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+                {owners.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
                   </option>
                 ))}
               </select>

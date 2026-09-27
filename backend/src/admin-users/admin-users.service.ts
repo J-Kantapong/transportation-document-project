@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
+import { requireRemark, writeAudit } from '../audit/audit-log.js';
 import { type PublicUser, toPublicUser, USER_SELECT } from '../auth/auth.types.js';
+import { hashPassword } from '../auth/password.js';
 import type { UserStatus } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -14,6 +16,17 @@ const UpdateSchema = z.object({
   roles: z.array(z.enum(['ADMIN', 'STAFF_ENTRY', 'STAFF_CAR', 'STAFF_MOTO', 'ACCOUNTANT', 'DELIVERY', 'CUSTOMER'])).optional(),
   customerId: z.string().trim().nullable().optional(),
 });
+
+export const REMARK_MAX_LENGTH = 500;
+
+// ตั้งรหัสผ่านชั่วคราวให้ผู้ใช้ที่ลืมรหัส (ผู้ใช้ 2026-09-27) - กติการหัสผ่านเดียวกับตอนสมัคร (auth.service.ts):
+// อย่างน้อย 8 ตัว ไม่เกิน 200 ตัว + พิมพ์ยืนยันให้ตรงกัน / เหตุผลบังคับ (เก็บใน AuditLog แต่ไม่เก็บรหัสผ่าน)
+const SetPasswordSchema = z
+  .object({
+    password: z.string().min(8, 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร').max(200, 'รหัสผ่านยาวเกินไป'),
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, { message: 'รหัสผ่านทั้งสองช่องไม่ตรงกัน' });
 
 @Injectable()
 export class AdminUsersService {
@@ -63,6 +76,31 @@ export class AdminUsersService {
         ...(becameApproved ? { approvedById: adminId, approvedAt: new Date() } : {}),
       },
       select: USER_SELECT,
+    });
+    return { user: toPublicUser(user) };
+  }
+
+  // ADMIN ตั้งรหัสผ่านชั่วคราวให้ผู้ใช้คนอื่น (ผู้ใช้ 2026-09-27) แล้วแจ้งผู้ใช้ให้เปลี่ยนเองที่เมนู "เปลี่ยนรหัสผ่าน"
+  // - บัญชีตัวเองใช้ทางนี้ไม่ได้: ต้องเปลี่ยนผ่าน /api/auth/change-password ที่ตรวจรหัสผ่านเดิม (token ที่หลุดไปจะเปลี่ยนรหัสไม่ได้)
+  // - ไม่เปลี่ยนสถานะ/บทบาท (ต่างจาก scripts/seed-admin.ts เดิมที่ตั้งเป็น ADMIN ทุกครั้ง)
+  // - ประวัติ: AuditLog entity 'User' action 'set-password' เก็บแค่ว่ามีการตั้งรหัสใหม่ ไม่เก็บรหัสผ่านหรือ hash
+  async setPassword(adminId: string, id: string, body: unknown): Promise<{ user: PublicUser }> {
+    if (id === adminId) throw bad('ตั้งรหัสผ่านของตัวเองที่นี่ไม่ได้ กรุณาใช้เมนู "เปลี่ยนรหัสผ่าน" (ต้องใส่รหัสผ่านเดิม)');
+    const raw = (body ?? {}) as { remark?: unknown };
+    const remark = requireRemark(raw.remark, 'กรุณาระบุเหตุผลที่ตั้งรหัสผ่านใหม่');
+    if (remark.length > REMARK_MAX_LENGTH) throw bad(`เหตุผลยาวเกิน ${REMARK_MAX_LENGTH} ตัวอักษร`);
+    const result = SetPasswordSchema.safeParse(body ?? {});
+    if (!result.success) throw bad(result.error.issues[0]?.message ?? 'กรุณาตรวจสอบข้อมูล');
+
+    const current = await this.prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!current) throw new NotFoundException({ error: 'ไม่พบผู้ใช้' });
+
+    const passwordHash = await hashPassword(result.data.password);
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({ where: { id }, data: { passwordHash }, select: USER_SELECT });
+      // writeAudit ซ่อนทุกคีย์ที่มีคำว่า password อยู่แล้ว - ใส่แค่ true ให้รู้ว่ารหัสถูกตั้งใหม่
+      await writeAudit(tx, { entity: 'User', entityId: id, action: 'set-password', remark, changes: { password: true } });
+      return updated;
     });
     return { user: toPublicUser(user) };
   }

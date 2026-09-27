@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
+import { currentUser } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { YamahaRelocationAttachmentKind, YamahaRelocationSize } from '../generated/prisma/enums.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
@@ -7,6 +9,12 @@ import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '..
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { calculateYamahaRelocationFees } from './yamaha-relocation-fee.js';
 import { CreateYamahaRelocationEntryDto } from './dto/create-yamaha-relocation-entry.dto.js';
+import type { UpdateYamahaRelocationEntryDto } from './dto/update-yamaha-relocation-entry.dto.js';
+
+// แก้/ยกเลิกรายการที่บันทึกผิด (ผู้ใช้ 2026-09-27): ADMIN / STAFF_ENTRY (access-policy.ts กฎขั้น 1-3) ต้องระบุเหตุผลเสมอ
+// บันทึกประวัติลง AuditLog (entity 'YamahaRelocation') - ยกเลิกไม่ลบแถว (cancelledAt) และไม่นับในรายการ/ยอดรวม/ภาพรวม
+// ตอนยกเลิกล้าง contentHash ของไฟล์แนบ ให้แนบไฟล์เดิมกับรายการที่บันทึกใหม่ได้ (ตัวไฟล์ยังอยู่ใน storage เป็นหลักฐาน)
+const STALE_ERROR = 'รายการนี้ถูกแก้หรือยกเลิกไปก่อนแล้ว - โหลดรายการใหม่';
 
 // ไฟล์แนบที่ต้องมีทุกรายการ (ผู้ใช้ 2026-09-22): ใบเสร็จ 1 ไฟล์ + Report 1 ไฟล์ เสมอ - รับรูป JPEG/PNG/WebP หรือ PDF
 export interface YamahaRelocationFiles {
@@ -32,8 +40,11 @@ export function detectAttachmentType(buf: Buffer): { mimeType: string; ext: stri
   return detectImageType(buf);
 }
 
+// วันที่ ค.ศ. YYYY-MM-DD ที่มีอยู่จริง - Date.parse ยอม 2026-02-31 (เลื่อนไป 3 มี.ค.) จึงต้องแปลงกลับได้วันเดิม
 function isValidDateParam(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function isValidMonthParam(value: string): boolean {
@@ -48,6 +59,24 @@ function isSize(value: unknown): value is YamahaRelocationSize {
 function parsePositiveInt(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : NaN;
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// ค่าที่ฟอร์มแก้โหลดมาตอนเปิด (expectedDate/Size/Count) - ช่องที่ไม่ส่งใช้ค่าที่อ่านในคำขอนี้ / ส่งมาผิดรูปแบบ = 400
+export function expectedState(
+  dto: UpdateYamahaRelocationEntryDto,
+  existing: { date: Date; size: YamahaRelocationSize; count: number },
+): { date: Date; size: YamahaRelocationSize; count: number } {
+  const bad = () => new BadRequestException({ error: 'ข้อมูลรายการที่โหลดมาไม่ถูกต้อง - โหลดรายการใหม่' });
+  let date = existing.date;
+  if (dto.expectedDate !== undefined) {
+    const raw = typeof dto.expectedDate === 'string' ? dto.expectedDate.trim() : '';
+    if (!isValidDateParam(raw)) throw bad();
+    date = new Date(`${raw}T00:00:00.000Z`);
+  }
+  if (dto.expectedSize !== undefined && !isSize(dto.expectedSize)) throw bad();
+  const count = dto.expectedCount !== undefined ? parsePositiveInt(dto.expectedCount) : existing.count;
+  if (count === null) throw bad();
+  return { date, size: (dto.expectedSize as YamahaRelocationSize | undefined) ?? existing.size, count };
 }
 
 const attachmentSelect = { id: true, kind: true, mimeType: true, sizeBytes: true, originalName: true, createdAt: true } as const;
@@ -206,8 +235,9 @@ export class YamahaRelocationService {
     const monthStart = new Date(`${monthParam}-01T00:00:00.000Z`);
     const monthEnd = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
 
+    // รายการที่ยกเลิกแล้วไม่แสดงและไม่นับในยอดรวมของเดือน (ผู้ใช้ 2026-09-27)
     const entries = await this.prisma.yamahaRelocationEntry.findMany({
-      where: { size: sizeParam, date: { gte: monthStart, lt: monthEnd } },
+      where: { size: sizeParam, date: { gte: monthStart, lt: monthEnd }, cancelledAt: null },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       include: { attachments: { select: attachmentSelect } },
     });
@@ -229,6 +259,82 @@ export class YamahaRelocationService {
         totalFee: summary.billFee + summary.noBillFee,
       },
     };
+  }
+
+  // รายการที่จะแก้/ยกเลิก - ยกเลิกไปแล้วแก้ต่อไม่ได้ (409 ให้หน้าเว็บโหลดใหม่)
+  private async findActive(id: string) {
+    const entry = await this.prisma.yamahaRelocationEntry.findUnique({ where: { id }, include: { attachments: { select: attachmentSelect } } });
+    if (!entry) throw new NotFoundException({ error: 'ไม่พบรายการแจ้งย้ายนี้' });
+    if (entry.cancelledAt) throw new ConflictException({ error: 'รายการนี้ถูกยกเลิกแล้ว - โหลดรายการใหม่' });
+    return entry;
+  }
+
+  // แก้วันที่ / รถเล็ก-รถใหญ่ / จำนวนคัน (ผู้ใช้ 2026-09-27) - ค่าธรรมเนียมคิดใหม่จากจำนวนคันและขนาดรถ ไฟล์แนบคงเดิม
+  async update(id: string, dto: UpdateYamahaRelocationEntryDto) {
+    const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้รายการแจ้งย้าย');
+    const existing = await this.findActive(id);
+    const loaded = expectedState(dto, existing);
+    // ฟอร์มส่งวันที่/ขนาด/จำนวนทุกช่องจากตอนเปิด - เปิดค้างไว้ขณะที่อีกคนแก้ไปก่อน = 409 ไม่เอาค่าเก่าไปทับ (พบ 2026-09-27:
+    // เดิมเทียบกับค่าที่อ่านในคำขอนี้เอง จึงกันได้แค่ช่วงไม่กี่มิลลิวินาที)
+    if (loaded.date.getTime() !== existing.date.getTime() || loaded.size !== existing.size || loaded.count !== existing.count) {
+      throw new ConflictException({ error: STALE_ERROR });
+    }
+
+    let date = existing.date;
+    if (dto.date !== undefined) {
+      const raw = typeof dto.date === 'string' ? dto.date.trim() : '';
+      if (!isValidDateParam(raw)) throw new BadRequestException({ error: 'กรุณาระบุวันที่ให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
+      date = new Date(`${raw}T00:00:00.000Z`);
+    }
+    if (dto.size !== undefined && !isSize(dto.size)) throw new BadRequestException({ error: 'กรุณาระบุขนาดรถ (รถเล็ก/รถใหญ่)' });
+    const size = dto.size !== undefined ? (dto.size as YamahaRelocationSize) : existing.size;
+    const count = dto.count !== undefined ? parsePositiveInt(dto.count) : existing.count;
+    if (count === null) throw new BadRequestException({ error: 'กรุณาระบุจำนวนคันเป็นจำนวนเต็มตั้งแต่ 1' });
+
+    const next = { date, size, count, ...calculateYamahaRelocationFees(size, count) };
+    const changes = diffChanges(existing, next);
+    if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // ตารางนี้ไม่มี updatedAt - กันแก้ทับกันด้วยค่าที่ฟอร์มโหลดมา (อีกคนแก้/ยกเลิกไปก่อน = ไม่เจอแถว)
+      const { count: matched } = await tx.yamahaRelocationEntry.updateMany({
+        where: { id, cancelledAt: null, date: loaded.date, size: loaded.size, count: loaded.count },
+        data: next,
+      });
+      if (matched === 0) throw new ConflictException({ error: STALE_ERROR });
+      await writeAudit(tx, { entity: 'YamahaRelocation', entityId: id, action: 'update', remark, changes });
+      return tx.yamahaRelocationEntry.findUniqueOrThrow({ where: { id }, include: { attachments: { select: attachmentSelect } } });
+    });
+    return { entry: serializeEntry(updated) };
+  }
+
+  // ยกเลิกรายการ (ผู้ใช้ 2026-09-27: ไม่ลบแถว) - ล้าง contentHash ของไฟล์แนบให้แนบไฟล์เดิมกับรายการที่ถูกต้องได้อีก
+  async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
+    const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกรายการแจ้งย้าย');
+    const existing = await this.findActive(id);
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.yamahaRelocationEntry.updateMany({
+        where: { id, cancelledAt: null },
+        data: { cancelledAt: new Date(), cancelReason: remark, cancelledById: currentUser()?.id ?? null },
+      });
+      if (count === 0) throw new ConflictException({ error: STALE_ERROR });
+      await tx.yamahaRelocationAttachment.updateMany({ where: { entryId: id }, data: { contentHash: null } });
+      await writeAudit(tx, {
+        entity: 'YamahaRelocation',
+        entityId: id,
+        action: 'cancel',
+        remark,
+        changes: {
+          date: existing.date,
+          size: existing.size,
+          count: existing.count,
+          billFee: existing.billFee,
+          noBillFee: existing.noBillFee,
+          attachments: existing.attachments.map((a) => ({ id: a.id, kind: a.kind, originalName: a.originalName })),
+        },
+      });
+    });
+    return { id };
   }
 
   // ตัวไฟล์แนบ (หน้าเว็บโหลดผ่าน backend เท่านั้น - bucket เป็น private)

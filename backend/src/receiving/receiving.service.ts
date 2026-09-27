@@ -50,7 +50,9 @@ function parseLimit(raw: unknown): number {
 }
 
 const VEHICLE_INCLUDE = {
-  customer: { select: { name: true } },
+  // id = กุญแจใบยื่น (วันที่ยื่น + กลุ่ม + รหัสลูกค้า ทุกหน้าเหมือนกัน - ผู้ใช้ 2026-09-27) ชื่อซ้ำกันได้ จึงใช้ชื่อแค่แสดง
+  // company/branch = แยกลูกค้าที่ชื่อซ้ำกันในการ์ดใบยื่น/ตัวกรองเจ้าของงาน
+  customer: { select: { id: true, name: true, company: true, branch: true } },
   brand: { select: { name: true } },
   // แถวล่าสุดแถวเดียวพอ - ใช้เช็คว่าได้รับใบเสร็จแล้วหรือยัง (ขั้น plate/book ต้องมีใบเสร็จก่อน)
   // submitDate + urgent = ใบยื่นที่รถคันนี้อยู่ (หน้ารับป้าย/รับเล่มจัดกลุ่มตามใบยื่น ผู้ใช้ 2026-09-26)
@@ -112,7 +114,7 @@ export class ReceivingService {
       plateDeliveredDate: Date | null;
       deliveryRecipient: string | null;
       deliveryNote: string | null;
-      customer: { name: string };
+      customer: { id: string; name: string; company: string | null; branch: string | null };
       brand: { name: string };
       documentSubmissions: Array<{ receiptNo?: string | null; submitDate?: Date; receiptDate?: Date | null; urgent?: boolean; createdAt?: Date }>;
     },
@@ -123,7 +125,10 @@ export class ReceivingService {
     return {
       id: vehicle.id,
       date: vehicle.date.toISOString().slice(0, 10),
+      customerId: vehicle.customer.id, // กุญแจใบยื่น (ผู้ใช้ 2026-09-27) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
       customerName: vehicle.customer.name,
+      customerCompany: vehicle.customer.company,
+      customerBranch: vehicle.customer.branch,
       chassis: vehicle.chassis,
       brandName: vehicle.brand.name,
       body: vehicle.body,

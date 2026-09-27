@@ -56,12 +56,53 @@ export interface Checks {
   ownerMissingIds: string[];
   plateMissingIds: string[];
   errorIds: string[];
+  dateBlockedIds: string[]; // ยื่นไม่ได้ ณ วันที่ยื่นที่ตั้งไว้ (เช่น ผลตรวจหมดอายุก่อนวันนั้น) - ดู eligibilityOf
   problemIds: Set<string>;
   pendingCount: number;
+  eligibilityPendingCount: number; // ยังตรวจสิทธิ์ยื่นตามวันที่ยื่นปัจจุบันไม่เสร็จ
   grandTotal: number;
   dutyTotal: number;
   taxPendingCount: number;
-  ready: boolean; // ครบทุกคัน คำนวณเสร็จ และมีวันที่ยื่น - ไปตรวจทาน/ยื่นได้
+  ready: boolean; // ครบทุกคัน คำนวณเสร็จ ยื่นได้ตามวันที่ยื่น และมีวันที่ยื่น - ไปตรวจทาน/ยื่นได้
+}
+
+// สิทธิ์ยื่นของรถคันหนึ่ง ณ วันที่ยื่นปัจจุบัน (ผู้ใช้ 2026-09-27)
+export type Eligibility = { kind: "checking" } | { kind: "ok" } | { kind: "blocked"; reason: string };
+
+// ผลตรวจสิทธิ์ยื่นที่รู้แล้ว: date = วันที่ยื่นที่ตรวจ, reason = เหตุผลที่ยื่นไม่ได้ (null = ยื่นได้)
+type EligibilityRecord = { date: string; reason: string | null };
+
+const VEHICLE_GONE_REASON = "ไม่พบข้อมูลรถคันนี้แล้ว (อาจถูกลบ) - เอาออกจากที่เลือก";
+
+// ตรวจสิทธิ์ยื่นของรถหลายคัน ณ วันที่ยื่น ด้วยการค้นเลขตัวถัง (backend ใช้กฎเดียวกับตอนยื่นจริง) - fresh = ข้อมูลรถล่าสุดของคันที่ยื่นได้
+// คันที่ยื่นได้จับคู่ด้วย id ไม่ใช่เลขตัวถัง (พบ 2026-09-27: รถที่เลือกไว้ถูกลบแล้วมีคนกรอกเลขตัวถังเดิมเป็นรถคันใหม่ ผลค้นคือคันใหม่
+// เดิมนับว่าคันที่ถูกลบยื่นได้ ไปพังตอนยื่น) - คันที่ยื่นไม่ได้ backend ไม่ส่ง id มา จับด้วยเลขตัวถัง (ผิดคันก็แค่กันไว้ ไม่ปล่อยผ่าน)
+async function checkEligibility(
+  vehicles: SubmitCandidate[],
+  date: string,
+): Promise<{ fresh: SubmitCandidate[]; results: Record<string, EligibilityRecord> }> {
+  const fresh: SubmitCandidate[] = [];
+  const results: Record<string, EligibilityRecord> = {};
+  for (let i = 0; i < vehicles.length; i += LOOKUP_CHUNK_SIZE) {
+    const chunk = vehicles.slice(i, i + LOOKUP_CHUNK_SIZE);
+    const { found, blocked } = await api.lookupVehiclesByChassis(
+      chunk.map((v) => v.chassis),
+      date,
+    );
+    const foundById = new Map(found.map((f) => [f.id, f]));
+    const blockedByChassis = new Map(blocked.map((b) => [b.chassis.toUpperCase(), b.reason]));
+    for (const v of chunk) {
+      const f = foundById.get(v.id);
+      if (f) {
+        results[v.id] = { date, reason: null };
+        fresh.push(f);
+        continue;
+      }
+      // ไม่อยู่ใน found ด้วย id นี้ = ยื่นไม่ได้ (blocked) หรือไม่พบคันนี้แล้ว (notFound / เลขตัวถังเดียวกันแต่เป็นรถคันอื่น)
+      results[v.id] = { date, reason: blockedByChassis.get(v.chassis.toUpperCase()) ?? VEHICLE_GONE_REASON };
+    }
+  }
+  return { fresh, results };
 }
 
 function priceSig(vehicle: SubmitCandidate, settings: EntrySettings): string {
@@ -92,12 +133,16 @@ interface SubmitFlowState {
   selected: SubmitCandidate[]; // เรียงตามลำดับที่เลือก
   selectedIds: Set<string>;
   settings: Record<string, EntrySettings>;
-  select: (vehicles: SubmitCandidate[]) => void;
+  // checkedDate = วันที่ยื่นที่รายการรถนั้นโหลดมา (คิว/ค้นเลขตัวถัง) - รถที่ส่งมาคือรถที่ยื่นได้ ณ วันนั้น
+  select: (vehicles: SubmitCandidate[], checkedDate?: string) => void;
   unselect: (ids: Iterable<string>) => void;
   clearSelection: () => void;
-  refreshSelected: (fresh: SubmitCandidate[]) => void;
+  refreshSelected: (fresh: SubmitCandidate[], checkedDate?: string) => void;
   updateSettings: (ids: Iterable<string>, change: (current: EntrySettings, vehicle: SubmitCandidate) => EntrySettings) => void;
   rowState: (vehicle: SubmitCandidate) => RowState;
+  eligibilityOf: (vehicle: SubmitCandidate) => Eligibility;
+  eligibilityError: string; // ตรวจสิทธิ์ยื่นตามวันที่ยื่นไม่สำเร็จ (เชื่อมต่อไม่ได้) - "" = ปกติ
+  retryEligibility: () => void;
   checks: Checks;
   retryPricing: () => void;
   verifyPrices: () => Promise<string[]>;
@@ -128,12 +173,53 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState<{ done: number; total: number } | null>(null);
   const submittingRef = useRef(false);
+  const submitDate = displayDateToIso(submitDateText.replace(/\D/g, ""));
+  // สิทธิ์ยื่นของรถที่เลือก ณ วันที่ยื่น (ผู้ใช้ 2026-09-27: ยกเลิก/ยื่นไม่สำเร็จแล้วยื่นใหม่ด้วยวันที่ยื่นเดิมได้ ถ้ายังไม่เกิน 90 วัน
+  // จากวันที่ตรวจผ่าน) - คิวขั้น 1 โหลดตามวันที่ยื่น เปลี่ยนวันที่ยื่นแล้วตรวจคันที่เลือกไว้ใหม่ทุกคัน backend ตรวจซ้ำตอนยื่นเสมอ
+  const [eligibility, setEligibility] = useState<Record<string, EligibilityRecord>>({});
+  const [eligibilityError, setEligibilityError] = useState("");
+  const [eligibilityRetry, setEligibilityRetry] = useState(0);
 
   useEffect(() => {
     try {
       window.localStorage.removeItem(OLD_DRAFT_STORAGE_KEY);
     } catch {}
   }, []);
+
+  // คันที่เลือกไว้แต่ยังไม่ได้ตรวจสิทธิ์ยื่น ณ วันที่ยื่นปัจจุบัน (เพิ่งเปลี่ยนวันที่ยื่น / เลือกจากรายการของวันอื่น)
+  const staleEligibilityKey = submitDate
+    ? selected
+        .filter((v) => eligibility[v.id]?.date !== submitDate)
+        .map((v) => v.id)
+        .join(",")
+    : "";
+  useEffect(() => {
+    if (!staleEligibilityKey || !submitDate) return;
+    const staleIds = new Set(staleEligibilityKey.split(","));
+    const stale = selected.filter((v) => staleIds.has(v.id));
+    const date = submitDate;
+    let cancelled = false;
+    // หน่วงนิดหนึ่ง: พิมพ์/เลือกวันที่ติดกันหลายครั้งส่งตรวจครั้งเดียว
+    const timer = window.setTimeout(async () => {
+      try {
+        const { fresh, results } = await checkEligibility(stale, date);
+        if (cancelled) return;
+        setEligibilityError("");
+        setEligibility((prev) => ({ ...prev, ...results }));
+        // ข้อมูลรถล่าสุดของคันที่ยื่นได้ (เจ้าของรถที่เพิ่งกรอก ฯลฯ) - คันที่ยื่นไม่ได้คงข้อมูลเดิมไว้ให้เห็นว่าคันไหน
+        const byId = new Map(fresh.map((v) => [v.id, v]));
+        if (byId.size > 0) setSelected((prev) => (prev.some((v) => byId.has(v.id)) ? prev.map((v) => byId.get(v.id) ?? v) : prev));
+      } catch (err) {
+        if (!cancelled) setEligibilityError(err instanceof ApiError ? err.message : "ตรวจสิทธิ์ยื่นตามวันที่ยื่นไม่สำเร็จ");
+      }
+    }, PRICE_DELAY_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // staleEligibilityKey รวมคันที่ต้องตรวจ + วันที่ยื่นแล้ว - selected เปลี่ยนแต่ไม่มีคันใหม่ต้องตรวจ = ไม่ต้องส่งใหม่
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staleEligibilityKey, submitDate, eligibilityRetry]);
 
   const settingsOf = (v: SubmitCandidate) => settings[v.id] ?? defaultSettings(v);
   const sigs = selected.map((v) => `${v.id}=${priceSig(v, settingsOf(v))}`).join("|");
@@ -180,7 +266,20 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SubmitFlowState>(() => {
     const settingsFor = (v: SubmitCandidate) => settings[v.id] ?? defaultSettings(v);
-    const submitDate = displayDateToIso(submitDateText.replace(/\D/g, ""));
+    const eligibilityOf = (v: SubmitCandidate): Eligibility => {
+      const record = eligibility[v.id];
+      if (!submitDate || !record || record.date !== submitDate) return { kind: "checking" };
+      return record.reason ? { kind: "blocked", reason: record.reason } : { kind: "ok" };
+    };
+    // บันทึกผลว่ารถเหล่านี้ยื่นได้ ณ checkedDate (มาจากคิว/ค้นเลขตัวถังของวันนั้น ซึ่งมีแต่คันที่ยื่นได้)
+    const markChecked = (vehicles: SubmitCandidate[], checkedDate: string | undefined) => {
+      if (!checkedDate || vehicles.length === 0) return;
+      setEligibility((prev) => {
+        const next = { ...prev };
+        for (const v of vehicles) next[v.id] = { date: checkedDate, reason: v.submitBlockReason };
+        return next;
+      });
+    };
     const rowState = (v: SubmitCandidate): RowState => {
       const p = priced[v.id];
       if (!p || p.sig !== priceSig(v, settingsFor(v))) return { kind: "pending" };
@@ -192,19 +291,24 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
     const ownerMissingIds = selected.filter((v) => isOwnerUnspecified(v, settingsFor(v))).map((v) => v.id);
     const plateMissingIds = selected.filter((v) => plateMissing(settingsFor(v))).map((v) => v.id);
     const errorIds = selected.filter((_, i) => states[i].kind === "error").map((v) => v.id);
+    const eligibilities = selected.map((v) => eligibilityOf(v));
+    const dateBlockedIds = selected.filter((_, i) => eligibilities[i].kind === "blocked").map((v) => v.id);
+    const eligibilityPendingCount = eligibilities.filter((e) => e.kind === "checking").length;
     const okStates = states.filter((s): s is Extract<RowState, { kind: "ok" }> => s.kind === "ok");
-    const problemIds = new Set([...ownerMissingIds, ...plateMissingIds, ...errorIds]);
+    const problemIds = new Set([...ownerMissingIds, ...plateMissingIds, ...errorIds, ...dateBlockedIds]);
     const pendingCount = states.filter((s) => s.kind === "pending").length;
     const checks: Checks = {
       ownerMissingIds,
       plateMissingIds,
       errorIds,
+      dateBlockedIds,
       problemIds,
       pendingCount,
+      eligibilityPendingCount,
       grandTotal: okStates.reduce((sum, s) => sum + s.total, 0),
       dutyTotal: okStates.reduce((sum, s) => sum + dutyAmount(s.fee), 0),
       taxPendingCount: okStates.filter((s) => s.taxAmount === null).length,
-      ready: selected.length > 0 && problemIds.size === 0 && pendingCount === 0 && !!submitDate,
+      ready: selected.length > 0 && problemIds.size === 0 && pendingCount === 0 && eligibilityPendingCount === 0 && !!submitDate,
     };
     const selectedIds = new Set(selected.map((v) => v.id));
 
@@ -222,38 +326,44 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
 
     // แทนข้อมูลรถที่เลือกไว้ด้วยข้อมูลล่าสุด (คิว/ค้นเลขตัวถัง) - เจ้าของรถที่เพิ่งกรอกในหน้าเพิ่มข้อมูลรถต้องไม่ถูกส่ง ownerType
     // ทับ (พบ 2026-09-27) เจ้าของรถเปลี่ยน = sig เปลี่ยน คำนวณใหม่เอง · คันที่ไม่อยู่ในข้อมูลใหม่คงของเดิม (backend ตรวจตอนยื่น)
-    const refreshSelected = (fresh: SubmitCandidate[]) => {
+    const refreshSelected = (fresh: SubmitCandidate[], checkedDate?: string) => {
       if (fresh.length === 0) return;
       const byId = new Map(fresh.map((v) => [v.id, v]));
       setSelected((prev) => (prev.some((v) => byId.has(v.id)) ? prev.map((v) => byId.get(v.id) ?? v) : prev));
+      markChecked(
+        selected.filter((v) => byId.has(v.id)).map((v) => byId.get(v.id) as SubmitCandidate),
+        checkedDate,
+      );
     };
 
-    // อ่านข้อมูลรถที่เลือกไว้ใหม่จาก backend (เลขตัวถัง ณ วันที่ยื่น) คืนรายการที่เลือกหลังแทนข้อมูลแล้ว - พลาดก็ใช้ของเดิม
-    const reloadSnapshots = async (vehicles: SubmitCandidate[]): Promise<SubmitCandidate[]> => {
+    // อ่านข้อมูลรถที่เลือกไว้ใหม่จาก backend (เลขตัวถัง ณ วันที่ยื่น) พร้อมตรวจสิทธิ์ยื่นของวันนั้นอีกรอบ
+    // คืนรายการที่เลือกหลังแทนข้อมูลแล้ว + คันที่ยื่นไม่ได้ ณ วันที่ยื่น - พลาดก็ใช้ของเดิม (backend ตรวจซ้ำตอนยื่นอยู่แล้ว)
+    const reloadSnapshots = async (vehicles: SubmitCandidate[]): Promise<{ vehicles: SubmitCandidate[]; blockedIds: string[] }> => {
       const byId = new Map<string, SubmitCandidate>();
+      const blockedIds: string[] = [];
       try {
-        for (let i = 0; i < vehicles.length; i += LOOKUP_CHUNK_SIZE) {
-          const chassis = vehicles.slice(i, i + LOOKUP_CHUNK_SIZE).map((v) => v.chassis);
-          const { found } = await api.lookupVehiclesByChassis(chassis, submitDate || today);
-          for (const v of found) byId.set(v.id, v);
-        }
+        const { fresh, results } = await checkEligibility(vehicles, submitDate || today);
+        for (const v of fresh) byId.set(v.id, v);
+        for (const [id, r] of Object.entries(results)) if (r.reason) blockedIds.push(id);
+        setEligibility((prev) => ({ ...prev, ...results }));
+        setEligibilityError("");
       } catch {
         // ใช้ข้อมูลเดิม - ขั้นคำนวณ/ยื่นจะบอกเหตุผลเองถ้าข้อมูลไม่ตรง
       }
       const fresh = [...byId.values()];
-      refreshSelected(fresh);
-      return selected.map((v) => byId.get(v.id) ?? v);
+      if (fresh.length > 0) setSelected((prev) => (prev.some((v) => byId.has(v.id)) ? prev.map((v) => byId.get(v.id) ?? v) : prev));
+      return { vehicles: selected.map((v) => byId.get(v.id) ?? v), blockedIds };
     };
 
     // คำนวณใหม่ทุกคันจากข้อมูลรถล่าสุด ก่อนเปิดหน้าต่างยืนยันยื่น (พบ 2026-09-27: ข้อมูลรถถูกแก้ระหว่างนี้ ยอดที่ตรวจทานไม่ตรงกับที่บันทึก)
-    // คืน id ของคันที่ยอด/สถานะเปลี่ยนจากที่แสดงอยู่ - โยน ApiError ถ้าคำนวณไม่ได้ทั้งชุด
+    // คืน id ของคันที่ยอด/สถานะเปลี่ยนจากที่แสดงอยู่ รวมคันที่ยื่นไม่ได้แล้ว ณ วันที่ยื่น - โยน ApiError ถ้าคำนวณไม่ได้ทั้งชุด
     const verifyPrices = async (): Promise<string[]> => {
       const shown = priced;
-      const vehicles = await reloadSnapshots(selected);
+      const { vehicles, blockedIds } = await reloadSnapshots(selected);
       const jobs = vehicles.map((v) => ({ vehicle: v, settings: settingsFor(v), sig: priceSig(v, settingsFor(v)) }));
       for (const job of jobs) requested.current[job.vehicle.id] = job.sig;
       const next: Record<string, Priced> = {};
-      const changed: string[] = [];
+      const changed: string[] = [...blockedIds];
       try {
         for (let i = 0; i < jobs.length; i += PREVIEW_CHUNK_SIZE) {
           const chunk = jobs.slice(i, i + PREVIEW_CHUNK_SIZE);
@@ -373,7 +483,7 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
       selected,
       selectedIds,
       settings,
-      select: (vehicles) => {
+      select: (vehicles, checkedDate) => {
         setSelected((prev) => {
           const have = new Set(prev.map((v) => v.id));
           return [...prev, ...vehicles.filter((v) => !have.has(v.id))];
@@ -384,6 +494,7 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
           for (const v of vehicles) next[v.id] ??= defaultSettings(v);
           return next;
         });
+        markChecked(vehicles, checkedDate);
       },
       unselect,
       clearSelection: () => {
@@ -391,6 +502,8 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
         setSelected([]);
         setSettings({});
         setPriced({});
+        setEligibility({});
+        setEligibilityError("");
       },
       refreshSelected,
       updateSettings: (ids, change) => {
@@ -402,6 +515,11 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
         });
       },
       rowState,
+      eligibilityOf,
+      // แสดงเฉพาะตอนยังมีคันที่รอตรวจสิทธิ์ ณ วันที่ยื่นนี้ (พบ 2026-09-27: เดิมคันเหล่านั้นถูกตรวจทางอื่น/ถูกเอาออกแล้ว ข้อความแดง
+      // ยังค้าง และปุ่ม "ลองใหม่" ไม่ทำอะไร) - เงื่อนไขนี้ = staleEligibilityKey ไม่ว่าง ปุ่มลองใหม่จึงส่งตรวจได้เสมอ
+      eligibilityError: submitDate && checks.eligibilityPendingCount > 0 ? eligibilityError : "",
+      retryEligibility: () => setEligibilityRetry((n) => n + 1),
       checks,
       // "ลองใหม่" / "คำนวณใหม่" ของคันที่คำนวณไม่ได้: อ่านข้อมูลรถใหม่ แล้วส่งคำนวณอีกรอบ (พบ 2026-09-27: เดิมกดแล้วไม่ส่งอะไรเลย
       // สำหรับ error รายคัน เพราะ sig ของคันนั้นยังตรงกับที่เคยส่ง)
@@ -417,7 +535,7 @@ export function SubmitFlowProvider({ children }: { children: ReactNode }) {
       result,
       setResult,
     };
-  }, [submitDateText, today, selected, settings, priced, result, submitting, submitProgress]);
+  }, [submitDateText, submitDate, today, selected, settings, priced, result, submitting, submitProgress, eligibility, eligibilityError]);
 
   return <SubmitFlowContext.Provider value={value}>{children}</SubmitFlowContext.Provider>;
 }

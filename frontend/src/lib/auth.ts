@@ -164,11 +164,14 @@ interface PageRule {
 
 // เรียงจากเจาะจงมากไปน้อย - ใช้กฎแรกที่ตรง (สำเนาของ backend access-policy.ts ฝั่งหน้าเว็บ)
 // หน้าภาพรวม "/" เฉพาะ ADMIN + ACCOUNTANT / ฐานข้อมูลลูกค้า: พนักงานดูได้แต่เพิ่มไม่ได้ (ปุ่มเพิ่มซ่อนในหน้า, backend กัน POST)
-// ขั้น 1-3 ทุกกลุ่มเปิดดูได้ (STAFF_CAR/MOTO อ่านอย่างเดียว - backend กันการบันทึก) ขั้น 4-8 เฉพาะ STAFF_CAR/MOTO (+ACCOUNTANT อ่าน)
+// ขั้น 1-3 ทุกกลุ่มเปิดดูได้ (STAFF_CAR/MOTO อ่านอย่างเดียว - backend กันการบันทึก) ขั้น 4-8 เฉพาะ STAFF_CAR/MOTO (+ACCOUNTANT อ่าน
+// ขั้น 4-7 และรายงานส่งงานของขั้น 8 - ไม่ใช่หน้า Delivery)
 const PAGE_RULES: PageRule[] = [
   { prefix: '/admin', roles: ['ADMIN'] },
   { prefix: '/portal', roles: ['CUSTOMER'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
+  // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
+  { prefix: '/registration/new-vehicle/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },
   { prefix: '/registration/new-vehicle/delivery', roles: [...SUBMIT_STAFF, 'DELIVERY'] },
   // ขั้นตอนยื่นเอกสาร 4 หน้า (/submit...) เป็นงานบันทึกล้วน - ACCOUNTANT ดูได้แค่รายการที่ยื่นแล้ว (พบ 2026-09-27)
   { prefix: '/registration/new-vehicle/submit-documents/submit', roles: SUBMIT_STAFF },

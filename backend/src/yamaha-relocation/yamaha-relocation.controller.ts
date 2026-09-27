@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query, StreamableFile, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, StreamableFile, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES } from '../receipts/receipts.service.js';
 import type { CreateYamahaRelocationEntryDto } from './dto/create-yamaha-relocation-entry.dto.js';
+import type { UpdateYamahaRelocationEntryDto } from './dto/update-yamaha-relocation-entry.dto.js';
 import { YamahaRelocationService, type YamahaRelocationFiles } from './yamaha-relocation.service.js';
 
 @Controller('api/yamaha-relocation')
@@ -26,6 +27,18 @@ export class YamahaRelocationController {
   )
   create(@Body() body: CreateYamahaRelocationEntryDto, @UploadedFiles() files: YamahaRelocationFiles | undefined) {
     return this.yamahaRelocationService.create(body, files);
+  }
+
+  // แก้รายการที่บันทึกผิด { date?, size?, count?, remark } - remark บังคับ (ผู้ใช้ 2026-09-27) สิทธิ์ ADMIN/STAFF_ENTRY
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() body: UpdateYamahaRelocationEntryDto) {
+    return this.yamahaRelocationService.update(id, body ?? {});
+  }
+
+  // ยกเลิกรายการ { remark } - แถวยังอยู่ (cancelledAt) ไฟล์แนบเดิมแนบกับรายการใหม่ได้
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string, @Body() body: { remark?: unknown }) {
+    return this.yamahaRelocationService.cancel(id, body?.remark);
   }
 
   @Get('attachments/:id/file')

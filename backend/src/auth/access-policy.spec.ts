@@ -39,4 +39,108 @@ describe('access policy step 4-8 rules', () => {
     expect(isAllowed(accessFor('/api/delivery/slips/s1/add-plate', 'POST'), ['STAFF_MOTO'])).toBe(true);
     expect(isAllowed(accessFor('/api/delivery', 'POST'), ['DELIVERY'])).toBe(true);
   });
+
+  // ผู้ใช้ 2026-09-27: บัญชีอ่านรายงานส่งงาน (ใบส่งงาน + ป้ายค้างส่ง) ได้ แต่ไม่เห็นคิว Delivery และบันทึก/แก้/ยกเลิกไม่ได้
+  it('lets accounting read the delivery report but not the Delivery queue or any change', () => {
+    const accountant: ['ACCOUNTANT'] = ['ACCOUNTANT'];
+    expect(isAllowed(accessFor('/api/delivery/slips', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery/plate-pending', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery/queue', 'GET'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/recent', 'GET'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1', 'PATCH'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1/cancel', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1/add-plate', 'POST'), accountant)).toBe(false);
+    // บทบาทเดิมยังเหมือนเดิม
+    expect(isAllowed(accessFor('/api/delivery/plate-pending', 'GET'), ['DELIVERY'])).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery/plate-pending', 'GET'), ['STAFF_ENTRY'])).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/queue', 'GET'), ['STAFF_MOTO'])).toBe(true);
+  });
+});
+
+// ผู้ใช้ 2026-09-27: แก้ข้อมูลลูกค้า และตั้งรหัสผ่านชั่วคราวให้ผู้ใช้ - ADMIN เท่านั้น
+describe('access policy admin corrections', () => {
+  it('keeps customer edits and temporary passwords to ADMIN', () => {
+    expect(accessFor('/api/customers/c1', 'PATCH')).toEqual(['ADMIN']);
+    expect(isAllowed(accessFor('/api/customers', 'GET'), ['ACCOUNTANT'])).toBe(true);
+    expect(isAllowed(accessFor('/api/customers/c1', 'PATCH'), ['ACCOUNTANT'])).toBe(false);
+    expect(isAllowed(accessFor('/api/customers/c1', 'PATCH'), ['STAFF_ENTRY'])).toBe(false);
+    // ประวัติการแก้ไขลูกค้า: ADMIN เท่านั้น (รายการลูกค้าทั้งหมดยังเปิดให้พนักงานทุกฝ่ายอ่าน)
+    expect(accessFor('/api/customers/c1/history', 'GET')).toEqual(['ADMIN']);
+    expect(isAllowed(accessFor('/api/customers/c1/history', 'GET'), ['ACCOUNTANT'])).toBe(false);
+    expect(accessFor('/api/admin/users/u1/password', 'PATCH')).toEqual(['ADMIN']);
+    expect(isAllowed(accessFor('/API/Admin/Users/u1/password', 'PATCH'), ['STAFF_CAR'])).toBe(false);
+  });
+});
+
+// ผู้ใช้ 2026-09-27: บัญชีแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบได้ แต่เปิดงานที่ปิดไว้กลับได้เฉพาะ ADMIN
+describe('access policy billing corrections', () => {
+  it('lets ADMIN and ACCOUNTANT correct invoices and close billing, and keeps reopening to ADMIN', () => {
+    const accountant: ['ACCOUNTANT'] = ['ACCOUNTANT'];
+    expect(isAllowed(accessFor('/api/billing/invoices/i1', 'PATCH'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/invoices/i1/unpay', 'PATCH'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/invoices/i1/history', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/vehicles/v1/close', 'POST'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/vehicles/closed', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/vehicles/v1/reopen', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/API/Billing/Vehicles/v1/Reopen/', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/billing/vehicles/v1/reopen', 'POST'), ['ADMIN'])).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/invoices/i1/unpay', 'PATCH'), ['STAFF_CAR'])).toBe(false);
+  });
+});
+
+// ผู้ใช้ 2026-09-27: "✎ แก้" แจ้งย้าย/ตัดบัญชีที่ดำเนินการแล้ว สิทธิ์เดียวกับการบันทึก (ENTRY + STAFF_MOTO ที่ service กรองจักรยานยนต์)
+describe('access policy transfer-notice correction', () => {
+  it('uses the transfer-notice write rule for /correct', () => {
+    const correct = accessFor('/api/vehicles/v1/transfer-notice/correct', 'PATCH');
+    expect(correct).toEqual(accessFor('/api/vehicles/v1/transfer-notice', 'PATCH'));
+    expect(isAllowed(correct, ['STAFF_ENTRY'])).toBe(true);
+    expect(isAllowed(correct, ['STAFF_MOTO'])).toBe(true);
+    expect(isAllowed(correct, ['STAFF_CAR'])).toBe(false);
+    expect(isAllowed(correct, ['ACCOUNTANT'])).toBe(false);
+    expect(isAllowed(accessFor('/API/Vehicles/v1/Transfer-Notice/Correct/', 'PATCH'), ['STAFF_CAR'])).toBe(false);
+  });
+});
+
+// ผู้ใช้ 2026-09-27: แก้/ยกเลิกงานได้เฉพาะพนักงานเจ้าของงาน + ADMIN (ขอบเขตประเภทรถกรองใน service) - ACCOUNTANT อ่านอย่างเดียว
+describe('access policy tax renewal / Yamaha / plate swap corrections', () => {
+  it('keeps tax-renewal edit and cancel to ADMIN / STAFF_CAR / STAFF_MOTO', () => {
+    for (const [path, method] of [
+      ['/api/tax-renewals/r1', 'PATCH'],
+      ['/api/tax-renewals/r1/cancel', 'POST'],
+    ] as const) {
+      const access = accessFor(path, method);
+      expect(isAllowed(access, ['STAFF_CAR'])).toBe(true);
+      expect(isAllowed(access, ['STAFF_MOTO'])).toBe(true);
+      expect(isAllowed(access, ['ACCOUNTANT'])).toBe(false);
+      expect(isAllowed(access, ['STAFF_ENTRY'])).toBe(false);
+    }
+  });
+
+  it('keeps Yamaha relocation edit and cancel to ADMIN / STAFF_ENTRY', () => {
+    for (const [path, method] of [
+      ['/api/yamaha-relocation/e1', 'PATCH'],
+      ['/api/yamaha-relocation/e1/cancel', 'POST'],
+    ] as const) {
+      const access = accessFor(path, method);
+      expect(isAllowed(access, ['STAFF_ENTRY'])).toBe(true);
+      expect(isAllowed(access, ['ADMIN'])).toBe(true);
+      expect(isAllowed(access, ['STAFF_CAR'])).toBe(false);
+      expect(isAllowed(access, ['ACCOUNTANT'])).toBe(false);
+    }
+  });
+
+  it('keeps plate-swap edit, undo-return and cancel off the read-only roles', () => {
+    for (const [path, method] of [
+      ['/api/plate-swaps/s1', 'PATCH'],
+      ['/api/plate-swaps/s1/undo-return', 'POST'],
+      ['/api/plate-swaps/s1/cancel', 'POST'],
+    ] as const) {
+      const access = accessFor(path, method);
+      expect(isAllowed(access, ['STAFF_CAR'])).toBe(true);
+      expect(isAllowed(access, ['ACCOUNTANT'])).toBe(false);
+      expect(isAllowed(access, ['STAFF_ENTRY'])).toBe(false);
+    }
+  });
 });

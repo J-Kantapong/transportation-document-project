@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
@@ -42,6 +42,21 @@ const COMPLETED_DETAIL_FIELDS: Array<[string, (v: TransferNoticeVehicle) => stri
   ["วันที่เสร็จ", (v) => (v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "")],
   ["ค่าใช้จ่าย", (v) => (v.transferCost ? `${v.transferCost} บาท` : "")],
 ];
+
+// รายการที่ดำเนินการแล้วโหลดทีละเท่านี้ (โหลดใหม่หลังแก้ = ได้เท่าที่เปิดดูอยู่ สูงสุด 1,000 - ตรงกับ backend)
+const COMPLETED_PAGE_SIZE = 100;
+
+// "✎ แก้" คันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): edit = แก้วันที่เสร็จ/ค่าใช้จ่าย (ได้จนกว่าจะยื่นเอกสาร)
+// undo = ยกเลิกสถานะดำเนินการแล้ว รถกลับเข้ารายการต้องดำเนินการ (ได้เฉพาะก่อนส่งตรวจ) - ต้องระบุเหตุผลทุกครั้ง
+interface CorrectionState {
+  vehicle: TransferNoticeVehicle;
+  mode: "edit" | "undo";
+  dateText: string;
+  costText: string;
+  remark: string;
+  saving: boolean;
+  message: { text: string; error?: boolean };
+}
 
 // Validates one row's completed-date/cost text and returns the parsed ISO date, or throws
 // with a Thai error message. Shared by the single-row and bulk save paths.
@@ -189,10 +204,22 @@ export default function TransferNoticePage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
-  // ตัดบัญชีแล้ว: เรียงตามทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน
+  // ตัดบัญชีแล้ว: เรียงตามทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน - ทีละ 100 คัน + ค้นหาทั้งฐานข้อมูล (ผู้ใช้ 2026-09-27:
+  // เดิมแสดงแค่ 100 คันล่าสุด คันที่เก่ากว่านั้นหาไม่เจอจึงแก้ไม่ได้)
   const [completedVehicles, setCompletedVehicles] = useState<TransferNoticeVehicle[]>([]);
   const [completedLoading, setCompletedLoading] = useState(true);
+  const [completedLoadingMore, setCompletedLoadingMore] = useState(false);
+  const [completedHasMore, setCompletedHasMore] = useState(false);
   const [completedError, setCompletedError] = useState("");
+  const [completedSearchText, setCompletedSearchText] = useState("");
+  const [completedQuery, setCompletedQuery] = useState("");
+  const [completedMessage, setCompletedMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  // คำขอล่าสุดเท่านั้นที่ได้แสดง (พิมพ์ค้นหาต่อกันเร็วๆ คำตอบเก่าอาจมาทีหลัง)
+  const completedRequestRef = useRef(0);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const correctionDialogRef = useRef<HTMLDialogElement>(null);
+  const [correction, setCorrection] = useState<CorrectionState | null>(null);
 
   // บันทึกได้ทุกคัน = ADMIN/STAFF_ENTRY, STAFF_MOTO เฉพาะจักรยานยนต์, บทบาทอื่นดูอย่างเดียว (backend กันอีกชั้น)
   const [roles, setRoles] = useState<UserRole[]>([]);
@@ -220,18 +247,45 @@ export default function TransferNoticePage() {
     }
   }
 
-  async function loadCompleted() {
-    setCompletedLoading(true);
+  // q = คำค้นที่ใช้ (ไม่ส่ง = คำค้นปัจจุบัน) | append = "โหลดเพิ่มอีก 100 คัน" | keepCount = โหลดใหม่หลังบันทึก/แก้
+  // ให้ได้เท่าที่เปิดดูอยู่ (สูงสุด 1,000 คัน)
+  async function loadCompleted(options: { q?: string; append?: boolean; keepCount?: boolean } = {}) {
+    const q = options.q ?? completedQuery;
+    const requestId = ++completedRequestRef.current;
+    const offset = options.append ? completedVehicles.length : 0;
+    const limit = options.keepCount ? Math.min(1000, Math.max(COMPLETED_PAGE_SIZE, completedVehicles.length)) : COMPLETED_PAGE_SIZE;
+    if (options.append) setCompletedLoadingMore(true);
+    else setCompletedLoading(true);
     setCompletedError("");
     try {
-      const data = await api.listRecentlyCompletedTransferNotice();
-      setCompletedVehicles(data.vehicles);
+      const data = await api.listRecentlyCompletedTransferNotice({ q, offset, limit });
+      if (requestId !== completedRequestRef.current) return;
+      setCompletedVehicles((prev) => (options.append ? [...prev, ...data.vehicles] : data.vehicles));
+      setCompletedHasMore(data.hasMore);
     } catch (err) {
+      if (requestId !== completedRequestRef.current) return;
       setCompletedError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
-      setCompletedVehicles([]);
+      if (!options.append) {
+        setCompletedVehicles([]);
+        setCompletedHasMore(false);
+      }
     } finally {
-      setCompletedLoading(false);
+      if (requestId === completedRequestRef.current) {
+        setCompletedLoading(false);
+        setCompletedLoadingMore(false);
+      }
     }
+  }
+
+  // พิมพ์ค้นหาแล้วรอ 300 ms ค่อยค้น (ค้นทั้งฐานข้อมูล ไม่ใช่แค่ที่โหลดมาแล้ว)
+  function handleCompletedSearchChange(text: string) {
+    setCompletedSearchText(text);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      const q = text.trim();
+      setCompletedQuery(q);
+      loadCompleted({ q });
+    }, 300);
   }
 
   useEffect(() => {
@@ -240,6 +294,10 @@ export default function TransferNoticePage() {
     loadPending();
     loadCompleted();
     setRoles(getCachedUser()?.roles ?? []);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleDateTextChange(raw: string) {
@@ -291,13 +349,13 @@ export default function TransferNoticePage() {
         expectedTransferDone: vehicle.transferDone,
       });
       // Reload so a completed row moves out of "ต้องดำเนินการ" into "ตัดบัญชีแล้ว" below.
-      await Promise.all([loadPending(), loadCompleted()]);
+      await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
       if (err instanceof ApiError && err.status === 409) {
         // มีคนบันทึกคันนี้ไปก่อนแล้ว - โหลดรายการใหม่ (แสดงข้อความที่หัวตาราง เพราะแถวนี้อาจหายไปจากรายการแล้ว)
         setBulkMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message}`, error: true });
-        await Promise.all([loadPending(), loadCompleted()]);
+        await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
         return;
       }
       patchRow(id, { saving: false, message: { text: message, error: true } });
@@ -352,7 +410,7 @@ export default function TransferNoticePage() {
             }
           : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
       );
-      await Promise.all([loadPending(), loadCompleted()]);
+      await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
     } finally {
       setBulkSaving(false);
     }
@@ -361,6 +419,81 @@ export default function TransferNoticePage() {
   function openDetail(vehicle: TransferNoticeVehicle) {
     setDetail(vehicle);
     dialogRef.current?.showModal();
+  }
+
+  // "✎ แก้" คันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27) - เปิดทีละคันใน dialog พร้อมค่าที่บันทึกไว้
+  function openCorrection(vehicle: TransferNoticeVehicle) {
+    setCorrection({
+      vehicle,
+      mode: "edit",
+      dateText: isoToDisplayDate(vehicle.transferCompletedDate ?? ""),
+      costText: vehicle.transferCost ?? "",
+      remark: "",
+      saving: false,
+      message: { text: "" },
+    });
+    correctionDialogRef.current?.showModal();
+  }
+
+  function patchCorrection(patch: Partial<CorrectionState>) {
+    setCorrection((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function handleCorrectionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!correction || correction.saving) return;
+    const { vehicle, mode } = correction;
+    const remark = correction.remark.trim();
+    const fail = (text: string) => patchCorrection({ message: { text, error: true } });
+    if (!remark) return fail("กรุณาระบุเหตุผลที่แก้");
+
+    // ค่าที่ dialog แสดงอยู่ - มีคนแก้คันนี้ไปก่อน = backend ตอบ 409 ไม่เขียนทับ (ผู้ใช้ 2026-09-27 รอบตรวจ)
+    const expected = { expectedCompletedDate: vehicle.transferCompletedDate ?? null, expectedCost: vehicle.transferCost ?? null };
+    let body: { done: boolean; completedDate: string | null; cost: string | null; remark: string };
+    if (mode === "undo") {
+      // ส่งตรวจแล้วยกเลิกสถานะไม่ได้ (backend บังคับเหมือนกัน)
+      if (vehicle.inspectionSentDate) return fail("รถคันนี้ส่งตรวจแล้ว - ยกเลิกสถานะไม่ได้");
+      body = { done: false, completedDate: null, cost: null, remark };
+    } else {
+      const digits = correction.dateText.replace(/\D/g, "");
+      const completedDateIso = digits ? displayDateToIso(digits) : "";
+      if (!digits) return fail("กรุณาระบุวันที่เสร็จ");
+      if (!completedDateIso) return fail("วันที่เสร็จไม่ถูกต้อง");
+      if (completedDateIso > todayIso()) return fail("วันที่เสร็จต้องไม่เกินวันนี้");
+      // ส่งตรวจได้หลังแจ้งย้าย/ตัดบัญชีเสร็จ - วันที่เสร็จจึงต้องไม่หลังวันที่ส่งตรวจ
+      if (vehicle.inspectionSentDate && completedDateIso > vehicle.inspectionSentDate) {
+        return fail(`วันที่เสร็จต้องไม่หลังวันที่ส่งตรวจ (${isoToDisplayDate(vehicle.inspectionSentDate)})`);
+      }
+      const cost = correction.costText.trim();
+      if (cost && !/^\d+(\.\d+)?$/.test(cost)) return fail("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
+      body = { done: true, completedDate: completedDateIso, cost: cost || null, remark };
+    }
+
+    patchCorrection({ saving: true, message: { text: "กำลังบันทึก…" } });
+    try {
+      await api.correctTransferNotice(vehicle.id, { ...body, ...expected });
+      correctionDialogRef.current?.close();
+      setCorrection(null);
+      setCompletedMessage({
+        text:
+          mode === "undo"
+            ? `ยกเลิกสถานะเลขตัวถัง ${vehicle.chassis} แล้ว - รถกลับไปอยู่ในรายการที่ต้องดำเนินการ`
+            : `แก้ข้อมูลเลขตัวถัง ${vehicle.chassis} แล้ว`,
+      });
+      await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
+      if (err instanceof ApiError && err.status === 409) {
+        // มีคนแก้/ส่งตรวจ/ยื่นคันนี้ไปก่อน - ปิด dialog (ค่าที่แสดงเก่าแล้ว กดบันทึกซ้ำก็ 409 อีก) แล้วโหลดรายการใหม่
+        // ให้เปิด ✎ แก้ ใหม่จากค่าล่าสุด (ผู้ใช้ 2026-09-27 รอบตรวจ)
+        correctionDialogRef.current?.close();
+        setCorrection(null);
+        setCompletedMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message} แล้วกด ✎ แก้ อีกครั้ง`, error: true });
+        await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
+        return;
+      }
+      patchCorrection({ saving: false, message: { text: message, error: true } });
+    }
   }
 
   const byDateVehicles = useMemo(() => pendingVehicles.filter((v) => v.date === dateIso), [pendingVehicles, dateIso]);
@@ -468,13 +601,36 @@ export default function TransferNoticePage() {
 
       <section className="panel customer-list">
         <div className="panel-head">
-          <h2>รายการที่ตัดบัญชีแล้วล่าสุด</h2>
-          <button className="text-button" onClick={loadCompleted}>
-            โหลดรายการใหม่
-          </button>
+          <div>
+            <h2>รายการที่ตัดบัญชีแล้วล่าสุด</h2>
+            <span className="muted">
+              ✎ แก้ = แก้วันที่เสร็จ/ค่าใช้จ่าย (ได้จนกว่าจะยื่นเอกสาร) หรือยกเลิกสถานะ (ได้เฉพาะก่อนส่งตรวจ) - ต้องระบุเหตุผลทุกครั้ง
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            {completedMessage.text && (
+              <span className={`customer-message${completedMessage.error ? " error" : " success"}`} role="status">
+                {completedMessage.text}
+              </span>
+            )}
+            <input
+              type="search"
+              value={completedSearchText}
+              onChange={(e) => handleCompletedSearchChange(e.target.value)}
+              placeholder="ค้นหาเลขตัวถัง / ลูกค้า / ทะเบียน"
+              aria-label="ค้นหารายการที่ดำเนินการแล้ว"
+              style={{ width: 240 }}
+            />
+            <button className="text-button" onClick={() => loadCompleted()}>
+              โหลดรายการใหม่
+            </button>
+          </div>
         </div>
         {!completedLoading && !completedError && (
-          <p style={{ padding: "0 24px 12px", fontSize: 12 }}>แสดง {completedVehicles.length} รายการล่าสุด</p>
+          <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
+            {completedQuery ? `พบ ${completedVehicles.length}${completedHasMore ? "+" : ""} รายการที่ตรงกับ "${completedQuery}"` : `แสดง ${completedVehicles.length} รายการล่าสุด`}
+            {completedHasMore ? " · ยังมีรายการเก่ากว่านี้" : ""}
+          </p>
         )}
         {completedLoading ? (
           <div className="empty-customers">กำลังโหลดรายการ…</div>
@@ -483,7 +639,7 @@ export default function TransferNoticePage() {
             {completedError}
           </div>
         ) : !completedVehicles.length ? (
-          <div className="empty-customers">ยังไม่มีรายการที่ดำเนินการเสร็จ</div>
+          <div className="empty-customers">{completedQuery ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการที่ดำเนินการเสร็จ"}</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -509,15 +665,32 @@ export default function TransferNoticePage() {
                     <td>{v.status || "—"}</td>
                     <td>{v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "—"}</td>
                     <td>{v.transferCost ? `${v.transferCost} บาท` : "—"}</td>
-                    <td>
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <button className="text-button" onClick={() => openDetail(v)}>
                         ดูข้อมูล
                       </button>
+                      {canEdit(v) &&
+                        (v.submitted ? (
+                          <span className="muted" style={{ fontSize: 11, marginLeft: 8 }} title="ยื่นเอกสารแล้ว - ย้อนกลับไปแก้ขั้นตอนก่อนหน้าไม่ได้">
+                            ยื่นแล้ว
+                          </span>
+                        ) : (
+                          <button className="text-button" style={{ marginLeft: 8 }} onClick={() => openCorrection(v)}>
+                            ✎ แก้
+                          </button>
+                        ))}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!completedLoading && !completedError && completedHasMore && (
+          <div style={{ padding: "12px 24px" }}>
+            <button className="text-button" disabled={completedLoadingMore} onClick={() => loadCompleted({ append: true })}>
+              {completedLoadingMore ? "กำลังโหลด…" : `โหลดเพิ่มอีก ${COMPLETED_PAGE_SIZE} คัน`}
+            </button>
           </div>
         )}
       </section>
@@ -542,6 +715,122 @@ export default function TransferNoticePage() {
                 </div>
               ))}
             </dl>
+          </>
+        )}
+      </dialog>
+
+      {/* "✎ แก้" คันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): แก้วันที่เสร็จ/ค่าใช้จ่าย หรือยกเลิกสถานะ (เฉพาะก่อนส่งตรวจ) - เหตุผลบังคับ
+          backend เก็บลงประวัติการแก้ไขของรถคันนั้น */}
+      <dialog
+        ref={correctionDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) correctionDialogRef.current?.close();
+        }}
+        onClose={() => setCorrection(null)}
+      >
+        <button className="close" aria-label="ปิด" onClick={() => correctionDialogRef.current?.close()}>
+          ×
+        </button>
+        {correction && (
+          <>
+            <h2>แก้แจ้งย้าย/ตัดบัญชีที่ดำเนินการแล้ว</h2>
+            <p style={{ margin: "0 0 4px" }}>
+              เลขตัวถัง <strong>{correction.vehicle.chassis}</strong> · {correction.vehicle.customerName} ·{" "}
+              {correction.vehicle.status || "—"}
+            </p>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "#5a6885" }}>
+              บันทึกไว้: เสร็จวันที่{" "}
+              {correction.vehicle.transferCompletedDate ? isoToDisplayDate(correction.vehicle.transferCompletedDate) : "—"} · ค่าใช้จ่าย{" "}
+              {correction.vehicle.transferCost ? `${correction.vehicle.transferCost} บาท` : "—"}
+              {correction.vehicle.inspectionSentDate
+                ? ` · ส่งตรวจแล้ววันที่ ${isoToDisplayDate(correction.vehicle.inspectionSentDate)}`
+                : " · ยังไม่ได้ส่งตรวจ"}
+            </p>
+            <form onSubmit={handleCorrectionSubmit}>
+              <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 6 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="radio"
+                    name="transfer-correction-mode"
+                    checked={correction.mode === "edit"}
+                    onChange={() => patchCorrection({ mode: "edit", message: { text: "" } })}
+                  />
+                  แก้วันที่เสร็จ / ค่าใช้จ่าย
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, opacity: correction.vehicle.inspectionSentDate ? 0.6 : 1 }}>
+                  <input
+                    type="radio"
+                    name="transfer-correction-mode"
+                    checked={correction.mode === "undo"}
+                    disabled={Boolean(correction.vehicle.inspectionSentDate)}
+                    onChange={() => patchCorrection({ mode: "undo", message: { text: "" } })}
+                  />
+                  ยกเลิกสถานะดำเนินการแล้ว (รถกลับไปอยู่ในรายการที่ต้องดำเนินการ)
+                </label>
+                {correction.vehicle.inspectionSentDate && (
+                  <span style={{ fontSize: 12, color: "#5a6885", marginLeft: 26 }}>
+                    ส่งตรวจแล้ว จึงยกเลิกสถานะไม่ได้ - ถ้าส่งตรวจผิดคัน ให้ &quot;ยกเลิกส่งตรวจ&quot; ที่หน้าตรวจรถก่อน
+                  </span>
+                )}
+              </fieldset>
+
+              {correction.mode === "edit" ? (
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 16 }}>
+                  <label className="field" style={{ margin: 0 }}>
+                    วันที่เสร็จ *
+                    <DateInput
+                      value={correction.dateText}
+                      onChange={(value) => patchCorrection({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
+                      style={{ width: 130 }}
+                    />
+                  </label>
+                  <label className="field" style={{ margin: 0 }}>
+                    ค่าใช้จ่าย (บาท)
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={correction.costText}
+                      onChange={(e) => patchCorrection({ costText: e.target.value })}
+                      style={{ width: 130 }}
+                    />
+                    {correction.vehicle.suggestedCost && (
+                      <span style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {correction.vehicle.suggestedCost} บาท</span>
+                    )}
+                  </label>
+                </div>
+              ) : (
+                <p style={{ margin: "16px 0 0", fontSize: 13 }}>
+                  วันที่เสร็จและค่าใช้จ่ายของคันนี้จะถูกล้าง แล้วรถกลับไปอยู่ในรายการที่ต้องดำเนินการด้านบน
+                </p>
+              )}
+
+              <label className="field" style={{ marginTop: 16 }}>
+                เหตุผลที่แก้ (Remark) *
+                <textarea
+                  required
+                  maxLength={500}
+                  value={correction.remark}
+                  onChange={(e) => patchCorrection({ remark: e.target.value })}
+                  placeholder="ระบุเหตุผล เช่น ติ๊กผิดคัน / พิมพ์วันที่ผิด - จำเป็นต้องกรอกทุกครั้ง"
+                />
+              </label>
+              <div className="form-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="submit"
+                  className={correction.mode === "undo" ? "primary danger" : "primary"}
+                  disabled={correction.saving || !correction.remark.trim()}
+                >
+                  {correction.mode === "undo" ? "ยืนยันยกเลิกสถานะ" : "บันทึกการแก้ไข"}
+                </button>
+                <span
+                  className={`customer-message${correction.message.error ? " error" : correction.message.text ? " success" : ""}`}
+                  role="status"
+                >
+                  {correction.message.text}
+                </span>
+              </div>
+            </form>
           </>
         )}
       </dialog>

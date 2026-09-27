@@ -258,7 +258,8 @@ export function ReceivedReceiptFixButton({
   const [imageId, setImageId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [stale, setStale] = useState<string[] | null>(null); // บันทึกแล้ว แต่มีใบส่งงาน/บิลที่ยังพิมพ์ค่าเดิม
+  // บันทึกแล้ว แต่มีใบส่งงาน/บิลที่ยังพิมพ์ค่าเดิม (แยกกันเพราะวิธีแก้ต่างกัน)
+  const [stale, setStale] = useState<{ slips: string[]; invoices: string[] } | null>(null);
 
   function open() {
     setDraft(initial());
@@ -315,8 +316,7 @@ export function ReceivedReceiptFixButton({
     try {
       const result = await api.updateReceiptFields(s.id, fix);
       onSaved(result);
-      const printed = [...result.liveSlips.map((no) => `ใบส่งงาน ${no}`), ...result.liveInvoices.map((no) => `บิล ${no}`)];
-      if (printed.length > 0) setStale(printed);
+      if (result.liveSlips.length > 0 || result.liveInvoices.length > 0) setStale({ slips: result.liveSlips, invoices: result.liveInvoices });
       else dialogRef.current?.close();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -379,9 +379,20 @@ export function ReceivedReceiptFixButton({
               <div className="customer-message success" role="status">
                 บันทึกการแก้ไขแล้ว
               </div>
-              <div className="customer-message error" role="alert">
-                เอกสารที่ออกไปแล้วยังพิมพ์ทะเบียน/เลขที่ใบเสร็จ/ยอดเดิม (ระบบไม่แก้ตาม): {stale.join(", ")} - ถ้าต้องให้ตรง ให้ยกเลิกใบส่งงาน/บิลนั้นแล้วออกใหม่
-              </div>
+              {/* บิลแก้ในที่ได้ด้วยเลขที่เดิม (ผู้ใช้ 2026-09-27 F53a) ไม่ต้องยกเลิกบิล - ใบส่งงานยังต้องยกเลิกแล้วออกใหม่ (เก็บทะเบียนไว้ในใบ) */}
+              {stale.invoices.length > 0 && (
+                <div className="customer-message error" role="alert">
+                  บิลที่ออกไปแล้วยังพิมพ์ทะเบียน/เลขที่ใบเสร็จ/ยอดเดิม (ระบบไม่แก้ตาม): {stale.invoices.map((no) => `บิล ${no}`).join(", ")} -
+                  ให้ฝ่ายบัญชีเปิด &quot;แก้ไขบิล&quot; แล้วติ๊ก &quot;ใช้ข้อมูลรถล่าสุด&quot; ในแถวรถคันนี้ (ยอดใบเสร็จแก้ในแถวเดียวกัน) ใช้เลขที่บิลเดิม
+                  ไม่ต้องยกเลิกบิล - บิลที่รับเงินแล้วให้ &quot;ยกเลิกการรับเงิน&quot; ก่อน
+                </div>
+              )}
+              {stale.slips.length > 0 && (
+                <div className="customer-message error" role="alert">
+                  ใบส่งงานที่ออกไปแล้วยังพิมพ์ทะเบียน/เลขที่ใบเสร็จเดิม (ระบบไม่แก้ตาม): {stale.slips.map((no) => `ใบส่งงาน ${no}`).join(", ")} -
+                  ถ้าต้องให้ตรง ให้ยกเลิกใบส่งงานนั้นแล้วออกใหม่
+                </div>
+              )}
               <div>
                 <button type="button" className="primary" onClick={() => dialogRef.current?.close()}>
                   ปิด

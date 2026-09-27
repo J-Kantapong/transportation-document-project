@@ -12,7 +12,7 @@ import type { CreateDocumentSubmissionDto } from './dto/create-document-submissi
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
 import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEntryDto } from './dto/preview-bulk-document-submission.dto.js';
 import type { GovernmentTaxOwnerInput, GovernmentTaxRuleSet } from '../tax/government-tax-calculator.js';
-import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason } from './submission-eligibility.js';
+import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason, OPEN_PLATE_SWAP_WHERE } from './submission-eligibility.js';
 import { lockSubmissions } from './submission-lock.js';
 import {
   assertPlateFormat,
@@ -168,19 +168,26 @@ export class DocumentSubmissionService {
     return { carBill: toRows(carBill), carNoBill: toRows(carNoBill), motoBill: toRows(motoBill), motoNoBill: toRows(motoNoBill) };
   }
 
-  // งานสลับเลขของรถคันนี้ (ถ้ามี) - ตารางยังไม่ได้รันไมเกรชัน (P2021) ถือว่าไม่มีงานสลับเลข
-  // อ่านนอก transaction ของ submit(): คำสั่งที่ error ใน transaction ของ Postgres ทำให้ทั้ง transaction ใช้ต่อไม่ได้
-  private async loadPlateSwap(vehicleId: string) {
-    return this.prisma.plateSwap
-      .findFirst({ where: { newVehicleId: vehicleId }, orderBy: { createdAt: 'desc' }, select: { returnedDate: true } })
-      .catch((err: { code?: string }) => {
-        if (err?.code === 'P2021') return null;
-        throw err;
-      });
+  // ฐานข้อมูลมีตารางงานสลับเลขแล้วหรือยัง - ยังไม่ได้รันไมเกรชัน (P2021) ถือว่าไม่มีงานสลับเลข
+  // เช็กนอก transaction ของ submit() (คำสั่งที่ error ใน transaction ของ Postgres ทำให้ทั้ง transaction ใช้ต่อไม่ได้)
+  // เจอตารางแล้วจำไว้ ไม่ต้องเช็กซ้ำทุกคัน
+  private plateSwapTableReady = false;
+  private async hasPlateSwapTable(): Promise<boolean> {
+    if (this.plateSwapTableReady) return true;
+    try {
+      await this.prisma.plateSwap.findFirst({ select: { id: true } });
+      this.plateSwapTableReady = true;
+      return true;
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2021') return false;
+      throw err;
+    }
   }
 
   // ต้องผ่าน Step 2 (แจ้งย้าย/ตัดบัญชี) + ตรวจรถผ่านภายใน 90 วัน และยังไม่เคยยื่นที่ค้างอยู่/ได้ใบเสร็จแล้ว -
   // ดูกฎทั้งหมดใน submission-eligibility.ts · client = transaction ของ submit() (อ่านหลังล็อกแถวรถแล้ว)
+  // งานสลับเลขที่ยังเปิดอยู่ของรถคันนี้ (งานไหนก็ได้ ไม่ใช่แค่งานล่าสุด - ผู้ใช้ 2026-09-27) อ่านหลังล็อกแถวรถเช่นกัน:
+  // การผูกรถใหม่กับงานสลับเลขล็อกแถวรถเดียวกัน (PlateSwapService) จึงผูกแทรกระหว่างตรวจกับบันทึกไม่ได้
   private async assertEligible(
     vehicle: {
       id: string;
@@ -190,13 +197,16 @@ export class DocumentSubmissionService {
       inspectionResultDate: Date | null;
     },
     submitDate: Date,
-    plateSwap: { returnedDate: Date | null } | null,
-    client: Pick<Prisma.TransactionClient, 'documentSubmission'> = this.prisma,
+    checkPlateSwap: boolean,
+    client: Pick<Prisma.TransactionClient, 'documentSubmission' | 'plateSwap'> = this.prisma,
   ) {
     const active = await client.documentSubmission.findFirst({
       where: { vehicleId: vehicle.id, status: { in: ACTIVE_SUBMISSION_STATUSES } },
       orderBy: { createdAt: 'desc' },
     });
+    const plateSwap = checkPlateSwap
+      ? await client.plateSwap.findFirst({ where: { newVehicleId: vehicle.id, ...OPEN_PLATE_SWAP_WHERE }, select: { returnedDate: true } })
+      : null;
     const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null, plateSwap }, submitDate);
     if (reason) throw new BadRequestException({ error: reason });
   }
@@ -280,7 +290,7 @@ export class DocumentSubmissionService {
     const plateCategory = parsePlateFields(dto.plateCategory, 'plateCategory');
     const plateNumber = parsePlateFields(dto.plateNumber, 'plateNumber');
     const feeRules = ctx.feeRules ?? (await this.loadRuleSet());
-    const plateSwap = await this.loadPlateSwap(vehicleId);
+    const checkPlateSwap = await this.hasPlateSwapTable();
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -288,7 +298,7 @@ export class DocumentSubmissionService {
         const vehicle = await tx.vehicle.findFirst({ where: { id: vehicleId, deletedAt: null }, include: { owner: true } });
         if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
         assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ยื่นได้เฉพาะประเภทรถของตัวเอง
-        await this.assertEligible(vehicle, submitDate, plateSwap, tx);
+        await this.assertEligible(vehicle, submitDate, checkPlateSwap, tx);
         const options = parseDocumentSubmissionOptions(dto, isMotorcycle(vehicle.body));
         assertPlateNumberProvided(options.plateNumberOption, plateCategory, plateNumber);
         const fees = computeDocumentFees(
@@ -482,7 +492,8 @@ export class DocumentSubmissionService {
             body: true,
             plateCategory: true,
             plateNumber: true,
-            customer: { select: { name: true, company: true } },
+            // id = กุญแจใบยื่น/ใบส่งงาน (ผู้ใช้ 2026-09-27: รหัสลูกค้าทุกหน้า ชื่อซ้ำกันได้) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
+            customer: { select: { id: true, name: true, company: true, branch: true } },
             brand: { select: { name: true } },
             owner: { select: { name: true, ownerType: true, hirerType: true, financeCompanyId: true } },
             // วันที่ตรวจผ่าน - หน้ายกเลิกรายการเตือนเมื่อผลตรวจหมดอายุแล้ว (ยกเลิกแล้วต้องส่งตรวจรอบ 2 - พบ 2026-09-27)

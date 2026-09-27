@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -197,6 +197,8 @@ export function TaxRenewalPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // ✎ แก้ / ยกเลิกงานที่บันทึกผิด (ผู้ใช้ 2026-09-27) - ต้องมีเหตุผลเสมอ
+  const [dialog, setDialog] = useState<{ kind: "edit" | "cancel"; row: TaxRenewal } | null>(null);
   // บันทึก/แก้ได้เฉพาะ ADMIN / STAFF_CAR / STAFF_MOTO (backend: POST/PATCH /api/tax-renewals = SUBMIT)
   // ACCOUNTANT เปิดหน้าได้แต่อ่านอย่างเดียว - ซ่อนฟอร์มและแสดงตารางเป็นข้อความ (พบ 2026-09-27)
   // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect (null = ยังไม่รู้ ไม่ขึ้น "ดูอย่างเดียว" แวบให้คนที่บันทึกได้)
@@ -565,6 +567,7 @@ export function TaxRenewalPage() {
                   <th>วันที่ชำระ</th>
                   <th>รับป้ายภาษี</th>
                   <th>คืนลูกค้า</th>
+                  {canWrite && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -608,8 +611,10 @@ export function TaxRenewalPage() {
                       </td>
                       <td>{baht(row.billTotal)}</td>
                       <td>{baht(row.noBillTotal)}</td>
+                      {/* key มีวันที่ที่บันทึกไว้ด้วย: ล้างวันที่ผ่าน ✎ แก้แล้วช่องต้องเริ่มใหม่ ไม่ค้างวันที่เดิมที่พิมพ์ไว้ในช่อง (พบ 2026-09-27) */}
                       <td>
                         <DateCell
+                          key={`payment:${row.paymentDate ?? ""}`}
                           value={row.paymentDate}
                           readOnly={!editable}
                           onSave={(v) => patch(row.id, { paymentDate: v })}
@@ -617,6 +622,7 @@ export function TaxRenewalPage() {
                       </td>
                       <td>
                         <DateCell
+                          key={`received:${row.receivedDate ?? ""}`}
                           value={row.receivedDate}
                           readOnly={!editable}
                           onSave={(v) => patch(row.id, { receivedDate: v })}
@@ -624,11 +630,31 @@ export function TaxRenewalPage() {
                       </td>
                       <td>
                         <DateCell
+                          key={`delivered:${row.deliveredDate ?? ""}`}
                           value={row.deliveredDate}
                           readOnly={!editable}
                           onSave={(v) => patch(row.id, { deliveredDate: v })}
                         />
                       </td>
+                      {canWrite && (
+                        <td>
+                          {editable && (
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                              <button type="button" className="text-button" onClick={() => setDialog({ kind: "edit", row })}>
+                                ✎ แก้
+                              </button>
+                              <button
+                                type="button"
+                                className="text-button"
+                                style={{ color: "#b43434" }}
+                                onClick={() => setDialog({ kind: "cancel", row })}
+                              >
+                                ยกเลิก
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -637,7 +663,323 @@ export function TaxRenewalPage() {
           </div>
         )}
       </div>
+
+      {dialog?.kind === "edit" && (
+        <EditRenewalDialog
+          row={dialog.row}
+          writeScope={writeScope}
+          onClose={() => setDialog(null)}
+          onSaved={() => {
+            setMessage("แก้งานต่อภาษีแล้ว");
+            void reload();
+          }}
+        />
+      )}
+      {dialog?.kind === "cancel" && (
+        <CancelRenewalDialog
+          row={dialog.row}
+          onClose={() => setDialog(null)}
+          onCancelled={() => {
+            setMessage("ยกเลิกงานต่อภาษีแล้ว");
+            void reload();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+const ownerSelectValue = (row: TaxRenewal): FormState["ownerType"] => (row.financed ? (row.hirerType ?? "") : row.ownerType);
+const isoOrNull = (text: string) => (text.replace(/\D/g, "") ? toIso(text) : null);
+
+// ✎ แก้งานต่อภาษีที่บันทึกผิด (ผู้ใช้ 2026-09-27): ข้อมูลรถ/ภาษี วันที่ต่างๆ และลงขัน - ต้องมีเหตุผล (เก็บประวัติ)
+// ยอดเงินคิดใหม่ที่ backend ตามข้อมูลที่แก้ (ถ้าชำระแล้ว) / ล้างวันที่ชำระ = ล้างยอดเงิน
+// เลือกรถผิดคัน = ยกเลิกงานแล้วบันทึกใหม่ (รถจากระบบแก้เลขตัวถัง/เลขเครื่องไม่ได้) / เจ้าของที่มาจากข้อมูลรถแก้ที่ข้อมูลรถ
+function EditRenewalDialog({
+  row,
+  writeScope,
+  onClose,
+  onSaved,
+}: {
+  row: TaxRenewal;
+  writeScope: VehicleScope;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dateText = (iso: string | null) => isoToDisplayDate((iso ?? "").slice(0, 10));
+  const [form, setForm] = useState({
+    submitDate: dateText(row.submitDate),
+    taxExpiryDate: dateText(row.taxExpiryDate),
+    paymentDate: dateText(row.paymentDate),
+    receivedDate: dateText(row.receivedDate),
+    deliveredDate: dateText(row.deliveredDate),
+    chassis: row.chassis,
+    engine: row.engine ?? "",
+    plateCategory: row.plateCategory,
+    plateNumber: row.plateNumber,
+    vehicleType: row.vehicleType,
+    fuel: row.fuel,
+    cc: row.cc ? String(Number(row.cc)) : "",
+    weight: row.weight ? String(Number(row.weight)) : "",
+    firstRegistrationDate: dateText(row.firstRegistrationDate),
+    ownerType: ownerSelectValue(row),
+    financed: row.financed,
+    ownerName: row.ownerName ?? "",
+    skipContribution: row.skipContribution,
+  });
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const manual = !row.vehicleId;
+  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  useEffect(() => {
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+  }, []);
+
+  async function save() {
+    setError("");
+    const required: Array<[keyof typeof form, string]> = [
+      ["submitDate", "วันที่ยื่นงาน"],
+      ["taxExpiryDate", "วันครบกำหนดภาษี"],
+      ["firstRegistrationDate", "วันจดทะเบียนครั้งแรก"],
+    ];
+    for (const [key, label] of required) {
+      if (!toIso(String(form[key]))) return setError(`${label}ไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป`);
+    }
+    const optional: Array<[keyof typeof form, string]> = [
+      ["paymentDate", "วันที่ชำระภาษี"],
+      ["receivedDate", "วันที่รับป้ายภาษี"],
+      ["deliveredDate", "วันที่คืนลูกค้า"],
+    ];
+    for (const [key, label] of optional) {
+      const text = String(form[key]);
+      if (text.replace(/\D/g, "") && !toIso(text)) return setError(`${label}ไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป หรือเว้นว่าง`);
+    }
+    if (!row.ownerFromVehicle && !form.ownerType) return setError("กรุณาเลือกประเภทเจ้าของรถ");
+    if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้");
+    setSaving(true);
+    try {
+      await api.updateTaxRenewal(row.id, {
+        submitDate: toIso(form.submitDate),
+        taxExpiryDate: toIso(form.taxExpiryDate),
+        paymentDate: isoOrNull(form.paymentDate),
+        receivedDate: isoOrNull(form.receivedDate),
+        deliveredDate: isoOrNull(form.deliveredDate),
+        plateCategory: form.plateCategory,
+        plateNumber: form.plateNumber,
+        // ส่งเฉพาะเมื่อเปลี่ยน - ค่าเดิมจากข้อมูลรถบางคันอาจไม่อยู่ในรายการตัวเลือก (backend ตรวจรายการเฉพาะค่าที่ส่งมา)
+        ...(form.vehicleType !== row.vehicleType ? { vehicleType: form.vehicleType } : {}),
+        ...(form.fuel !== row.fuel ? { fuel: form.fuel } : {}),
+        cc: form.cc || null,
+        weight: form.weight || null,
+        firstRegistrationDate: toIso(form.firstRegistrationDate),
+        ownerName: form.ownerName || null,
+        skipContribution: form.skipContribution,
+        // รถจากระบบ: เลขตัวถัง/เลขเครื่องมาจากข้อมูลรถ / เจ้าของที่มาจากข้อมูลรถแก้ที่นี่ไม่ได้ - ไม่ส่งไป
+        ...(manual ? { chassis: form.chassis, engine: form.engine || null } : {}),
+        ...(!row.ownerFromVehicle && form.ownerType ? { ownerType: form.ownerType, financed: form.financed } : {}),
+        remark: remark.trim(),
+        // ฟอร์มส่งทุกช่องจากตอนเปิด - มีคนแก้/ติ๊กไปก่อนระหว่างที่เปิดค้างไว้ backend ตอบ 409 ไม่ทับของเขา (พบ 2026-09-27)
+        expectedUpdatedAt: row.updatedAt,
+      });
+      onSaved();
+      dialogRef.current?.close();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(760px, 96vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>แก้งานต่อภาษี</h2>
+      <p className="muted">
+        {row.plateCategory} {row.plateNumber} · ตัวถัง {row.chassis}
+        {row.customer ? ` · ${row.customer.company || row.customer.name}` : ""}
+        {manual ? " · กรอกข้อมูลรถเอง" : " · รถจากระบบ (เลือกผิดคันให้ยกเลิกงานแล้วบันทึกใหม่)"}
+      </p>
+      <div className="vehicle-fields" style={{ marginTop: 12 }}>
+        <label className="field">
+          <span>วันที่ยื่นงาน *</span>
+          <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
+        </label>
+        <label className="field">
+          <span>วันครบกำหนดภาษี *</span>
+          <DateTextInput value={form.taxExpiryDate} onChange={(v) => set("taxExpiryDate", v)} required />
+        </label>
+        <label className="field">
+          <span>วันที่ชำระภาษี (ลบให้ว่าง = ยังไม่ชำระ)</span>
+          <DateTextInput value={form.paymentDate} onChange={(v) => set("paymentDate", v)} />
+        </label>
+        <label className="field">
+          <span>วันที่รับป้ายภาษี</span>
+          <DateTextInput value={form.receivedDate} onChange={(v) => set("receivedDate", v)} />
+        </label>
+        <label className="field">
+          <span>วันที่คืนลูกค้า</span>
+          <DateTextInput value={form.deliveredDate} onChange={(v) => set("deliveredDate", v)} />
+        </label>
+        {manual && (
+          <>
+            <label className="field">
+              <span>เลขตัวถัง *</span>
+              <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} />
+            </label>
+            <label className="field">
+              <span>เลขเครื่อง</span>
+              <input value={form.engine} onChange={(e) => set("engine", e.target.value)} />
+            </label>
+          </>
+        )}
+        <label className="field">
+          <span>หมวดทะเบียน *</span>
+          <input value={form.plateCategory} onChange={(e) => set("plateCategory", e.target.value)} />
+        </label>
+        <label className="field">
+          <span>เลขทะเบียน *</span>
+          <input value={form.plateNumber} onChange={(e) => set("plateNumber", e.target.value)} />
+        </label>
+        <label className="field">
+          <span>ประเภทรถ</span>
+          <select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
+            {Array.from(new Set([row.vehicleType, ...VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t))])).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>ประเภทเชื้อเพลิง</span>
+          <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)}>
+            {Array.from(new Set([row.fuel, ...FUEL_TYPES])).map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>ขนาด CC</span>
+          <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
+        </label>
+        <label className="field">
+          <span>น้ำหนักรถ (กก.)</span>
+          <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
+        </label>
+        <label className="field">
+          <span>วันจดทะเบียนครั้งแรก *</span>
+          <DateTextInput value={form.firstRegistrationDate} onChange={(v) => set("firstRegistrationDate", v)} required />
+        </label>
+        {row.ownerFromVehicle ? (
+          <div className="field">
+            <span>ประเภทเจ้าของรถ</span>
+            <span className="sub">อ่านจากข้อมูลรถ - แก้ที่หน้าเพิ่มข้อมูลรถจดใหม่</span>
+          </div>
+        ) : (
+          <OwnerTypeFields
+            ownerType={form.ownerType}
+            financed={form.financed}
+            onOwnerTypeChange={(v) => set("ownerType", v)}
+            onFinancedChange={(v) => set("financed", v)}
+          />
+        )}
+        <label className="field wide">
+          <span>ชื่อเจ้าของรถ</span>
+          <input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
+        </label>
+      </div>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginTop: 14 }}>
+        <input type="checkbox" checked={form.skipContribution} onChange={(e) => set("skipContribution", e.target.checked)} />
+        ไม่มีค่าลงขัน
+      </label>
+      <p className="sub" style={{ marginTop: 8 }}>
+        งานที่ชำระแล้ว: ยอดภาษี/เงินเพิ่ม/ลงขันคิดใหม่ตามข้อมูลที่แก้ (ยอดเดิม Bill {baht(row.billTotal)} · ลงขัน {baht(row.noBillTotal)})
+      </p>
+      <label className="field" style={{ marginTop: 12 }}>
+        <span>เหตุผลที่แก้ *</span>
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์วันครบกำหนดภาษีผิด" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={save} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+// ยกเลิกงานต่อภาษี (ผู้ใช้ 2026-09-27): ไม่ลบแถว หายจากรายการ ยอดรวม และภาพรวม - ต้องมีเหตุผล (เก็บประวัติ)
+function CancelRenewalDialog({ row, onClose, onCancelled }: { row: TaxRenewal; onClose: () => void; onCancelled: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+  }, []);
+
+  async function confirm() {
+    setError("");
+    if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่ยกเลิก");
+    setSaving(true);
+    try {
+      await api.cancelTaxRenewal(row.id, remark.trim());
+      onCancelled();
+      dialogRef.current?.close();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "ยกเลิกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>ยกเลิกงานต่อภาษี</h2>
+      <p className="muted">
+        {row.plateCategory} {row.plateNumber} · {row.vehicleType} · ครบกำหนด {isoToDisplayDate(row.taxExpiryDate.slice(0, 10))}
+      </p>
+      <p style={{ marginTop: 12 }}>
+        งานนี้จะหายจากรายการ ยอดรวม และภาพรวม (ยังเก็บไว้ในประวัติพร้อมเหตุผล)
+        {row.paymentDate ? ` - งานนี้บันทึกวันที่ชำระแล้ว (${isoToDisplayDate(row.paymentDate.slice(0, 10))}) ยอดเงินจะไม่ถูกนับอีก` : ""}
+      </p>
+      <label className="field" style={{ marginTop: 12 }}>
+        <span>เหตุผลที่ยกเลิก *</span>
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น บันทึกซ้ำ / เลือกรถผิดคัน" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ไม่ยกเลิก
+        </button>
+        <button type="button" className="primary" onClick={confirm} disabled={saving}>
+          {saving ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
@@ -806,8 +1148,9 @@ function DateTextInput({
   );
 }
 
-// ช่องวันที่ในตาราง - บันทึกเมื่อพิมพ์ครบ 8 หลักหรือลบจนว่าง ถ้า backend ปฏิเสธให้ดึงค่าเดิมกลับมาแสดง
+// ช่องวันที่ในตาราง - บันทึกเมื่อพิมพ์ครบ 8 หลัก ถ้า backend ปฏิเสธให้ดึงค่าเดิมกลับมาแสดง
 // ครบ 8 หลักแต่ไม่ใช่วันที่จริง (เช่น 31/02) ขึ้นเตือนใต้ช่อง - เดิมค้างข้อความไว้เหมือนบันทึกแล้วทั้งที่ไม่ได้ส่ง (พบ 2026-09-27)
+// วันที่ที่กรอกแล้วแสดงเป็นข้อความ - แก้/ล้างต้องผ่านปุ่ม ✎ แก้ พร้อมเหตุผล (ผู้ใช้ 2026-09-27)
 function DateCell({
   value,
   readOnly,
@@ -821,7 +1164,7 @@ function DateCell({
   const [text, setText] = useState(saved);
   const [invalid, setInvalid] = useState(false);
 
-  if (readOnly) return <span>{saved || "-"}</span>;
+  if (readOnly || value) return <span>{saved || "-"}</span>;
 
   async function handleChange(next: string) {
     setText(next);

@@ -6,7 +6,7 @@ import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "./SubmitFlowContext";
 import { DONE_HREF, MENU_HREF, PICK_HREF, REVIEW_HREF, SETTINGS_HREF } from "./shared";
 
-// หัวของทุกขั้น: ลิงก์กลับเมนู + แถบ 4 ขั้น (กดย้อนกลับไปแก้ขั้นก่อนหน้าได้เสมอ) + วันที่ยื่น (กรอกในขั้นตั้งค่า
+// หัวของทุกขั้น: ลิงก์กลับเมนู + แถบ 4 ขั้น (กดย้อนกลับไปแก้ขั้นก่อนหน้าได้เสมอ) + วันที่ยื่น (กรอกในขั้นเลือกรถ/ขั้นตั้งค่า
 // ขั้น 3-4 แสดงอย่างเดียว)
 export function SubmitFlowHeader() {
   const pathname = usePathname();
@@ -48,7 +48,8 @@ export function SubmitFlowHeader() {
         ))}
       </nav>
 
-      {/* ช่องกรอกวันที่ยื่นอยู่ขั้นตั้งค่า (ผู้ใช้ 2026-09-25) - ขั้นตรวจทาน/ยื่นแล้วแสดงวันที่ให้เห็นอย่างเดียว */}
+      {/* ช่องกรอกวันที่ยื่นอยู่ขั้นตั้งค่า (ผู้ใช้ 2026-09-25) และขั้นเลือกรถ (ผู้ใช้ 2026-09-27: คิวโหลดตามวันที่ยื่น)
+          - ขั้นตรวจทาน/ยื่นแล้วแสดงวันที่ให้เห็นอย่างเดียว */}
       {step >= 3 && (
         <div className="submit-date">
           <span className="muted">

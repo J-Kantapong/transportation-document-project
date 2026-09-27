@@ -5,7 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, fetchAuthedBlob, receiptImageUrl } from "@/lib/api";
 import { getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
-import { plateSwapApi, type PlateSwap, type PlateSwapNewVehicle, type PlateSwapStatusFilter } from "@/lib/plate-swap-api";
+import {
+  plateSwapApi,
+  type PlateSwap,
+  type PlateSwapNewVehicle,
+  type PlateSwapStatusFilter,
+  type PlateSwapVehicleHit,
+} from "@/lib/plate-swap-api";
 import {
   calculatePlateSwapCarFees,
   dutyAmountOf,
@@ -14,11 +20,15 @@ import {
   type PlateSwapNumberSource,
 } from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
+import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
 // หน้ารับเอกสารกลับ (PlateSwapReturnPage): ถ่าย/แนบรูปใบเสร็จ (บังคับ) แล้วยืนยันวันที่รับเอกสารกลับ
+// แก้/ยกเลิก (ผู้ใช้ 2026-09-27): ADMIN + STAFF_CAR แก้ข้อมูลงาน (✎ แก้) ยกเลิกรับกลับ และยกเลิกงานได้ ต้องระบุเหตุผลเสมอ
+// (เก็บประวัติ) - ไม่มีการลบงานแล้ว งานที่ยกเลิกหายจากรายการและยอดรวม แต่ยังอยู่ในฐานข้อมูล
+// รถใหม่รับ "ทะเบียนเก่า" ของรถเก่า ส่วน "ทะเบียนใหม่" คือเลขที่รถเก่าได้รับ (ผู้ใช้ยืนยัน 2026-09-27)
 
 export const PLATE_SWAP_HOME = "/registration/plate-swap";
 export const OLD_NEW_HOME = "/registration/plate-swap/old-new";
@@ -61,6 +71,8 @@ function DateTextInput({ value, onChange, label }: { value: string; onChange: (t
   );
 }
 
+const textToIso = (text: string) => displayDateToIso(text.replace(/\D/g, ""));
+
 const plateText = (v: PlateSwapNewVehicle) => [v.plateCategory, v.plateNumber].filter(Boolean).join(" ");
 
 // บรรทัดย่อยของรถเก่าในตาราง - เลขเครื่องมาก่อนเลขตัวถัง ตามลำดับช่องในฟอร์ม (ผู้ใช้ 2026-09-23)
@@ -70,18 +82,158 @@ const oldVehicleText = (s: PlateSwap) => `${s.oldBrand} · เครื่อง
 const oldPlateText = (s: PlateSwap) => `${s.oldPlateCategory} ${s.oldPlateNumber}`;
 const newPlateText = (s: PlateSwap) => (s.newPlateCategory && s.newPlateNumber ? `${s.newPlateCategory} ${s.newPlateNumber}` : "");
 
+const dangerButton: React.CSSProperties = { color: "#b43434" };
+const warnBox: React.CSSProperties = {
+  margin: "0 23px 14px",
+  padding: "12px 14px",
+  border: "1px solid #f0c36d",
+  background: "#fff8e6",
+  borderRadius: 8,
+  fontSize: 13,
+  color: "#6b4a00",
+};
+
+// ป๊อปอัปถามเหตุผล (บังคับ) ก่อนแก้/ยกเลิก - ใช้ซ้ำทั้งยกเลิกงาน ยกเลิกรับกลับ และเปลี่ยนคันหลังรับกลับ
+// onConfirm โยน error ได้ ข้อความขึ้นในป๊อปอัปและยังไม่ปิด
+function ReasonDialog({
+  title,
+  children,
+  confirmLabel,
+  placeholder,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  children?: React.ReactNode;
+  confirmLabel: string;
+  placeholder?: string;
+  onConfirm: (remark: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+  }, []);
+
+  async function handleConfirm() {
+    setError("");
+    if (!remark.trim()) return setError("กรุณาระบุเหตุผล");
+    setSaving(true);
+    try {
+      await onConfirm(remark.trim());
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(errorText(err, "บันทึกไม่สำเร็จ"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>{title}</h2>
+      {children}
+      <label className="field" style={{ marginTop: 12 }}>
+        เหตุผล *
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={placeholder} />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : confirmLabel}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+// สรุปงานในป๊อปอัป - ให้เห็นว่ากำลังแก้/ยกเลิกงานไหน
+function SwapSummary({ swap }: { swap: PlateSwap }) {
+  return (
+    <p className="muted">
+      {swap.oldOwnerName} · ทะเบียนเก่า {oldPlateText(swap)}
+      {newPlateText(swap) ? ` · ใหม่ ${newPlateText(swap)}` : ""} · ยื่น {isoToDisplayDate(swap.submitDate)}
+      {swap.returnedDate ? ` · รับกลับ ${isoToDisplayDate(swap.returnedDate)}` : ""}
+    </p>
+  );
+}
+
+// F20 (ผู้ใช้ 2026-09-27): ก่อนแก้ ขั้นยื่นเอกสารเติม "ทะเบียนใหม่ของรถเก่า" ให้รถใหม่ (ผิดฝั่ง) - ขึ้นเตือนให้พนักงานตรวจ
+// ที่แก้ขึ้นกับสถานะการยื่นของรถใหม่ (พบ 2026-09-27: เดิมบอกให้แก้ในหน้ารับใบเสร็จทุกกรณี แต่ฟอร์มรับใบเสร็จแก้ได้แค่รายการที่รอใบเสร็จ)
+// - รอใบเสร็จ: กรอกทะเบียนตามใบเสร็จตอนบันทึกใบเสร็จ (ลิงก์เปิดใบยื่นของรถคันนี้ให้)
+// - ได้ใบเสร็จแล้ว: ปุ่ม ✎ แก้ ในตาราง "ได้ใบเสร็จแล้ว" ของหน้ารับใบเสร็จ (ต้องระบุเหตุผล)
+// - ไม่มีรายการยื่นที่ยังมีผล (ยื่นไม่ผ่าน / ยกเลิกการยื่น): ตอนยื่นใหม่ ขั้นยื่นเอกสารเติมทะเบียนเก่าให้แล้ว
+const RECEIPT_CAR_PAGE = workPageFor("receipt", "car", [], "/registration/new-vehicle/receive-receipt");
+
+function WrongPlateNote({ swap }: { swap: PlateSwap }) {
+  const vehicle = swap.newVehicle;
+  if (!swap.linkedPlateIsNewPlate || !vehicle) return null;
+  return (
+    <div className="sub" style={{ color: "#a86200", whiteSpace: "normal" }}>
+      ⚠ รถใหม่ถูกบันทึกทะเบียน {plateText(vehicle)} ซึ่งเป็นทะเบียนใหม่ของรถเก่า - รถใหม่ต้องได้ทะเบียนเก่า {oldPlateText(swap)}{" "}
+      กรุณาตรวจกับใบเสร็จจริง{" - "}
+      {vehicle.activeSubmissionStatus === "PENDING" ? (
+        <>
+          รถคันนี้รอใบเสร็จอยู่: กรอกทะเบียนตามใบเสร็จตอนบันทึกใบเสร็จ{" "}
+          <Link href={focusHref(RECEIPT_CAR_PAGE, vehicle.chassis)}>ไปหน้ารับใบเสร็จ →</Link>
+        </>
+      ) : vehicle.activeSubmissionStatus === "RECEIPT_RECEIVED" ? (
+        <>
+          รถคันนี้ได้ใบเสร็จแล้ว: แก้ที่ปุ่ม ✎ แก้ ในตาราง &quot;ได้ใบเสร็จแล้ว&quot; (ค้นเลขตัวถัง {vehicle.chassis}) พร้อมเหตุผล{" "}
+          <Link href={RECEIPT_CAR_PAGE}>ไปหน้ารับใบเสร็จ →</Link>
+        </>
+      ) : (
+        <>รถคันนี้ยังไม่มีรายการยื่นที่รอใบเสร็จ: ตอนยื่นเอกสารใหม่ ระบบเติมทะเบียนเก่าให้แล้ว ตรวจอีกครั้งก่อนยื่น</>
+      )}
+    </div>
+  );
+}
+
+function WrongPlateBanner({ swaps }: { swaps: PlateSwap[] }) {
+  const count = swaps.filter((s) => s.linkedPlateIsNewPlate).length;
+  if (count === 0) return null;
+  return (
+    <div style={warnBox} role="alert">
+      ⚠ มี {count} งานที่รถใหม่ถูกบันทึกทะเบียนเป็น &quot;ทะเบียนใหม่ของรถเก่า&quot; (ขั้นยื่นเอกสารเคยเติมเลขผิดฝั่งก่อน 27/09/2026)
+      รถใหม่ต้องได้ทะเบียนเก่าของรถเก่า - ดูแถวที่มี ⚠ ตรวจกับใบเสร็จจริง แล้วแก้ตามที่บอกในแถวนั้น (ที่แก้ขึ้นกับว่ารถคันนั้นยื่นเอกสารถึงขั้นไหนแล้ว)
+    </div>
+  );
+}
+
 // เลขทะเบียนใหม่ในตาราง - ตอนยื่นอาจยังไม่รู้ จึงกรอก/แก้ได้จากตรงนี้ (ผู้ใช้ 2026-09-23)
+// งานที่รับเอกสารกลับแล้ว แก้ได้แต่ต้องมีเหตุผล (ผู้ใช้ 2026-09-27)
 function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite: boolean; onChange: (swap: PlateSwap) => void }) {
   const [editing, setEditing] = useState(false);
   const [category, setCategory] = useState(swap.newPlateCategory ?? "");
   const [number, setNumber] = useState(swap.newPlateNumber ?? "");
+  const [remark, setRemark] = useState("");
   const [busy, setBusy] = useState(false);
+  const needsRemark = Boolean(swap.returnedDate);
 
   async function save() {
+    if (needsRemark && !remark.trim()) {
+      window.alert("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ทะเบียนใหม่");
+      return;
+    }
     setBusy(true);
     try {
-      onChange((await plateSwapApi.setNewPlate(swap.id, category, number)).swap);
+      onChange((await plateSwapApi.setNewPlate(swap.id, category, number, needsRemark ? remark.trim() : undefined)).swap);
       setEditing(false);
+      setRemark("");
     } catch (err) {
       window.alert(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
     } finally {
@@ -115,6 +267,16 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
             }
           }}
         />
+        {needsRemark && (
+          <input
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            placeholder="เหตุผลที่แก้ *"
+            aria-label="เหตุผลที่แก้ทะเบียนใหม่"
+            className="inspect-input"
+            style={{ width: 150 }}
+          />
+        )}
         <button type="button" className="text-button" disabled={busy} onClick={save}>
           บันทึก
         </button>
@@ -124,6 +286,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
           onClick={() => {
             setCategory(swap.newPlateCategory ?? "");
             setNumber(swap.newPlateNumber ?? "");
+            setRemark("");
             setEditing(false);
           }}
         >
@@ -147,9 +310,19 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
 }
 
 // ค้นรถใหม่ด้วยเลขตัวถังแล้วเลือก 1 คัน (ปุ่มลิงก์ข้อมูลรถในฐานข้อมูลรถจดใหม่)
-function NewVehiclePicker({ onPick, onCancel }: { onPick: (v: PlateSwapNewVehicle) => void; onCancel?: () => void }) {
+// F51 (ผู้ใช้ 2026-09-27): รถที่ยื่นเอกสารแล้ว หรือผูกกับงานสลับเลขอื่นที่ยังไม่รับกลับ เลือกไม่ได้ (แสดงเหตุผล)
+// excludeSwapId = งานที่กำลังเปลี่ยนคัน - รถที่ผูกกับงานนี้เองไม่นับว่าผูกซ้ำ
+function NewVehiclePicker({
+  excludeSwapId,
+  onPick,
+  onCancel,
+}: {
+  excludeSwapId?: string;
+  onPick: (v: PlateSwapNewVehicle) => void;
+  onCancel?: () => void;
+}) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlateSwapNewVehicle[] | null>(null);
+  const [results, setResults] = useState<PlateSwapVehicleHit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -161,7 +334,7 @@ function NewVehiclePicker({ onPick, onCancel }: { onPick: (v: PlateSwapNewVehicl
     setBusy(true);
     setError("");
     try {
-      setResults((await plateSwapApi.searchNewVehicles(query)).vehicles);
+      setResults((await plateSwapApi.searchNewVehicles(query, excludeSwapId)).vehicles);
     } catch (err) {
       setError(errorText(err, "ค้นหาไม่สำเร็จ"));
       setResults(null);
@@ -200,12 +373,24 @@ function NewVehiclePicker({ onPick, onCancel }: { onPick: (v: PlateSwapNewVehicl
       {results && results.length > 0 && (
         <div className="choices" style={{ marginTop: 0 }}>
           {results.map((v) => (
-            <button key={v.id} type="button" onClick={() => onPick(v)}>
+            <button
+              key={v.id}
+              type="button"
+              disabled={Boolean(v.linkBlockedReason)}
+              title={v.linkBlockedReason ?? undefined}
+              style={v.linkBlockedReason ? { opacity: 0.65, cursor: "not-allowed" } : undefined}
+              onClick={() => {
+                if (!v.linkBlockedReason) onPick(v);
+              }}
+            >
               <strong>{v.chassis}</strong>
               <div className="muted">
                 {v.brandName} · {v.customerName}
                 {plateText(v) ? ` · ทะเบียน ${plateText(v)}` : ""}
               </div>
+              {v.linkBlockedReason && (
+                <div style={{ color: "#b43434", fontSize: 12, marginTop: 4, whiteSpace: "normal" }}>🔒 {v.linkBlockedReason}</div>
+              )}
             </button>
           ))}
         </div>
@@ -226,6 +411,222 @@ function LinkedVehicle({ vehicle }: { vehicle: PlateSwapNewVehicle }) {
   );
 }
 
+// ✎ แก้งาน (F34 ผู้ใช้ 2026-09-27): ข้อมูลรถเก่า วันที่ยื่น ที่มาของเลข/ป้าย (คิดค่าใช้จ่ายใหม่) และวันที่รับกลับ (งานที่รับกลับแล้ว)
+// ต้องระบุเหตุผล - backend บันทึกเฉพาะช่องที่เปลี่ยนลงประวัติ / ทะเบียนใหม่และรถใหม่แก้ที่ช่องในตาราง
+function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: () => void; onSaved: (swap: PlateSwap) => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [form, setForm] = useState({
+    oldOwnerName: swap.oldOwnerName,
+    oldEngine: swap.oldEngine,
+    oldChassis: swap.oldChassis,
+    oldBrand: swap.oldBrand,
+    oldPlateCategory: swap.oldPlateCategory,
+    oldPlateNumber: swap.oldPlateNumber,
+  });
+  const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(swap.submitDate));
+  const [returnedDateText, setReturnedDateText] = useState(() => (swap.returnedDate ? isoToDisplayDate(swap.returnedDate) : ""));
+  const [numberSource, setNumberSource] = useState<PlateSwapNumberSource>(swap.numberSource);
+  const [buyNormalPlate, setBuyNormalPlate] = useState(swap.buyNormalPlate);
+  const [buyAuctionPlate, setBuyAuctionPlate] = useState(swap.buyAuctionPlate);
+  const [brandNames, setBrandNames] = useState<string[]>([swap.oldBrand]);
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+    api
+      .listBrands()
+      .then((data) => setBrandNames(Array.from(new Set([swap.oldBrand, ...data.brands.map((b) => b.name)]))))
+      .catch(() => undefined);
+  }, [swap.oldBrand]);
+
+  const numberItems = PLATE_SWAP_CAR_NUMBER_ITEMS[numberSource];
+  const feesChanged = numberSource !== swap.numberSource || buyNormalPlate !== swap.buyNormalPlate || buyAuctionPlate !== swap.buyAuctionPlate;
+  const fees = calculatePlateSwapCarFees({ numberSource, buyNormalPlate, buyAuctionPlate });
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  async function save() {
+    setError("");
+    const submitDate = textToIso(submitDateText);
+    if (!submitDate) return setError("วันที่ยื่นไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป");
+    const returnedDate = swap.returnedDate ? textToIso(returnedDateText) : "";
+    if (swap.returnedDate && !returnedDate) return setError("วันที่รับเอกสารกลับไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป");
+    if (returnedDate && returnedDate > todayIso()) return setError("วันที่รับเอกสารกลับต้องไม่เกินวันนี้");
+    if (returnedDate && returnedDate < submitDate) return setError("วันที่รับเอกสารกลับต้องไม่ก่อนวันที่ยื่น");
+    if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้");
+    setSaving(true);
+    try {
+      const { swap: updated } = await plateSwapApi.update(swap.id, {
+        ...form,
+        submitDate,
+        numberSource,
+        buyNormalPlate,
+        buyAuctionPlate: numberSource === "AUCTION_RESERVED" && buyAuctionPlate,
+        ...(returnedDate ? { returnedDate } : {}),
+        remark: remark.trim(),
+        // ฟอร์มส่งทุกช่องจากตอนเปิด - มีคนแก้/รับกลับไปก่อนระหว่างที่เปิดค้างไว้ backend ตอบ 409 ไม่ทับของเขา (พบ 2026-09-27)
+        expectedUpdatedAt: swap.updatedAt,
+      });
+      onSaved(updated);
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(errorText(err, "บันทึกไม่สำเร็จ"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(720px, 96vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>แก้งานสลับเลข</h2>
+      <SwapSummary swap={swap} />
+      <div className="customer-grid" style={{ marginTop: 12 }}>
+        <label className="field">
+          วันที่ยื่น *
+          <DateTextInput value={submitDateText} onChange={setSubmitDateText} label="วันที่ยื่น" />
+        </label>
+        {swap.returnedDate && (
+          <label className="field">
+            วันที่รับเอกสารกลับ *
+            <DateTextInput value={returnedDateText} onChange={setReturnedDateText} label="วันที่รับเอกสารกลับ" />
+          </label>
+        )}
+        <label className="field">
+          ชื่อเจ้าของรถ *
+          <input value={form.oldOwnerName} onChange={set("oldOwnerName")} />
+        </label>
+        <label className="field">
+          เลขเครื่อง *
+          <input value={form.oldEngine} onChange={set("oldEngine")} />
+        </label>
+        <label className="field">
+          เลขตัวถัง *
+          <input value={form.oldChassis} onChange={set("oldChassis")} />
+        </label>
+        <label className="field">
+          ยี่ห้อ *
+          <select value={form.oldBrand} onChange={set("oldBrand")}>
+            {brandNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="field">
+          ทะเบียนเก่า *
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={form.oldPlateCategory} onChange={set("oldPlateCategory")} maxLength={3} aria-label="หมวดทะเบียนเก่า" />
+            <input
+              value={form.oldPlateNumber}
+              onChange={(e) => setForm((prev) => ({ ...prev, oldPlateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+              maxLength={4}
+              inputMode="numeric"
+              aria-label="เลขทะเบียนเก่า"
+            />
+          </div>
+        </div>
+      </div>
+
+      <h3 style={{ marginTop: 18 }}>ค่าใช้จ่าย</h3>
+      <div className="inspect-filter" style={{ padding: 0, marginBottom: 10 }}>
+        {(Object.keys(PLATE_SWAP_CAR_NUMBER_ITEMS) as PlateSwapNumberSource[]).map((source) => (
+          <button
+            key={source}
+            type="button"
+            className={`filter-chip${numberSource === source ? " selected" : ""}`}
+            onClick={() => {
+              setNumberSource(source);
+              if (source === "NEW_UNUSED") setBuyAuctionPlate(false);
+            }}
+          >
+            {PLATE_SWAP_CAR_NUMBER_ITEMS[source].title}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 14 }}>
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={buyNormalPlate} onChange={(e) => setBuyNormalPlate(e.target.checked)} />
+          ซื้อ{numberItems.normalPlate.label.replace(/^ค่า/, "")} ({formatBaht(numberItems.normalPlate.amount)} บาท)
+        </label>
+        {numberItems.auctionPlate && (
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={buyAuctionPlate} onChange={(e) => setBuyAuctionPlate(e.target.checked)} />
+            ซื้อ{numberItems.auctionPlate.label.replace(/^ค่า/, "")} ({formatBaht(numberItems.auctionPlate.amount)} บาท)
+          </label>
+        )}
+      </div>
+      {feesChanged && (
+        <p className="customer-message" style={{ marginTop: 8 }}>
+          ค่าใช้จ่ายจะคิดใหม่: Bill {formatBaht(Number(swap.billTotal))} → {formatBaht(fees.billTotal)} · No Bill{" "}
+          {formatBaht(Number(swap.noBillTotal))} → {formatBaht(fees.noBillTotal)} บาท
+        </p>
+      )}
+
+      <label className="field" style={{ marginTop: 12 }}>
+        เหตุผลที่แก้ *
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อเจ้าของรถผิด" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ปิด
+        </button>
+        <button type="button" className="primary" onClick={save} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+// ยกเลิกงาน (แทนการลบเดิม) - ทุกสถานะ ต้องมีเหตุผล / รูปใบเสร็จที่แนบไว้นำไปแนบกับงานที่คีย์ใหม่ได้
+function CancelSwapDialog({ swap, onClose, onCancelled }: { swap: PlateSwap; onClose: () => void; onCancelled: (id: string) => void }) {
+  return (
+    <ReasonDialog
+      title="ยกเลิกงานสลับเลข"
+      confirmLabel="ยืนยันยกเลิกงาน"
+      placeholder="เช่น บันทึกซ้ำ / ลูกค้ายกเลิก"
+      onClose={onClose}
+      onConfirm={async (remark) => {
+        await plateSwapApi.cancel(swap.id, remark);
+        onCancelled(swap.id);
+      }}
+    >
+      <SwapSummary swap={swap} />
+      <p style={{ marginTop: 12 }}>
+        งานนี้จะหายจากรายการและยอดรวม (ยังเก็บไว้ในประวัติพร้อมเหตุผล)
+        {swap.newVehicle ? ` และรถใหม่ ${swap.newVehicle.chassis} จะไม่ถูกล็อกการยื่นเอกสารจากงานนี้อีก` : ""}
+        {swap.receipts.length > 0 ? " - รูปใบเสร็จที่แนบไว้นำไปแนบกับงานที่บันทึกใหม่ได้" : ""}
+      </p>
+    </ReasonDialog>
+  );
+}
+
+// ปุ่มแก้/ยกเลิกท้ายแถว (ADMIN / STAFF_CAR)
+function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCancel: () => void; children?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <button type="button" className="text-button" onClick={onEdit}>
+        ✎ แก้
+      </button>
+      {children}
+      <button type="button" className="text-button" style={dangerButton} onClick={onCancel}>
+        ยกเลิกงาน
+      </button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // หน้ายื่น
 // ---------------------------------------------------------------------------------------------
@@ -241,11 +642,13 @@ const EMPTY_FORM = {
   newPlateNumber: "",
 };
 
+type RowDialog = { kind: "edit" | "cancel"; swap: PlateSwap } | null;
+
 export function PlateSwapSubmitPage() {
   const canWrite = useCanWrite();
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
-  const submitDate = useMemo(() => displayDateToIso(submitDateText.replace(/\D/g, "")), [submitDateText]);
+  const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [newVehicle, setNewVehicle] = useState<PlateSwapNewVehicle | null>(null);
   const [picking, setPicking] = useState(false);
   const [numberSource, setNumberSource] = useState<PlateSwapNumberSource>("NEW_UNUSED");
@@ -259,6 +662,7 @@ export function PlateSwapSubmitPage() {
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
+  const [dialog, setDialog] = useState<RowDialog>(null);
 
   const fees = calculatePlateSwapCarFees({ numberSource, buyNormalPlate, buyAuctionPlate });
   const numberItems = PLATE_SWAP_CAR_NUMBER_ITEMS[numberSource];
@@ -333,23 +737,9 @@ export function PlateSwapSubmitPage() {
 
   const replaceSwap = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
 
-  async function relink(swap: PlateSwap, vehicle: PlateSwapNewVehicle) {
-    try {
-      const { swap: updated } = await plateSwapApi.linkNewVehicle(swap.id, vehicle.id);
-      setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-    } catch (err) {
-      window.alert(errorText(err, "บันทึกไม่สำเร็จ"));
-    }
-  }
-
-  async function remove(swap: PlateSwap) {
-    if (!window.confirm(`ลบงานสลับเลขของ ${swap.oldOwnerName} (${oldPlateText(swap)})?`)) return;
-    try {
-      await plateSwapApi.remove(swap.id);
-      setSwaps((prev) => prev.filter((s) => s.id !== swap.id));
-    } catch (err) {
-      window.alert(errorText(err, "ลบไม่สำเร็จ"));
-    }
+  // เปลี่ยนคัน - งานที่รับกลับแล้วต้องมีเหตุผล (ผู้ใช้ 2026-09-27) error โยนต่อให้ผู้เรียกแสดง
+  async function relink(swap: PlateSwap, vehicle: PlateSwapNewVehicle, remark?: string) {
+    replaceSwap((await plateSwapApi.linkNewVehicle(swap.id, vehicle.id, remark)).swap);
   }
 
   // ยอดรวมของเดือน - ค่าอากรแยกออกจาก "รวมทั้งหมด" แต่ยังอยู่ในยอด No Bill (ผู้ใช้ 2026-09-23)
@@ -403,7 +793,7 @@ export function PlateSwapSubmitPage() {
                 </select>
               </label>
               <div className="field">
-                ทะเบียนเก่า *
+                ทะเบียนเก่า * (รถใหม่จะได้เลขนี้)
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     value={form.oldPlateCategory}
@@ -426,7 +816,7 @@ export function PlateSwapSubmitPage() {
               </div>
               {/* ผู้ใช้ 2026-09-23: ตอนยื่นบางทียังไม่รู้เลขใหม่ - เว้นว่างได้ แล้วมากรอกตอนรับเอกสารกลับ */}
               <div className="field">
-                ทะเบียนใหม่ (ยังไม่รู้เว้นว่างได้)
+                ทะเบียนใหม่ของรถเก่า (ยังไม่รู้เว้นว่างได้)
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     value={form.newPlateCategory}
@@ -598,6 +988,7 @@ export function PlateSwapSubmitPage() {
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
           <>
+            <WrongPlateBanner swaps={swaps} />
             <div className="table-wrap">
               <table>
                 <thead>
@@ -616,7 +1007,15 @@ export function PlateSwapSubmitPage() {
                 </thead>
                 <tbody>
                   {swaps.map((swap) => (
-                    <SubmittedRow key={swap.id} swap={swap} canWrite={!!canWrite} onRelink={relink} onRemove={remove} onPlateChange={replaceSwap} />
+                    <SubmittedRow
+                      key={swap.id}
+                      swap={swap}
+                      canWrite={!!canWrite}
+                      onRelink={relink}
+                      onPlateChange={replaceSwap}
+                      onEdit={() => setDialog({ kind: "edit", swap })}
+                      onCancel={() => setDialog({ kind: "cancel", swap })}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -630,6 +1029,25 @@ export function PlateSwapSubmitPage() {
           </>
         )}
       </div>
+
+      {dialog?.kind === "edit" && (
+        <EditSwapDialog
+          swap={dialog.swap}
+          onClose={() => setDialog(null)}
+          onSaved={(updated) => {
+            // แก้วันที่ยื่นข้ามเดือน = ไม่อยู่ในเดือนที่ดูอยู่แล้ว โหลดใหม่ให้ตรงกับ backend
+            if (updated.submitDate.slice(0, 7) !== month) void load(month);
+            else replaceSwap(updated);
+          }}
+        />
+      )}
+      {dialog?.kind === "cancel" && (
+        <CancelSwapDialog
+          swap={dialog.swap}
+          onClose={() => setDialog(null)}
+          onCancelled={(id) => setSwaps((prev) => prev.filter((s) => s.id !== id))}
+        />
+      )}
     </section>
   );
 }
@@ -638,16 +1056,34 @@ function SubmittedRow({
   swap,
   canWrite,
   onRelink,
-  onRemove,
   onPlateChange,
+  onEdit,
+  onCancel,
 }: {
   swap: PlateSwap;
   canWrite: boolean;
-  onRelink: (swap: PlateSwap, vehicle: PlateSwapNewVehicle) => void;
-  onRemove: (swap: PlateSwap) => void;
+  onRelink: (swap: PlateSwap, vehicle: PlateSwapNewVehicle, remark?: string) => Promise<void>;
   onPlateChange: (swap: PlateSwap) => void;
+  onEdit: () => void;
+  onCancel: () => void;
 }) {
   const [picking, setPicking] = useState(false);
+  // งานที่รับกลับแล้ว: เลือกคันใหม่แล้วต้องใส่เหตุผลก่อนบันทึก (ผู้ใช้ 2026-09-27)
+  const [pendingVehicle, setPendingVehicle] = useState<PlateSwapNewVehicle | null>(null);
+
+  async function pick(vehicle: PlateSwapNewVehicle) {
+    setPicking(false);
+    if (swap.returnedDate) {
+      setPendingVehicle(vehicle);
+      return;
+    }
+    try {
+      await onRelink(swap, vehicle);
+    } catch (err) {
+      window.alert(errorText(err, "บันทึกไม่สำเร็จ"));
+    }
+  }
+
   return (
     <tr>
       <td>{isoToDisplayDate(swap.submitDate)}</td>
@@ -661,16 +1097,11 @@ function SubmittedRow({
       </td>
       <td style={{ whiteSpace: "normal", minWidth: 200 }}>
         {picking ? (
-          <NewVehiclePicker
-            onPick={(v) => {
-              setPicking(false);
-              onRelink(swap, v);
-            }}
-            onCancel={() => setPicking(false)}
-          />
+          <NewVehiclePicker excludeSwapId={swap.id} onPick={pick} onCancel={() => setPicking(false)} />
         ) : (
           <>
             {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">ยังไม่ลิงก์</span>}
+            <WrongPlateNote swap={swap} />
             {canWrite && (
               <div>
                 <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setPicking(true)}>
@@ -679,6 +1110,20 @@ function SubmittedRow({
               </div>
             )}
           </>
+        )}
+        {pendingVehicle && (
+          <ReasonDialog
+            title="เปลี่ยนรถใหม่ของงานที่รับเอกสารกลับแล้ว"
+            confirmLabel="ยืนยันเปลี่ยนคัน"
+            placeholder="เช่น ลิงก์ผิดคัน"
+            onClose={() => setPendingVehicle(null)}
+            onConfirm={(remark) => onRelink(swap, pendingVehicle, remark)}
+          >
+            <SwapSummary swap={swap} />
+            <p style={{ marginTop: 12 }}>
+              เปลี่ยนรถใหม่จาก {swap.newVehicle?.chassis ?? "-"} เป็น <strong>{pendingVehicle.chassis}</strong>
+            </p>
+          </ReasonDialog>
         )}
       </td>
       <td title={swap.billItems.map((i) => `${i.label} ${formatBaht(i.amount)}`).join("\n")}>{formatBaht(Number(swap.billTotal))}</td>
@@ -697,11 +1142,7 @@ function SubmittedRow({
       </td>
       {canWrite && (
         <td>
-          {!swap.returnedDate && (
-            <button type="button" className="text-button" style={{ color: "#b43434" }} onClick={() => onRemove(swap)}>
-              ลบ
-            </button>
-          )}
+          <RowActions onEdit={onEdit} onCancel={onCancel} />
         </td>
       )}
     </tr>
@@ -712,6 +1153,8 @@ function SubmittedRow({
 // หน้ารับเอกสารกลับ
 // ---------------------------------------------------------------------------------------------
 
+type ReturnDialog = { kind: "edit" | "cancel" | "undo"; swap: PlateSwap } | null;
+
 export function PlateSwapReturnPage() {
   const canWrite = useCanWrite();
   const [status, setStatus] = useState<Exclude<PlateSwapStatusFilter, "all">>("pending");
@@ -719,8 +1162,9 @@ export function PlateSwapReturnPage() {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
   const [returnDateText, setReturnDateText] = useState(() => isoToDisplayDate(todayIso()));
-  const returnDate = useMemo(() => displayDateToIso(returnDateText.replace(/\D/g, "")), [returnDateText]);
+  const returnDate = useMemo(() => textToIso(returnDateText), [returnDateText]);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [dialog, setDialog] = useState<ReturnDialog>(null);
 
   async function load(forStatus: typeof status) {
     setLoading(true);
@@ -742,19 +1186,32 @@ export function PlateSwapReturnPage() {
   }, [status]);
 
   const replace = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  const drop = (id: string) => setSwaps((prev) => prev.filter((s) => s.id !== id));
 
   async function confirmReturn(swap: PlateSwap, newPlateCategory: string, newPlateNumber: string) {
     if (!returnDate) {
       setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
       return;
     }
+    // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น - พบ 2026-09-27)
+    if (returnDate > todayIso()) {
+      setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
+      return;
+    }
     if (!newPlateCategory || !newPlateNumber) {
       setMessage({ text: "กรุณากรอกทะเบียนใหม่ที่ได้รับ (หมวดทะเบียนและเลขทะเบียน)", error: true });
       return;
     }
+    // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล (ผู้ใช้ 2026-09-27)
+    const ok = window.confirm(
+      `ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถเก่า: ${swap.oldOwnerName} (ทะเบียนเก่า ${oldPlateText(swap)})\nทะเบียนใหม่ที่รถเก่าได้: ${newPlateCategory} ${newPlateNumber}${
+        swap.newVehicle ? `\nรถใหม่ที่รับเลข ${oldPlateText(swap)}: ${swap.newVehicle.chassis}` : ""
+      }`,
+    );
+    if (!ok) return;
     try {
       await plateSwapApi.markReturned(swap.id, returnDate, newPlateCategory, newPlateNumber);
-      setSwaps((prev) => prev.filter((s) => s.id !== swap.id));
+      drop(swap.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${oldPlateText(swap)})` });
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
@@ -802,34 +1259,71 @@ export function PlateSwapReturnPage() {
         ) : swaps.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>รถเก่า</th>
-                  <th>ทะเบียนเก่า / ใหม่</th>
-                  <th>รถใหม่ที่ลิงก์</th>
-                  <th>ใบเสร็จ</th>
-                  <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {swaps.map((swap) => (
-                  <ReturnRow
-                    key={swap.id}
-                    swap={swap}
-                    canWrite={!!canWrite && status === "pending"}
-                    onChange={replace}
-                    onConfirm={confirmReturn}
-                    onMessage={(text, error) => setMessage({ text, error })}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <WrongPlateBanner swaps={swaps} />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่ยื่น</th>
+                    <th>รถเก่า</th>
+                    <th>ทะเบียนเก่า / ใหม่</th>
+                    <th>รถใหม่ที่ลิงก์</th>
+                    <th>ใบเสร็จ</th>
+                    <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                    {canWrite && <th />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {swaps.map((swap) => (
+                    <ReturnRow
+                      key={swap.id}
+                      swap={swap}
+                      canWrite={!!canWrite}
+                      onChange={replace}
+                      onConfirm={confirmReturn}
+                      onMessage={(text, error) => setMessage({ text, error })}
+                      onDialog={(kind) => setDialog({ kind, swap })}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
+
+      {dialog?.kind === "edit" && <EditSwapDialog swap={dialog.swap} onClose={() => setDialog(null)} onSaved={replace} />}
+      {dialog?.kind === "cancel" && (
+        <CancelSwapDialog
+          swap={dialog.swap}
+          onClose={() => setDialog(null)}
+          onCancelled={(id) => {
+            drop(id);
+            setMessage({ text: `ยกเลิกงานแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})` });
+          }}
+        />
+      )}
+      {dialog?.kind === "undo" && (
+        <ReasonDialog
+          title="ยกเลิกการรับเอกสารกลับ"
+          confirmLabel="ยืนยันยกเลิกรับกลับ"
+          placeholder="เช่น กดรับกลับผิดงาน"
+          onClose={() => setDialog(null)}
+          onConfirm={async (remark) => {
+            await plateSwapApi.undoReturn(dialog.swap.id, remark);
+            drop(dialog.swap.id);
+            setMessage({ text: `ย้ายกลับไปรอรับเอกสารแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})` });
+          }}
+        >
+          <SwapSummary swap={dialog.swap} />
+          <p style={{ marginTop: 12 }}>
+            งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot;
+            {dialog.swap.newVehicle ? ` และรถใหม่ ${dialog.swap.newVehicle.chassis} จะยื่นเอกสารไม่ได้จนกว่าจะยืนยันรับกลับอีกครั้ง` : ""}
+            {" "}- ถ้าแค่วันที่รับกลับผิด ใช้ ✎ แก้ แทน
+          </p>
+        </ReasonDialog>
+      )}
     </section>
   );
 }
@@ -840,17 +1334,25 @@ function ReturnRow({
   onChange,
   onConfirm,
   onMessage,
+  onDialog,
 }: {
   swap: PlateSwap;
   canWrite: boolean;
   onChange: (swap: PlateSwap) => void;
   onConfirm: (swap: PlateSwap, newPlateCategory: string, newPlateNumber: string) => void;
   onMessage: (text: string, error?: boolean) => void;
+  onDialog: (kind: "edit" | "cancel" | "undo") => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [plateCategoryText, setPlateCategoryText] = useState(swap.newPlateCategory ?? "");
   const [plateNumberText, setPlateNumberText] = useState(swap.newPlateNumber ?? "");
+  const returned = Boolean(swap.returnedDate);
+  // งานที่รับกลับแล้ว: รูปใบเสร็จเป็นหลักฐาน แก้ได้ (ผู้ใช้ 2026-09-27) แต่ต้องกด "แก้รูปใบเสร็จ" และใส่เหตุผลก่อน
+  const [editingReceipts, setEditingReceipts] = useState(false);
+  const [receiptRemark, setReceiptRemark] = useState("");
+  const receiptWritable = canWrite && (!returned || editingReceipts);
+  const remarkMissing = returned && !receiptRemark.trim();
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -859,7 +1361,7 @@ function ReturnRow({
     try {
       for (const file of Array.from(files)) {
         const image = await compressReceiptImage(file);
-        onChange((await plateSwapApi.addReceipt(swap.id, image, compressedFileName(file))).swap);
+        onChange((await plateSwapApi.addReceipt(swap.id, image, compressedFileName(file), returned ? receiptRemark.trim() : undefined)).swap);
       }
     } catch (err) {
       onMessage(errorText(err, "แนบรูปไม่สำเร็จ"), true);
@@ -872,7 +1374,7 @@ function ReturnRow({
   async function removeReceipt(receiptId: string) {
     if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
     try {
-      onChange((await plateSwapApi.removeReceipt(swap.id, receiptId)).swap);
+      onChange((await plateSwapApi.removeReceipt(swap.id, receiptId, returned ? receiptRemark.trim() : undefined)).swap);
     } catch (err) {
       onMessage(errorText(err, "ลบรูปไม่สำเร็จ"), true);
     }
@@ -888,7 +1390,9 @@ function ReturnRow({
       <td>
         <div>{oldPlateText(swap)}</div>
         {/* ผู้ใช้ 2026-09-23: ทะเบียนใหม่ได้มาตอนงานเรียบร้อย จึงกรอกที่หน้านี้ได้เลย (หมวด + เลข) */}
-        {canWrite ? (
+        {returned ? (
+          <NewPlateCell swap={swap} canWrite={canWrite} onChange={onChange} />
+        ) : canWrite ? (
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
             <input
               value={plateCategoryText}
@@ -914,6 +1418,7 @@ function ReturnRow({
       </td>
       <td style={{ whiteSpace: "normal" }}>
         {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">ยังไม่ลิงก์</span>}
+        <WrongPlateNote swap={swap} />
       </td>
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -923,12 +1428,14 @@ function ReturnRow({
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
                 🧾 รูป {i + 1}
               </button>
-              {canWrite && (
+              {receiptWritable && (
                 <button
                   type="button"
                   className="text-button"
                   aria-label={`ลบรูปใบเสร็จที่ ${i + 1}`}
-                  style={{ color: "#b43434" }}
+                  style={dangerButton}
+                  disabled={remarkMissing}
+                  title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
                   ×
@@ -937,12 +1444,48 @@ function ReturnRow({
             </span>
           ))}
         </div>
-        {canWrite && (
+        {canWrite && returned && !editingReceipts && (
+          <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditingReceipts(true)}>
+            แก้รูปใบเสร็จ
+          </button>
+        )}
+        {receiptWritable && (
           <>
+            {returned && (
+              <input
+                value={receiptRemark}
+                onChange={(e) => setReceiptRemark(e.target.value)}
+                placeholder="เหตุผลที่แก้รูป *"
+                aria-label="เหตุผลที่แก้รูปใบเสร็จ"
+                className="inspect-input"
+                style={{ width: 170, marginTop: 4 }}
+              />
+            )}
             <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
-            <button type="button" className="text-button" style={{ paddingLeft: 0 }} disabled={busy} onClick={() => inputRef.current?.click()}>
-              {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
-            </button>
+            <div>
+              <button
+                type="button"
+                className="text-button"
+                style={{ paddingLeft: 0 }}
+                disabled={busy || remarkMissing}
+                title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
+                onClick={() => inputRef.current?.click()}
+              >
+                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+              </button>
+              {returned && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setEditingReceipts(false);
+                    setReceiptRemark("");
+                  }}
+                >
+                  เสร็จ
+                </button>
+              )}
+            </div>
           </>
         )}
       </td>
@@ -968,6 +1511,17 @@ function ReturnRow({
           </button>
         ) : null}
       </td>
+      {canWrite && (
+        <td>
+          <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
+            {returned && (
+              <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
+                ยกเลิกรับกลับ
+              </button>
+            )}
+          </RowActions>
+        </td>
+      )}
     </tr>
   );
 }

@@ -9,8 +9,10 @@ import {
   jobSheetRowsPerPage,
   MOTO_TITLE_PREFIX,
   printJobSheets,
+  swapPlateNote,
   type JobSheetKind,
 } from "@/lib/job-sheet-print";
+import { customerDisplayNames } from "@/lib/job-sheet";
 
 // ชื่อหัวใบส่งงานเริ่มต้น - แก้ไขได้ก่อนพิมพ์
 // - ใบรถยนต์: ชื่อบริษัทของลูกค้าถ้ามี ไม่งั้น "บริษัท {ชื่อลูกค้า}" (ตามตัวอย่าง "บริษัท SP")
@@ -50,7 +52,17 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
     () => buildJobSheets(kind, rows, note, defaultTitleFor(kind, urgent), titleEdits),
     [kind, urgent, rows, note, titleEdits],
   );
+  // ใบแยกตามรหัสลูกค้า (ผู้ใช้ 2026-09-27) ลูกค้าคนละรายที่บริษัทเดียวกันได้ชื่อหัวใบเริ่มต้นซ้ำกัน - แสดงชื่อลูกค้าใต้ช่องให้แยกออก
+  const customerLabels = useMemo(() => customerDisplayNames(rows.map((r) => r.vehicle.customer)), [rows]);
+  const customerOfSheet = (key: string) => {
+    const id = key.slice(key.indexOf("|") + 1);
+    const branch = rows.find((r) => r.vehicle.customer.id === id)?.vehicle.customer.branch?.trim();
+    const label = customerLabels.get(id) ?? "";
+    return branch && !label.includes(branch) ? `${label} · ${branch}` : label;
+  };
   const missingTax = rows.filter((r) => r.taxAmount === null).length;
+  // เลขจากงานสลับเลขที่คนอื่นทำมาให้ (ผู้ใช้ 2026-09-27) - พิมพ์หมายเหตุใต้เลขทะเบียนของคันนั้น
+  const swapCount = rows.filter((r) => swapPlateNote(r.plateNumberOption)).length;
   const totalPages = sheets.reduce((sum, s) => sum + jobSheetPageCount(s), 0);
 
   function handlePrint() {
@@ -87,6 +99,9 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
                 {kind === "moto" && <span style={{ whiteSpace: "nowrap" }}>{MOTO_TITLE_PREFIX} -</span>}
                 <input type="text" style={{ flex: 1 }} value={sheet.title} onChange={(e) => setTitleEdits((prev) => ({ ...prev, [sheet.key]: e.target.value }))} />
               </span>
+              <span className="muted" style={{ fontSize: 12 }}>
+                ลูกค้า {customerOfSheet(sheet.key)}
+              </span>
             </label>
             <div style={{ textAlign: "right", fontSize: 13 }}>
               <div>
@@ -112,6 +127,11 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
           ? "ค่าธรรมเนียมในใบ = ค่าธรรมเนียม (Bill) + ค่าภาษี ของแต่ละคัน ไม่รวมลงขัน/ค่าอากร - ใบมอเตอร์ไซค์ไม่พิมพ์ยอดรวม"
           : "ยอดรวม = ค่าธรรมเนียม + ค่าภาษี + ลงขัน (+ ด่วน) ของทุกคันในใบ ไม่รวมค่าอากร"}
       </p>
+      {swapCount > 0 && (
+        <p className="muted">
+          {swapCount} คันใช้เลขที่มีคนทำสลับเลขมาให้ - พิมพ์ &quot;สลับเลข · ป้ายขาวดำ/ป้ายประมูล&quot; ใต้เลขทะเบียนของคันนั้น
+        </p>
+      )}
       {missingTax > 0 && (
         <p className="customer-message error" role="alert">
           {missingTax} คันยังคำนวณภาษีไม่ได้ -{" "}

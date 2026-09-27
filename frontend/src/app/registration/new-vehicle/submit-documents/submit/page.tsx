@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { api, ApiError, type SubmitCandidate } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { FOCUS_PARAM } from "@/lib/vehicle-focus";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
+import { SubmitDateField } from "@/components/submit-flow/SubmitDateField";
 import {
   isInWriteScope,
   isMotoBody,
@@ -13,12 +14,13 @@ import {
   lastFailedLabel,
   SETTINGS_HREF,
   summarizeList,
-  useTodayIso,
   useWriteScope,
 } from "@/components/submit-flow/shared";
 
-// ขั้น 1 เลือกรถ (ผู้ใช้ 2026-09-25): คิวรถที่พร้อมยื่น (ไม่ผูกกับวันที่ยื่น) ติ๊กเลือกแล้วไปขั้นตั้งค่า - ตั้งค่ารายคัน (เจ้าของรถ/
+// ขั้น 1 เลือกรถ (ผู้ใช้ 2026-09-25): คิวรถที่พร้อมยื่น ติ๊กเลือกแล้วไปขั้นตั้งค่า - ตั้งค่ารายคัน (เจ้าของรถ/
 // ขอเลข/ป้าย/ด่วน) ทำในขั้นตรวจทานที่เดียว ไม่มีฟอร์มรายคันแยกแล้ว
+// คิวโหลดตามวันที่ยื่นของขั้นตอนนี้ (ผู้ใช้ 2026-09-27): ยกเลิก/ยื่นไม่สำเร็จแล้วยื่นใหม่ด้วยวันที่ยื่นเดิมได้ ถ้าวันนั้นยังไม่ครบ
+// 90 วันจากวันที่ตรวจผ่าน (เดิมคิวใช้วันนี้เสมอ รถที่ผลตรวจเพิ่งหมดอายุเลือกไม่ได้ ต้องไปตรวจรอบ 2) - backend ตรวจซ้ำตอนยื่น
 const QUEUE_PAGE_SIZE = 50;
 
 type KindFilter = "all" | "car" | "moto";
@@ -53,14 +55,16 @@ export default function SubmitPickPage() {
 function SubmitPickStep() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { selected, selectedIds, select, unselect, refreshSelected } = useSubmitFlow();
-  // คิวไม่ผูกกับวันที่ยื่นแล้ว (ผู้ใช้ 2026-09-25: บางทีคีย์งานไว้ล่วงหน้า) - แสดงรถที่พร้อมยื่น ณ วันนี้ วันที่ยื่นกรอกในขั้นตั้งค่า
-  // เปิดค้างข้ามคืนแล้วกลับมาที่หน้าต่าง = วันใหม่ โหลดคิวใหม่ (พบ 2026-09-27: เดิมคิวยังเป็นของเมื่อวาน มีรถที่ผลตรวจเพิ่งหมดอายุ)
-  const queueDate = useTodayIso();
+  const { selected, selectedIds, select, unselect, refreshSelected, submitDate, today, checks } = useSubmitFlow();
+  // คิว = รถที่ยื่นได้ ณ วันที่ยื่นของขั้นตอนนี้ (ช่องวันที่ยื่นบนหน้านี้กับขั้นตั้งค่าเป็นค่าเดียวกัน ผู้ใช้ 2026-09-27)
+  // ยังไม่แก้วันที่ = วันนี้ เปิดค้างข้ามคืนแล้วกลับมาที่หน้าต่าง = วันใหม่ โหลดคิวใหม่ (พบ 2026-09-27)
+  const queueDate = submitDate || today;
   // ยื่นได้เฉพาะประเภทรถที่บัญชีนี้บันทึกได้ (เช่น STAFF_CAR + ACCOUNTANT เห็นมอเตอร์ไซค์ในคิวแต่ยื่นไม่ได้ - พบ 2026-09-27)
   const writeScope = useWriteScope();
 
   const [queue, setQueue] = useState<SubmitCandidate[]>([]);
+  // วันที่ยื่นที่คิวในจอโหลดมา - ระหว่างโหลดคิวของวันใหม่ แถวที่ติ๊กยังเป็นของวันเดิม (ขั้นตอนตรวจสิทธิ์ของวันใหม่ให้เอง)
+  const [queueLoadedFor, setQueueLoadedFor] = useState("");
   // โหลดคิวสำเร็จแล้วหรือยัง (ห้ามแสดง "ไม่มีรถ" ตอนโหลดไม่ขึ้น)
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -75,7 +79,10 @@ function SubmitPickStep() {
   const [chassisFilter, setChassisFilter] = useState(() => searchParams.get(FOCUS_PARAM) ?? "");
   const [page, setPage] = useState(0);
 
-  const [lookupResults, setLookupResults] = useState<SubmitCandidate[] | null>(null);
+  // ผลค้น "ทำไมไม่อยู่ในคิว" ตรวจ ณ วันที่ยื่นตอนค้น - แสดงเฉพาะตอนวันที่ยื่นยังเป็นวันเดียวกัน (พบ 2026-09-27: เปลี่ยนวันที่ยื่นแล้ว
+  // ผลของวันเดิม เช่น "ยื่นได้" ยังค้างอยู่ข้างคิวของวันใหม่)
+  const [lookup, setLookup] = useState<{ date: string; vehicles: SubmitCandidate[] } | null>(null);
+  const lookupResults = lookup && lookup.date === queueDate ? lookup.vehicles : null;
   const [lookupLoading, setLookupLoading] = useState(false);
 
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -87,14 +94,16 @@ function SubmitPickStep() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดคิวตอนเปิดหน้า/กดลองใหม่
     setLoading(true);
     setLoadError("");
+    const date = queueDate;
     api
-      .listSubmissionQueue(queueDate)
+      .listSubmissionQueue(date)
       .then(({ vehicles }) => {
         if (cancelled) return;
         setQueue(vehicles);
+        setQueueLoadedFor(date);
         setLoaded(true);
-        // รถที่เลือกไว้แล้วใช้ข้อมูลล่าสุด (เช่น เจ้าของรถที่เพิ่งกรอกในหน้าเพิ่มข้อมูลรถ - พบ 2026-09-27)
-        refreshSelected(vehicles);
+        // รถที่เลือกไว้แล้วใช้ข้อมูลล่าสุด (เช่น เจ้าของรถที่เพิ่งกรอกในหน้าเพิ่มข้อมูลรถ - พบ 2026-09-27) และนับว่ายื่นได้ ณ วันนั้น
+        refreshSelected(vehicles, date);
       })
       .catch((err) => !cancelled && setLoadError(err instanceof ApiError ? err.message : "โหลดคิวรอยื่นเอกสารไม่สำเร็จ"))
       .finally(() => !cancelled && setLoading(false));
@@ -142,7 +151,6 @@ function SubmitPickStep() {
   const currentPage = Math.min(page, totalPages - 1);
   const pageRows = filtered.slice(currentPage * QUEUE_PAGE_SIZE, (currentPage + 1) * QUEUE_PAGE_SIZE);
   const allFilteredSelected = filtered.length > 0 && filtered.every((v) => selectedIds.has(v.id));
-  const queueById = useMemo(() => new Map(queue.map((v) => [v.id, v])), [queue]);
 
   function onFilterChange(apply: () => void) {
     apply();
@@ -151,13 +159,13 @@ function SubmitPickStep() {
 
   function toggle(v: SubmitCandidate) {
     if (selectedIds.has(v.id)) unselect([v.id]);
-    else select([v]);
+    else select([v], queueLoadedFor);
   }
 
   // เลือก/เอาออกทุกคันที่ตรงตัวกรอง (ทุกหน้า ไม่ใช่แค่ 50 คันที่เห็น)
   function toggleAllFiltered() {
     if (allFilteredSelected) unselect(filtered.map((v) => v.id));
-    else select(filtered);
+    else select(filtered, queueLoadedFor);
   }
 
   async function handleLookupOutsideQueue() {
@@ -165,11 +173,12 @@ function SubmitPickStep() {
     if (!query) return;
     setLookupLoading(true);
     setNotice(null);
+    const date = queueDate;
     try {
-      const { vehicles } = await api.searchVehiclesByChassis(query, queueDate);
-      setLookupResults(vehicles);
+      const { vehicles } = await api.searchVehiclesByChassis(query, date);
+      setLookup({ date, vehicles });
     } catch (err) {
-      setLookupResults(null);
+      setLookup(null);
       setNotice({ text: err instanceof ApiError ? err.message : "ค้นหาไม่สำเร็จ", error: true });
     } finally {
       setLookupLoading(false);
@@ -183,8 +192,9 @@ function SubmitPickStep() {
     if (lines.length > 1000) return setNotice({ text: `รองรับไม่เกิน 1,000 คันต่อครั้ง (พบ ${lines.length} รายการ)`, error: true });
     setPasteBusy(true);
     setNotice(null);
+    const date = queueDate;
     try {
-      const lookup = await api.lookupVehiclesByChassis(lines, queueDate);
+      const lookup = await api.lookupVehiclesByChassis(lines, date);
       const { notFound } = lookup;
       // คันนอกประเภทรถที่บัญชีนี้ยื่นได้ นับเป็นยื่นไม่ได้พร้อมเหตุผล
       const found = lookup.found.filter((v) => isInWriteScope(writeScope, v.body));
@@ -192,10 +202,10 @@ function SubmitPickStep() {
         ...lookup.blocked,
         ...lookup.found.filter((v) => !isInWriteScope(writeScope, v.body)).map((v) => ({ chassis: v.chassis, reason: "บัญชีของคุณยื่นรถประเภทนี้ไม่ได้" })),
       ];
-      // ใช้ข้อมูลจากคิว (มีวันที่ตรวจ/หมายเหตุครบ) ถ้ามี
-      const vehicles = found.map((v) => queueById.get(v.id) ?? v);
+      // ผลค้นเลขตัวถังเป็นข้อมูลล่าสุด ณ วันที่ยื่นนี้ (คิวในจออาจโหลดไว้ก่อน/เป็นของวันเดิม)
+      const vehicles = found;
       const fresh = vehicles.filter((v) => !selectedIds.has(v.id));
-      select(fresh);
+      select(fresh, date);
       const parts = [`เลือกเพิ่ม ${fresh.length} คัน`];
       if (vehicles.length > fresh.length) parts.push(`เลือกไว้แล้ว ${vehicles.length - fresh.length} คัน`);
       if (notFound.length > 0) parts.push(`ไม่พบในระบบ ${notFound.length} รายการ: ${summarizeList(notFound)}`);
@@ -221,6 +231,15 @@ function SubmitPickStep() {
       </p>
 
       <section className="panel" style={{ padding: 22, marginBottom: 16 }}>
+        {/* วันที่ยื่นช่องเดียวกับขั้นตั้งค่า (ผู้ใช้ 2026-09-27) - ยื่นใหม่ด้วยวันที่ยื่นเดิมหลังยกเลิก/ยื่นไม่สำเร็จ เปลี่ยนตรงนี้ได้เลย */}
+        <div
+          style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #edf0f5" }}
+        >
+          <SubmitDateField />
+          <span className="muted" style={{ fontSize: 13 }}>
+            คิวนี้คือรถที่ยื่นได้ ณ วันที่ยื่นนี้ (ตรวจผ่านไม่เกิน 90 วัน) - ยื่นใหม่ด้วยวันที่ยื่นเดิม เช่น หลังยกเลิก ให้เปลี่ยนวันที่ตรงนี้
+          </span>
+        </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label className="field" style={{ minWidth: 190 }}>
             วันที่ตรวจผ่าน
@@ -268,7 +287,7 @@ function SubmitPickStep() {
               onChange={(e) =>
                 onFilterChange(() => {
                   setChassisFilter(e.target.value);
-                  setLookupResults(null);
+                  setLookup(null);
                 })
               }
               placeholder="บางส่วนก็ได้"
@@ -329,7 +348,10 @@ function SubmitPickStep() {
       <section className="panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "16px 22px" }}>
           <div>
-            <strong style={{ fontSize: 15 }}>รถที่ยื่นได้ {filtered.length} คัน</strong>
+            <strong style={{ fontSize: 15 }}>
+              รถที่ยื่นได้ {filtered.length} คัน
+              {queueLoadedFor ? <span style={{ fontWeight: 400 }}> ณ วันที่ยื่น {isoToDisplayDate(queueLoadedFor)}</span> : null}
+            </strong>
             <span className="muted" role="status">
               {loading ? " · กำลังโหลด…" : queueReady ? ` · ในคิวทั้งหมด ${rows.length} คัน` : ""}
             </span>
@@ -357,7 +379,7 @@ function SubmitPickStep() {
                 </button>
               </>
             ) : rows.length === 0 ? (
-              "ยังไม่มีรถที่พร้อมยื่น (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านแล้ว)"
+              "ยังไม่มีรถที่พร้อมยื่น ณ วันที่ยื่นนี้ (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านไม่เกิน 90 วัน)"
             ) : (
               "ไม่มีรถตรงกับตัวกรอง"
             )}
@@ -415,7 +437,9 @@ function SubmitPickStep() {
 
       {lookupResults && (
         <section className="panel" style={{ marginTop: 16 }}>
-          <p style={{ margin: 0, padding: "16px 22px", fontSize: 14, fontWeight: 500 }}>ผลค้นหาในระบบทั้งหมด</p>
+          <p style={{ margin: 0, padding: "16px 22px", fontSize: 14, fontWeight: 500 }}>
+            ผลค้นหาในระบบทั้งหมด <span style={{ fontWeight: 400 }}>ณ วันที่ยื่น {isoToDisplayDate(queueDate)}</span>
+          </p>
           {lookupResults.length === 0 ? (
             <div className="empty-customers">ไม่พบข้อมูลรถเลขตัวถังนี้ในระบบ</div>
           ) : (
@@ -458,6 +482,10 @@ function SubmitPickStep() {
       <div className="submit-footer">
         <span>
           เลือกแล้ว <strong>{selected.length}</strong> คัน
+          {/* คันที่เลือกไว้แต่ยื่นไม่ได้ ณ วันที่ยื่นที่เพิ่งเปลี่ยน - เหตุผลอยู่ในขั้นตั้งค่า */}
+          {checks.dateBlockedIds.length > 0 && (
+            <span className="field-error"> · ยื่นไม่ได้ ณ วันที่ยื่นนี้ {checks.dateBlockedIds.length} คัน (ดูเหตุผลที่ขั้นตั้งค่า)</span>
+          )}
           {selected.length > 0 && (
             <>
               {" · "}

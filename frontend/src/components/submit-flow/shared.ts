@@ -1,5 +1,14 @@
 import { useSyncExternalStore } from "react";
-import type { DocumentSubmission, DocumentSubmissionOptionsInput, FeeItem, FeePreview, OwnerType, SubmitCandidate, Vehicle } from "@/lib/api";
+import type {
+  DocumentSubmission,
+  DocumentSubmissionOptionsInput,
+  FeeItem,
+  FeePreview,
+  OwnerType,
+  PlateNumberOption,
+  SubmitCandidate,
+  Vehicle,
+} from "@/lib/api";
 import { getToken, rolesFromToken, submitWriteScopeFor, vehicleScopeFor, type VehicleScope } from "@/lib/auth";
 import { OWNER_TYPE_LABEL, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
@@ -77,10 +86,32 @@ export function defaultSettings(vehicle: Vehicle): EntrySettings {
   return {
     options: DEFAULT_OPTIONS,
     // รถที่มีเลขทะเบียนอยู่แล้วแสดงไว้ให้เลย - รถที่รับเลขจากงานสลับเลขใช้ทะเบียนของงานนั้นก่อน (ผู้ใช้ 2026-09-23)
-    plateCategory: vehicle.plateSwap?.newPlateCategory ?? vehicle.plateCategory ?? "",
-    plateNumber: vehicle.plateSwap?.newPlateNumber ?? vehicle.plateNumber ?? "",
+    // รถใหม่รับ "ทะเบียนเก่า" ของรถเก่า (oldPlate*) - newPlate* คือเลขที่รถเก่าได้ใหม่ (ผู้ใช้ยืนยัน 2026-09-27: เดิมเติมผิดฝั่ง)
+    plateCategory: vehicle.plateSwap?.oldPlateCategory ?? vehicle.plateCategory ?? "",
+    plateNumber: vehicle.plateSwap?.oldPlateNumber ?? vehicle.plateNumber ?? "",
     ownerType: vehicle.ownerType ?? undefined,
   };
+}
+
+// "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27): คนอื่นทำสลับเลขแล้วส่งเลขมาให้ - ไม่ใช่การขอใช้เลข (ไม่มีค่าขอใช้เลข ไม่นับเป็นคำขอเพิ่ม)
+export function isSwapPlateOption(option: PlateNumberOption | string | null | undefined): boolean {
+  return option === "SWAP_NORMAL" || option === "SWAP_AUCTION";
+}
+
+// ป้ายกำกับรายการที่ยื่นด้วยเลขจากงานสลับเลขที่คนอื่นทำมาให้ (ตารางรายการที่ยื่นแล้ว) - ตัวเลือกอื่น = null
+export function swapPlateLabel(option: PlateNumberOption | string | null | undefined): string | null {
+  if (option === "SWAP_NORMAL") return "มีคนทำสลับเลขมาให้ · ป้ายขาวดำ";
+  if (option === "SWAP_AUCTION") return "มีคนทำสลับเลขมาให้ · ป้ายประมูล";
+  return null;
+}
+
+const plateKey = (category: string, number: string) => `${category}${number}`.replace(/\s+/g, "").toUpperCase();
+
+// ทะเบียนที่กรอกในแถวไม่ตรงกับเลขที่รถคันนี้รับจากงานสลับเลข (ทะเบียนเก่าของรถเก่า) - เตือนให้ตรวจ ไม่บล็อก
+export function plateSwapPrefillMismatch(vehicle: Vehicle, settings: EntrySettings): boolean {
+  const swap = vehicle.plateSwap;
+  if (!swap) return false;
+  return plateKey(settings.plateCategory, settings.plateNumber) !== plateKey(swap.oldPlateCategory, swap.oldPlateNumber);
 }
 
 // ค่าอากรอยู่ในรายการ No bill (label ขึ้นต้น "ค่าอากร") - ยอดรวมทั้งหมดแยกค่าอากรออก แสดงเป็นบรรทัดต่างหาก
@@ -144,6 +175,7 @@ export function useTodayIso(): string {
   return useSyncExternalStore(subscribeDayChange, todayIso, todayIso);
 }
 
+// ขอใช้เลข (NORMAL/AUCTION) และเลขจากงานสลับเลข (SWAP_*) ต้องกรอกหมวด+เลข - "ไม่ขอ" เว้นว่างได้
 export function plateMissing(settings: EntrySettings): boolean {
   return settings.options.plateNumberOption !== "NONE" && (!settings.plateCategory.trim() || !settings.plateNumber.trim());
 }

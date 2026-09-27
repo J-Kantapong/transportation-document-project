@@ -73,6 +73,8 @@ export interface OpenVehicle {
   } | null;
   hasPendingPlateSwap: boolean;
   billed: boolean; // อยู่ในบิลที่ยังไม่ถูกยกเลิกแล้ว
+  // ปิดงาน - วางบิลนอกระบบแล้ว (Vehicle.billingClosedAt, ผู้ใช้ 2026-09-27) = ไม่รอวางบิล เหมือนอยู่ในบิลแล้ว
+  billingClosed?: boolean;
 }
 
 const iso = (d: Date) => isoOf(d);
@@ -105,7 +107,7 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
     waits.push(...beforeSubmission(v, today));
   }
 
-  if (v.deliveredDate && !v.billed) waits.push(wait('billing', iso(v.deliveredDate)));
+  if (v.deliveredDate && !v.billed && !v.billingClosed) waits.push(wait('billing', iso(v.deliveredDate)));
   return waits;
 }
 

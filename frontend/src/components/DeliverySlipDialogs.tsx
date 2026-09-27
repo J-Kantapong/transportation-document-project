@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { billingApi, slipNoText, type DeliverySlip } from "@/lib/billing-api";
+import { billingApi, slipNoText, type DeliverySlip, type DeliverySlipItem } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
@@ -40,6 +40,8 @@ export function DeliverySlipEditDialog({
   const [error, setError] = useState("");
   // บิลเก็บเฉพาะวันส่งเล่ม - รายการส่งป้ายตามทีหลังเปลี่ยนวันที่ได้แม้วางบิลแล้ว (ผู้ใช้ 2026-09-27)
   const billed = slip.items.filter((i) => !i.cancelledAt && i.book && i.invoiceNo);
+  // ปิดงาน - วางบิลนอกระบบ ล็อกวันที่ส่งเล่มเหมือนวางบิลแล้ว (2026-09-27)
+  const closed = slip.items.filter((i) => !i.cancelledAt && i.book && !i.invoiceNo && i.billingClosed);
 
   async function handleSave() {
     setError("");
@@ -80,6 +82,12 @@ export function DeliverySlipEditDialog({
       {billed.length > 0 && (
         <p className="muted" style={{ marginTop: 8 }}>
           มีรถวางบิลแล้ว {billed.length} คัน ({billed.map((i) => i.invoiceNo).join(", ")}) - เปลี่ยนวันที่ส่งไม่ได้ แก้ได้เฉพาะชื่อผู้รับ
+          (ถ้าต้องเปลี่ยนวันที่ ให้ฝ่ายบัญชีเอารถออกจากบิลก่อนด้วย &quot;แก้ไขบิล&quot;)
+        </p>
+      )}
+      {closed.length > 0 && (
+        <p className="muted" style={{ marginTop: 8 }}>
+          มีรถปิดงาน - วางบิลนอกระบบแล้ว {closed.length} คัน - เปลี่ยนวันที่ส่งไม่ได้จนกว่า ADMIN เปิดงานกลับ แก้ได้เฉพาะชื่อผู้รับ
         </p>
       )}
       <label className="field" style={{ marginTop: 12 }}>
@@ -105,11 +113,15 @@ export function DeliverySlipEditDialog({
 
 export function DeliverySlipCancelDialog({
   slip,
+  editable = () => true,
   onClose,
   onCancelled,
   onRefused,
 }: {
   slip: DeliverySlip;
+  // คันที่บัญชีนี้ยกเลิกได้ (ขอบเขตการแก้) - ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ คันอีกประเภทติ๊กไม่ได้
+  // backend ตรวจรายคันที่เลือกอยู่แล้ว (DeliveryService.cancelSlip) ไม่ส่ง = ทุกคัน
+  editable?: (item: DeliverySlipItem) => boolean;
   onClose: () => void;
   onCancelled: (slip: DeliverySlip) => void;
   onRefused?: () => void;
@@ -117,12 +129,16 @@ export function DeliverySlipCancelDialog({
   const dialogRef = useModal();
   const items = slip.items.filter((i) => !i.cancelledAt);
   // วางบิลแล้วล็อกเฉพาะรายการส่งเล่ม - ใบส่งป้ายตามทีหลังยกเลิกได้ (ผู้ใช้ 2026-09-27)
-  const locked = (i: (typeof items)[number]) => i.book && !!i.invoiceNo;
-  const [picked, setPicked] = useState(() => new Set(items.filter((i) => !locked(i)).map((i) => i.vehicleId)));
+  const locked = (i: DeliverySlipItem) => i.book && (!!i.invoiceNo || i.billingClosed);
+  const mine = items.filter(editable);
+  const [picked, setPicked] = useState(() => new Set(mine.filter((i) => !locked(i)).map((i) => i.vehicleId)));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const allBilled = items.every(locked);
+  // ไม่มีคันที่ยกเลิกได้: [].every = true จึงต้องเช็กว่ามีคันก่อน (พบ 2026-09-27: ใบที่ยกเลิกครบทุกคันที่เห็นแล้วขึ้นว่า "วางบิลแล้วทุกคัน")
+  const noneMine = mine.length === 0;
+  const allBilled = !noneMine && mine.every(locked);
+  const blocked = noneMine || allBilled;
 
   function toggle(vehicleId: string) {
     setPicked((prev) => {
@@ -159,24 +175,40 @@ export function DeliverySlipCancelDialog({
       <p className="muted">
         {isoToDisplayDate(slip.date)} · {slip.customer.displayName} · ผู้รับ {slip.recipient}
       </p>
-      {allBilled ? (
+      {noneMine ? (
         <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-          รถในใบนี้วางบิลแล้วทุกคัน ต้องยกเลิกบิลก่อนจึงจะยกเลิกการส่งได้
+          ไม่มีรถในใบนี้ที่บัญชีของคุณยกเลิกได้ - ให้ ADMIN หรือพนักงานประเภทรถนั้นยกเลิก
+        </p>
+      ) : allBilled ? (
+        <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
+          {mine.length < items.length ? "รถประเภทที่บัญชีนี้ดูแลในใบนี้" : "รถในใบนี้"}วางบิลแล้ว (หรือปิดงาน - วางบิลนอกระบบ) ทุกคัน ต้องให้ฝ่ายบัญชีเอารถออกจากบิล
+          (&quot;แก้ไขบิล&quot; ติ๊ก &quot;เอาออกจากบิล&quot;) / ให้ ADMIN เปิดงานกลับก่อนจึงจะยกเลิกการส่งได้
         </p>
       ) : (
         <>
           <p style={{ marginTop: 12 }}>เลือกคันที่จะยกเลิก รถจะกลับเข้าคิว Delivery เพื่อบันทึกส่งใหม่ ใบนี้ยังเก็บไว้พร้อมเหตุผล</p>
           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-            {items.map((i) => (
-              <label key={i.vehicleId} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={locked(i)} onChange={() => toggle(i.vehicleId)} />
-                <span>
-                  {i.plateText || "—"} · {i.chassis}
-                  {i.book ? "" : " (ใบส่งป้าย)"}
-                  {locked(i) ? <span className="muted"> · วางบิลแล้ว {i.invoiceNo} ยกเลิกไม่ได้</span> : null}
-                </span>
-              </label>
-            ))}
+            {items.map((i) => {
+              const other = !editable(i);
+              return (
+                <label key={i.vehicleId} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={other || locked(i)} onChange={() => toggle(i.vehicleId)} />
+                  <span>
+                    {i.plateText || "—"} · {i.chassis}
+                    {i.book ? "" : " (ใบส่งป้าย)"}
+                    {other ? (
+                      <span className="muted"> · รถอีกประเภท - ให้ ADMIN หรือพนักงานประเภทนั้นยกเลิก</span>
+                    ) : locked(i) ? (
+                      <span className="muted">
+                        {i.invoiceNo
+                          ? ` · วางบิลแล้ว ${i.invoiceNo} ยกเลิกไม่ได้จนกว่าฝ่ายบัญชีเอารถออกจากบิล ("แก้ไขบิล")`
+                          : " · ปิดงาน - วางบิลนอกระบบแล้ว ยกเลิกไม่ได้จนกว่า ADMIN เปิดงานกลับ"}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              );
+            })}
           </div>
           <label className="field" style={{ marginTop: 12 }}>
             เหตุผลที่ยกเลิก *
@@ -193,7 +225,7 @@ export function DeliverySlipCancelDialog({
         <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ไม่ยกเลิก
         </button>
-        {!allBilled && (
+        {!blocked && (
           <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
             {saving ? "กำลังยกเลิก..." : `ยืนยันยกเลิก ${picked.size} คัน`}
           </button>

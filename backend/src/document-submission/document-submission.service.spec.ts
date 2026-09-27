@@ -100,28 +100,53 @@ describe('DocumentSubmissionService.submit - เงื่อนไขการ�
     return { service: new DocumentSubmissionService(prisma, mockTaxService()) };
   }
 
-  // รถที่รับเลขจากงานสลับเลข (ผู้ใช้ 2026-09-23)
-  function withPlateSwap(returnedDate: Date | null) {
+  // รถที่รับเลขจากงานสลับเลข (ผู้ใช้ 2026-09-23) - openSwap = งานที่ยังเปิดอยู่ที่ query เจอ (null = ไม่มี/รับกลับหมดแล้ว)
+  // findFirst ครั้งแรกคือเช็กว่ามีตาราง (select id) ครั้งถัดไปคือหางานที่ยังเปิดอยู่ของรถคันนี้ใน transaction
+  function withPlateSwap(openSwap: { returnedDate: Date | null } | null) {
     const create = vi.fn().mockResolvedValue({ id: 'sub1', status: 'PENDING' });
+    const findSwap = vi.fn(async (args: { where?: unknown }) => (args?.where ? openSwap : { id: 'any' }));
     const prisma = mockPrisma({
-      plateSwap: { findFirst: vi.fn().mockResolvedValue({ returnedDate }) },
+      plateSwap: { findFirst: findSwap },
       documentSubmission: { findFirst: vi.fn().mockResolvedValue(null), findUnique: vi.fn(), create, update: vi.fn() },
     });
-    return { service: new DocumentSubmissionService(prisma, mockTaxService()), create };
+    return { service: new DocumentSubmissionService(prisma, mockTaxService()), create, findSwap, prisma };
   }
 
   it('ยื่นไม่ได้ถ้างานสลับเลขยังไม่ได้ยืนยันรับเอกสารกลับ', async () => {
-    const { service, create } = withPlateSwap(null);
+    const { service, create } = withPlateSwap({ returnedDate: null });
     await expect(service.submit('v1', OPTIONS)).rejects.toMatchObject({
       response: { error: expect.stringContaining('ยืนยันรับเอกสารกลับ') },
     });
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('ยื่นได้เมื่องานสลับเลขรับเอกสารกลับแล้ว', async () => {
-    const { service, create } = withPlateSwap(new Date('2026-09-18T00:00:00.000Z'));
+  it('ยื่นได้เมื่องานสลับเลขรับเอกสารกลับแล้ว (ไม่มีงานที่ยังเปิดอยู่)', async () => {
+    const { service, create } = withPlateSwap(null);
     await service.submit('v1', OPTIONS);
     expect(create).toHaveBeenCalled();
+  });
+
+  // ผู้ใช้ 2026-09-27: งานไหนก็ได้ที่ยังไม่รับเอกสารกลับและไม่ได้ยกเลิก = ล็อก (เดิมดูแค่งานล่าสุด)
+  it('หางานสลับเลขที่ยังเปิดอยู่ของรถคันนี้ (ไม่ใช่แค่งานล่าสุด ไม่นับงานที่ยกเลิก) หลังล็อกแถวรถ', async () => {
+    const { service, create, findSwap, prisma } = withPlateSwap(null);
+    await service.submit('v1', OPTIONS);
+    const openQuery = findSwap.mock.calls.findIndex((c) => c[0]?.where);
+    expect(findSwap.mock.calls[openQuery][0]).toEqual({
+      where: { newVehicleId: 'v1', returnedDate: null, cancelledAt: null },
+      select: { returnedDate: true },
+    });
+    // อ่านใน transaction หลัง SELECT ... FOR UPDATE ของแถวรถ - ผูกงานสลับเลขแทรกระหว่างตรวจกับบันทึกไม่ได้
+    const lock = mocksOf(prisma).$queryRaw as unknown as ReturnType<typeof vi.fn>;
+    expect(lock.mock.invocationCallOrder[0]).toBeLessThan(findSwap.mock.invocationCallOrder[openQuery]);
+    expect(create).toHaveBeenCalled();
+  });
+
+  it('เช็กว่ามีตารางงานสลับเลขครั้งเดียว แล้วจำไว้', async () => {
+    const { service, findSwap } = withPlateSwap(null);
+    await service.submit('v1', OPTIONS);
+    await service.submit('v1', OPTIONS);
+    expect(findSwap.mock.calls.filter((c) => !c[0]?.where)).toHaveLength(1);
+    expect(findSwap.mock.calls.filter((c) => c[0]?.where)).toHaveLength(2);
   });
 
   it('ยื่นไม่ได้ถ้ายื่นครั้งล่าสุดยังค้างสถานะ PENDING', async () => {
@@ -188,6 +213,24 @@ describe('DocumentSubmissionService.submit - เงื่อนไขการ�
     const result = await service.submit('v1', OPTIONS);
     expect(result.submission).toEqual({ id: 'sub1', status: 'PENDING' });
   });
+
+  // มีคนทำสลับเลขมาให้ (ผู้ใช้ 2026-09-27): ต้องมีหมวด+เลข บันทึกลงรถ ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้าย
+  it('มีคนทำสลับเลขมาให้: ไม่มีทะเบียน = ไม่บันทึก / มีทะเบียน = บันทึกทะเบียนลงรถและเก็บตัวเลือกไว้', async () => {
+    const { service, create } = withActiveSubmission(null);
+    await expect(service.submit('v1', { ...OPTIONS, plateNumberOption: 'SWAP_NORMAL' })).rejects.toMatchObject({
+      response: { error: expect.stringContaining('สลับเลข') },
+    });
+    expect(create).not.toHaveBeenCalled();
+
+    const prisma = mockPrisma();
+    const ok = new DocumentSubmissionService(prisma, mockTaxService());
+    await ok.submit('v1', { ...OPTIONS, plateNumberOption: 'SWAP_AUCTION', includePlateFee: false, plateCategory: '1กข', plateNumber: '1234' });
+    expect(mocksOf(prisma).vehicle.update).toHaveBeenCalledWith({ where: { id: 'v1' }, data: { plateCategory: '1กข', plateNumber: '1234' } });
+    const data = mocksOf(prisma).documentSubmission.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ plateNumberOption: 'SWAP_AUCTION', includePlateFee: true });
+    expect(data.billItems.map((i: { label: string }) => i.label)).toContain('ค่าแผ่นป้ายทะเบียนรถ');
+    expect(data.billItems.some((i: { label: string }) => i.label.includes('ขอใช้เลข'))).toBe(false);
+  });
 });
 
 // ยื่นซ้ำพร้อมกัน (พบ 2026-09-27): ล็อกแถวรถแล้วตรวจสิทธิ์ยื่นใน transaction เดียวกับการบันทึก
@@ -209,11 +252,12 @@ describe('DocumentSubmissionService.submit - transaction และล็อก�
     expect(mocksOf(tax).calculateAndSave.mock.calls[0]).toEqual(['v1', { client: prisma, rules: undefined }]);
   });
 
-  it('ฐานข้อมูลที่ยังไม่มีตารางงานสลับเลข (P2021) ยังยื่นได้ - อ่านนอก transaction', async () => {
+  it('ฐานข้อมูลที่ยังไม่มีตารางงานสลับเลข (P2021) ยังยื่นได้ - เช็กนอก transaction และไม่อ่านตารางนั้นใน transaction', async () => {
     const plateSwapFind = vi.fn().mockRejectedValue(Object.assign(new Error('missing table'), { code: 'P2021' }));
     const prisma = mockPrisma({ plateSwap: { findFirst: plateSwapFind } });
     const service = new DocumentSubmissionService(prisma, mockTaxService());
     await expect(service.submit('v1', OPTIONS)).resolves.toMatchObject({ submission: { id: 'sub1' } });
+    expect(plateSwapFind).toHaveBeenCalledTimes(1);
     expect(plateSwapFind.mock.invocationCallOrder[0]).toBeLessThan(mocksOf(prisma).$transaction.mock.invocationCallOrder[0]);
   });
 
@@ -943,6 +987,12 @@ describe('DocumentSubmissionService.listByDate - ตาราง "ได้ใ�
     const { service, findMany } = setup();
     await service.listByDate('2026-09-19');
     expect(findMany.mock.calls[0][0].include.vehicle.select).toMatchObject({ inspectionResultDate: true });
+  });
+
+  it('ส่งรหัสลูกค้ามาด้วย - กุญแจใบยื่น/ใบส่งงานเป็นรหัสลูกค้า ชื่อซ้ำกันได้ (ผู้ใช้ 2026-09-27)', async () => {
+    const { service, findMany } = setup();
+    await service.listByDate('2026-09-19');
+    expect(findMany.mock.calls[0][0].include.vehicle.select.customer).toEqual({ select: { id: true, name: true, company: true, branch: true } });
   });
 
   it('kind / offset ผิดรูปแบบ -> 400', async () => {

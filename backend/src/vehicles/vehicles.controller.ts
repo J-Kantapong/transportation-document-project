@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
+import type { CorrectTransferNoticeDto } from './dto/correct-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import type { CorrectInspectionSentDto } from './dto/correct-inspection-sent.dto.js';
 import type { CancelInspectionSentDto } from './dto/cancel-inspection-sent.dto.js';
@@ -75,14 +76,21 @@ export class VehiclesController {
     return { vehicles: await this.vehiclesService.findPendingTransferNotice() };
   }
 
+  // ดำเนินการแล้ว: ทีละ 100 คัน ทำเสร็จล่าสุดก่อน -> { vehicles, hasMore } (q ค้นเลขตัวถัง/ลูกค้า ฯลฯ, offset โหลดเพิ่ม)
   @Get('transfer-notice/completed')
-  async findRecentlyCompletedTransferNotice() {
-    return { vehicles: await this.vehiclesService.findRecentlyCompletedTransferNotice() };
+  findRecentlyCompletedTransferNotice(@Query('q') q?: string, @Query('offset') offset?: string, @Query('limit') limit?: string) {
+    return this.vehiclesService.findRecentlyCompletedTransferNotice({ q, offset, limit });
   }
 
   @Patch(':id/transfer-notice')
   async updateTransferNotice(@Param('id') id: string, @Body() body: UpdateTransferNoticeDto) {
     return { vehicle: await this.vehiclesService.updateTransferNotice(id, body) };
+  }
+
+  // แก้วันที่/ค่าใช้จ่าย หรือยกเลิกสถานะของคันที่ดำเนินการแล้ว (ต้องมีเหตุผล - ผู้ใช้ 2026-09-27) สิทธิ์เท่ากับ PATCH ด้านบน
+  @Patch(':id/transfer-notice/correct')
+  async correctTransferNotice(@Param('id') id: string, @Body() body: CorrectTransferNoticeDto) {
+    return { vehicle: await this.vehiclesService.correctTransferNotice(id, body) };
   }
 
   @Get('inspection/pending-send')

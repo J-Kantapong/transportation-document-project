@@ -4,16 +4,21 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { activeSlip, billingApi, slipNoText, type DeliveryRow, type DeliverySlip } from "@/lib/billing-api";
-import { getCachedUser, submitWriteScopeFor, writeScopeFor, type VehicleScope } from "@/lib/auth";
+import { canAccessPage, getCachedUser, submitWriteScopeFor, writeScopeFor, type VehicleScope } from "@/lib/auth";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { focusHref } from "@/lib/vehicle-focus";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import {
   countItems,
+  deliveryCustomerLabels,
+  deliveryRowCustomer,
   downloadDeliveryReportPdf,
   downloadDeliverySlipPdf,
+  hiddenItemsOf,
   printDeliveryReport,
   printDeliverySlips,
+  slipCancelledForViewer,
+  type DeliveryCustomer,
   type DeliveryReportInput,
 } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
@@ -21,8 +26,10 @@ import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialo
 
 // รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งเล่ม / ป้าย (ใบเสร็จไปกับใบวางบิล ผู้ใช้ 2026-09-26)
 // พิมพ์ใบส่งงานซ้ำได้ทีละใบ + ท้ายรายงานมีรถที่ป้ายยังค้างส่ง - ไม่มีราคา (DELIVERY เปิดหน้านี้ได้)
+// ACCOUNTANT เปิดหน้านี้ได้แบบอ่านอย่างเดียว (ผู้ใช้ 2026-09-27) แต่เปิดหน้า Delivery ไม่ได้ - ลิงก์ไปหน้านั้นจึงซ่อน
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
 const DELIVERY_PAGE = "/registration/new-vehicle/delivery";
+const BILLING_PAGE = "/accounting/billing";
 const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done">✓</span> : <span className="muted">—</span>);
 const CANCELLED_ROW = { color: "#9aa3b5", textDecoration: "line-through" } as const;
 
@@ -33,9 +40,21 @@ function inScope(body: string | null, scope: VehicleScope | null): boolean {
   return scope === "ALL" || (scope === "MOTO") === isMotorcycleBody(body);
 }
 
-function canManageSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
+// ยกเลิก: backend ตรวจขอบเขตเฉพาะคันที่เลือก (DeliveryService.cancelSlip) -> ปุ่มขึ้นเมื่อมีคันที่ยังไม่ยกเลิกในขอบเขตการแก้
+// อย่างน้อย 1 คัน ใบเก่าที่รวมสองประเภท: STAFF_CAR (+ ACCOUNTANT / DELIVERY ที่เห็นทุกคัน) ยกเลิกคันรถยนต์ของตัวเองได้
+// คันอีกประเภทติ๊กไม่ได้ในหน้าต่างยกเลิก (พบ 2026-09-27: เดิมต้องการทุกคันในขอบเขต -> ปุ่มหายสำหรับบัญชีที่เห็นทุกคัน
+// และ [].every = true -> ใบที่ยกเลิกครบทุกคันที่เห็นแล้วยังมีปุ่ม)
+function canCancelSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
   if (slip.cancelledAt) return false;
-  return slip.items.filter((i) => !i.cancelledAt).every((i) => inScope(i.body, scope));
+  return slip.items.some((i) => !i.cancelledAt && inScope(i.body, scope));
+}
+
+// แก้ผู้รับ/วันที่: ใช้ร่วมกันทั้งใบ backend ต้องการให้ทุกคันที่ยังไม่ยกเลิกอยู่ในขอบเขต รวมคันที่บัญชีนี้มองไม่เห็นด้วย
+// (ใบเก่าที่รวมรถยนต์ + จักรยานยนต์ - เดิมปุ่มขึ้นแต่กดแล้วถูกปฏิเสธทุกครั้ง พบ 2026-09-27)
+function canEditSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
+  if (slip.cancelledAt || hiddenItemsOf(slip) > 0) return false;
+  const live = slip.items.filter((i) => !i.cancelledAt);
+  return live.length > 0 && live.every((i) => inScope(i.body, scope));
 }
 
 export function DeliveryReportPage() {
@@ -48,7 +67,8 @@ export function DeliveryReportPage() {
   const [pendingRows, setPendingRows] = useState<DeliveryRow[]>([]);
   const [customerId, setCustomerId] = useState("");
   // ตัวเลือกลูกค้าสะสมจากทุกครั้งที่โหลด - กรองลูกค้าฝั่ง server แล้วรายการอื่นยังเลือกได้
-  const [customerNames, setCustomerNames] = useState<Record<string, string>>({});
+  // เก็บชื่อ/บริษัท/สาขาตามรหัสลูกค้า ชื่อที่แสดงมาจาก deliveryCustomerLabels (ชื่อซ้ำต่อผู้ติดต่อ/สาขา - F47 2026-09-27)
+  const [customerInfo, setCustomerInfo] = useState<Record<string, DeliveryCustomer>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [makingPdf, setMakingPdf] = useState(false);
@@ -56,6 +76,8 @@ export function DeliveryReportPage() {
   // ประเภทรถที่บันทึกส่งที่หน้า Delivery ได้ (สำเนาของ currentDeliveryScope ใน backend) - ป้ายค้างส่งแสดงตามขอบเขตการอ่าน
   // ซึ่งกว้างกว่าได้ (STAFF_CAR + ACCOUNTANT) คันนอกขอบเขตไม่มีในคิวหน้า Delivery จึงไม่แสดงลิงก์ไปบันทึก
   const [deliverScope, setDeliverScope] = useState<VehicleScope | null>(null);
+  // ลิงก์กลับ: หน้า Delivery ถ้าเปิดได้ ไม่งั้นหน้าวางบิล (ACCOUNTANT) - null = ยังไม่รู้บทบาท / เปิดไม่ได้ทั้งคู่
+  const [backLink, setBackLink] = useState<{ href: string; label: string } | null>(null);
   const [dialog, setDialog] = useState<{ kind: "edit" | "cancel"; slip: DeliverySlip } | null>(null);
   const [plateDialog, setPlateDialog] = useState<DeliveryRow | null>(null);
   const [showCancelled, setShowCancelled] = useState(true);
@@ -91,10 +113,10 @@ export function DeliveryReportPage() {
       setTruncated(!!s.truncated);
       setPendingRows(rows);
       setRange({ from, to });
-      setCustomerNames((prev) => {
+      setCustomerInfo((prev) => {
         const next = { ...prev };
-        for (const slip of s.slips) next[slip.customer.id] = slip.customer.displayName;
-        for (const r of rows) if (r.deliveredDate) next[r.customerId] = r.customerName;
+        for (const slip of s.slips) next[slip.customer.id] = slip.customer;
+        for (const r of rows) if (r.deliveredDate) next[r.customerId] = deliveryRowCustomer(r);
         return next;
       });
     } catch (err) {
@@ -111,7 +133,16 @@ export function DeliveryReportPage() {
     const roles = getCachedUser()?.roles ?? [];
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditScope(submitWriteScopeFor(roles));
-    setDeliverScope(roles.includes("DELIVERY") ? "ALL" : writeScopeFor(roles));
+    // ลิงก์ "บันทึกส่งป้าย →" พาไปหน้า Delivery - ACCOUNTANT เปิดหน้านั้นไม่ได้ (writeScopeFor ให้ ALL) จึงไม่แสดง (ผู้ใช้ 2026-09-27)
+    const canDeliver = canAccessPage(DELIVERY_PAGE, roles);
+    setDeliverScope(!canDeliver ? "NONE" : roles.includes("DELIVERY") ? "ALL" : writeScopeFor(roles));
+    setBackLink(
+      canDeliver
+        ? { href: DELIVERY_PAGE, label: "← Delivery" }
+        : canAccessPage(BILLING_PAGE, roles)
+          ? { href: BILLING_PAGE, label: "← วางบิล" }
+          : null,
+    );
   }, []);
 
   // โหลดช่วงเดิมใหม่เบื้องหลัง: ใบอื่นที่ค้างบนจอ (ป้ายส่งตามในใบไหน) + ป้ายค้างส่ง ต้องตรงกับ server ทั้งคู่
@@ -164,16 +195,19 @@ export function DeliveryReportPage() {
   }
 
   // ตัวเลือกลูกค้า = ลูกค้าที่เคยมีใบส่งงานในรายงานนี้หรือมีป้ายค้างส่ง
+  const customerLabels = useMemo(() => deliveryCustomerLabels(Object.values(customerInfo)), [customerInfo]);
+  const labelOf = (id: string, fallback: string) => customerLabels.get(id) ?? fallback;
   const customers = useMemo(
-    () => Object.entries(customerNames).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th")),
-    [customerNames],
+    () => Array.from(customerLabels, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th")),
+    [customerLabels],
   );
   const activeCustomer = customers.find((c) => c.id === customerId) ?? null;
 
   const customerSlips = slips.filter((s) => !customerId || s.customer.id === customerId);
-  const shownSlips = customerSlips.filter((s) => showCancelled || !s.cancelledAt);
+  // ใบที่คันที่บัญชีนี้เห็นถูกยกเลิกครบแล้ว (ใบเก่าที่รวมสองประเภท) นับเป็นใบที่ยกเลิกสำหรับบัญชีนี้ - ไม่นับ/ไม่พิมพ์ใบว่าง
+  const shownSlips = customerSlips.filter((s) => showCancelled || !slipCancelledForViewer(s));
   // พิมพ์ / นับ / PDF ใช้เฉพาะคันที่ยังไม่ยกเลิก
-  const liveSlips = customerSlips.filter((s) => !s.cancelledAt).map(activeSlip);
+  const liveSlips = customerSlips.filter((s) => !slipCancelledForViewer(s)).map(activeSlip);
   const cancelledCount = customerSlips.length - liveSlips.length;
   // ส่งเล่มไปแล้วแต่ป้ายยังไม่ได้ส่ง (รอป้ายออก / ป้ายมาแล้วรอส่ง) - ไม่ขึ้นกับช่วงวันที่
   const platePending = pendingRows.filter((r) => r.deliveredDate && (!customerId || r.customerId === customerId));
@@ -181,14 +215,16 @@ export function DeliveryReportPage() {
   const counts = countItems(liveItems);
   // คัน = นับรถไม่ซ้ำ: ส่งเล่มใบหนึ่งแล้วส่งป้ายตามอีกใบในช่วงเดียวกัน = 1 คัน (พบ 2026-09-27: เดิมนับ 2)
   const vehicleCount = new Set(liveItems.map((i) => i.vehicleId)).size;
-  const report: DeliveryReportInput = { ...range, customerName: activeCustomer?.name ?? null, slips: liveSlips, platePending, truncated };
+  const report: DeliveryReportInput = { ...range, customerName: activeCustomer?.name ?? null, slips: liveSlips, platePending, customerLabels, truncated };
   const canAddPlate = (r: DeliveryRow) => r.kind === "PLATE_ONLY" && !!r.bookSlip && inScope(r.body, editScope);
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle/delivery" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← Delivery
-      </Link>
+      {backLink && (
+        <Link href={backLink.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+          {backLink.label}
+        </Link>
+      )}
       <h1 tabIndex={-1}>รายงานส่งงาน</h1>
       <p>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกเล่ม / ป้าย (ใบเสร็จส่งพร้อมใบวางบิล) พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</p>
 
@@ -292,86 +328,105 @@ export function DeliveryReportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shownSlips.map((s) => (
-                      <Fragment key={s.id}>
-                        <tr style={{ background: s.cancelledAt ? "#fbf1f1" : "#f5f7fb" }}>
-                          <td colSpan={6}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                              <span>
-                                <b style={s.cancelledAt ? CANCELLED_ROW : undefined}>{slipNoText(s.slipNo)}</b> · {isoToDisplayDate(s.date)} ·{" "}
-                                {s.customer.displayName} · ผู้รับ {s.recipient}
-                                {s.note ? ` · ${s.note}` : ""}
-                                {s.createdBy ? <span className="muted"> · บันทึกโดย {s.createdBy}</span> : null}
-                                {s.cancelledAt && (
-                                  <span className="badge" style={{ marginLeft: 8, background: "#fdecec", color: "#c0392b" }}>
-                                    ยกเลิกแล้ว
-                                  </span>
-                                )}
-                              </span>
-                              {!s.cancelledAt && (
+                    {shownSlips.map((s) => {
+                      // gone = ยกเลิกทั้งใบ หรือคันที่บัญชีนี้เห็นถูกยกเลิกครบแล้ว (ใบเก่าที่รวมสองประเภท) - ไม่มีปุ่มพิมพ์/PDF/แก้/ยกเลิก
+                      const gone = slipCancelledForViewer(s);
+                      const hidden = hiddenItemsOf(s);
+                      const cancellable = !gone && canCancelSlip(s, editScope);
+                      const editable = !gone && canEditSlip(s, editScope);
+                      return (
+                        <Fragment key={s.id}>
+                          <tr style={{ background: gone ? "#fbf1f1" : "#f5f7fb" }}>
+                            <td colSpan={6}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                                 <span>
-                                  <button className="text-button" onClick={() => printDeliverySlips([activeSlip(s)])}>
-                                    พิมพ์ใบส่งงาน
-                                  </button>
-                                  <button className="text-button" disabled={makingPdf} onClick={() => savePdf(() => downloadDeliverySlipPdf(activeSlip(s)))}>
-                                    บันทึก PDF
-                                  </button>
-                                  {canManageSlip(s, editScope) && (
-                                    <>
+                                  <b style={gone ? CANCELLED_ROW : undefined}>{slipNoText(s.slipNo)}</b> · {isoToDisplayDate(s.date)} ·{" "}
+                                  {labelOf(s.customer.id, s.customer.displayName)} · ผู้รับ {s.recipient}
+                                  {s.note ? ` · ${s.note}` : ""}
+                                  {s.createdBy ? <span className="muted"> · บันทึกโดย {s.createdBy}</span> : null}
+                                  {gone && (
+                                    <span className="badge" style={{ marginLeft: 8, background: "#fdecec", color: "#c0392b" }}>
+                                      {s.cancelledAt ? "ยกเลิกแล้ว" : "ยกเลิกครบทุกคันที่ดูแลแล้ว"}
+                                    </span>
+                                  )}
+                                </span>
+                                {!gone && (
+                                  <span>
+                                    <button className="text-button" onClick={() => printDeliverySlips([activeSlip(s)])}>
+                                      พิมพ์ใบส่งงาน
+                                    </button>
+                                    <button className="text-button" disabled={makingPdf} onClick={() => savePdf(() => downloadDeliverySlipPdf(activeSlip(s)))}>
+                                      บันทึก PDF
+                                    </button>
+                                    {editable && (
                                       <button className="text-button" onClick={() => setDialog({ kind: "edit", slip: s })}>
                                         ✎ แก้
                                       </button>
+                                    )}
+                                    {cancellable && (
                                       <button className="text-button" style={{ color: "#c0392b" }} onClick={() => setDialog({ kind: "cancel", slip: s })}>
                                         ยกเลิก
                                       </button>
-                                    </>
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                            {s.cancelledAt && (
-                              <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
-                                เหตุผลที่ยกเลิก: {s.cancelReason}
-                                {s.cancelledBy ? ` · โดย ${s.cancelledBy}` : ""}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                        {s.items.map((i) => {
-                          const later = i.plateSentLater;
-                          return (
-                            <tr key={`${s.id}-${i.vehicleId}`} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
-                              <td>{i.plateText || "—"}</td>
-                              <td>{i.chassis}</td>
-                              <td>{i.brandName}</td>
-                              <td>{i.receiptNo || "—"}</td>
-                              <td>
-                                <Tick sent={i.book} />
-                              </td>
-                              <td>
-                                <Tick sent={i.plate} />
-                                {/* ใบนี้ส่งเล่มอย่างเดียว ป้ายไปในใบอื่นทีหลัง - บอกไว้ให้รู้ว่าทำไมช่องนี้ว่าง (ผู้ใช้ 2026-09-27) */}
-                                {later && (
-                                  <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
-                                    ป้ายส่งตามใน {slipNoText(later.slipNo)} {isoToDisplayDate(later.date)}
+                                    )}
                                   </span>
                                 )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        {!s.cancelledAt && s.items.some((i) => i.cancelledAt) && (
-                          <tr>
-                            <td colSpan={6} className="muted" style={{ fontSize: 13 }}>
-                              {s.items
-                                .filter((i) => i.cancelledAt)
-                                .map((i) => `ยกเลิก ${i.chassis}: ${i.cancelReason}${i.cancelledBy ? ` (${i.cancelledBy})` : ""}`)
-                                .join(" · ")}
+                              </div>
+                              {/* ใบเก่าที่รวมรถยนต์ + จักรยานยนต์: บัญชีที่ไม่เห็นบางคัน (hidden) หรือเห็นแต่แก้ได้บางคัน (ยกเลิกได้ แก้ทั้งใบไม่ได้) */}
+                              {!gone && (hidden > 0 || (cancellable && !editable)) && (
+                                <div className="muted" style={{ marginTop: 4, fontSize: 13, color: "#bb6a00" }}>
+                                  ใบนี้ส่งรถยนต์กับจักรยานยนต์รวมกัน (ก่อนแยกใบ)
+                                  {hidden > 0 ? ` มีรถอีก ${hidden} คันที่บัญชีนี้ไม่ได้ดูแล - แสดง/พิมพ์เฉพาะคันในขอบเขต` : ""}
+                                  {cancellable && !editable ? " - ยกเลิกได้เฉพาะคันประเภทที่บัญชีนี้ดูแล แก้ผู้รับ/วันที่ทั้งใบให้ ADMIN ทำ" : ""}
+                                </div>
+                              )}
+                              {s.cancelledAt ? (
+                                <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                                  เหตุผลที่ยกเลิก: {s.cancelReason}
+                                  {s.cancelledBy ? ` · โดย ${s.cancelledBy}` : ""}
+                                </div>
+                              ) : gone && hidden > 0 ? (
+                                <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+                                  ใบนี้ส่งรถยนต์กับจักรยานยนต์รวมกัน (ก่อนแยกใบ) - ยังมีรถอีก {hidden} คันที่บัญชีนี้ไม่ได้ดูแลซึ่งยังไม่ได้ยกเลิก
+                                </div>
+                              ) : null}
                             </td>
                           </tr>
-                        )}
-                      </Fragment>
-                    ))}
+                          {s.items.map((i) => {
+                            const later = i.plateSentLater;
+                            return (
+                              <tr key={`${s.id}-${i.vehicleId}`} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
+                                <td>{i.plateText || "—"}</td>
+                                <td>{i.chassis}</td>
+                                <td>{i.brandName}</td>
+                                <td>{i.receiptNo || "—"}</td>
+                                <td>
+                                  <Tick sent={i.book} />
+                                </td>
+                                <td>
+                                  <Tick sent={i.plate} />
+                                  {/* ใบนี้ส่งเล่มอย่างเดียว ป้ายไปในใบอื่นทีหลัง - บอกไว้ให้รู้ว่าทำไมช่องนี้ว่าง (ผู้ใช้ 2026-09-27) */}
+                                  {later && (
+                                    <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
+                                      ป้ายส่งตามใน {slipNoText(later.slipNo)} {isoToDisplayDate(later.date)}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {!s.cancelledAt && s.items.some((i) => i.cancelledAt) && (
+                            <tr>
+                              <td colSpan={6} className="muted" style={{ fontSize: 13 }}>
+                                {s.items
+                                  .filter((i) => i.cancelledAt)
+                                  .map((i) => `ยกเลิก ${i.chassis}: ${i.cancelReason}${i.cancelledBy ? ` (${i.cancelledBy})` : ""}`)
+                                  .join(" · ")}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -400,7 +455,7 @@ export function DeliveryReportPage() {
                   <tbody>
                     {platePending.map((r) => (
                       <tr key={r.id}>
-                        <td>{r.customerName}</td>
+                        <td>{labelOf(r.customerId, r.customerName)}</td>
                         <td>{r.plateCategory && r.plateNumber ? `${r.plateCategory} ${r.plateNumber}` : "—"}</td>
                         <td>{r.chassis}</td>
                         <td>
@@ -447,6 +502,7 @@ export function DeliveryReportPage() {
       {dialog?.kind === "cancel" && (
         <DeliverySlipCancelDialog
           slip={dialog.slip}
+          editable={(i) => inScope(i.body, editScope)}
           onClose={() => setDialog(null)}
           onCancelled={(updated) => replaceSlip(updated, `ยกเลิกการส่งใน ${slipNoText(updated.slipNo)} แล้ว - รถกลับเข้าคิว Delivery ให้บันทึกส่งใหม่`)}
           onRefused={reloadQuietly}
@@ -458,7 +514,7 @@ export function DeliveryReportPage() {
             id: plateDialog.id,
             chassis: plateDialog.chassis,
             plateText: plateDialog.plateCategory && plateDialog.plateNumber ? `${plateDialog.plateCategory} ${plateDialog.plateNumber}` : "",
-            customerName: plateDialog.customerName,
+            customerName: labelOf(plateDialog.customerId, plateDialog.customerName),
           }}
           slip={plateDialog.bookSlip}
           onClose={() => setPlateDialog(null)}

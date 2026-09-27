@@ -1,10 +1,22 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { assertTransferNoticeInScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { currentUser } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { TaxService } from '../tax/tax.service.js';
+import type { GovernmentTaxOwnerInput, GovernmentTaxVehicleInput } from '../tax/government-tax-calculator.js';
 import { vehicleListWhere } from './vehicle-list-filter.js';
+import {
+  affectedSteps,
+  changedStepFields,
+  isImpactConfirmed,
+  needsTaxPreview,
+  ownerNameChanged,
+  ownerTaxChanged,
+  type AffectedStep,
+} from './vehicle-edit-impact.js';
 import { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
+import { CorrectTransferNoticeDto } from './dto/correct-transfer-notice.dto.js';
 import { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
 import { CorrectInspectionSentDto } from './dto/correct-inspection-sent.dto.js';
 import { CancelInspectionSentDto } from './dto/cancel-inspection-sent.dto.js';
@@ -14,6 +26,7 @@ import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 import { OWNER_TYPE_CHOICES } from './vehicle-reference-data.js';
+import { cancelledSubmitDate, resubmitWindow, type ResubmitWindow, type SubmitAttempt } from './resubmit-window.js';
 import { OwnerType } from '../generated/prisma/enums.js';
 import { addDays, bangkokToday, isoOf, toDate } from '../overview/overview-calculator.js';
 import {
@@ -33,6 +46,13 @@ export interface PlateSwapSummary {
   newPlateNumber: string | null;
   submitDate: string; // YYYY-MM-DD
   returnedDate: string | null;
+}
+
+// คำเตือนตอนแก้ข้อมูลรถที่ผ่านขั้นตอนถัดไปแล้ว (ผู้ใช้ 2026-09-27) - tax = ภาษีที่ยื่นไว้ + ข้อมูลใหม่สำหรับ preview ภาษี
+// (เฉพาะรายการยื่นที่รอใบเสร็จและช่องที่ใช้คิดภาษีเปลี่ยน)
+interface EditWarning {
+  affected: AffectedStep[];
+  tax: { old: number | null; vehicle: GovernmentTaxVehicleInput; owner: GovernmentTaxOwnerInput } | null;
 }
 
 const EDITABLE_VEHICLE_FIELDS = [
@@ -200,6 +220,13 @@ function diffField(value: unknown): string | null {
   return String(value);
 }
 
+// ค่าใช้จ่ายเท่ากันไหม - เทียบเป็นตัวเลข ("300" = "300.00" = Decimal 300) ว่าง/null = ไม่มีค่าใช้จ่าย
+function sameCostValue(a: unknown, b: unknown): boolean {
+  const empty = (v: unknown) => v === null || v === undefined || String(v).trim() === '';
+  if (empty(a) || empty(b)) return empty(a) && empty(b);
+  return Number(String(a)) === Number(String(b));
+}
+
 interface VehicleRowError {
   row: number;
   errors: string[];
@@ -233,7 +260,16 @@ const COMPLETED_SUBMITTED_REFERENCE = 100;
 
 @Injectable()
 export class VehiclesService {
-  constructor(private readonly prisma: PrismaService) {}
+  // TaxService ใช้ preview ภาษีตามข้อมูลใหม่ในคำเตือนตอนแก้ข้อมูลรถที่ยื่นแล้ว (ไม่บันทึก - ผู้ใช้ 2026-09-27)
+  // unit test ที่ไม่ส่งมาใช้ตัวที่สร้างจาก prisma เดียวกัน
+  private readonly taxService: TaxService;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(TaxService) taxService?: TaxService,
+  ) {
+    this.taxService = taxService ?? new TaxService(prisma);
+  }
 
   private readonly vehicleFullInclude = {
     customer: { select: { name: true } },
@@ -336,9 +372,11 @@ export class VehiclesService {
   private async plateSwapsByVehicle(vehicleIds: string[]): Promise<Map<string, PlateSwapSummary>> {
     if (vehicleIds.length === 0) return new Map();
     try {
+      // งานที่ยังไม่รับเอกสารกลับมาก่อน (ตัวที่ล็อกการยื่น) แล้วค่อยงานล่าสุด งานที่ยกเลิกแล้วไม่นับ (ผู้ใช้ 2026-09-27: กฎเดียวกับ
+      // การยื่นจริงและค้นหารถ - ดู document-submission/plate-swap-link.ts เดิมดูแค่งานล่าสุด งานเก่าที่ยังค้างไม่ล็อก)
       const swaps = await this.prisma.plateSwap.findMany({
-        where: { newVehicleId: { in: vehicleIds } },
-        orderBy: { createdAt: 'desc' },
+        where: { newVehicleId: { in: vehicleIds }, cancelledAt: null },
+        orderBy: [{ returnedDate: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
         select: {
           id: true,
           newVehicleId: true,
@@ -353,7 +391,7 @@ export class VehiclesService {
       });
       const map = new Map<string, PlateSwapSummary>();
       for (const swap of swaps) {
-        if (!swap.newVehicleId || map.has(swap.newVehicleId)) continue; // งานล่าสุดของรถคันนั้นเท่านั้น
+        if (!swap.newVehicleId || map.has(swap.newVehicleId)) continue; // งานแรกตามลำดับข้างบนของรถคันนั้นเท่านั้น
         map.set(swap.newVehicleId, {
           id: swap.id,
           oldOwnerName: swap.oldOwnerName,
@@ -583,12 +621,29 @@ export class VehiclesService {
     });
   }
 
+  // สถานะขั้นตอนของรถที่ใช้เตือนตอนแก้ข้อมูลรถ (ผู้ใช้ 2026-09-27) - ดู vehicle-edit-impact.ts
+  // รายการยื่นที่ยัง active ล่าสุด (ภาษีที่ยื่นไว้) / ใบส่งงานที่ยังไม่ยกเลิก / ใบวางบิลที่ยังไม่ VOID
+  private readonly editStepStateInclude = {
+    owner: true,
+    documentSubmissions: {
+      where: { status: { in: ACTIVE_SUBMISSION_STATUSES } },
+      orderBy: { createdAt: 'desc' as const },
+      take: 1,
+      select: { status: true, taxAmount: true, submitDate: true },
+    },
+    deliverySlipItems: { where: { cancelledAt: null }, select: { id: true }, take: 1 },
+    invoiceLines: { where: { invoice: { status: { not: 'VOID' } } }, select: { id: true }, take: 1 },
+  } as const;
+
   // แก้ไขรถที่บันทึกแล้ว - ต้องมี remark ทุกครั้ง ไม่งั้นห้ามแก้ไข บันทึกทุกครั้งลง VehicleEditLog
+  // แก้ช่องที่ขั้นตอนถัดไปใช้ไปแล้ว (จังหวัด/ประเภทรถ/ยี่ห้อ/เชื้อเพลิง/CC/น้ำหนัก/เจ้าของ/ลูกค้า - ผู้ใช้ 2026-09-27) = ตอบ 409
+  // { needsConfirm: true, affected, taxPreview? } จนกว่าจะส่ง confirm: true (+ confirmedSteps = confirmKey ของคำเตือนที่เห็น) มา
+  // เตือนอย่างเดียว: ค่าใช้จ่าย/ค่าธรรมเนียม/ภาษีของขั้นตอนเดิมไม่ถูกคิดใหม่ (รายการยื่นที่รอใบเสร็จ -> ยกเลิกแล้วยื่นใหม่)
   async updateVehicle(id: string, body: UpdateVehicleDto) {
     const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
     if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไข (Remark)' });
 
-    const existing = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: { owner: true } });
+    const existing = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, select: { id: true, chassis: true } });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     const row = normalizeVehicleRow(body as unknown as Record<string, unknown>);
@@ -615,43 +670,103 @@ export class VehiclesService {
       if (duplicate) throw new ConflictException({ error: 'เลขตัวถังนี้มีอยู่แล้ว' });
     }
 
-    const data = this.toCreateData(row, existing.ownerId);
-    const changes: Record<string, { from: string | null; to: string | null }> = {};
-    for (const [key] of EDITABLE_VEHICLE_FIELDS) {
-      const from = diffField((existing as Record<string, unknown>)[key]);
-      const to = diffField((data as Record<string, unknown>)[key]);
-      if (from !== to) changes[key] = { from, to };
-    }
-
-    // เจ้าของรถเปลี่ยน = สร้าง VehicleOwner แถวใหม่แล้วชี้ไปแทน (ไม่แก้แถวเดิม เพราะ Step 4 tax-input เคยให้เลือกแถวเจ้าของ
-    // ที่มีอยู่ซ้ำข้ามคันได้) - บันทึกลง edit log เป็นข้อความอ่านง่ายใต้ key "owner"
-    const currentOwner: OwnerData | null = existing.owner
-      ? {
-          name: existing.owner.name,
-          hirerName: existing.owner.hirerName,
-          ownerType: existing.owner.ownerType,
-          isHirePurchaseBusiness: existing.owner.isHirePurchaseBusiness,
-          hirerType: existing.owner.hirerType,
-          financeCompanyId: existing.owner.financeCompanyId,
-        }
-      : null;
     const nextOwner = ownerDataFor(row, financeCompany?.name ?? null);
-    const ownerChanged = !sameOwner(currentOwner, nextOwner);
-    if (ownerChanged) changes.owner = { from: describeOwner(currentOwner), to: describeOwner(nextOwner) };
 
+    let warning: EditWarning | null;
     try {
-      await this.prisma.$transaction(async (tx) => {
+      warning = await this.prisma.$transaction(async (tx): Promise<EditWarning | null> => {
+        // ล็อกแถวรถก่อนอ่านสถานะขั้นตอน (ยื่นเอกสาร/วางบิล/ลบรถล็อกแถวเดียวกัน) - ยื่นเอกสารพร้อมกับที่แก้ = อีกฝั่งรอจนแก้เสร็จ
+        // หรือแก้เห็นรายการยื่นที่เพิ่งบันทึก ไม่มีทางบันทึกผ่านไปโดยไม่เตือน
+        await tx.$queryRaw`SELECT "id" FROM "Vehicle" WHERE "id" = ${id} FOR UPDATE`;
+        const current = await tx.vehicle.findFirst({ where: { id, deletedAt: null }, include: this.editStepStateInclude });
+        if (!current) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+
+        const data = this.toCreateData(row, current.ownerId);
+        const changes: Record<string, { from: string | null; to: string | null }> = {};
+        for (const [key] of EDITABLE_VEHICLE_FIELDS) {
+          const from = diffField((current as Record<string, unknown>)[key]);
+          const to = diffField((data as Record<string, unknown>)[key]);
+          if (from !== to) changes[key] = { from, to };
+        }
+
+        // เจ้าของรถเปลี่ยน = สร้าง VehicleOwner แถวใหม่แล้วชี้ไปแทน (ไม่แก้แถวเดิม เพราะ Step 4 tax-input เคยให้เลือกแถวเจ้าของ
+        // ที่มีอยู่ซ้ำข้ามคันได้) - บันทึกลง edit log เป็นข้อความอ่านง่ายใต้ key "owner"
+        const currentOwner: OwnerData | null = current.owner
+          ? {
+              name: current.owner.name,
+              hirerName: current.owner.hirerName,
+              ownerType: current.owner.ownerType,
+              isHirePurchaseBusiness: current.owner.isHirePurchaseBusiness,
+              hirerType: current.owner.hirerType,
+              financeCompanyId: current.owner.financeCompanyId,
+            }
+          : null;
+        const ownerChanged = !sameOwner(currentOwner, nextOwner);
+        if (ownerChanged) changes.owner = { from: describeOwner(currentOwner), to: describeOwner(nextOwner) };
+
+        // ขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว (ผู้ใช้ 2026-09-27) - ยังไม่ได้ยืนยัน = ไม่บันทึกอะไร คืนคำเตือนให้ตอบ 409
+        const submission = current.documentSubmissions[0] ?? null;
+        const state = {
+          transferDone: current.transferDone,
+          inspectionSent: current.inspectionSentDate != null,
+          inspectionResultPending: current.inspectionSentDate != null && current.inspectionResult == null && current.inspectionResultDate == null,
+          submissionStatus: submission?.status ?? null,
+          submitDate: submission?.submitDate ? isoOf(submission.submitDate) : null,
+          delivered: current.deliveredDate != null || current.deliverySlipItems.length > 0,
+          billed: current.invoiceLines.length > 0,
+          billingClosed: current.billingClosedAt != null,
+        };
+        // ชื่อเจ้าของนับแยกจากส่วนที่มีผลกับภาษี: ใบส่งงานอ่านชื่อตอนพิมพ์ (ผู้ใช้ 2026-09-27 รอบตรวจ)
+        const changed = changedStepFields(current, data, ownerTaxChanged(currentOwner, nextOwner), ownerNameChanged(currentOwner, nextOwner));
+        const affected = affectedSteps(changed, state, current, data);
+        if (!isImpactConfirmed(affected, body?.confirm, body?.confirmedSteps)) {
+          return {
+            affected,
+            tax: needsTaxPreview(changed, state)
+              ? {
+                  old: submission?.taxAmount == null ? null : Number(submission.taxAmount),
+                  vehicle: { body: data.body, fuel: data.fuel, cc: data.cc, weight: data.weight, firstRegistrationDate: current.firstRegistrationDate },
+                  owner: { ownerType: nextOwner.ownerType, isHirePurchaseBusiness: nextOwner.isHirePurchaseBusiness, hirerType: nextOwner.hirerType },
+                }
+              : null,
+          };
+        }
+
         if (ownerChanged) {
           const owner = await tx.vehicleOwner.create({ data: nextOwner, select: { id: true } });
           data.ownerId = owner.id;
         }
         await tx.vehicle.update({ where: { id }, data });
-        await tx.vehicleEditLog.create({ data: { vehicleId: id, remark, changes: JSON.stringify(changes), editedById: editorId() } });
+        await tx.vehicleEditLog.create({
+          data: {
+            vehicleId: id,
+            // แก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ยืนยันคำเตือนแล้ว) - เก็บว่าเตือนขั้นตอนไหนไว้กับเหตุผลด้วย
+            remark: affected.length ? `ยืนยันแก้หลัง ${affected.map((a) => a.label).join(', ')}: ${remark}` : remark,
+            changes: JSON.stringify(changes),
+            editedById: editorId(),
+          },
+        });
+        return null;
       });
     } catch (err) {
       // มีคนบันทึกเลขตัวถังเดียวกันเข้ามาระหว่างนั้น (unique index กันไว้) - ตอบ 409 แบบเดียวกับการตรวจล่วงหน้า
       if (isChassisConflict(err)) throw new ConflictException({ error: 'เลขตัวถังนี้มีอยู่แล้ว' });
       throw err;
+    }
+
+    if (warning) {
+      // ภาษีตามข้อมูลใหม่แบบ preview (ไม่บันทึก TaxCalculation) เทียบกับภาษีที่ยื่นไว้ - คำนวณนอก transaction ไม่ให้ล็อกแถวรถนาน
+      let taxPreview: { old: number | null; new: number | null; reason: string | null } | undefined;
+      if (warning.tax) {
+        const [preview] = await this.taxService.previewMany([{ vehicle: warning.tax.vehicle, owner: warning.tax.owner }]);
+        taxPreview = { old: warning.tax.old, new: preview?.amount ?? null, reason: preview?.reason ?? null };
+      }
+      throw new ConflictException({
+        error: 'รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบผลกระทบแล้วกดยืนยันเพื่อบันทึก',
+        needsConfirm: true,
+        affected: warning.affected,
+        ...(taxPreview ? { taxPreview } : {}),
+      });
     }
 
     return { id };
@@ -768,7 +883,8 @@ export class VehiclesService {
       return 'รถคันนี้ถูกวางบิลแล้ว - ลบไม่ได้';
     }
     try {
-      const swap = await this.prisma.plateSwap.findFirst({ where: { newVehicleId: vehicle.id }, select: { id: true } });
+      // งานสลับเลขที่ยกเลิกแล้วไม่นับ (ยกเลิกแบบซ่อน ไม่ลบแถว - ผู้ใช้ 2026-09-27)
+      const swap = await this.prisma.plateSwap.findFirst({ where: { newVehicleId: vehicle.id, cancelledAt: null }, select: { id: true } });
       if (swap) return 'รถคันนี้ถูกผูกเป็นรถใหม่ของงานสลับเลข - ต้องไปแก้งานสลับเลขให้ผูกคันอื่นก่อนจึงจะลบได้';
     } catch {
       // ฐานข้อมูลที่ยังไม่ได้รันไมเกรชันตาราง PlateSwap (P2021) - ถือว่าไม่มีงานสลับเลข เหมือน plateSwapsByVehicle()
@@ -794,23 +910,32 @@ export class VehiclesService {
     return vehicles.map((vehicle) => this.mapTransferNoticeVehicle(vehicle, deregistrationFees, relocateFees));
   }
 
-  // ทุกคันที่ transferDone = true เรียงจากทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน
-  async findRecentlyCompletedTransferNotice() {
+  // ทุกคันที่ transferDone = true เรียงจากทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน - ทีละ 100 คัน (offset = "โหลดเพิ่ม",
+  // limit สูงสุด 1,000 ใช้โหลดใหม่หลังแก้ให้ได้เท่าที่เปิดอยู่) q ค้นเลขตัวถัง/เลขเครื่อง/ทะเบียน/ลูกค้า/เจ้าของ แบบหน้าเพิ่มข้อมูลรถ
+  // (ผู้ใช้ 2026-09-27: เดิมแสดงแค่ 100 คันล่าสุด คันที่เก่ากว่านั้นหาไม่เจอจึงแก้ไม่ได้)
+  async findRecentlyCompletedTransferNotice(params: { q?: string; offset?: string; limit?: string } = {}) {
+    const pageSize = Math.min(1000, Math.max(1, Number.parseInt(params.limit ?? '100', 10) || 100));
+    const offset = Math.max(0, Number.parseInt(params.offset ?? '0', 10) || 0);
     const [vehicles, deregistrationFees, relocateFees] = await Promise.all([
       this.prisma.vehicle.findMany({
-        where: { deletedAt: null, transferDone: true },
-        orderBy: [{ transferCompletedDate: 'desc' }, { updatedAt: 'desc' }],
-        take: 100,
+        where: { ...vehicleListWhere({ q: params.q }), transferDone: true },
+        orderBy: [{ transferCompletedDate: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }],
+        skip: offset,
+        take: pageSize + 1, // เกินมา 1 คัน = ยังมีหน้าถัดไป
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
+          ...activeSubmissionsInclude,
         },
       }),
       this.prisma.feeDeregistration.findMany(),
       this.prisma.feeRelocate.findMany(),
     ]);
 
-    return vehicles.map((vehicle) => this.mapTransferNoticeVehicle(vehicle, deregistrationFees, relocateFees));
+    return {
+      vehicles: vehicles.slice(0, pageSize).map((vehicle) => this.mapTransferNoticeVehicle(vehicle, deregistrationFees, relocateFees)),
+      hasMore: vehicles.length > pageSize,
+    };
   }
 
   private mapTransferNoticeVehicle(
@@ -823,8 +948,10 @@ export class VehiclesService {
       transferDone: boolean;
       transferCompletedDate: Date | null;
       transferCost: unknown;
+      inspectionSentDate: Date | null;
       customer: { name: string };
       brand: { name: string };
+      documentSubmissions?: Array<unknown>;
     },
     deregistrationFees: Array<{ vehicleType: string; brand: string; amount: unknown }>,
     relocateFees: Array<{ vehicleType: string; brand: string; noBillAmount: unknown; billAmount: unknown }>,
@@ -845,6 +972,9 @@ export class VehiclesService {
       transferDone: vehicle.transferDone,
       transferCompletedDate: vehicle.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
       transferCost: vehicle.transferCost,
+      // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
+      inspectionSentDate: vehicle.inspectionSentDate?.toISOString().slice(0, 10) ?? null,
+      submitted: (vehicle.documentSubmissions?.length ?? 0) > 0,
     };
   }
 
@@ -900,40 +1030,122 @@ export class VehiclesService {
     if (typeof expectedDone === 'boolean' && expectedDone !== vehicle.transferDone) {
       throw new ConflictException({ error: STALE_ERROR });
     }
+    // คันที่ดำเนินการแล้วแก้/ยกเลิกสถานะได้ทาง "✎ แก้" ที่ต้องระบุเหตุผลเท่านั้น (ผู้ใช้ 2026-09-27: เดิมเรียก API นี้ตรงๆ ย้อนสถานะ
+    // ได้แม้ส่งตรวจแล้วและไม่มีเหตุผล) - ดู correctTransferNotice
+    if (vehicle.transferDone) {
+      throw new BadRequestException({ error: 'รถคันนี้ดำเนินการแจ้งย้าย/ตัดบัญชีแล้ว - แก้ได้ที่ปุ่ม "✎ แก้" (ต้องระบุเหตุผล)' });
+    }
 
     const completedDate = completedDateRaw ? toDate(completedDateRaw) : null;
     const cost = costRaw || null;
-    // คันที่ดำเนินการแล้วถูกแก้ (ย้อนเป็นยังไม่เสร็จ / เปลี่ยนวันที่ / ค่าใช้จ่าย) บันทึกลงประวัติการแก้ไขด้วย - หน้าเว็บไม่มีปุ่มนี้
-    // มีได้จากการเรียก API ตรง
-    const changes: Record<string, { from: string | null; to: string | null }> = {};
-    if (vehicle.transferDone !== done) changes.transferDone = { from: String(vehicle.transferDone), to: String(done) };
-    if (diffField(vehicle.transferCompletedDate) !== diffField(completedDate)) {
-      changes.transferCompletedDate = { from: diffField(vehicle.transferCompletedDate), to: diffField(completedDate) };
-    }
-    const fromCost = diffField(vehicle.transferCost);
-    if ((fromCost === null) !== (cost === null) || (fromCost !== null && Number(fromCost) !== Number(cost))) {
-      changes.transferCost = { from: fromCost, to: cost };
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.vehicle.updateMany({
-        where: { id, deletedAt: null, transferDone: vehicle.transferDone, ...NOT_SUBMITTED_WHERE },
-        data: { transferDone: done, transferCompletedDate: completedDate, transferCost: cost },
-      });
-      if (count === 0) throw new ConflictException({ error: STALE_ERROR });
-      if (vehicle.transferDone && Object.keys(changes).length) {
-        await tx.vehicleEditLog.create({
-          data: {
-            vehicleId: id,
-            remark: done ? 'แก้ไขข้อมูลแจ้งย้าย/ตัดบัญชีที่ดำเนินการแล้ว' : 'ย้อนสถานะแจ้งย้าย/ตัดบัญชีเป็นยังไม่ดำเนินการ',
-            changes: JSON.stringify(changes),
-            editedById: editorId(),
-          },
-        });
-      }
+    const { count } = await this.prisma.vehicle.updateMany({
+      where: { id, deletedAt: null, transferDone: false, ...NOT_SUBMITTED_WHERE },
+      data: { transferDone: done, transferCompletedDate: completedDate, transferCost: cost },
     });
+    if (count === 0) throw new ConflictException({ error: STALE_ERROR });
 
     return { id, transferDone: done, transferCompletedDate: completedDateRaw || null, transferCost: cost };
+  }
+
+  // แก้/ยกเลิกสถานะแจ้งย้าย/ตัดบัญชีที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27) - ต้องระบุเหตุผลทุกครั้ง เก็บลง VehicleEditLog
+  // - ยกเลิกสถานะ (done = false) ได้เฉพาะก่อนส่งตรวจ: ล้างวันที่เสร็จ/ค่าใช้จ่าย รถกลับเข้าคิว "ต้องดำเนินการ"
+  //   (ส่งตรวจแล้วค่อยพบว่าติ๊กผิดคัน = ยกเลิกส่งตรวจที่หน้าตรวจรถก่อน)
+  // - แก้วันที่เสร็จ/ค่าใช้จ่าย (done = true) ได้จนกว่าจะยื่นเอกสาร: วันที่เสร็จต้องไม่เกินวันนี้ และไม่หลังวันที่ส่งตรวจ
+  // สิทธิ์เท่ากับการบันทึกแจ้งย้าย/ตัดบัญชี (ADMIN/STAFF_ENTRY ทุกคัน, STAFF_MOTO เฉพาะจักรยานยนต์)
+  async correctTransferNotice(id: string, dto: CorrectTransferNoticeDto) {
+    if (typeof dto?.done !== 'boolean') throw new BadRequestException({ error: 'done ต้องเป็น true/false' });
+    const done = dto.done;
+    const completedDateRaw = typeof dto?.completedDate === 'string' ? dto.completedDate.trim() : '';
+    const costRaw = typeof dto?.cost === 'string' ? dto.cost.trim() : '';
+    const remark = typeof dto?.remark === 'string' ? dto.remark.trim() : '';
+    const expectedDate = dto?.expectedCompletedDate;
+    const expectedCost = dto?.expectedCost;
+
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้แจ้งย้าย/ตัดบัญชี' });
+    if (expectedDate !== undefined && expectedDate !== null && !(typeof expectedDate === 'string' && isValidDateParam(expectedDate))) {
+      throw new BadRequestException({ error: 'expectedCompletedDate ต้องเป็น ค.ศ. YYYY-MM-DD หรือ null' });
+    }
+    if (expectedCost !== undefined && expectedCost !== null && typeof expectedCost !== 'string' && typeof expectedCost !== 'number') {
+      throw new BadRequestException({ error: 'expectedCost ต้องเป็นตัวเลขหรือ null' });
+    }
+    if (done) {
+      if (!completedDateRaw) throw new BadRequestException({ error: 'กรุณาระบุวันที่เสร็จ' });
+      if (!isValidDateParam(completedDateRaw)) throw new BadRequestException({ error: 'วันที่เสร็จต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง' });
+      if (completedDateRaw > bangkokToday()) throw new BadRequestException({ error: 'วันที่เสร็จต้องไม่เกินวันนี้' });
+      if (costRaw && !/^\d+(\.\d+)?$/.test(costRaw)) throw new BadRequestException({ error: 'ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0' });
+    }
+
+    const vehicle = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, include: activeSubmissionsInclude });
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
+    assertTransferNoticeInScope(vehicle.body);
+    assertNotSubmitted(vehicle);
+    // dialog ส่งวันที่/ค่าใช้จ่ายที่แสดงอยู่มาด้วย - ไม่ตรงกับตอนนี้ = มีคนแก้ไปก่อนแล้ว ห้ามเขียนทับ (พบ 2026-09-27 รอบตรวจ: เดิมเทียบแค่
+    // ค่าที่ service เพิ่งอ่าน dialog ที่เปิดค้างไว้จึงเขียนวันที่เดิมทับที่อีกคนเพิ่งแก้ได้ แบบเดียวกับ expectedTransferDone)
+    if (expectedDate !== undefined && (expectedDate || null) !== diffField(vehicle.transferCompletedDate)) {
+      throw new ConflictException({ error: STALE_ERROR });
+    }
+    if (expectedCost !== undefined && !sameCostValue(expectedCost, vehicle.transferCost)) {
+      throw new ConflictException({ error: STALE_ERROR });
+    }
+    if (!vehicle.transferDone) {
+      throw new BadRequestException({ error: 'รถคันนี้ยังไม่ได้ดำเนินการแจ้งย้าย/ตัดบัญชี - บันทึกที่ตาราง "ต้องดำเนินการ"' });
+    }
+    if (!done && vehicle.inspectionSentDate) {
+      throw new BadRequestException({
+        error: 'รถคันนี้ส่งตรวจแล้ว - ยกเลิกสถานะแจ้งย้าย/ตัดบัญชีไม่ได้ (แก้ได้เฉพาะวันที่เสร็จ/ค่าใช้จ่าย)',
+      });
+    }
+    // ส่งตรวจได้หลังแจ้งย้าย/ตัดบัญชีเสร็จ (assertSentDateInOrder) - แก้วันที่เสร็จให้หลังวันส่งตรวจไม่ได้
+    if (done && vehicle.inspectionSentDate && completedDateRaw > isoOf(vehicle.inspectionSentDate)) {
+      throw new BadRequestException({ error: `วันที่เสร็จต้องไม่หลังวันที่ส่งตรวจ (${dmy(isoOf(vehicle.inspectionSentDate))})` });
+    }
+
+    const data = done
+      ? { transferDone: true, transferCompletedDate: toDate(completedDateRaw), transferCost: costRaw || null }
+      : { transferDone: false, transferCompletedDate: null, transferCost: null };
+    const changes: Record<string, { from: string | null; to: string | null }> = {};
+    if (!done) changes.transferDone = { from: 'true', to: 'false' };
+    if (diffField(vehicle.transferCompletedDate) !== diffField(data.transferCompletedDate)) {
+      changes.transferCompletedDate = { from: diffField(vehicle.transferCompletedDate), to: diffField(data.transferCompletedDate) };
+    }
+    const fromCost = diffField(vehicle.transferCost);
+    const toCost = data.transferCost;
+    if ((fromCost === null) !== (toCost === null) || (fromCost !== null && Number(fromCost) !== Number(toCost))) {
+      changes.transferCost = { from: fromCost, to: toCost };
+    }
+    if (!Object.keys(changes).length) throw new BadRequestException({ error: 'ข้อมูลแจ้งย้าย/ตัดบัญชีเหมือนเดิม - ไม่มีอะไรต้องแก้' });
+
+    await this.prisma.$transaction(async (tx) => {
+      // บันทึกเฉพาะเมื่อยังเป็นข้อมูลที่อ่านมา (ยังไม่ยื่น/ส่งตรวจเหมือนเดิม/ไม่มีใครแก้ไปก่อน) - ไม่ตรง = 409 ไม่เขียนทับ
+      const { count } = await tx.vehicle.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          transferDone: true,
+          transferCompletedDate: vehicle.transferCompletedDate,
+          transferCost: vehicle.transferCost,
+          inspectionSentDate: vehicle.inspectionSentDate,
+          ...NOT_SUBMITTED_WHERE,
+        },
+        data,
+      });
+      if (count === 0) throw new ConflictException({ error: STALE_ERROR });
+      await tx.vehicleEditLog.create({
+        data: {
+          vehicleId: id,
+          remark: done ? `แก้แจ้งย้าย/ตัดบัญชี: ${remark}` : `ยกเลิกสถานะแจ้งย้าย/ตัดบัญชี: ${remark}`,
+          changes: JSON.stringify(changes),
+          editedById: editorId(),
+        },
+      });
+    });
+
+    return {
+      id,
+      transferDone: data.transferDone,
+      transferCompletedDate: done ? completedDateRaw : null,
+      transferCost: data.transferCost,
+    };
   }
 
   // ผ่าน Step 2 แล้ว (transferDone = true) และ: ยังไม่ได้ส่งตรวจ, ตรวจไม่ผ่าน (ส่งตรวจใหม่), หรือผลตรวจผ่านครบ
@@ -965,7 +1177,43 @@ export class VehiclesService {
       this.prisma.feeInspectionProvince.findMany(),
     ]);
 
-    return vehicles.map((vehicle) => this.mapInspectionVehicle(vehicle, bangkokFees, provinceFees));
+    const windows = await this.resubmitWindows(vehicles.filter((v) => isReinspectionDue(v)));
+    return vehicles.map((vehicle) => ({
+      ...this.mapInspectionVehicle(vehicle, bangkokFees, provinceFees),
+      // ถึงกำหนดตรวจรอบ 2 แต่ยกเลิก/ยื่นไม่สำเร็จภายในอายุผลตรวจเดิม = ยังยื่นใหม่ด้วยวันที่ยื่นเดิมได้ (ดู resubmit-window.ts)
+      resubmitWith: windows.get(vehicle.id) ?? null,
+    }));
+  }
+
+  // รถที่ถึงกำหนดตรวจรอบ 2: ครั้งล่าสุดที่ยื่นไม่สำเร็จ (FAILED) หรือยกเลิกการยื่น (VehicleEditLog) ด้วยผลตรวจผ่านปัจจุบัน
+  private async resubmitWindows(
+    due: Array<{ id: string; inspectionResultDate: Date | null }>,
+  ): Promise<Map<string, ResubmitWindow>> {
+    const result = new Map<string, ResubmitWindow>();
+    if (due.length === 0) return result;
+    const ids = due.map((v) => v.id);
+    const [failed, cancelLogs] = await Promise.all([
+      this.prisma.documentSubmission.findMany({
+        where: { vehicleId: { in: ids }, status: 'FAILED' },
+        select: { vehicleId: true, submitDate: true },
+      }),
+      this.prisma.vehicleEditLog.findMany({
+        where: { vehicleId: { in: ids }, changes: { contains: 'submission.cancelled' } },
+        select: { vehicleId: true, changes: true },
+      }),
+    ]);
+    const attempts = new Map<string, SubmitAttempt[]>();
+    const add = (vehicleId: string, attempt: SubmitAttempt) => attempts.set(vehicleId, [...(attempts.get(vehicleId) ?? []), attempt]);
+    for (const f of failed) add(f.vehicleId, { submitDate: isoOf(f.submitDate), reason: 'FAILED' });
+    for (const log of cancelLogs) {
+      const submitDate = cancelledSubmitDate(log.changes);
+      if (submitDate) add(log.vehicleId, { submitDate, reason: 'CANCELLED' });
+    }
+    for (const v of due) {
+      const found = v.inspectionResultDate ? resubmitWindow(v.inspectionResultDate, attempts.get(v.id) ?? []) : null;
+      if (found) result.set(v.id, found);
+    }
+    return result;
   }
 
   // ส่งตรวจแล้ว (inspectionSentDate มีค่า) แต่ยังไม่ทราบผล (inspectionResultDate ยังไม่มี)

@@ -48,6 +48,7 @@ export interface DeliverySlipItem {
   cancelReason: string | null;
   cancelledBy: string | null;
   invoiceNo: string | null; // วางบิลแล้ว = ยกเลิก / เปลี่ยนวันที่ส่งไม่ได้
+  billingClosed: boolean; // ปิดงาน - วางบิลนอกระบบ = ล็อกใบส่งเล่มเหมือนวางบิลแล้ว จนกว่า ADMIN เปิดงานกลับ (2026-09-27)
   ownerName: string | null; // ติดไฟแนนซ์ = ผู้ครอบครอง, ไม่ติด = ผู้ถือกรรมสิทธิ์
   // ส่งเล่มในใบนี้ ป้ายส่งตามไปในใบอื่น (อ่านสด) - null = ป้ายไปในใบนี้แล้ว / ยังค้างส่ง
   plateSentLater: { slipNo: number; date: string } | null;
@@ -65,6 +66,8 @@ export interface DeliverySlip {
   cancelReason: string | null;
   cancelledBy: string | null;
   customer: { id: string; name: string; company: string | null; branch: string | null; address: string | null; phone: string | null; displayName: string };
+  // ใบเก่าที่รวมรถยนต์ + จักรยานยนต์: คันอีกประเภทที่ยังไม่ยกเลิกซึ่งผู้ใช้นี้ไม่เห็น (ADMIN = 0)
+  hiddenItems: number;
   items: DeliverySlipItem[];
 }
 
@@ -163,7 +166,64 @@ export interface Invoice {
   paidDate: string | null;
   taxInvoiceNo: string | null;
   voidReason: string | null;
+  // หน้าแก้บิลส่งกลับเป็น expectedUpdatedAt - มีคนแก้/รับเงิน/ยกเลิกไปก่อน backend ตอบ 409 (ผู้ใช้ 2026-09-27)
+  updatedAt: string | null;
+  // จำนวนประวัติแก้ / ยกเลิก / ยกเลิกการรับเงิน (มาเฉพาะใน listInvoices)
+  historyCount?: number;
   lines: InvoiceLine[];
+}
+
+// แก้บิลที่ยังไม่รับเงิน เลขที่เดิม (ผู้ใช้ 2026-09-27) - ช่องที่ไม่ส่ง = ไม่แก้, lines = เฉพาะคันที่แก้ (id = InvoiceLine.id)
+// removeLineIds = เอารถออกจากบิล (รถกลับเข้าคิวรอวางบิล), applyCurrentTerms = คิด VAT/หัก ณ ที่จ่ายตามเงื่อนไขปัจจุบันของลูกค้า
+// refreshLineIds = ดึงข้อมูลรถล่าสุด (ทะเบียน เลขที่ใบเสร็จ ยี่ห้อ ประเภทรถ เลขตัวถัง วันที่ส่งงาน) ลงบิลรายคัน - backend อ่านใหม่ตอนบันทึก
+export interface UpdateInvoiceInput {
+  issueDate?: string;
+  jobLabel?: string;
+  extras?: Array<{ label: string; amount: number }>;
+  lines?: Array<{ id: string; receiptAmount: number; serviceFee: number; serviceLabel: string | null; deduction: number; deductionNote: string | null }>;
+  removeLineIds?: string[];
+  refreshLineIds?: string[];
+  applyCurrentTerms?: boolean;
+  expectedUpdatedAt?: string | null;
+  remark: string;
+}
+
+// ข้อมูลรถปัจจุบันของแต่ละคันในบิล (GET /api/billing/invoices/:id/live-lines) - หน้าแก้บิลเทียบกับข้อมูลที่บิลเก็บไว้
+// deliveredDate = null ถ้ารถไม่มีวันที่ส่งงานแล้ว (บิลเก็บวันที่เดิมไว้), receiptAmount = ยอดใบเสร็จที่พนักงานกรอกไว้ (คำแนะนำเท่านั้น)
+export interface InvoiceLiveLine {
+  id: string; // InvoiceLine.id
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  plateText: string;
+  receiptNo: string | null;
+  deliveredDate: string | null;
+  receiptAmount: number | null;
+}
+
+// ประวัติของบิล (AuditLog) - changes = { ช่อง: { from, to } }, action = update | unpay | void
+export interface InvoiceHistoryEntry {
+  id: string;
+  action: string;
+  remark: string;
+  changes: Record<string, { from: unknown; to: unknown }>;
+  editedBy: string | null;
+  createdAt: string;
+}
+
+// รถที่ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-09-27)
+export interface ClosedBillingVehicle {
+  id: string;
+  chassis: string;
+  brandName: string;
+  body: string | null;
+  plateText: string;
+  customerId: string;
+  customerName: string;
+  deliveredDate: string | null;
+  closedAt: string; // ISO timestamp
+  note: string | null;
+  closedBy: string | null;
 }
 
 // GET /api/billing/invoices: บิลรอรับเงินครบทุกใบ + ประวัติ (รับเงินแล้ว / ยกเลิก) ใหม่สุดทีละหน้า (พบ 2026-09-27)
@@ -201,7 +261,8 @@ export const billingApi = {
     request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}/cancel`, json("POST", data)),
 
   billingQueue: () => request<{ suggestedInvoiceNo: string; customers: BillingCustomer[] }>("/api/billing/queue"),
-  updateTerms: (customerId: string, terms: BillingTerms) =>
+  // remark บังคับ - ค่าก่อน/หลังเก็บในประวัติลูกค้า (ผู้ใช้ 2026-09-27)
+  updateTerms: (customerId: string, terms: BillingTerms & { remark: string }) =>
     request<{ terms: BillingTerms }>(`/api/billing/customers/${customerId}/terms`, json("PATCH", terms)),
   replaceRates: (customerId: string, rates: ServiceFeeRateInput[]) =>
     request<{ rates: ServiceFeeRate[] }>(`/api/billing/customers/${customerId}/rates`, json("PUT", { rates })),
@@ -211,4 +272,18 @@ export const billingApi = {
   markInvoicePaid: (id: string, data: { paidDate: string; taxInvoiceNo: string }) =>
     request<{ invoice: Invoice }>(`/api/billing/invoices/${id}/paid`, json("PATCH", data)),
   voidInvoice: (id: string, reason: string) => request<{ invoice: Invoice }>(`/api/billing/invoices/${id}/void`, json("PATCH", { reason })),
+  // แก้บิล / ยกเลิกการรับเงิน / ประวัติ (ผู้ใช้ 2026-09-27) - ADMIN + ACCOUNTANT, ต้องมีเหตุผลทุกครั้ง
+  updateInvoice: (id: string, data: UpdateInvoiceInput) =>
+    request<{ invoice: Invoice }>(`/api/billing/invoices/${encodeURIComponent(id)}`, json("PATCH", data)),
+  unpayInvoice: (id: string, remark: string) =>
+    request<{ invoice: Invoice }>(`/api/billing/invoices/${encodeURIComponent(id)}/unpay`, json("PATCH", { remark })),
+  invoiceHistory: (id: string) => request<{ entries: InvoiceHistoryEntry[] }>(`/api/billing/invoices/${encodeURIComponent(id)}/history`),
+  invoiceLiveLines: (id: string) => request<{ lines: InvoiceLiveLine[] }>(`/api/billing/invoices/${encodeURIComponent(id)}/live-lines`),
+  customerTerms: (customerId: string) => request<{ terms: BillingTerms }>(`/api/billing/customers/${encodeURIComponent(customerId)}/terms`),
+  // ปิดงาน - วางบิลนอกระบบ (ADMIN + ACCOUNTANT) / เปิดงานกลับ (ADMIN) - รายการรถที่ปิดไว้ใหม่สุดก่อนทีละ 100 คัน
+  closedVehicles: (offset = 0) => request<{ vehicles: ClosedBillingVehicle[]; hasMore: boolean }>(`/api/billing/vehicles/closed?offset=${offset}`),
+  closeVehicleBilling: (vehicleId: string, note: string) =>
+    request<{ vehicle: ClosedBillingVehicle }>(`/api/billing/vehicles/${encodeURIComponent(vehicleId)}/close`, json("POST", { note })),
+  reopenVehicleBilling: (vehicleId: string, remark: string) =>
+    request<{ id: string; reopened: boolean }>(`/api/billing/vehicles/${encodeURIComponent(vehicleId)}/reopen`, json("POST", { remark })),
 };

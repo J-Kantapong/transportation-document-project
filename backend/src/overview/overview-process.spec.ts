@@ -110,6 +110,20 @@ describe('waitsFor - ขั้นที่รถค้างอยู่', () =>
     expect(stages({ ...base, bookReceivedDate: d('2026-09-18'), plateReceivedDate: d('2026-09-18'), deliveredDate: d('2026-09-20'), plateDeliveredDate: d('2026-09-20'), billed: true })).toEqual([]);
   });
 
+  // ผู้ใช้ 2026-09-27: ปิดงาน - วางบิลนอกระบบ = ไม่ค้างวางบิล แต่ยังรอส่งป้ายตามปกติ
+  it('ปิดงาน - วางบิลนอกระบบแล้วไม่รอวางบิล', () => {
+    const delivered = {
+      ...passed('2026-09-01'),
+      latestSubmission: sub('RECEIPT_RECEIVED'),
+      bookReceivedDate: d('2026-09-18'),
+      plateReceivedDate: d('2026-09-22'),
+      deliveredDate: d('2026-09-20'),
+    };
+    expect(stages({ ...delivered, billingClosed: true })).toEqual(['plateDelivery']);
+    expect(stages({ ...delivered, plateDeliveredDate: d('2026-09-22'), billingClosed: true })).toEqual([]);
+    expect(stages({ ...delivered, billingClosed: false })).toEqual(['plateDelivery', 'billing']);
+  });
+
   it('รอป้าย/เล่มนับจากวันที่ในใบเสร็จ (ไม่มีค่อยใช้วันที่รับใบเสร็จ)', () => {
     const since = (o: Partial<NonNullable<OpenVehicle['latestSubmission']>>) =>
       waitsFor({ ...passed('2026-09-01'), latestSubmission: sub('RECEIPT_RECEIVED', o) }, TODAY).map((w) => w.since);

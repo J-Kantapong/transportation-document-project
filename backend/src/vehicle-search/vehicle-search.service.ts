@@ -27,7 +27,7 @@ export const SEARCH_STAGES = [
   'billing',
 ] as const satisfies readonly StageKey[];
 
-// ตัวกรองสถานะ: ขั้นที่ค้าง | done = จบงานแล้ว (ส่งงาน + ป้าย + วางบิลครบ) | problem = มีปัญหาหรือเกินกำหนด
+// ตัวกรองสถานะ: ขั้นที่ค้าง | done = จบงานแล้ว (ส่งงาน + ป้าย + วางบิลครบ หรือปิดงาน - วางบิลนอกระบบ) | problem = มีปัญหาหรือเกินกำหนด
 export type StatusFilter = (typeof SEARCH_STAGES)[number] | 'done' | 'problem';
 const STATUS_FILTERS: readonly string[] = [...SEARCH_STAGES, 'done', 'problem'];
 
@@ -114,8 +114,10 @@ export class VehicleSearchService {
             _count: { select: { receipts: true } },
           },
         },
-        plateSwapsAsNew: { where: { returnedDate: null }, take: 1, select: { id: true } },
+        // งานสลับเลขที่ยกเลิกแล้ว (cancelledAt) ไม่ทำให้รถรอ (ผู้ใช้ 2026-09-27: ยกเลิกแบบไม่ลบแถว)
+        plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null }, take: 1, select: { id: true } },
         invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
+        billingClosedAt: true,
       },
     });
 
@@ -126,6 +128,8 @@ export class VehicleSearchService {
           latestSubmission: v.documentSubmissions[0] ?? null,
           hasPendingPlateSwap: v.plateSwapsAsNew.length > 0,
           billed: v.invoiceLines.length > 0,
+          // ปิดงาน - วางบิลนอกระบบ = ไม่รอ "วางบิล" (ผู้ใช้ 2026-09-27)
+          billingClosed: !!v.billingClosedAt,
         },
         today,
       ).map((w): VehicleStatus => {

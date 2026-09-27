@@ -10,7 +10,7 @@ import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { ReceiptEditButton, ReceivedReceiptFixButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary, useCanEditReceipts } from "./ReceiptPhotos";
 import { DateInput } from "@/components/DateInput";
-import { jobSheetGroup } from "@/lib/job-sheet";
+import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
@@ -38,14 +38,15 @@ function sheetGroup(s: DocumentSubmission): { tab: Tab; label: string } {
   return { tab: g.kind, label: g.label };
 }
 
-const sheetKey = (s: DocumentSubmission) => `${s.submitDate.slice(0, 10)}|${sheetGroup(s).label}|${s.vehicle.customer.name}`;
+// เจ้าของงาน = รหัสลูกค้า ไม่ใช่ชื่อ (ผู้ใช้ 2026-09-27: กุญแจเดียวกับหน้ารับป้าย/รับเล่ม/Delivery/ใบส่งงาน - ชื่อซ้ำกันได้)
+const sheetKey = (s: DocumentSubmission) => jobSheetKey(s.submitDate.slice(0, 10), sheetGroup(s).label, s.vehicle.customer.id);
 
 interface Sheet {
   key: string;
   tab: Tab;
   date: string;
   label: string;
-  owner: string;
+  owner: string; // ชื่อที่แสดง (customerDisplayNames - ชื่อซ้ำต่อบริษัท/สาขา)
   rows: DocumentSubmission[]; // ทุกคันในใบ เรียงตามลำดับในใบที่ปริ้น (createdAt)
 }
 
@@ -422,11 +423,13 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
 
   const allSheets = useMemo(() => {
     const map = new Map<string, Sheet>();
+    const ownerNames = customerDisplayNames(sheetRows.map((s) => s.vehicle.customer));
     for (const s of [...sheetRows].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
       const key = sheetKey(s);
       if (!map.has(key)) {
         const g = sheetGroup(s);
-        map.set(key, { key, tab: g.tab, date: s.submitDate.slice(0, 10), label: g.label, owner: s.vehicle.customer.name, rows: [] });
+        const owner = ownerNames.get(s.vehicle.customer.id) ?? s.vehicle.customer.name;
+        map.set(key, { key, tab: g.tab, date: s.submitDate.slice(0, 10), label: g.label, owner, rows: [] });
       }
       map.get(key)!.rows.push(s);
     }

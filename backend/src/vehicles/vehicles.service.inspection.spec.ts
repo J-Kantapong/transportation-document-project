@@ -185,6 +185,39 @@ describe('VehiclesService.findPendingInspectionSend', () => {
     const or = findMany.mock.calls[0][0].where.OR as Array<{ inspectionResultDate?: { lte: Date } }>;
     expect(or[2].inspectionResultDate?.lte).toEqual(new Date('2026-06-29T00:00:00.000Z'));
   });
+
+  // ผู้ใช้ 2026-09-27 (F19): ยกเลิก/ยื่นไม่สำเร็จแล้วยื่นใหม่ด้วยวันที่ยื่นเดิมได้ - คิวส่งตรวจรอบ 2 บอกไว้ให้ถามฝ่ายยื่นก่อนส่งตรวจ
+  it('รถถึงกำหนดตรวจรอบ 2 ที่ยกเลิก/ยื่นไม่สำเร็จด้วยผลตรวจเดิม ได้ resubmitWith (วันที่ยื่นล่าสุด + ยื่นได้ถึง)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-27T03:00:00.000Z'));
+    const due = vehicleRow({
+      id: 'v1',
+      customer: { name: 'ลูกค้า' },
+      inspectionSentDate: new Date('2026-06-01T00:00:00.000Z'),
+      inspectionResult: 'ผ่าน',
+      inspectionResultDate: new Date('2026-06-02T00:00:00.000Z'),
+    });
+    const fresh = vehicleRow({ id: 'v2', customer: { name: 'ลูกค้า' } });
+    const failedFindMany = vi.fn().mockResolvedValue([{ vehicleId: 'v1', submitDate: new Date('2026-07-10T00:00:00.000Z') }]);
+    const logFindMany = vi.fn().mockResolvedValue([
+      { vehicleId: 'v1', changes: JSON.stringify({ 'submission.cancelled': { from: 'ยื่น 2026-08-25 | Bill: -', to: 'ยกเลิกการยื่น' } }) },
+    ]);
+    const prisma = {
+      vehicle: { findMany: vi.fn().mockResolvedValue([due, fresh]) },
+      documentSubmission: { findMany: failedFindMany },
+      vehicleEditLog: { findMany: logFindMany },
+      feeInspectionBangkok: { findMany: vi.fn().mockResolvedValue(bangkokFees) },
+      feeInspectionProvince: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+    const rows = await new VehiclesService(prisma).findPendingInspectionSend();
+    expect(rows.map((r) => [r.id, r.round2Due, r.resubmitWith])).toEqual([
+      ['v1', true, { submitDate: '2026-08-25', reason: 'CANCELLED', validUntil: '2026-08-30' }],
+      ['v2', false, null],
+    ]);
+    // ถามเฉพาะรถที่ถึงกำหนดตรวจรอบ 2
+    expect(failedFindMany.mock.calls[0][0].where).toEqual({ vehicleId: { in: ['v1'] }, status: 'FAILED' });
+    expect(logFindMany.mock.calls[0][0].where.vehicleId).toEqual({ in: ['v1'] });
+  });
 });
 
 describe('VehiclesService.findRecentlyCompletedInspection', () => {

@@ -11,7 +11,10 @@ function toRow(r: ReceivingRow): QueueRow {
   return {
     id: r.id,
     date: r.date,
+    customerId: r.customerId, // กุญแจใบยื่น (ผู้ใช้ 2026-09-27)
     customerName: r.customerName,
+    customerCompany: r.customerCompany,
+    customerBranch: r.customerBranch,
     chassis: r.chassis,
     body: r.body,
     plateCategory: r.plateCategory,

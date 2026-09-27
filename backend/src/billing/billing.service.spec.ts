@@ -1,6 +1,10 @@
 import { vi } from 'vitest';
 import { BillingService, isInvoiceNoConflict } from './billing.service.js';
+import { requestContext } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+
+// คำขอของผู้ใช้ u1 (ADMIN) - ประวัติ (AuditLog / VehicleEditLog) เก็บผู้ทำจาก request context
+const asUser = <T>(fn: () => T) => requestContext.run({ user: { id: 'u1', roles: ['ADMIN'], customerId: null, name: 'แอดมิน' } }, fn);
 
 const customer = {
   id: 'c1',
@@ -114,6 +118,38 @@ describe('BillingService.createInvoice', () => {
     const { svc } = service([vehicle({ customerId: 'c2' })]);
     await expect(svc.createInvoice(dto())).rejects.toMatchObject({ response: { error: expect.stringContaining('ไม่ใช่ของลูกค้า') } });
   });
+
+  // ผู้ใช้ 2026-09-27: รถที่ปิดงาน - วางบิลนอกระบบแล้วลงบิลในระบบซ้ำไม่ได้ (ต้องให้ ADMIN เปิดกลับก่อน)
+  it('รถที่ปิดงาน - วางบิลนอกระบบแล้วลงบิลไม่ได้', async () => {
+    const { svc, create } = service([vehicle({ billingClosedAt: new Date('2026-09-22T03:00:00.000Z') })]);
+    await expect(svc.createInvoice(dto())).rejects.toMatchObject({ response: { error: 'รถ CH1 ปิดงาน (วางบิลนอกระบบ) ไปแล้ว' } });
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe('BillingService.queue', () => {
+  // ผู้ใช้ 2026-09-27: คิวรอวางบิลไม่รวมรถที่ปิดงาน - วางบิลนอกระบบ (และรถที่ถูกลบ)
+  it('ไม่รวมรถที่ปิดงาน - วางบิลนอกระบบ', async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService;
+    await new BillingService(prisma).queue();
+    const args = findMany.mock.calls[0][0];
+    const waiting = { deletedAt: null, billingClosedAt: null, deliveredDate: { not: null } };
+    expect(args.where.vehicles.some).toMatchObject(waiting);
+    expect(args.include.vehicles.where).toMatchObject(waiting);
+  });
+
+  // ผู้ใช้ 2026-09-27: SWAP_NORMAL / SWAP_AUCTION (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข
+  it('ขอใช้เลข = NORMAL / AUCTION เท่านั้น ไม่นับ SWAP_* และ NONE', async () => {
+    const sub = (plateNumberOption: string) => [{ receiptNo: 'R', receiptAmount: 1000, taxAmount: null, billFeeTotal: 0, plateNumberOption }];
+    const vehicles = ['NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION', 'NONE'].map((opt, n) =>
+      vehicle({ id: `v${n}`, cc: null, deliveryRecipient: null, plateDeliveredDate: null, documentSubmissions: sub(opt) }),
+    );
+    const findMany = vi.fn().mockResolvedValue([{ ...customer, serviceFeeRates: [], vehicles }]);
+    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService;
+    const res = await new BillingService(prisma).queue();
+    expect(res.customers[0].vehicles.map((v) => v.requestedPlateNumber)).toEqual([true, true, false, false, false]);
+  });
 });
 
 describe('isInvoiceNoConflict', () => {
@@ -158,12 +194,18 @@ function invoiceRow(id: string, status: string, issueDate: string, o: Record<str
 }
 
 describe('BillingService.listInvoices', () => {
-  function listService(issued: unknown[], history: unknown[], aggregate = { _count: { _all: issued.length }, _sum: { netTotal: 0 } }) {
+  function listService(
+    issued: unknown[],
+    history: unknown[],
+    aggregate = { _count: { _all: issued.length }, _sum: { netTotal: 0 } },
+    audits: Array<{ entityId: string; _count: { _all: number } }> = [],
+  ) {
     const findMany = vi.fn().mockImplementation(async ({ where }) => (where.status === 'ISSUED' ? issued : history));
-    const prisma: Record<string, unknown> = { invoice: { findMany, aggregate: vi.fn().mockResolvedValue(aggregate) } };
+    const groupBy = vi.fn().mockResolvedValue(audits);
+    const prisma: Record<string, unknown> = { invoice: { findMany, aggregate: vi.fn().mockResolvedValue(aggregate) }, auditLog: { groupBy } };
     const $transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
     prisma.$transaction = $transaction;
-    return { svc: new BillingService(prisma as unknown as PrismaService), findMany, $transaction };
+    return { svc: new BillingService(prisma as unknown as PrismaService), findMany, $transaction, groupBy };
   }
 
   it('อ่านใน snapshot เดียวกัน - บิลที่เพิ่งรับเงินระหว่างอ่านมาแถวเดียว (สถานะใหม่)', async () => {
@@ -205,6 +247,19 @@ describe('BillingService.listInvoices', () => {
     expect(result.invoices.map((i) => i.id)).toEqual(['p1', 'p2']);
   });
 
+  it('บอกจำนวนประวัติแก้/ยกเลิก/ย้อนรับเงินของแต่ละใบ (AuditLog) ในคำขอเดียว', async () => {
+    const { svc, groupBy } = listService([invoiceRow('i1', 'ISSUED', '2026-09-25')], [invoiceRow('p1', 'PAID', '2026-09-20')], undefined, [
+      { entityId: 'p1', _count: { _all: 2 } },
+    ]);
+    const result = await svc.listInvoices();
+    expect(result.invoices.map((i) => [i.id, i.historyCount])).toEqual([
+      ['i1', 0],
+      ['p1', 2],
+    ]);
+    expect(groupBy).toHaveBeenCalledTimes(1);
+    expect(groupBy.mock.calls[0][0]).toMatchObject({ by: ['entityId'], where: { entity: 'Invoice', entityId: { in: ['i1', 'p1'] } } });
+  });
+
   it('โหลดเพิ่ม (offset) ส่งเฉพาะประวัติ ไม่ส่งบิลรอรับเงินซ้ำ', async () => {
     const { svc, findMany } = listService([invoiceRow('i1', 'ISSUED', '2026-09-25')], [invoiceRow('p9', 'PAID', '2026-01-01')]);
     const result = await svc.listInvoices({ offset: '200' });
@@ -219,8 +274,10 @@ describe('BillingService.markPaid / voidInvoice', () => {
     const current = invoiceRow('i1', status, '2026-09-21');
     const findUnique = vi.fn().mockImplementation(async ({ include }) => (include ? { ...current, status: 'PAID' } : current));
     const updateMany = vi.fn().mockResolvedValue({ count: updatedCount });
-    const prisma = { invoice: { findUnique, updateMany } } as unknown as PrismaService;
-    return { svc: new BillingService(prisma), updateMany };
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
+    const prisma: Record<string, unknown> = { invoice: { findUnique, updateMany }, auditLog: { create: auditCreate } };
+    prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    return { svc: new BillingService(prisma as unknown as PrismaService), updateMany, auditCreate };
   }
 
   beforeEach(() => {
@@ -257,20 +314,510 @@ describe('BillingService.markPaid / voidInvoice', () => {
 
   it('บิลเปลี่ยนสถานะไปก่อน (อีกหน้าจอยกเลิก/รับเงินพร้อมกัน) = บันทึกไม่ได้ ไม่เขียนทับ', async () => {
     const { svc } = payService('ISSUED', 0);
-    await expect(svc.markPaid('i1', { paidDate: '2026-09-27' })).rejects.toMatchObject({ response: { error: 'บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน' } });
-    await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ response: { error: 'ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน' } });
+    // 409 = หน้าจอเก่า หน้ารายการบิลโหลดใหม่ (พบ 2026-09-27: เดิมตอบ 400 บิลค้างสถานะเก่าบนจอ)
+    await expect(svc.markPaid('i1', { paidDate: '2026-09-27' })).rejects.toMatchObject({ status: 409, response: { error: 'บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน' } });
+    await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ status: 409, response: { error: 'ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน' } });
   });
 
-  it('บิลที่รับเงินแล้วบันทึกรับเงินซ้ำหรือยกเลิกไม่ได้', async () => {
+  it('บิลที่รับเงินแล้วบันทึกรับเงินซ้ำหรือยกเลิกไม่ได้ (409 ให้หน้าจอโหลดใหม่)', async () => {
     const { svc, updateMany } = payService('PAID');
-    await expect(svc.markPaid('i1', { paidDate: '2026-09-27' })).rejects.toMatchObject({ response: { error: 'บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน' } });
-    await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ response: { error: 'ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน' } });
+    await expect(svc.markPaid('i1', { paidDate: '2026-09-27' })).rejects.toMatchObject({ status: 409, response: { error: 'บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน' } });
+    await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ status: 409, response: { error: 'ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน' } });
     expect(updateMany).not.toHaveBeenCalled();
   });
 
   it('ยกเลิกบิลเปลี่ยนสถานะแบบมีเงื่อนไข ISSUED พร้อมเหตุผล', async () => {
-    const { svc, updateMany } = payService();
-    await svc.voidInvoice('i1', { reason: ' ออกซ้ำ ' });
+    const { svc, updateMany, auditCreate } = payService();
+    await asUser(() => svc.voidInvoice('i1', { reason: ' ออกซ้ำ ' }));
     expect(updateMany).toHaveBeenCalledWith({ where: { id: 'i1', status: 'ISSUED' }, data: { status: 'VOID', voidReason: 'ออกซ้ำ' } });
+    // ผู้ใช้ 2026-09-27: ทุกการยกเลิกมีประวัติว่าใครทำ
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: { entity: 'Invoice', entityId: 'i1', action: 'void', remark: 'ออกซ้ำ', changes: { status: { from: 'ISSUED', to: 'VOID' } }, editedById: 'u1' },
+      select: { id: true },
+    });
+  });
+
+  it('ยกเลิกบิลไม่สำเร็จ (สถานะเปลี่ยนไปก่อน) ไม่เขียนประวัติ', async () => {
+    const { svc, auditCreate } = payService('ISSUED', 0);
+    await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ status: 409 });
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- F23: ยกเลิกการรับเงิน (ผู้ใช้ 2026-09-27: ADMIN + ACCOUNTANT พร้อมเหตุผล) ----------
+describe('BillingService.unpayInvoice', () => {
+  function unpayService(status = 'PAID', updatedCount = 1) {
+    const current = invoiceRow('i1', status, '2026-09-21', { paidDate: new Date('2026-09-25T00:00:00.000Z'), taxInvoiceNo: 'TV2026-010' });
+    const findUnique = vi.fn().mockImplementation(async ({ include }) => (include ? { ...current, status: 'ISSUED', paidDate: null, taxInvoiceNo: null } : current));
+    const updateMany = vi.fn().mockResolvedValue({ count: updatedCount });
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
+    const prisma: Record<string, unknown> = { invoice: { findUnique, updateMany }, auditLog: { create: auditCreate } };
+    prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    return { svc: new BillingService(prisma as unknown as PrismaService), updateMany, auditCreate };
+  }
+
+  it('บิลที่รับเงินแล้วกลับเป็นรอรับเงิน ล้างวันที่รับเงิน + เลข TV และเก็บค่าเดิมในประวัติ', async () => {
+    const { svc, updateMany, auditCreate } = unpayService();
+    const invoice = await asUser(() => svc.unpayInvoice('i1', { remark: ' กดรับเงินผิดใบ ' }));
+    expect(invoice).toMatchObject({ status: 'ISSUED', paidDate: null, taxInvoiceNo: null });
+    // เปลี่ยนแบบมีเงื่อนไขรวมค่าที่อ่านมา กันกด 2 หน้าจอพร้อมกัน
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'i1', status: 'PAID', paidDate: new Date('2026-09-25T00:00:00.000Z'), taxInvoiceNo: 'TV2026-010' },
+      data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: {
+        entity: 'Invoice',
+        entityId: 'i1',
+        action: 'unpay',
+        remark: 'กดรับเงินผิดใบ',
+        changes: {
+          status: { from: 'PAID', to: 'ISSUED' },
+          paidDate: { from: '2026-09-25', to: null },
+          taxInvoiceNo: { from: 'TV2026-010', to: null },
+        },
+        editedById: 'u1',
+      },
+      select: { id: true },
+    });
+  });
+
+  it('ต้องมีเหตุผล - ไม่มีแล้วไม่แตะฐานข้อมูล', async () => {
+    const { svc, updateMany } = unpayService();
+    await expect(svc.unpayInvoice('i1', { remark: '  ' })).rejects.toMatchObject({ response: { error: 'กรุณาระบุเหตุผลที่ยกเลิกการรับเงิน' } });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ใช้ได้เฉพาะบิลที่รับเงินแล้ว - สถานะอื่น = หน้าจอเก่า ตอบ 409 ให้โหลดรายการใหม่', async () => {
+    for (const status of ['ISSUED', 'VOID']) {
+      const { svc, updateMany } = unpayService(status);
+      await expect(svc.unpayInvoice('i1', { remark: 'ผิด' })).rejects.toMatchObject({ status: 409, response: { error: 'ยกเลิกการรับเงินได้เฉพาะบิลที่รับเงินแล้ว' } });
+      expect(updateMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it('มีคนเปลี่ยนสถานะไปก่อน = 409 ไม่เขียนประวัติ', async () => {
+    const { svc, auditCreate } = unpayService('PAID', 0);
+    await expect(svc.unpayInvoice('i1', { remark: 'ผิด' })).rejects.toMatchObject({ status: 409 });
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- F53(a): แก้บิลที่ยังไม่รับเงินโดยใช้เลขที่เดิม (ผู้ใช้ 2026-09-27) ----------
+describe('BillingService.updateInvoice', () => {
+  const UPDATED_AT = new Date('2026-09-21T05:00:00.000Z');
+  const line = (id: string, o: Record<string, unknown>) => ({
+    id,
+    invoiceId: 'i1',
+    vehicleId: `v-${id}`,
+    brandName: 'Lexus',
+    body: 'รย.1-เก๋ง 2 ตอน',
+    receiptNo: null,
+    deliveredDate: new Date('2026-09-20T00:00:00.000Z'),
+    serviceLabel: null,
+    deduction: 0,
+    deductionNote: null,
+    ...o,
+  });
+  // ค่าใบเสร็จ 3,745 + 2,000 / ค่าดำเนินการ 700 + 500 + ค่าส่ง 200 = 1,400 / VAT 98 / หัก 1% (อัตราพิเศษตอนออกบิล) 14
+  const issued = () =>
+    invoiceRow('i1', 'ISSUED', '2026-09-21', {
+      invoiceNo: 'IV2026-121',
+      updatedAt: UPDATED_AT,
+      extras: [{ label: 'ค่าส่งเอกสาร', amount: 200 }],
+      vatRate: 7,
+      whtRate: 1,
+      feeTotal: 5745,
+      serviceTotal: 1400,
+      vatAmount: 98,
+      whtAmount: 14,
+      netTotal: 7229,
+      lines: [
+        line('l1', { chassis: 'CH1', plateText: 'กก 7733', receiptAmount: 3745, serviceFee: 700 }),
+        line('l2', { chassis: 'CH2', plateText: '', receiptAmount: 2000, serviceFee: 500 }),
+      ],
+    });
+
+  // liveVehicles = ข้อมูลรถปัจจุบัน (ใช้ตอนดึงข้อมูลรถล่าสุดลงบิล refreshLineIds)
+  function editService(invoice: Record<string, unknown> = issued(), liveVehicles: unknown[] = []) {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    const findUnique = vi.fn().mockResolvedValue(invoice);
+    const invoiceUpdate = vi.fn().mockResolvedValue(invoice);
+    const lineUpdate = vi.fn().mockResolvedValue({});
+    const lineDelete = vi.fn().mockResolvedValue({ count: 1 });
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
+    const vehicleFindMany = vi.fn().mockResolvedValue(liveVehicles);
+    const prisma: Record<string, unknown> = {
+      $queryRaw: queryRaw,
+      invoice: { findUnique, update: invoiceUpdate },
+      invoiceLine: { update: lineUpdate, deleteMany: lineDelete },
+      vehicle: { findMany: vehicleFindMany },
+      customer: { findUnique: vi.fn().mockResolvedValue(customer) },
+      auditLog: { create: auditCreate },
+    };
+    prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    return { svc: new BillingService(prisma as unknown as PrismaService), queryRaw, findUnique, invoiceUpdate, lineUpdate, lineDelete, auditCreate, vehicleFindMany };
+  }
+
+  const lineInput = (id: string, o: Record<string, unknown> = {}) => ({ id, receiptAmount: 2000, serviceFee: 500, serviceLabel: null, deduction: 0, deductionNote: null, ...o });
+
+  it('แก้ยอดรายคัน คำนวณยอดใหม่ฝั่ง server ด้วยอัตราเดิมของบิล เลขที่บิลไม่เปลี่ยน และเก็บค่าก่อน/หลังในประวัติ', async () => {
+    const { svc, queryRaw, findUnique, invoiceUpdate, lineUpdate, auditCreate } = editService();
+    await asUser(() =>
+      svc.updateInvoice('i1', { lines: [lineInput('l2', { serviceFee: 600 })], remark: ' ค่าดำเนินการคีย์ผิด ', expectedUpdatedAt: UPDATED_AT.toISOString() }),
+    );
+    // ล็อกแถวบิลก่อนอ่าน
+    expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
+    expect(lineUpdate).toHaveBeenCalledWith({ where: { id: 'l2' }, data: { receiptAmount: 2000, serviceFee: 600, serviceLabel: null, deduction: 0, deductionNote: null } });
+    const data = invoiceUpdate.mock.calls[0][0].data;
+    // ค่าดำเนินการ 1,500 -> VAT 105, หัก 1% เดิม 15 -> สุทธิ 5,745 + 1,500 + 105 - 15
+    expect(data).toMatchObject({ feeTotal: 5745, serviceTotal: 1500, vatRate: 7, vatAmount: 105, whtRate: 1, whtAmount: 15, netTotal: 7335 });
+    expect(data.invoiceNo).toBeUndefined();
+    const audit = auditCreate.mock.calls[0][0].data;
+    expect(audit).toMatchObject({ entity: 'Invoice', entityId: 'i1', action: 'update', remark: 'ค่าดำเนินการคีย์ผิด', editedById: 'u1' });
+    expect(audit.changes).toEqual({
+      'รถ CH2 · serviceFee': { from: 500, to: 600 },
+      serviceTotal: { from: 1400, to: 1500 },
+      vatAmount: { from: 98, to: 105 },
+      whtAmount: { from: 14, to: 15 },
+      netTotal: { from: 7229, to: 7335 },
+    });
+  });
+
+  it('เปลี่ยนวันที่ออกบิลแล้วยังใช้อัตราหัก ณ ที่จ่ายเดิมของบิล เว้นแต่เลือกใช้เงื่อนไขปัจจุบันของลูกค้า', async () => {
+    const keep = editService();
+    await keep.svc.updateInvoice('i1', { issueDate: '2027-01-05', remark: 'วันที่ผิด' });
+    expect(keep.invoiceUpdate.mock.calls[0][0].data).toMatchObject({ issueDate: new Date('2027-01-05T00:00:00.000Z'), whtRate: 1, whtAmount: 14 });
+
+    // ลูกค้า: หัก 3% อัตราพิเศษ 1% ถึง 31/12/2026 -> ออกบิล 05/01/2027 = หัก 3% ของ 1,400 = 42
+    const current = editService();
+    await current.svc.updateInvoice('i1', { issueDate: '2027-01-05', applyCurrentTerms: true, remark: 'วันที่ผิด' });
+    expect(current.invoiceUpdate.mock.calls[0][0].data).toMatchObject({ whtRate: 3, whtAmount: 42, netTotal: 5745 + 1400 + 98 - 42 });
+  });
+
+  it('เอารถออกจากบิล (รถกลับเข้าคิว) ต้องเหลืออย่างน้อย 1 คัน', async () => {
+    const { svc, lineDelete, invoiceUpdate, auditCreate } = editService();
+    await svc.updateInvoice('i1', { removeLineIds: ['l1'], remark: 'ลงผิดคัน' });
+    expect(lineDelete).toHaveBeenCalledWith({ where: { invoiceId: 'i1', id: { in: ['l1'] } } });
+    expect(invoiceUpdate.mock.calls[0][0].data).toMatchObject({ feeTotal: 2000, serviceTotal: 700 });
+    expect(auditCreate.mock.calls[0][0].data.changes['รถ กก 7733 · เอาออกจากบิล']).toMatchObject({ from: { chassis: 'CH1', receiptAmount: 3745 }, to: null });
+
+    const all = editService();
+    await expect(all.svc.updateInvoice('i1', { removeLineIds: ['l1', 'l2'], remark: 'ผิด' })).rejects.toMatchObject({
+      response: { error: 'บิลต้องเหลือรถอย่างน้อย 1 คัน - ถ้าจะเอาออกทั้งหมดให้ยกเลิกบิล' },
+    });
+    expect(all.lineDelete).not.toHaveBeenCalled();
+  });
+
+  it('แก้ชื่องานและค่าใช้จ่ายอื่นๆ', async () => {
+    const { svc, invoiceUpdate, auditCreate } = editService();
+    await svc.updateInvoice('i1', { jobLabel: 'จดทะเบียนรถยนต์ใหม่', extras: [], remark: 'ไม่มีค่าส่ง' });
+    expect(invoiceUpdate.mock.calls[0][0].data).toMatchObject({ jobLabel: 'จดทะเบียนรถยนต์ใหม่', extras: [], serviceTotal: 1200 });
+    expect(auditCreate.mock.calls[0][0].data.changes).toMatchObject({
+      jobLabel: { from: 'จดทะเบียนรถยนต์', to: 'จดทะเบียนรถยนต์ใหม่' },
+      extras: { from: [{ label: 'ค่าส่งเอกสาร', amount: 200 }], to: [] },
+    });
+  });
+
+  it('ต้องมีเหตุผล / แก้ได้เฉพาะบิลรอรับเงิน / ไม่มีอะไรเปลี่ยน / มีคนแก้ไปก่อน', async () => {
+    const blank = editService();
+    await expect(blank.svc.updateInvoice('i1', { jobLabel: 'x' })).rejects.toMatchObject({ response: { error: 'กรุณาระบุเหตุผลที่แก้ไขบิล' } });
+    expect(blank.queryRaw).not.toHaveBeenCalled();
+
+    for (const status of ['PAID', 'VOID']) {
+      const done = editService({ ...issued(), status });
+      await expect(done.svc.updateInvoice('i1', { jobLabel: 'x', remark: 'r' })).rejects.toMatchObject({ status: 409, response: { error: 'แก้ไขได้เฉพาะบิลที่ยังไม่รับเงิน' } });
+      expect(done.invoiceUpdate).not.toHaveBeenCalled();
+      // หน้าแก้ที่เปิดค้างไว้ (updatedAt เก่า) แล้วอีกคนรับเงิน/ยกเลิก = 409 ข้อความให้เปิดหน้าแก้ใหม่ (เทียบ updatedAt ก่อนสถานะ)
+      const stalePaid = editService({ ...issued(), status, updatedAt: new Date('2026-09-22T00:00:00.000Z') });
+      await expect(stalePaid.svc.updateInvoice('i1', { jobLabel: 'x', remark: 'r', expectedUpdatedAt: UPDATED_AT.toISOString() })).rejects.toMatchObject({
+        status: 409,
+        response: { error: 'บิลนี้ถูกแก้ไขหรือเปลี่ยนสถานะไปแล้ว กรุณาเปิดหน้าแก้ใหม่' },
+      });
+      expect(stalePaid.invoiceUpdate).not.toHaveBeenCalled();
+    }
+
+    const same = editService();
+    await expect(same.svc.updateInvoice('i1', { lines: [lineInput('l2')], remark: 'r' })).rejects.toMatchObject({ response: { error: 'ไม่มีข้อมูลที่เปลี่ยน' } });
+    expect(same.auditCreate).not.toHaveBeenCalled();
+
+    const stale = editService();
+    await expect(stale.svc.updateInvoice('i1', { jobLabel: 'x', remark: 'r', expectedUpdatedAt: '2026-09-20T00:00:00.000Z' })).rejects.toMatchObject({ status: 409 });
+    expect(stale.invoiceUpdate).not.toHaveBeenCalled();
+
+    const foreign = editService();
+    await expect(foreign.svc.updateInvoice('i1', { lines: [lineInput('other')], remark: 'r' })).rejects.toMatchObject({ status: 400 });
+    expect(foreign.invoiceUpdate).not.toHaveBeenCalled();
+  });
+
+  // ดึงข้อมูลรถล่าสุดลงบิล (ผู้ใช้ 2026-09-27, F53a): ทะเบียน / เลขที่ใบเสร็จที่แก้หลังออกบิล ไม่ต้องยกเลิกบิลแล้วออกเลขใหม่
+  const liveVehicle = (id: string, o: Record<string, unknown> = {}) => ({
+    id,
+    chassis: 'CH1',
+    body: 'รย.1-เก๋ง 2 ตอน',
+    plateCategory: 'กก',
+    plateNumber: '7733',
+    deliveredDate: new Date('2026-09-20T00:00:00.000Z'),
+    brand: { name: 'Lexus' },
+    documentSubmissions: [],
+    ...o,
+  });
+
+  it('ดึงทะเบียน / เลขที่ใบเสร็จล่าสุดลงบิล อ่านรถใต้ล็อกบิล ยอดไม่เปลี่ยน และเก็บค่าก่อน/หลังรายช่องในประวัติ', async () => {
+    const live = liveVehicle('v-l1', { plateCategory: '1กข', plateNumber: '1234', documentSubmissions: [{ receiptNo: '69/0035371', receiptAmount: 3745 }] });
+    const { svc, queryRaw, lineUpdate, invoiceUpdate, auditCreate, vehicleFindMany } = editService(issued(), [live]);
+    await svc.updateInvoice('i1', { refreshLineIds: ['l1'], remark: 'AI อ่านทะเบียนผิด แก้แล้ว', expectedUpdatedAt: UPDATED_AT.toISOString() });
+    expect(vehicleFindMany.mock.calls[0][0].where).toEqual({ id: { in: ['v-l1'] } });
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(vehicleFindMany.mock.invocationCallOrder[0]);
+    expect(lineUpdate).toHaveBeenCalledTimes(1);
+    expect(lineUpdate).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      data: {
+        chassis: 'CH1',
+        brandName: 'Lexus',
+        body: 'รย.1-เก๋ง 2 ตอน',
+        plateText: '1กข 1234',
+        receiptNo: '69/0035371',
+        deliveredDate: new Date('2026-09-20T00:00:00.000Z'),
+      },
+    });
+    // เลขที่บิลและยอดเดิม
+    expect(invoiceUpdate.mock.calls[0][0].data).toMatchObject({ feeTotal: 5745, serviceTotal: 1400, netTotal: 7229 });
+    expect(invoiceUpdate.mock.calls[0][0].data.invoiceNo).toBeUndefined();
+    expect(auditCreate.mock.calls[0][0].data.changes).toEqual({
+      'รถ กก 7733 · plateText': { from: 'กก 7733', to: '1กข 1234' },
+      'รถ กก 7733 · receiptNo': { from: null, to: '69/0035371' },
+    });
+  });
+
+  it('แก้ยอดและดึงข้อมูลล่าสุดคันเดียวกัน = เขียนแถวเดียว', async () => {
+    const live = liveVehicle('v-l2', { chassis: 'CH2', plateCategory: '2กข', plateNumber: '5' });
+    const { svc, lineUpdate, auditCreate } = editService(issued(), [live]);
+    await svc.updateInvoice('i1', { lines: [lineInput('l2', { serviceFee: 600 })], refreshLineIds: ['l2'], remark: 'ได้ทะเบียนแล้ว' });
+    expect(lineUpdate).toHaveBeenCalledTimes(1);
+    expect(lineUpdate.mock.calls[0][0]).toMatchObject({ where: { id: 'l2' }, data: { serviceFee: 600, receiptAmount: 2000, plateText: '2กข 5', chassis: 'CH2' } });
+    expect(auditCreate.mock.calls[0][0].data.changes).toMatchObject({
+      'รถ CH2 · serviceFee': { from: 500, to: 600 },
+      'รถ CH2 · plateText': { from: '', to: '2กข 5' },
+    });
+  });
+
+  it('รถไม่มีวันที่ส่งงานแล้ว = เก็บวันที่ส่งงานเดิมของบิล', async () => {
+    const live = liveVehicle('v-l1', { plateNumber: '7734', deliveredDate: null });
+    const { svc, lineUpdate, auditCreate } = editService(issued(), [live]);
+    await svc.updateInvoice('i1', { refreshLineIds: ['l1'], remark: 'ทะเบียนผิด' });
+    expect(lineUpdate.mock.calls[0][0].data.deliveredDate).toEqual(new Date('2026-09-20T00:00:00.000Z'));
+    expect(Object.keys(auditCreate.mock.calls[0][0].data.changes)).toEqual(['รถ กก 7733 · plateText']);
+  });
+
+  it('ข้อมูลรถตรงกับบิลอยู่แล้ว / ดึงล่าสุดพร้อมเอาออก / รูปแบบผิด / ไม่พบรถ = 400 ไม่เขียนอะไร', async () => {
+    const same = editService(issued(), [liveVehicle('v-l1')]);
+    await expect(same.svc.updateInvoice('i1', { refreshLineIds: ['l1'], remark: 'r' })).rejects.toMatchObject({
+      status: 400,
+      response: { error: 'ไม่มีข้อมูลที่เปลี่ยน - ข้อมูลรถในบิลตรงกับข้อมูลล่าสุดอยู่แล้ว' },
+    });
+    expect(same.lineUpdate).not.toHaveBeenCalled();
+    expect(same.auditCreate).not.toHaveBeenCalled();
+
+    const both = editService();
+    await expect(both.svc.updateInvoice('i1', { refreshLineIds: ['l1'], removeLineIds: ['l1'], remark: 'r' })).rejects.toMatchObject({
+      response: { error: 'รถคันเดียวกันดึงข้อมูลล่าสุดและเอาออกจากบิลพร้อมกันไม่ได้' },
+    });
+    expect(both.queryRaw).not.toHaveBeenCalled();
+
+    const shape = editService();
+    await expect(shape.svc.updateInvoice('i1', { refreshLineIds: 'l1', remark: 'r' })).rejects.toMatchObject({ response: { error: 'refreshLineIds ต้องเป็นรายการ id' } });
+
+    const other = editService();
+    await expect(other.svc.updateInvoice('i1', { refreshLineIds: ['other'], remark: 'r' })).rejects.toMatchObject({ status: 400 });
+    expect(other.vehicleFindMany).not.toHaveBeenCalled();
+
+    const gone = editService(issued(), []);
+    await expect(gone.svc.updateInvoice('i1', { refreshLineIds: ['l1'], remark: 'r' })).rejects.toMatchObject({ response: { error: 'ไม่พบข้อมูลรถ CH1' } });
+    expect(gone.invoiceUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('BillingService.invoiceLiveLines', () => {
+  it('ข้อมูลรถปัจจุบันของแต่ละคันในบิล (ทะเบียน เลขที่ใบเสร็จ ยอดใบเสร็จที่กรอกไว้) ข้ามคันที่ไม่พบ', async () => {
+    const prisma = {
+      invoice: { findUnique: vi.fn().mockResolvedValue({ lines: [{ id: 'l1', vehicleId: 'v1' }, { id: 'l2', vehicleId: 'gone' }] }) },
+      vehicle: { findMany: vi.fn().mockResolvedValue([vehicle({ documentSubmissions: [{ receiptNo: 'R1', receiptAmount: 3745 }] })]) },
+    } as unknown as PrismaService;
+    await expect(new BillingService(prisma).invoiceLiveLines('i1')).resolves.toEqual([
+      { id: 'l1', chassis: 'CH1', brandName: 'Lexus', body: 'รย.1-เก๋ง 2 ตอน', plateText: 'กก 7733', receiptNo: 'R1', deliveredDate: '2026-09-20', receiptAmount: 3745 },
+    ]);
+  });
+
+  it('ไม่พบบิล = 404', async () => {
+    const prisma = { invoice: { findUnique: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService;
+    await expect(new BillingService(prisma).invoiceLiveLines('x')).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+// ---------- F53(b): ปิดงาน - วางบิลนอกระบบ / เปิดงานกลับ (ผู้ใช้ 2026-09-27) ----------
+describe('BillingService.closeVehicleBilling / reopenVehicleBilling', () => {
+  const closedRow = {
+    id: 'v1',
+    chassis: 'CH1',
+    body: 'รย.1-เก๋ง 2 ตอน',
+    plateCategory: 'กก',
+    plateNumber: '7733',
+    deliveredDate: new Date('2026-09-20T00:00:00.000Z'),
+    billingClosedAt: new Date('2026-09-27T03:00:00.000Z'),
+    billingClosedNote: 'วางบิลใน Google Sheet IV2026-130',
+    brand: { name: 'Lexus' },
+    customer: { id: 'c1', name: 'Lexus', company: 'บริษัท เลกซัส จำกัด' },
+    billingClosedBy: { name: 'สมชาย', displayName: 'ชาย' },
+  };
+
+  function closeService(v: Record<string, unknown> | null, updatedCount = 1) {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    const findUnique = vi.fn().mockResolvedValue(v);
+    const updateMany = vi.fn().mockResolvedValue({ count: updatedCount });
+    const findMany = vi.fn().mockResolvedValue([closedRow]);
+    const editLog = vi.fn().mockResolvedValue({ id: 'e1' });
+    const prisma: Record<string, unknown> = { $queryRaw: queryRaw, vehicle: { findUnique, updateMany, findMany }, vehicleEditLog: { create: editLog } };
+    prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    return { svc: new BillingService(prisma as unknown as PrismaService), queryRaw, findUnique, updateMany, findMany, editLog };
+  }
+
+  const delivered = (o: Record<string, unknown> = {}) => ({
+    chassis: 'CH1',
+    deletedAt: null,
+    deliveredDate: new Date('2026-09-20T00:00:00.000Z'),
+    billingClosedAt: null,
+    billingClosedNote: null,
+    invoiceLines: [],
+    ...o,
+  });
+
+  it('ปิดงานพร้อมหมายเหตุ: ล็อกแถวรถ บันทึกผู้ปิด และเขียนประวัติรถ', async () => {
+    const { svc, queryRaw, findUnique, updateMany, editLog } = closeService(delivered());
+    const row = await asUser(() => svc.closeVehicleBilling('v1', { note: ' วางบิลใน Google Sheet IV2026-130 ' }));
+    expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'v1', billingClosedAt: null },
+      data: { billingClosedAt: expect.any(Date), billingClosedNote: 'วางบิลใน Google Sheet IV2026-130', billingClosedById: 'u1' },
+    });
+    const log = editLog.mock.calls[0][0].data;
+    expect(log).toMatchObject({ vehicleId: 'v1', editedById: 'u1', remark: 'ปิดงาน - วางบิลนอกระบบ: วางบิลใน Google Sheet IV2026-130' });
+    expect(JSON.parse(log.changes)).toMatchObject({ billingClosedNote: { from: null, to: 'วางบิลใน Google Sheet IV2026-130' } });
+    expect(row).toMatchObject({ id: 'v1', plateText: 'กก 7733', customerName: 'บริษัท เลกซัส จำกัด', note: 'วางบิลใน Google Sheet IV2026-130', closedBy: 'ชาย' });
+  });
+
+  it('ต้องมีหมายเหตุ / ส่งงานแล้ว / ยังไม่อยู่ในบิล / ยังไม่ปิด', async () => {
+    const blank = closeService(delivered());
+    await expect(blank.svc.closeVehicleBilling('v1', { note: '' })).rejects.toMatchObject({ status: 400 });
+    expect(blank.queryRaw).not.toHaveBeenCalled();
+
+    const notDelivered = closeService(delivered({ deliveredDate: null }));
+    await expect(notDelivered.svc.closeVehicleBilling('v1', { note: 'n' })).rejects.toMatchObject({ response: { error: 'รถ CH1 ยังไม่ได้บันทึกส่งงาน' } });
+
+    const billed = closeService(delivered({ invoiceLines: [{ invoice: { invoiceNo: 'IV2026-117' } }] }));
+    await expect(billed.svc.closeVehicleBilling('v1', { note: 'n' })).rejects.toMatchObject({ response: { error: 'รถ CH1 อยู่ในบิล IV2026-117 แล้ว' } });
+
+    const closed = closeService(delivered({ billingClosedAt: new Date() }));
+    await expect(closed.svc.closeVehicleBilling('v1', { note: 'n' })).rejects.toMatchObject({ response: { error: 'รถ CH1 ปิดงานไปแล้ว' } });
+
+    const deleted = closeService(delivered({ deletedAt: new Date() }));
+    await expect(deleted.svc.closeVehicleBilling('v1', { note: 'n' })).rejects.toMatchObject({ status: 404 });
+
+    for (const s of [notDelivered, billed, closed, deleted]) expect(s.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ปิดพร้อมกัน 2 หน้าจอ = 409 ไม่เขียนประวัติซ้ำ', async () => {
+    const { svc, editLog } = closeService(delivered(), 0);
+    await expect(svc.closeVehicleBilling('v1', { note: 'n' })).rejects.toMatchObject({ status: 409 });
+    expect(editLog).not.toHaveBeenCalled();
+  });
+
+  it('เปิดงานกลับ: ล้างทั้ง 3 ช่องแบบมีเงื่อนไข พร้อมเหตุผลในประวัติรถ', async () => {
+    const closedAt = new Date('2026-09-27T03:00:00.000Z');
+    const { svc, updateMany, editLog } = closeService(delivered({ billingClosedAt: closedAt, billingClosedNote: 'Google Sheet' }));
+    await expect(asUser(() => svc.reopenVehicleBilling('v1', { remark: ' ปิดผิดคัน ' }))).resolves.toEqual({ id: 'v1', reopened: true });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'v1', billingClosedAt: closedAt },
+      data: { billingClosedAt: null, billingClosedNote: null, billingClosedById: null },
+    });
+    const log = editLog.mock.calls[0][0].data;
+    expect(log.remark).toBe('เปิดงานกลับ (ยกเลิกปิดงาน - วางบิลนอกระบบ): ปิดผิดคัน');
+    expect(log.editedById).toBe('u1');
+    expect(JSON.parse(log.changes)).toMatchObject({ billingClosedNote: { from: 'Google Sheet', to: null } });
+  });
+
+  it('เปิดงานกลับต้องมีเหตุผล และใช้ได้เฉพาะรถที่ปิดไว้', async () => {
+    const blank = closeService(delivered({ billingClosedAt: new Date() }));
+    await expect(blank.svc.reopenVehicleBilling('v1', { remark: ' ' })).rejects.toMatchObject({ response: { error: 'กรุณาระบุเหตุผลที่เปิดงานกลับ' } });
+    const open = closeService(delivered());
+    await expect(open.svc.reopenVehicleBilling('v1', { remark: 'r' })).rejects.toMatchObject({ response: { error: 'รถ CH1 ไม่ได้ปิดงานไว้' } });
+    expect(open.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('รายการรถที่ปิดงาน ใหม่สุดก่อนทีละ 100 คัน', async () => {
+    const { svc, findMany } = closeService(null);
+    const result = await svc.listClosedVehicles({ offset: '100' });
+    expect(result).toMatchObject({ hasMore: false, vehicles: [{ id: 'v1', closedAt: '2026-09-27T03:00:00.000Z' }] });
+    expect(findMany.mock.calls[0][0]).toMatchObject({ where: { deletedAt: null, billingClosedAt: { not: null } }, skip: 100, take: 101 });
+  });
+});
+
+// ---------- F25: แก้เงื่อนไขวางบิลต้องมีเหตุผลและประวัติ (ผู้ใช้ 2026-09-27) ----------
+
+describe('BillingService.updateTerms', () => {
+  function termsService(row: typeof customer | null = customer) {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    const findUnique = vi.fn().mockResolvedValue(row);
+    const update = vi.fn().mockImplementation(async ({ data }) => ({ ...row, ...data }));
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
+    const prisma: Record<string, unknown> = { $queryRaw: queryRaw, customer: { findUnique, update }, auditLog: { create: auditCreate } };
+    prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    return { svc: new BillingService(prisma as unknown as PrismaService), queryRaw, findUnique, update, auditCreate };
+  }
+
+  it('บันทึกเงื่อนไขใหม่ ล็อกแถวลูกค้าก่อนอ่าน และเก็บเฉพาะช่องที่เปลี่ยนลงประวัติลูกค้า', async () => {
+    const { svc, queryRaw, findUnique, update, auditCreate } = termsService();
+    const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: ' หมดโปรอัตราพิเศษ ' }));
+    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null });
+    expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { billingVat: true, billingWhtRate: 3, billingWhtSpecialRate: null, billingWhtSpecialUntil: null },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: {
+        entity: 'Customer',
+        entityId: 'c1',
+        action: 'update-terms',
+        remark: 'หมดโปรอัตราพิเศษ',
+        changes: { billingWhtSpecialRate: { from: 1, to: null }, billingWhtSpecialUntil: { from: '2026-12-31', to: null } },
+        editedById: 'u1',
+      },
+      select: { id: true },
+    });
+  });
+
+  it('ต้องมีเหตุผล - ไม่มีแล้วไม่แตะฐานข้อมูล', async () => {
+    const { svc, queryRaw, update } = termsService();
+    await expect(svc.updateTerms('c1', { vat: true, whtRate: 3, remark: '  ' })).rejects.toMatchObject({
+      response: { error: 'กรุณาระบุเหตุผลที่แก้เงื่อนไขวางบิล' },
+    });
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('ค่าเหมือนเดิม = 400 ไม่เขียนประวัติ / ไม่พบลูกค้า = 404', async () => {
+    const same = termsService();
+    await expect(
+      same.svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: 1, whtSpecialUntil: '2026-12-31', remark: 'ลองกด' }),
+    ).rejects.toMatchObject({ response: { error: 'เงื่อนไขวางบิลเหมือนเดิม - ไม่มีอะไรต้องแก้' } });
+    expect(same.update).not.toHaveBeenCalled();
+    expect(same.auditCreate).not.toHaveBeenCalled();
+
+    const missing = termsService(null);
+    await expect(missing.svc.updateTerms('c9', { vat: false, whtRate: 0, remark: 'r' })).rejects.toMatchObject({ status: 404 });
   });
 });
