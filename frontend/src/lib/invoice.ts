@@ -1,4 +1,4 @@
-import type { BillingTerms, Invoice, InvoiceLine } from "@/lib/billing-api";
+import type { BillingTerms, Invoice, InvoiceLine, ServiceFeeRate } from "@/lib/billing-api";
 import { comparePlate } from "@/lib/plate-order";
 
 // คำนวณยอดบิลแบบสดบนหน้าจอ - ต้องให้ผลเท่ากับ backend/src/billing/billing-calculator.ts (backend คำนวณซ้ำและเป็นตัวจริงตอนบันทึก)
@@ -10,6 +10,19 @@ export function round2(n: number): number {
 
 export function formatMoney(amount: number): string {
   return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ราคาก่อน VAT ของแถวราคา / ค่าดำเนินการจากแถวราคาหลัก - เหมือน backend/src/billing/billing-calculator.ts
+// ราคาเหมารวมใบเสร็จ (YMAC): ค่าดำเนินการ = ราคา - ค่าใบเสร็จจริง, ไม่รู้ค่าใบเสร็จ / ใบเสร็จแพงกว่าราคา = null
+export function rateAmountExVat(rate: Pick<ServiceFeeRate, "amount" | "vatInclusive">): number {
+  return rate.vatInclusive ? round2(rate.amount / (1 + VAT_RATE / 100)) : round2(rate.amount);
+}
+
+export function serviceFeeFromRate(rate: Pick<ServiceFeeRate, "amount" | "vatInclusive" | "includesReceipt">, receiptAmount: number | null): number | null {
+  if (!rate.includesReceipt) return rateAmountExVat(rate);
+  if (receiptAmount === null) return null;
+  const rest = round2(rate.amount - receiptAmount);
+  return rest < 0 ? null : rateAmountExVat({ amount: rest, vatInclusive: rate.vatInclusive });
 }
 
 export function effectiveWhtRate(terms: BillingTerms, issueDate: string): number {
@@ -64,16 +77,20 @@ export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "
   const brandText = brands.length === 1 ? ` ${brands[0]}` : "";
   const out: InvoiceFaceLine[] = [{ name: `ค่าธรรมเนียม${invoice.jobLabel}${brandText} ${invoice.lines.length} คัน`, qty: 1, unit: invoice.feeTotal }];
 
-  const groups = new Map<string, InvoiceFaceLine>();
+  const groups = new Map<string, InvoiceFaceLine & { parts: number }>();
   for (const l of invoice.lines) {
     const suffix = l.deduction > 0 ? ` ${l.plateText || l.chassis}` : l.serviceLabel ? ` ${l.serviceLabel}` : "";
     const name = `ค่าดำเนินการ${invoice.jobLabel}${suffix}`;
     const key = `${name}|${l.serviceFee}`;
-    const g = groups.get(key) ?? { name, qty: 0, unit: l.serviceFee };
+    // จำนวนส่วนในวงเล็บ: "" = 0, "(300-799 cc)" = 1, "(300-799 cc + ขอใช้)" = 2 - คันที่มีหักยอดไว้ท้ายสุด
+    const parts = l.deduction > 0 ? 99 : l.serviceLabel ? l.serviceLabel.split(" + ").length : 0;
+    const g = groups.get(key) ?? { name, qty: 0, unit: l.serviceFee, parts };
     g.qty += 1;
     groups.set(key, g);
   }
-  out.push(...groups.values());
+  // ลำดับบรรทัด (ผู้ใช้ 2026-09-28): จดปกติก่อน แล้วค่อยบรรทัดที่มีค่าเพิ่ม (ขอใช้ / ด่วน) - ในกลุ่มเดียวกันราคาน้อยไปมาก
+  // เช่น (ต่ำกว่า 300 cc) → (300-799 cc) → (ต่ำกว่า 300 cc + ขอใช้) → (300-799 cc + ขอใช้)
+  out.push(...[...groups.values()].sort((a, b) => a.parts - b.parts || a.unit - b.unit).map(({ name, qty, unit }) => ({ name, qty, unit })));
   for (const e of invoice.extras) out.push({ name: e.label, qty: 1, unit: e.amount });
   return out;
 }

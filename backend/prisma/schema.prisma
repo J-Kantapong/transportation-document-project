@@ -85,6 +85,9 @@ model User {
   cancelledYamaha    YamahaRelocationEntry[] @relation("YamahaRelocationCancels")
   cancelledSwaps     PlateSwap[]             @relation("PlateSwapCancels")
   billingClosures    Vehicle[]               @relation("VehicleBillingClosures")
+  accountPeriods     CustomerAccountPeriod[] @relation("CustomerAccountPeriods")
+  paymentsCreated    CustomerPayment[]       @relation("CustomerPaymentsCreated")
+  paymentsCancelled  CustomerPayment[]       @relation("CustomerPaymentsCancelled")
 
   @@index([status])
   @@index([customerId])
@@ -115,6 +118,8 @@ model Customer {
   invoices        Invoice[]
   deliverySlips   DeliverySlip[]
   users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
+  accountPeriods  CustomerAccountPeriod[]
+  payments        CustomerPayment[]
 }
 
 model Brand {
@@ -211,14 +216,15 @@ model Vehicle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  customer            Customer             @relation(fields: [customerId], references: [id])
-  deletedBy           User?                @relation("DeletedVehicles", fields: [deletedById], references: [id])
-  billingClosedBy     User?                @relation("VehicleBillingClosures", fields: [billingClosedById], references: [id], onDelete: SetNull)
-  brand               Brand                @relation(fields: [brandId], references: [id])
-  owner               VehicleOwner?        @relation(fields: [ownerId], references: [id])
-  platePhoto          PlatePhoto?          @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
-  bookPhoto           BookPhoto?           @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
+  customer            Customer              @relation(fields: [customerId], references: [id])
+  deletedBy           User?                 @relation("DeletedVehicles", fields: [deletedById], references: [id])
+  billingClosedBy     User?                 @relation("VehicleBillingClosures", fields: [billingClosedById], references: [id], onDelete: SetNull)
+  brand               Brand                 @relation(fields: [brandId], references: [id])
+  owner               VehicleOwner?         @relation(fields: [ownerId], references: [id])
+  platePhoto          PlatePhoto?           @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
+  bookPhoto           BookPhoto?            @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
   invoiceLines        InvoiceLine[]
+  paymentLines        CustomerPaymentLine[]
   cases               Case[]
   editLogs            VehicleEditLog[]
   taxCalculations     TaxCalculation[]
@@ -815,17 +821,21 @@ model BookPhoto {
 // ตารางค่าดำเนินการต่อลูกค้า - ใช้เสนอราคาเริ่มต้นให้รถแต่ละคันตอนออกบิล (บัญชีแก้รายคันได้เสมอ)
 // จับคู่ด้วยชนิดรถ + ช่วง CC (ccMin <= cc < ccMax, ว่าง = ไม่จำกัด) แถวที่ sortOrder น้อยสุดที่เข้าเงื่อนไขชนะ
 model ServiceFeeRate {
-  id           String   @id @default(cuid())
-  customerId   String
-  label        String // ข้อความบนบิล เช่น "จดทะเบียนรถจักรยานยนต์ 150 cc - 299 cc"
-  vehicleKind  String   @default("ANY") // CAR | MOTO | ANY
-  ccMin        Decimal? @db.Decimal(10, 2)
-  ccMax        Decimal? @db.Decimal(10, 2)
-  amount       Decimal  @db.Decimal(12, 2)
-  vatInclusive Boolean  @default(false) // true = amount เป็นราคารวม VAT แล้ว (เช่น 1,045) ระบบถอดเป็นก่อน VAT (/1.07) ให้
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(cuid())
+  customerId      String
+  label           String // ข้อความบนบิล เช่น "จดทะเบียนรถจักรยานยนต์ 150 cc - 299 cc"
+  vehicleKind     String   @default("ANY") // CAR | MOTO | ANY
+  ccMin           Decimal? @db.Decimal(10, 2)
+  ccMax           Decimal? @db.Decimal(10, 2)
+  amount          Decimal  @db.Decimal(12, 2)
+  vatInclusive    Boolean  @default(false) // true = amount เป็นราคารวม VAT แล้ว (เช่น 1,045) ระบบถอดเป็นก่อน VAT (/1.07) ให้
+  // true = amount เป็นราคาเหมารวมค่าใบเสร็จกรมขนส่งแล้ว (ผู้ใช้ 2026-09-27, YMAC: จดใหม่ 650 รวมใบเสร็จ 340) - ค่าดำเนินการ = amount - ค่าใบเสร็จจริงของคันนั้น
+  includesReceipt Boolean  @default(false)
+  // BASE = ราคาหลักเลือกตามชนิดรถ/CC, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) = ค่าเพิ่มที่บวกให้เอง (ผู้ใช้ 2026-09-28, TWE)
+  kind            String   @default("BASE")
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -911,6 +921,7 @@ model Invoice {
   status           String    @default("ISSUED")
   paidDate         DateTime?
   taxInvoiceNo     String? // เลขที่ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ที่ออกตอนรับเงิน
+  account          String    @default("COMPANY") // COMPANY | PERSONAL - บัญชีของลูกค้า ณ วันส่งงานของรถในบิล (บัญชีบุคคล = ไม่มี VAT, เลขบิลรันแยก)
   voidReason       String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -1022,7 +1033,7 @@ model TaxRenewal {
 // แถวไม่ถูกแก้หรือลบ (append only) และไม่ผูก FK กับแถวต้นทาง จึงอยู่ครบแม้ต้นทางถูกลบ
 model AuditLog {
   id         String   @id @default(cuid())
-  entity     String // 'Customer' | 'Invoice' | 'TaxRenewal' | 'YamahaRelocation' | 'PlateSwap' | 'User'
+  entity     String // 'Customer' | 'Invoice' | 'TaxRenewal' | 'YamahaRelocation' | 'PlateSwap' | 'User' | 'CustomerPayment'
   entityId   String // id ของแถวต้นทาง
   action     String // คำกริยาสั้นภาษาอังกฤษ เช่น 'update' | 'cancel' | 'unpay' | 'set-password' | 'undo-return'
   remark     String // เหตุผลที่แก้/ยกเลิก
@@ -1034,4 +1045,66 @@ model AuditLog {
 
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// --- บัญชีรับเงินของลูกค้า (ผู้ใช้ 2026-09-26/27) -----------------------------------------------
+// เงินของลูกค้าเข้าบัญชีบริษัท (มี VAT) หรือบัญชีบุคคล (เช่น SPI, YMAC) ลูกค้าหนึ่งรายใช้บัญชีเดียว แต่ย้ายบัญชีได้ในอนาคต
+// (ผู้ใช้แยกบัญชีเพื่อกระจายฐานภาษี) จึงเก็บเป็นประวัติพร้อมวันเริ่มใช้: บัญชีของงานวันใด = แถวล่าสุดที่ effectiveFrom <= วันนั้น
+// ไม่มีแถวเลย = บัญชีบริษัท - ดู backend/src/billing/billing-account.ts
+model CustomerAccountPeriod {
+  id            String   @id @default(cuid())
+  customerId    String
+  account       String // COMPANY | PERSONAL
+  effectiveFrom DateTime // วันที่เริ่มใช้ (เที่ยงคืน UTC)
+  remark        String // เหตุผลที่ตั้ง/ย้ายบัญชี (บังคับ)
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  customer  Customer @relation(fields: [customerId], references: [id])
+  createdBy User?    @relation("CustomerAccountPeriods", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([customerId, effectiveFrom])
+}
+
+// --- บันทึกการจ่ายของลูกค้า (ผู้ใช้ 2026-09-27) ----------------------------------------------------
+// ลูกค้าบางราย (SPI) กำหนดเองว่าจ่ายคันไหนเท่าไร และราคายังตกลงกันอยู่ - บันทึกตามที่ลูกค้าจ่ายมาจริงทีละครั้ง (ยอดโอน + รายคัน)
+// แล้วทำตารางล้อกับรถที่ส่งงานแล้ว ให้เห็นว่าคันไหนได้เงินแล้ว/ยังไม่ได้ ไม่ผูกกับใบวางบิล (Invoice)
+// ยกเลิกแบบ soft (cancelledAt) พร้อมเหตุผล + AuditLog - ดู backend/src/customer-payments
+model CustomerPayment {
+  id            String    @id @default(cuid())
+  customerId    String
+  account       String // COMPANY | PERSONAL - บัญชีของลูกค้า ณ วันที่รับเงิน (snapshot)
+  paidDate      DateTime // วันที่เงินเข้า
+  amount        Decimal   @db.Decimal(12, 2) // ยอดที่โอนเข้าจริง
+  whtAmount     Decimal   @default(0) @db.Decimal(12, 2) // หัก ณ ที่จ่ายที่ลูกค้าแจ้ง (0 = ไม่หัก)
+  reference     String? // เลขที่เอกสารจ่าย / เลขอ้างอิงของลูกค้า
+  note          String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
+  customer    Customer              @relation(fields: [customerId], references: [id])
+  createdBy   User?                 @relation("CustomerPaymentsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy User?                 @relation("CustomerPaymentsCancelled", fields: [cancelledById], references: [id], onDelete: SetNull)
+  lines       CustomerPaymentLine[]
+
+  @@index([customerId, paidDate])
+}
+
+model CustomerPaymentLine {
+  id        String  @id @default(cuid())
+  paymentId String
+  vehicleId String? // null = หาเลขตัวถังนี้ในรถของลูกค้าไม่เจอ (ยังเก็บไว้ตามที่ลูกค้าแจ้ง)
+  chassis   String // เลขตัวถังตามที่ลูกค้าแจ้ง
+  amount    Decimal @db.Decimal(12, 2)
+  note      String?
+  sortOrder Int     @default(0)
+
+  payment CustomerPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  vehicle Vehicle?        @relation(fields: [vehicleId], references: [id])
+
+  @@index([paymentId])
+  @@index([vehicleId])
 }

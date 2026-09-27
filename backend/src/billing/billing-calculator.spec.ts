@@ -1,4 +1,4 @@
-import { computeInvoiceTotals, effectiveWhtRate, nextInvoiceNo, rateAmountExVat, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
+import { computeInvoiceTotals, effectiveWhtRate, nextInvoiceNo, rateAmountExVat, serviceFeeFromRate, suggestAddOns, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
 
 const terms = (o: Partial<BillingTerms> = {}): BillingTerms => ({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, ...o });
 
@@ -41,7 +41,7 @@ describe('effectiveWhtRate', () => {
 });
 
 describe('suggestRate', () => {
-  const rate = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'ANY', ccMin: null, ccMax: null, amount: 0, vatInclusive: false, sortOrder: 0, ...o });
+  const rate = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'ANY', ccMin: null, ccMax: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
   const rates = [
     rate({ id: 'small', vehicleKind: 'MOTO', ccMax: 150, amount: 360, sortOrder: 1 }),
     rate({ id: 'mid', vehicleKind: 'MOTO', ccMin: 150, ccMax: 300, amount: 440, sortOrder: 2 }),
@@ -68,5 +68,45 @@ describe('rateAmountExVat / nextInvoiceNo', () => {
     expect(nextInvoiceNo('IV2026-120')).toBe('IV2026-121');
     expect(nextInvoiceNo('IV2026-099')).toBe('IV2026-100');
     expect(nextInvoiceNo(null)).toBe('');
+  });
+});
+
+describe('serviceFeeFromRate', () => {
+  it('uses the rate as the service fee when it does not include the receipt', () => {
+    expect(serviceFeeFromRate({ amount: 700, vatInclusive: false, includesReceipt: false }, 3745)).toBe(700);
+  });
+
+  it('subtracts the actual receipt from an all-in price (YMAC new registration 650 incl. receipt 340)', () => {
+    expect(serviceFeeFromRate({ amount: 650, vatInclusive: false, includesReceipt: true }, 340)).toBe(310);
+  });
+
+  it('takes VAT out of what is left when the all-in price includes VAT', () => {
+    expect(serviceFeeFromRate({ amount: 1447, vatInclusive: true, includesReceipt: true }, 340)).toBe(1034.58);
+  });
+
+  it('suggests nothing when the receipt is unknown or costs more than the price', () => {
+    expect(serviceFeeFromRate({ amount: 650, vatInclusive: false, includesReceipt: true }, null)).toBeNull();
+    expect(serviceFeeFromRate({ amount: 650, vatInclusive: false, includesReceipt: true }, 700)).toBeNull();
+  });
+});
+
+describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด่วน +100)', () => {
+  const row = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'MOTO', ccMin: null, ccMax: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
+  const rates = [
+    row({ id: 'plate', kind: 'OTHER_PROVINCE', amount: 100, sortOrder: 0 }),
+    row({ id: 'small', ccMax: 300, amount: 520, sortOrder: 1 }),
+    row({ id: 'big', ccMin: 300, ccMax: 800, amount: 885, sortOrder: 2 }),
+    row({ id: 'urgent', kind: 'URGENT', amount: 100, sortOrder: 3 }),
+  ];
+
+  it('never picks an add-on row as the base price', () => {
+    expect(suggestRate(rates, { isMoto: true, cc: 149.5 })?.id).toBe('small');
+    expect(suggestRate(rates, { isMoto: true, cc: 367.6 })?.id).toBe('big');
+  });
+
+  it('adds the ขอใช้ (other-province) add-on for other-province cars and the urgent add-on for urgent submissions', () => {
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false })).toEqual([]);
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true }).map((r) => r.id)).toEqual(['plate', 'urgent']);
+    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true })).toEqual([]); // motorcycle-only add-ons
   });
 });

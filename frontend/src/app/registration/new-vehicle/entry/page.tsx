@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { PageTabs } from "@/components/PageTabs";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
@@ -21,6 +21,7 @@ import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type Norma
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -376,6 +377,8 @@ export default function VehicleEntryPage() {
   const [detail, setDetail] = useState<Vehicle | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const pendingEditChassis = useRef(""); // ?focus=...&edit=1 - เปิดฟอร์มแก้ไขเมื่อรถคันนี้โหลดมาถึง
+  const router = useRouter();
   const [editRow, setEditRow] = useState<NormalizedVehicleRow>(EMPTY_SINGLE);
   const [editFinanceOn, setEditFinanceOn] = useState(false);
   const [editDateText, setEditDateText] = useState("");
@@ -504,7 +507,18 @@ export default function VehicleEntryPage() {
     // Standard fetch-on-mount; both loaders set a loading flag before their first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadLookups();
-    loadVehicles();
+    // ?focus=<เลขตัวถัง>&edit=1 จากปุ่ม "แก้ข้อมูลรถ" ในหน้าวางบิล (ผู้ใช้ 2026-09-28): ค้นรถคันนั้น (อาจเก่ากว่า 100 คันล่าสุด)
+    // แล้วเปิดฟอร์มแก้ไขให้เลย - แก้ตามปกติ (ต้องมีเหตุผล เก็บประวัติ) · ไม่มีสิทธิ์แก้ = แค่ค้นให้เห็น
+    const focus = focusChassis();
+    if (focus) {
+      const focused = { q: focus, from: "", to: "" };
+      setFilter(focused);
+      setSearchText(focus);
+      if (new URLSearchParams(window.location.search).get("edit") === "1") pendingEditChassis.current = focus;
+      loadVehicles(focused, false);
+    } else {
+      loadVehicles();
+    }
     // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect ไม่ใช่ตอน useState (แบบเดียวกับหน้าฐานข้อมูลลูกค้า)
     setCanDelete(canDeleteVehicle(getCachedUser()?.roles ?? []));
     // แก้ไขรถที่บันทึกแล้ว: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน PATCH อยู่แล้ว - ซ่อนปุ่มให้กลุ่มอื่น)
@@ -513,6 +527,16 @@ export default function VehicleEntryPage() {
     // โหลดครั้งแรกตอนเปิดหน้าเท่านั้น - หลังจากนั้นโหลดใหม่ตามปุ่มค้นหา/โหลดเพิ่ม
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // เปิดฟอร์มแก้ไขของรถที่ถูกส่งมาแก้ (?edit=1) เมื่อรายการโหลดมาถึงแล้ว - ครั้งเดียว
+  useEffect(() => {
+    const chassis = pendingEditChassis.current;
+    if (!chassis || !canEdit) return;
+    const target = vehicles.find((v) => sameChassis(v.chassis, chassis));
+    if (!target) return;
+    pendingEditChassis.current = "";
+    openEdit(target);
+  }, [vehicles, canEdit]);
 
   const customerOptions = useMemo(
     () => customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") })),
@@ -847,6 +871,12 @@ export default function VehicleEntryPage() {
       );
       setEditWarning(null);
       setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
+      // มาจากปุ่ม "แก้ข้อมูลรถ" ในหน้าวางบิล (ผู้ใช้ 2026-09-28): บันทึกเสร็จกลับไปหน้าวางบิลทันที ราคาคิดใหม่จากข้อมูลที่แก้
+      const back = returnToAfterEdit();
+      if (back) {
+        router.push(back);
+        return;
+      }
       await loadVehicles();
       editDialogRef.current?.close();
     } catch (error) {
@@ -1442,4 +1472,11 @@ export default function VehicleEntryPage() {
       </dialog>
     </section>
   );
+}
+
+// ?returnTo= จากหน้าวางบิล - รับเฉพาะหน้าวางบิลในเว็บนี้ (กันลิงก์พาไปที่อื่นหลังบันทึก) ไม่มี/ไม่ผ่าน = อยู่หน้านี้ตามเดิม
+function returnToAfterEdit(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("returnTo") ?? "";
+  return raw === "/accounting/billing" || raw.startsWith("/accounting/billing?") ? raw : null;
 }

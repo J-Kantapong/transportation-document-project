@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError } from "@/lib/api";
-import { getCachedUser } from "@/lib/auth";
-import { billingApi, type BillingCustomer, type BillingVehicle, type ClosedBillingVehicle } from "@/lib/billing-api";
+import { ApiError, receiptImageUrl } from "@/lib/api";
+import { AuthedImage } from "@/components/AuthedImage";
+import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
+import { ACCOUNT_LABEL, billingApi, type BillingAccount, type BillingCustomer, type BillingVehicle, type ClosedBillingVehicle, type ServiceFeeRate } from "@/lib/billing-api";
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
-import { BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
+import { BillingAccountEditor, BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
-import { computeTotals, formatMoney, round2, termsSummary } from "@/lib/invoice";
+import { computeTotals, formatMoney, rateAmountExVat, round2, serviceFeeFromRate, termsSummary } from "@/lib/invoice";
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { comparePlate } from "@/lib/plate-order";
-import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
+import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถที่พนักงานบันทึกส่งงานแล้วมารอที่นี่ บัญชีเลือกคัน ตรวจค่าดำเนินการ แล้วออกใบวางบิล
@@ -20,15 +21,23 @@ import { DateInput } from "@/components/DateInput";
 const PLATE_REQUEST_DEDUCTION = 500;
 const PLATE_REQUEST_NOTE = "ลูกค้าชำระค่าขอใช้เลขเอง";
 
+// ค่าดำเนินการรายคัน (ผู้ใช้ 2026-09-28: จับคู่อัตโนมัติจากข้อมูลรถ ให้ผิดพลาดน้อยที่สุด): เลือกแถวราคาหลักจาก dropdown
+// (ระบบเลือกให้ตามชนิดรถ/CC) + ติ๊กค่าเพิ่ม (ระบบติ๊กให้ตามการยื่น: ขอใช้เลข / ด่วน) แล้วคิดยอดให้เอง - พิมพ์ยอดเองได้เฉพาะ "กำหนดเอง"
+const CUSTOM_RATE = "";
+
 interface RowState {
   checked: boolean;
   receiptText: string;
-  serviceText: string;
+  rateId: string; // CUSTOM_RATE = พิมพ์ยอดเอง (customText)
+  addOnIds: string[];
+  customText: string;
   label: string;
   deduct: boolean;
-  // ค่าที่ระบบเสนอตอนสร้างแถว - ใช้ดูว่าบัญชีแก้ช่องนั้นเองหรือยังตอนโหลดคิวใหม่ (mergeRow)
+  receiptChecked: boolean; // บัญชีตรวจใบเสร็จแล้วว่ายอดที่ไม่ตรงกับที่ระบบคำนวณนั้นถูกต้อง (ปลดคำเตือน)
+  // ค่าที่ระบบเสนอตอนสร้างแถว - ใช้ดูว่าบัญชีแก้เองหรือยังตอนโหลดคิวใหม่ (mergeRow) และแสดงว่า "แก้จากที่ระบบเลือก"
   receiptBase: string;
-  serviceBase: string;
+  rateBase: string;
+  addOnBase: string[];
 }
 
 interface ExtraState {
@@ -43,10 +52,32 @@ const money = (text: string): number | null => {
 
 const plateText = (v: BillingVehicle) => (v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : "");
 
+// คอลัมน์ของรายการรถรอวางบิล (หัวตาราง + ทุกแถวใช้ชุดเดียวกัน) - แคบพอไม่ต้องเลื่อนซ้ายขวา
+const ROW_GRID: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "20px minmax(150px,1.8fr) minmax(64px,1fr) minmax(40px,0.5fr) minmax(64px,0.9fr) minmax(84px,1.2fr) 28px",
+  gap: 10,
+  alignItems: "center",
+};
+
+const sameIds =(a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
+
 const newRow = (v: BillingVehicle): RowState => {
   const receiptText = v.receiptAmount === null ? "" : formatMoney(v.receiptAmount);
-  const serviceText = v.suggestedServiceFee === null ? "" : formatMoney(v.suggestedServiceFee);
-  return { checked: false, receiptText, serviceText, label: "", deduct: false, receiptBase: receiptText, serviceBase: serviceText };
+  const rateId = v.suggestedRateId ?? CUSTOM_RATE;
+  return {
+    checked: false,
+    receiptText,
+    rateId,
+    addOnIds: v.suggestedAddOnIds,
+    customText: "",
+    label: "",
+    deduct: false,
+    receiptChecked: false,
+    receiptBase: receiptText,
+    rateBase: rateId,
+    addOnBase: v.suggestedAddOnIds,
+  };
 };
 
 // โหลดคิวใหม่ระหว่างเตรียมบิล: คันที่ยังอยู่ในคิวเก็บที่ติ๊ก/กรอกไว้ ช่องที่บัญชียังไม่ได้แก้เองใช้ค่าใหม่จากระบบ
@@ -54,14 +85,27 @@ const newRow = (v: BillingVehicle): RowState => {
 function mergeRow(prev: RowState | undefined, v: BillingVehicle): RowState {
   const fresh = newRow(v);
   if (!prev) return fresh;
+  const untouchedRate = prev.rateId === prev.rateBase && sameIds(prev.addOnIds, prev.addOnBase);
   return {
     ...prev,
     receiptText: prev.receiptText === prev.receiptBase ? fresh.receiptText : prev.receiptText,
-    serviceText: prev.serviceText === prev.serviceBase ? fresh.serviceText : prev.serviceText,
+    rateId: untouchedRate ? fresh.rateId : prev.rateId,
+    addOnIds: untouchedRate ? fresh.addOnIds : prev.addOnIds,
     receiptBase: fresh.receiptBase,
-    serviceBase: fresh.serviceBase,
+    rateBase: fresh.rateBase,
+    addOnBase: fresh.addOnBase,
   };
 }
+
+// ข้อความต่อท้ายบนบิลเมื่อไม่ได้พิมพ์เอง (ผู้ใช้ 2026-09-28: บรรทัดราคาต่างกันแต่ชื่อเหมือนกันอ่านไม่ออก)
+// = ส่วนที่ต่างของชื่อราคาหลัก (ถ้าบิลนี้มีราคาหลักมากกว่า 1 แบบ เช่น "300-799 cc") + ชื่อค่าเพิ่ม -> "(300-799 cc + ขอใช้)"
+// ชื่อราคาหลักที่ขึ้นต้นด้วยชื่องานบนบิลตัดส่วนนั้นออก ("จดทะเบียนรถจักรยานยนต์ 300-799 cc" -> "300-799 cc")
+function autoServiceLabel(base: ServiceFeeRate | undefined, addOns: ServiceFeeRate[], jobLabel: string, showBase: boolean): string {
+  const baseText = showBase && base ? (base.label.startsWith(jobLabel) ? base.label.slice(jobLabel.length).trim() : base.label) : "";
+  const parts = [baseText, ...addOns.map((a) => a.label)].filter(Boolean);
+  return parts.length ? `(${parts.join(" + ")})` : "";
+}
+
 
 function defaultJobLabel(vehicles: BillingVehicle[]): string {
   if (vehicles.length > 0 && vehicles.every((v) => v.isMoto)) return "จดทะเบียนรถจักรยานยนต์";
@@ -74,12 +118,15 @@ export function BillingPage() {
   const [invoiceReload, setInvoiceReload] = useState(0); // เพิ่มค่า = ให้รายการบิลที่ออกแล้วโหลดใหม่
   const [customerId, setCustomerId] = useState("");
   const focusApplied = useRef(false);
+  const returnState = useRef<BillingReturnState | null | undefined>(undefined); // งานที่เตรียมไว้ก่อนไปแก้ข้อมูลรถ (undefined = ยังไม่อ่าน)
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [extras, setExtras] = useState<ExtraState[]>([]);
-  const [invoiceNo, setInvoiceNo] = useState("");
+  // เลขที่บิลแยกตามบัญชี (ผู้ใช้ 2026-09-27): บัญชีบริษัท IV… / บัญชีบุคคลรันชุดของตัวเอง - ช่องเลขที่บิลแสดงของบัญชีที่รถที่เลือกอยู่
+  const [invoiceNos, setInvoiceNos] = useState<Record<BillingAccount, string>>({ COMPANY: "", PERSONAL: "" });
+  const [lastInvoiceNos, setLastInvoiceNos] = useState<Record<BillingAccount, string | null>>({ COMPANY: null, PERSONAL: null });
   const [issueDateText, setIssueDateText] = useState(isoToDisplayDate(todayIso()));
   const [jobLabelEdit, setJobLabelEdit] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState<"" | "terms" | "rates">("");
+  const [settingsOpen, setSettingsOpen] = useState<"" | "terms" | "rates" | "account">("");
   const [loading, setLoading] = useState(true); // โหลดคิวครั้งแรก
   const [refreshing, setRefreshing] = useState(false); // โหลดคิวใหม่ - ตารางยังแสดงอยู่ แต่ยังออกบิลไม่ได้จนกว่าจะเสร็จ
   const [saving, setSaving] = useState(false);
@@ -88,11 +135,18 @@ export function BillingPage() {
   const [closing, setClosing] = useState<BillingVehicle | null>(null);
   const [closedReload, setClosedReload] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canEditVehicle, setCanEditVehicle] = useState(false); // ADMIN / STAFF_ENTRY - ปุ่มแก้ข้อมูลรถ
+  const [expanded, setExpanded] = useState<string | null>(null); // คันที่เปิด "แก้" อยู่
+  const [fixedIds, setFixedIds] = useState<Set<string>>(new Set()); // คันที่เพิ่งแก้ข้อมูลรถเสร็จ (ป้าย "แก้ไขเรียบร้อย")
+  const [confirmOpen, setConfirmOpen] = useState(false); // หน้ายืนยันออกบิล
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
     setIsAdmin((getCachedUser()?.roles ?? []).includes("ADMIN"));
+    setCanEditVehicle(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
+
 
   // reset = เริ่มบิลใหม่ (เปิดหน้า / หลังออกบิล): ทุกแถวกลับเป็นค่าจากระบบ ล้างค่าใช้จ่ายอื่นๆ/ชื่องาน และใช้เลขที่ IV ที่ระบบเสนอใหม่
   // ไม่ reset = โหลดคิวใหม่ระหว่างเตรียมบิล (หลังแก้ตารางค่าดำเนินการ / ยกเลิกบิล): เก็บงานที่กำลังเตรียมไว้และอยู่ที่ลูกค้าเดิม (shownId)
@@ -110,10 +164,31 @@ export function BillingPage() {
         if (owner) setCustomerId(owner.id);
       }
       if (reset) {
-        setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
+        const fresh: Record<string, RowState> = Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)])));
+        // กลับมาจากแก้ข้อมูลรถ: ติ๊กคันเดิมไว้ให้ + เปิดช่อง "แก้" ของคันที่เพิ่งแก้ ทำงานต่อได้เลย (ราคาคิดใหม่จากข้อมูลที่แก้แล้ว)
+        // อ่านครั้งเดียวแล้วเก็บใน ref: ตอนเปิดหน้าอาจโหลดคิวซ้ำ (React dev) - ทุกรอบของการเปิดหน้าใช้ค่าเดียวกัน, ออกบิลแล้วล้างทิ้ง
+        if (returnState.current === undefined) returnState.current = takeBillingReturnState();
+        const saved = returnState.current;
+        if (saved) {
+          for (const id of saved.checked) if (fresh[id]) fresh[id] = { ...fresh[id], checked: true };
+          if (q.customers.some((c) => c.id === saved.customerId)) setCustomerId(saved.customerId);
+          // แก้ข้อมูลรถแล้วถูกต้อง = ถือว่าเสร็จ ไม่ต้องเปิดช่อง "แก้"/รูปใบเสร็จค้างไว้ (ผู้ใช้ 2026-09-28) - ยังมีปัญหาค่อยเปิดให้ดูต่อ
+          const edited = q.customers.flatMap((c) => c.vehicles).find((x) => x.id === saved.expanded);
+          const stillWrong =
+            !!edited &&
+            (edited.receiptAmount === null || edited.suggestedRateId === null || (edited.receiptEstimate !== null && edited.receiptAmount !== edited.receiptEstimate));
+          setExpanded(stillWrong ? edited.id : null);
+          // คันที่แก้เสร็จแล้วติ๊กให้ด้วย พร้อมลงบิลต่อ
+          if (edited && !stillWrong && fresh[edited.id]) {
+            fresh[edited.id] = { ...fresh[edited.id], checked: true };
+            setFixedIds((prev) => new Set(prev).add(edited.id)); // ป้าย "แก้ไขเรียบร้อย" ข้างเลขตัวถัง (ผู้ใช้ 2026-09-28)
+          }
+        }
+        setRows(fresh);
         setExtras([]);
         setJobLabelEdit(null);
-        setInvoiceNo(q.suggestedInvoiceNo);
+        setInvoiceNos({ COMPANY: q.suggestedInvoiceNo, PERSONAL: q.suggestedPersonalInvoiceNo });
+        setLastInvoiceNos({ COMPANY: q.lastInvoiceNo, PERSONAL: q.lastPersonalInvoiceNo });
       } else {
         // คันที่ออกจากคิวแล้วหายไป คันใหม่ (เช่น รถจากบิลที่เพิ่งยกเลิก) ได้แถวใหม่ที่ยังไม่ติ๊ก
         setRows((prev) => Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, mergeRow(prev[v.id], v)]))));
@@ -145,30 +220,103 @@ export function BillingPage() {
     [customer],
   );
   const selected = vehicles.filter((v) => rows[v.id]?.checked);
+  // บัญชีของบิล = บัญชีของรถที่เลือก (ตามวันส่งงาน) - เลือกปนกัน 2 บัญชี = ออกบิลไม่ได้ ต้องแยกบิล
+  const selectedAccounts = [...new Set(selected.map((v) => v.account))];
+  const mixedAccounts = selectedAccounts.length > 1;
+  const account: BillingAccount = selectedAccounts.length === 1 ? selectedAccounts[0] : (customer?.account ?? "COMPANY");
+  const invoiceNo = invoiceNos[account];
   const issueDateIso = displayDateToIso(issueDateText.replace(/\D/g, ""));
   const jobLabel = jobLabelEdit ?? defaultJobLabel(selected.length ? selected : vehicles);
 
+  const rates = customer?.rates ?? [];
+  const rateById = new Map(rates.map((r) => [r.id, r]));
+  // แถวราคาที่ใช้กับรถคันนี้ได้ (ชนิดรถตรงหรือทุกชนิด) - ราคาหลักไว้ใน dropdown, ค่าเพิ่มเป็นช่องติ๊ก
+  const ratesFor = (v: BillingVehicle, kind: "BASE" | "ADD_ON") =>
+    rates.filter((r) => (kind === "BASE" ? r.kind === "BASE" : r.kind !== "BASE") && (r.vehicleKind === "ANY" || r.vehicleKind === (v.isMoto ? "MOTO" : "CAR")));
+  const addOnsOf = (row: RowState) => row.addOnIds.map((id) => rateById.get(id)).filter((r): r is ServiceFeeRate => !!r);
+
+  // ค่าดำเนินการก่อนหักยอด (เหมือน serviceFeeFromRate + ค่าเพิ่ม ฝั่ง backend) - null = ยังไม่มีราคา / ใบเสร็จแพงกว่าราคาเหมารวม
+  const baseFeeOf = (v: BillingVehicle): number | null => {
+    const row = rows[v.id];
+    if (!row) return null;
+    if (row.rateId === CUSTOM_RATE) return money(row.customText);
+    const rate = rateById.get(row.rateId);
+    if (!rate) return null;
+    const base = serviceFeeFromRate(rate, money(row.receiptText));
+    return base === null ? null : round2(base + addOnsOf(row).reduce((s, a) => s + rateAmountExVat(a), 0));
+  };
+
   const serviceFeeOf = (v: BillingVehicle): number | null => {
     const row = rows[v.id];
-    const base = row ? money(row.serviceText) : null;
-    if (base === null) return null;
+    const base = baseFeeOf(v);
+    if (!row || base === null) return null;
     const fee = round2(base - (row.deduct ? PLATE_REQUEST_DEDUCTION : 0));
     return fee >= 0 ? fee : null;
+  };
+
+  // เหตุผลที่คันนี้ยังออกบิลไม่ได้ (ติ๊กไม่ได้จนกว่าจะแก้) - null = พร้อม
+  // ยอดใบเสร็จไม่ตรงกับที่ระบบคำนวณจากข้อมูลรถตอนยื่น - มักแปลว่าข้อมูลรถผิด (เช่น จังหวัด -> ขอใช้ผิด ค่าบริการผิด 100)
+  const receiptMismatchOf = (v: BillingVehicle): string | null => {
+    const row = rows[v.id];
+    const receipt = row ? money(row.receiptText) : null;
+    if (!row || row.receiptChecked || receipt === null || v.receiptEstimate === null || receipt === v.receiptEstimate) return null;
+    const diff = round2(receipt - v.receiptEstimate);
+    const hint =
+      diff > 0 && !v.otherProvince
+        ? " - ใบเสร็จแพงกว่า อาจเป็นรถขอใช้แต่ข้อมูลรถไม่ใช่"
+        : diff < 0 && v.otherProvince
+          ? " - ใบเสร็จถูกกว่า อาจไม่ใช่รถขอใช้แต่ข้อมูลรถบอกว่าใช่"
+          : "";
+    return `ใบเสร็จ ${formatMoney(receipt)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(v.receiptEstimate)} (ต่าง ${diff > 0 ? "+" : ""}${formatMoney(diff)})${hint}`;
+  };
+
+  const problemOf = (v: BillingVehicle): string | null => {
+    const row = rows[v.id];
+    if (!row) return null;
+    if (money(row.receiptText) === null) return "ไม่มียอดใบเสร็จ - กด แก้ แล้วใส่ค่าใบเสร็จ";
+    const mismatch = receiptMismatchOf(v);
+    if (mismatch) return `${mismatch} - กด แก้ ตรวจกับใบเสร็จจริง`;
+    if (serviceFeeOf(v) !== null) return null;
+    if (row.rateId === CUSTOM_RATE) return `ไม่มีราคาที่ตรงกับรถคันนี้${v.cc === null ? " (ไม่มีข้อมูล cc)" : ""} - กด แก้ แล้วเลือกราคา`;
+    return "ราคาไม่ถูกต้อง (ใบเสร็จแพงกว่าราคาเหมารวม?) - กด แก้ แล้วตรวจ";
+  };
+  const readyIds = (list: BillingVehicle[]) => list.filter((v) => !problemOf(v)).map((v) => v.id);
+  const problemCount = vehicles.filter((v) => problemOf(v)).length;
+
+  // คันที่เลือกใช้ราคาหลักกี่แบบ - มากกว่า 1 แบบ ใส่ขนาด/ชนิดในวงเล็บให้บรรทัดบนบิลแยกออกจากกัน
+  const multipleBaseRates = new Set(selected.map((v) => rows[v.id]?.rateId).filter((id) => id && id !== CUSTOM_RATE)).size > 1;
+  const labelOf = (v: BillingVehicle) => {
+    const row = rows[v.id];
+    if (!row || row.rateId === CUSTOM_RATE) return "";
+    return autoServiceLabel(rateById.get(row.rateId), addOnsOf(row), jobLabel, multipleBaseRates);
   };
 
   const draftLines = selected.map((v) => ({
     vehicle: v,
     receiptAmount: money(rows[v.id].receiptText),
     serviceFee: serviceFeeOf(v),
-    serviceLabel: rows[v.id].label.trim() || null,
+    serviceLabel: rows[v.id].label.trim() || labelOf(v) || null,
     deduction: rows[v.id].deduct ? PLATE_REQUEST_DEDUCTION : 0,
   }));
+  // สรุปคันที่เลือกตามราคาที่ใช้ เช่น "ต่ำกว่า 300 cc + ขอใช้ = 620.00 · 3 คัน" - เห็นคันที่ราคาแปลกได้ทันที
+  const priceBreakdown = [
+    ...selected
+      .reduce((m, v) => {
+        const row = rows[v.id];
+        const fee = serviceFeeOf(v);
+        const rate = rateById.get(row.rateId);
+        const name = row.rateId === CUSTOM_RATE ? "กำหนดเอง" : [rate?.label ?? "—", ...addOnsOf(row).map((a) => a.label)].join(" + ");
+        const text = `${name}${row.deduct ? ` − ${PLATE_REQUEST_DEDUCTION}` : ""} = ${fee === null ? "—" : formatMoney(fee)}`;
+        return m.set(text, (m.get(text) ?? 0) + 1);
+      }, new Map<string, number>())
+      .entries(),
+  ];
   const draftExtras = extras.map((e) => ({ label: e.label.trim(), amount: money(e.amountText) }));
   const totals = customer
     ? computeTotals(
         draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0 })),
         draftExtras.map((e) => ({ amount: e.amount ?? 0 })),
-        customer.terms,
+        account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
       )
     : null;
@@ -177,6 +325,7 @@ export function BillingPage() {
     customer && totals && selected.length > 0
       ? {
           invoiceNo,
+          account,
           issueDate: issueDateIso || todayIso(),
           customer: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
           jobLabel,
@@ -232,13 +381,18 @@ export function BillingPage() {
     if (!customer) return;
     const fail = (text: string) => setMessage({ text, error: true });
     if (selected.length === 0) return fail("เลือกรถอย่างน้อย 1 คัน");
+    if (mixedAccounts) return fail("รถที่เลือกส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี");
     if (!invoiceNo.trim()) return fail("ใส่เลขที่บิล");
     if (!issueDateIso) return fail("วันที่ออกบิลไม่ถูกต้อง");
     if (!jobLabel.trim()) return fail("ใส่ชื่องานที่จะแสดงบนบิล");
     for (const l of draftLines) {
       const name = plateText(l.vehicle) || l.vehicle.chassis;
       if (l.receiptAmount === null) return fail(`ใส่ค่าใบเสร็จของ ${name}`);
-      if (l.serviceFee === null) return fail(`ค่าดำเนินการของ ${name} ไม่ถูกต้อง`);
+      if (l.serviceFee === null) {
+        const row = rows[l.vehicle.id];
+        if (row.rateId === CUSTOM_RATE && !row.customText.trim()) return fail(`เลือกราคาของ ${name} (ยังไม่มีราคาที่ตรงกับรถคันนี้)`);
+        return fail(`ค่าดำเนินการของ ${name} ไม่ถูกต้อง - ตรวจราคาและค่าใบเสร็จ`);
+      }
     }
     for (const e of draftExtras) {
       if (!e.label) return fail("ค่าใช้จ่ายอื่นๆ ต้องมีชื่อรายการ");
@@ -263,7 +417,11 @@ export function BillingPage() {
         })),
         extras: draftExtras.map((e) => ({ label: e.label, amount: e.amount! })),
       });
+      returnState.current = null; // ออกบิลแล้ว - ไม่ติ๊กคันเดิมซ้ำ
       await loadQueue(true);
+      setConfirmOpen(false);
+      setShowPreview(false);
+      setExpanded(null);
       setInvoiceReload((n) => n + 1);
       setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน ยอด ${formatMoney(invoice.netTotal)} บาท` });
       printInvoice(invoice);
@@ -307,6 +465,7 @@ export function BillingPage() {
             {customers.map((c) => (
               <button key={c.id} className={`filter-chip${c.id === customer.id ? " selected" : ""}`} onClick={() => chooseCustomer(c.id)}>
                 {c.company || c.name} · รอวางบิล {c.vehicles.length}
+                {c.account === "PERSONAL" && ` · ${ACCOUNT_LABEL.PERSONAL}`}
               </button>
             ))}
           </div>
@@ -314,12 +473,17 @@ export function BillingPage() {
           <section className="panel" style={{ marginTop: 16, padding: "16px 23px", overflow: "visible" }}>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", alignItems: "center", justifyContent: "space-between", fontSize: 14 }}>
               <div>
-                <b style={{ fontWeight: 600 }}>เงื่อนไขวางบิล:</b> {termsSummary(customer.terms, todayIso())}
+                <b style={{ fontWeight: 600 }}>{ACCOUNT_LABEL[customer.account]}</b>
+                <span className="muted" style={{ margin: "0 10px" }}>·</span>
+                <b style={{ fontWeight: 600 }}>เงื่อนไขวางบิล:</b> {termsSummary(customer.account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, todayIso())}
                 <span className="muted" style={{ marginLeft: 12 }}>
                   ตารางค่าดำเนินการ {customer.rates.length} แถว
                 </span>
               </div>
               <div>
+                <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "account" ? "" : "account")}>
+                  บัญชีรับเงิน
+                </button>
                 <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "terms" ? "" : "terms")}>
                   แก้เงื่อนไข
                 </button>
@@ -328,6 +492,13 @@ export function BillingPage() {
                 </button>
               </div>
             </div>
+            {settingsOpen === "account" && (
+              <BillingAccountEditor
+                key={customer.id}
+                customerId={customer.id}
+                onSaved={() => loadQueue(false, customer.id)} // บัญชีรายคันคิดตามวันส่งงานฝั่ง backend
+              />
+            )}
             {settingsOpen === "terms" && (
               <BillingTermsEditor
                 key={customer.id}
@@ -352,222 +523,438 @@ export function BillingPage() {
             )}
           </section>
 
-          <div className="lower" style={{ marginTop: 16, gridTemplateColumns: "minmax(0,1fr) 330px" }}>
-            <section className="panel">
-              <div className="panel-head">
-                <h2>ส่งงานแล้ว รอวางบิล ({vehicles.length})</h2>
-                <div>
-                  <button className="text-button" onClick={() => setChecked(vehicles.map((v) => v.id), true)}>
-                    เลือกทั้งหมด
-                  </button>
-                  <button className="text-button" onClick={() => setChecked(vehicles.map((v) => v.id), false)}>
-                    ไม่เลือกเลย
-                  </button>
-                </div>
+          {/* วางบิลแบบติ๊กอย่างเดียว (ผู้ใช้ 2026-09-28): แต่ละคันเห็นแค่ทะเบียน/เลขตัวถัง/ราคาที่ระบบคิด ไม่ต้องเลื่อนซ้ายขวา
+              รายละเอียด (ค่าใบเสร็จ, แถวราคา, ค่าเพิ่ม, ข้อความบนบิล, ปิดงาน) อยู่หลังปุ่ม "แก้" ใช้เฉพาะคันที่ต้องแก้
+              คันที่มีปัญหา (ไม่มีราคา/ไม่มียอดใบเสร็จ) ติ๊กไม่ได้จนกว่าจะแก้ · ออกบิลผ่านหน้ายืนยันที่สรุปราคาและยอดรวม */}
+          <section className="panel" style={{ marginTop: 16, overflow: "visible" }}>
+            <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
+              <h2>ส่งงานแล้ว รอวางบิล ({vehicles.length})</h2>
+              <span className="muted" style={{ fontSize: 12 }}>
+                <span style={{ display: "inline-block", width: 12, height: 12, background: "#fff6dd", border: "1px solid #f5d27a", borderRadius: 3, verticalAlign: "middle", marginRight: 4 }} />
+                แถวสีเหลือง = ไม่ใช่จดปกติ (ขอใช้ / ด่วน / กำหนดเอง)
+              </span>
+            </div>
+            {problemCount > 0 && (
+              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fff4e5", color: "#8a4b00", fontSize: 13 }}>
+                ⚠ ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
               </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ลงบิลนี้</th>
-                      <th>ทะเบียน</th>
-                      <th>เลขตัวถัง</th>
-                      <th>ยี่ห้อ / ประเภทรถ</th>
-                      <th>เลขที่ใบเสร็จ</th>
-                      <th>ค่าใบเสร็จ</th>
-                      <th>ค่าดำเนินการ</th>
-                      <th>ข้อความต่อท้ายบนบิล</th>
-                      <th>วางบิลนอกระบบ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dates.map((date) => {
-                      const group = vehicles.filter((v) => v.deliveredDate === date);
-                      return (
-                        <Fragment key={date}>
-                          <tr>
-                            <td colSpan={9} style={{ background: "#f5f7fb", padding: "8px 20px", fontSize: 12, color: "#576781" }}>
-                              ส่งเมื่อ <b>{isoToDisplayDate(date)}</b> · {group.length} คัน · ผู้รับ {group[0].recipient || "—"}
-                              <button className="text-button" onClick={() => setChecked(group.map((v) => v.id), true)}>
-                                เลือกทั้งวันนี้
-                              </button>
-                            </td>
-                          </tr>
-                          {group.map((v) => {
-                            const row = rows[v.id];
-                            if (!row) return null;
-                            const fee = serviceFeeOf(v);
-                            return (
-                              <tr key={v.id}>
-                                <td>
-                                  <input type="checkbox" checked={row.checked} onChange={(e) => patchRow(v.id, { checked: e.target.checked })} aria-label={`ลงบิล ${plateText(v) || v.chassis}`} />
-                                </td>
-                                <td>
-                                  {plateText(v) || "—"}
-                                  {!v.plateDelivered && <div className="muted">ป้ายค้างส่ง</div>}
-                                </td>
-                                <td>{v.chassis}</td>
-                                <td>
-                                  {v.brandName}
-                                  <div className="muted">
-                                    {v.body || "—"}
-                                    {v.cc !== null ? ` · ${v.cc} cc` : ""}
-                                  </div>
-                                </td>
-                                <td>{v.receiptNo || "—"}</td>
-                                <td>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={row.receiptText}
-                                    onChange={(e) => patchRow(v.id, { receiptText: e.target.value })}
-                                    style={{ width: 100, textAlign: "right" }}
-                                    aria-label={`ค่าใบเสร็จ ${plateText(v) || v.chassis}`}
-                                  />
-                                  {v.receiptAmountSource === "BILL_ESTIMATE" && <div className="muted">ยอดจากระบบ ตรวจกับใบเสร็จ</div>}
-                                  {v.receiptAmountSource === "NONE" && <div className="customer-message error" style={{ fontSize: 11 }}>ไม่มียอดใบเสร็จ</div>}
-                                </td>
-                                <td>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={row.serviceText}
-                                    onChange={(e) => patchRow(v.id, { serviceText: e.target.value })}
-                                    style={{ width: 100, textAlign: "right" }}
-                                    aria-label={`ค่าดำเนินการ ${plateText(v) || v.chassis}`}
-                                  />
-                                  {v.suggestedServiceFee === null && row.serviceText === "" && <div className="muted">ไม่มีราคาในตาราง</div>}
-                                  {v.requestedPlateNumber && (
-                                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginTop: 4, color: row.deduct ? "#b43434" : "#576781" }}>
-                                      <input type="checkbox" checked={row.deduct} onChange={(e) => patchRow(v.id, { deduct: e.target.checked })} />
-                                      {PLATE_REQUEST_NOTE} −{PLATE_REQUEST_DEDUCTION}
-                                      {row.deduct && fee !== null ? ` = ${formatMoney(fee)}` : ""}
-                                    </label>
-                                  )}
-                                </td>
-                                <td>
-                                  <input
-                                    type="text"
-                                    value={row.label}
-                                    onChange={(e) => patchRow(v.id, { label: e.target.value })}
-                                    placeholder="เช่น (ขอใช้ต่างภูมิลำเนา)"
-                                    style={{ width: 190 }}
-                                    aria-label={`ข้อความต่อท้ายบนบิล ${plateText(v) || v.chassis}`}
-                                  />
-                                </td>
-                                <td>
-                                  <button
-                                    className="text-button"
-                                    title="วางบิลที่อื่นแล้ว หรือไม่ต้องวางบิล - เอาออกจากคิวพร้อมหมายเหตุ"
-                                    onClick={() => setClosing(v)}
-                                    aria-label={`ปิดงาน วางบิลนอกระบบ ${plateText(v) || v.chassis}`}
-                                  >
-                                    ปิดงาน
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ padding: "16px 23px", borderTop: "1px solid #f0f2f6", display: "grid", gap: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h2 style={{ fontSize: 15 }}>ค่าใช้จ่ายอื่นๆ ของบิลนี้</h2>
-                  <button className="text-button" onClick={() => setExtras((prev) => [...prev, { label: "", amountText: "" }])}>
-                    + เพิ่มรายการ
-                  </button>
-                </div>
-                {extras.map((e, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8 }}>
-                    <input
-                      type="text"
-                      value={e.label}
-                      placeholder="ชื่อรายการ"
-                      onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, label: ev.target.value } : x)))}
-                      style={{ flex: 1, minWidth: 0 }}
-                      aria-label="ชื่อรายการ"
-                    />
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={e.amountText}
-                      placeholder="จำนวนเงิน"
-                      onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, amountText: ev.target.value } : x)))}
-                      style={{ width: 120, textAlign: "right" }}
-                      aria-label="จำนวนเงิน"
-                    />
-                    <button className="text-button" onClick={() => setExtras((prev) => prev.filter((_, n) => n !== i))} aria-label="ลบรายการ">
-                      ลบ
-                    </button>
-                  </div>
-                ))}
-                <p style={{ fontSize: 12 }}>ทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่ง คิด VAT และหัก ณ ที่จ่ายเหมือนค่าดำเนินการ</p>
-              </div>
-            </section>
-
-            <section className="panel" style={{ padding: "22px 23px", alignSelf: "start", overflow: "visible" }}>
-              <h2 style={{ marginBottom: 16 }}>สรุปยอดบิล ({selected.length} คัน)</h2>
-              <div style={{ display: "grid", gap: 12 }}>
-                <label className="field">
-                  เลขที่ IV (ล้อตาม Google Sheet)
-                  <input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="IV2026-121" />
-                </label>
-                <label className="field">
-                  วันที่ออกบิล
-                  <DateInput
-                    value={issueDateText}
-                    onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
-                  />
-                  {!issueDateIso && issueDateText.replace(/\D/g, "").length === 8 && (
-                    <span className="customer-message error" style={{ fontSize: 11 }}>
-                      วันที่ออกบิลไม่ถูกต้อง - ยอดด้านล่างคิดตามวันนี้
+            )}
+            {dates.map((date) => {
+              const group = vehicles.filter((v) => v.deliveredDate === date);
+              return (
+                <div key={date}>
+                  <div style={{ background: "#f5f7fb", padding: "8px 23px", fontSize: 12, color: "#576781", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <span>
+                      ส่งเมื่อ <b>{isoToDisplayDate(date)}</b> · {group.length} คัน · ผู้รับ {group[0].recipient || "—"}
                     </span>
-                  )}
-                </label>
+                  </div>
+                  <div style={{ ...ROW_GRID, padding: "6px 23px", fontSize: 12, color: "#576781", borderTop: "1px solid #f0f2f6" }}>
+                    {/* ติ๊กเลือกทั้งหมด (ผู้ใช้ 2026-09-28) - เฉพาะคันที่พร้อม คันที่ต้องตรวจไม่ถูกเลือก · ติ๊กออก = ไม่เลือกทั้งกลุ่ม */}
+                    <SelectAllBox
+                      checkedCount={group.filter((v) => rows[v.id]?.checked).length}
+                      readyCount={readyIds(group).length}
+                      onChange={(checked) => setChecked(checked ? readyIds(group) : group.map((v) => v.id), checked)}
+                    />
+                    <span>เลขตัวถัง</span>
+                    <span>ทะเบียน</span>
+                    <span>cc</span>
+                    <span style={{ textAlign: "right" }}>ราคาใบเสร็จ</span>
+                    <span style={{ textAlign: "right" }}>ค่าบริการ</span>
+                    <span />
+                  </div>
+                  {group.map((v) => {
+                    const row = rows[v.id];
+                    if (!row) return null;
+                    const fee = serviceFeeOf(v);
+                    const receipt = money(row.receiptText);
+                    const problem = problemOf(v);
+                    const changed = row.rateId !== row.rateBase || !sameIds(row.addOnIds, row.addOnBase) || row.receiptText !== row.receiptBase;
+                    const open = expanded === v.id;
+                    const name = plateText(v) || v.chassis;
+                    const notNormal = addOnsOf(row).length > 0 || row.rateId === CUSTOM_RATE || row.deduct;
+                    return (
+                      <div key={v.id} style={{ borderTop: "1px solid #f0f2f6" }}>
+                        {/* หนึ่งคันหนึ่งแถว (ผู้ใช้ 2026-09-28): เลขตัวถัง · ทะเบียน · cc · ราคาใบเสร็จ · ค่าบริการ */}
+                        {/* ไม่ใช่จดปกติ (มีค่าเพิ่ม ขอใช้/ด่วน, ราคากำหนดเอง, หักยอด) = แถวสีเหลือง ให้เห็นทันที (ผู้ใช้ 2026-09-28) */}
+                        <div style={{ ...ROW_GRID, padding: "8px 23px", fontSize: 13, background: notNormal ? "#fff6dd" : undefined }}>
+                          <input
+                            type="checkbox"
+                            checked={row.checked}
+                            disabled={!!problem && !row.checked}
+                            onChange={(e) => patchRow(v.id, { checked: e.target.checked })}
+                            aria-label={`ลงบิล ${name}`}
+                            style={{ width: 18, height: 18 }}
+                          />
+                          <span style={{ wordBreak: "break-all" }}>
+                            {v.chassis}
+                            {fixedIds.has(v.id) && (
+                              <span style={{ marginLeft: 6, fontSize: 11, background: "#e3f5e9", color: "#1e6b3a", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                                ✓ แก้ไขเรียบร้อย
+                              </span>
+                            )}
+                          </span>
+                          <span>{plateText(v) || "—"}</span>
+                          <span>{v.cc === null ? "—" : v.cc}</span>
+                          <span style={{ textAlign: "right" }}>{receipt === null ? "—" : formatMoney(receipt)}</span>
+                          <span style={{ textAlign: "right" }}>
+                            {/* ป้ายขอใช้/ด่วนอยู่หน้าตัวเลข */}
+                            {addOnsOf(row).map((a) => (
+                              <span key={a.id} style={{ fontSize: 11, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>
+                                {a.label}
+                              </span>
+                            ))}
+                            {row.rateId === CUSTOM_RATE && !problem && (
+                              <span style={{ fontSize: 11, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>กำหนดเอง</span>
+                            )}
+                            {problem ? (
+                              <span className="customer-message error" title={problem}>
+                                ⚠ ต้องตรวจ
+                              </span>
+                            ) : (
+                              <b style={{ fontWeight: 600, color: changed ? "#b43434" : undefined }} title={changed ? "แก้จากที่ระบบเลือก" : undefined}>
+                                {formatMoney(fee ?? 0)}
+                              </b>
+                            )}
+                          </span>
+                          <button className="text-button" onClick={() => setExpanded(open ? null : v.id)} aria-expanded={open} aria-label={`แก้ ${name}`}>
+                            {open ? "ปิด" : "แก้"}
+                          </button>
+                        </div>
+                        {problem && !open && (
+                          <div className="customer-message error" style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
+                            {problem}
+                          </div>
+                        )}
+                        {open && (
+                          <div style={{ padding: "4px 23px 16px 53px", display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", fontSize: 13 }}>
+                            <div className="muted" style={{ gridColumn: "1 / -1" }}>
+                              {v.brandName} · {v.body || "—"}
+                              {v.cc !== null ? ` · ${v.cc} cc` : " · ไม่มีข้อมูล cc"} · ใบเสร็จเลขที่ {v.receiptNo || "—"}
+                            </div>
+                            {/* รูปใบเสร็จจริงไว้เทียบยอด (ผู้ใช้ 2026-09-28) - กดรูปเพื่อเปิดเต็มในแท็บใหม่ */}
+                            <div style={{ gridColumn: "1 / -1" }}>
+                              {v.receiptImageIds.length ? (
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  {v.receiptImageIds.map((id) => (
+                                    <AuthedImage
+                                      key={id}
+                                      src={receiptImageUrl(id)}
+                                      alt={`ใบเสร็จ ${name}`}
+                                      style={{ maxWidth: "100%", maxHeight: 420, objectFit: "contain", border: "1px solid #e4e9f1", borderRadius: 8, background: "#f7f8fb" }}
+                                      linkTitle="เปิดรูปใบเสร็จเต็มในแท็บใหม่"
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="muted">ยังไม่มีรูปใบเสร็จในระบบ</span>
+                              )}
+                            </div>
+                            <label className="field">
+                              ค่าใบเสร็จ
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={row.receiptText}
+                                onChange={(e) => patchRow(v.id, { receiptText: e.target.value })}
+                                style={{ textAlign: "right" }}
+                                aria-label={`ค่าใบเสร็จ ${name}`}
+                              />
+                            </label>
+                            {v.receiptEstimate !== null && receipt !== null && receipt !== v.receiptEstimate && (
+                              <div
+                                style={{
+                                  gridColumn: "1 / -1",
+                                  padding: "8px 12px",
+                                  borderRadius: 8,
+                                  background: row.receiptChecked ? "#eaf7ee" : "#fff4e5",
+                                  color: row.receiptChecked ? "#1e6b3a" : "#8a4b00",
+                                }}
+                              >
+                                {receiptMismatchOf(v) ?? `ใบเสร็จ ${formatMoney(receipt)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(v.receiptEstimate)}`}
+                                <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                                  <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
+                                  ตรวจกับใบเสร็จจริงแล้ว ยอดถูกต้อง (และติ๊ก/เอาติ๊ก &quot;ขอใช้&quot; ให้ตรงใบเสร็จแล้ว)
+                                </label>
+                              </div>
+                            )}
+                            <label className="field">
+                              ราคา
+                              <select value={row.rateId} onChange={(e) => patchRow(v.id, { rateId: e.target.value })} aria-label={`ราคา ${name}`}>
+                                {ratesFor(v, "BASE").map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.label} · {formatMoney(r.amount)}
+                                    {r.includesReceipt ? " รวมใบเสร็จ" : ""}
+                                  </option>
+                                ))}
+                                <option value={CUSTOM_RATE}>กำหนดเอง…</option>
+                              </select>
+                            </label>
+                            {row.rateId === CUSTOM_RATE ? (
+                              <label className="field">
+                                ค่าบริการ (กำหนดเอง)
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={row.customText}
+                                  onChange={(e) => patchRow(v.id, { customText: e.target.value })}
+                                  style={{ textAlign: "right" }}
+                                  aria-label={`ค่าดำเนินการ ${name}`}
+                                />
+                              </label>
+                            ) : (
+                              ratesFor(v, "ADD_ON").length > 0 && (
+                                <div style={{ display: "grid", gap: 4, alignContent: "start" }}>
+                                  <span>ค่าเพิ่ม</span>
+                                  {ratesFor(v, "ADD_ON").map((a) => (
+                                    <label key={a.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={row.addOnIds.includes(a.id)}
+                                        onChange={(e) => patchRow(v.id, { addOnIds: e.target.checked ? [...row.addOnIds, a.id] : row.addOnIds.filter((id) => id !== a.id) })}
+                                      />
+                                      {a.label} +{formatMoney(a.amount)}
+                                      {row.addOnBase.includes(a.id) && <span className="muted">(ตามข้อมูลรถ)</span>}
+                                    </label>
+                                  ))}
+                                </div>
+                              )
+                            )}
+                            <label className="field">
+                              ข้อความต่อท้ายบนบิล
+                              <input
+                                type="text"
+                                value={row.label}
+                                onChange={(e) => patchRow(v.id, { label: e.target.value })}
+                                placeholder={labelOf(v) || "เช่น (ขอใช้ต่างภูมิลำเนา)"}
+                                aria-label={`ข้อความต่อท้ายบนบิล ${name}`}
+                              />
+                            </label>
+                            {v.requestedPlateNumber && (
+                              <label style={{ display: "flex", gap: 6, alignItems: "center", color: row.deduct ? "#b43434" : "#576781" }}>
+                                <input type="checkbox" checked={row.deduct} onChange={(e) => patchRow(v.id, { deduct: e.target.checked })} />
+                                {PLATE_REQUEST_NOTE} −{PLATE_REQUEST_DEDUCTION}
+                              </label>
+                            )}
+                            {/* แก้ที่ต้นทาง (ผู้ใช้ 2026-09-28): ไปฟอร์มแก้ไขข้อมูลรถของคันนี้ (ต้องมีเหตุผล เก็บประวัติ) บันทึกแล้วเด้งกลับหน้านี้
+                                พร้อมคันที่ติ๊กไว้และช่อง "แก้" ของคันนี้ ราคา/ขอใช้คิดใหม่จากข้อมูลที่แก้ ทำงานต่อได้เลย */}
+                            <div style={{ gridColumn: "1 / -1", fontSize: 12 }}>
+                              {canEditVehicle ? (
+                                <Link
+                                  href={focusHref("/registration/new-vehicle/entry", v.chassis, { edit: "1", returnTo: "/accounting/billing" })}
+                                  className="text-button"
+                                  onClick={() =>
+                                    saveBillingReturnState({
+                                      customerId: customer.id,
+                                      checked: vehicles.filter((x) => rows[x.id]?.checked).map((x) => x.id),
+                                      expanded: v.id,
+                                    })
+                                  }
+                                >
+                                  แก้ข้อมูลรถ (จังหวัด / cc ฯลฯ) →
+                                </Link>
+                              ) : (
+                                <span className="muted">ข้อมูลรถผิด (เช่น จังหวัด) ให้ผู้ลงข้อมูลรถ (ADMIN / STAFF_ENTRY) แก้ที่หน้าเพิ่มข้อมูลรถจดใหม่</span>
+                              )}
+                              {canEditVehicle && <span className="muted"> - บันทึกแล้วกลับมาหน้านี้เอง พร้อมราคาที่คิดใหม่ คันที่ติ๊กไว้ยังอยู่</span>}
+                            </div>
+                            <div style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                              <b style={{ fontWeight: 600 }}>ค่าบริการคันนี้ {fee === null ? "—" : formatMoney(fee)}</b>
+                              {changed && (
+                                <button
+                                  className="text-button"
+                                  onClick={() => patchRow(v.id, { rateId: row.rateBase, addOnIds: row.addOnBase, receiptText: row.receiptBase })}
+                                >
+                                  กลับไปใช้ค่าที่ระบบเลือก
+                                </button>
+                              )}
+                              <button
+                                className="text-button"
+                                title="วางบิลที่อื่นแล้ว หรือไม่ต้องวางบิล - เอาออกจากคิวพร้อมหมายเหตุ"
+                                onClick={() => setClosing(v)}
+                                aria-label={`ปิดงาน วางบิลนอกระบบ ${name}`}
+                              >
+                                ปิดงาน (วางบิลนอกระบบ)
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {/* ยอดสรุปรวม (ผู้ใช้ 2026-09-28): รวมเฉพาะคันที่ติ๊ก ตรงคอลัมน์ราคาใบเสร็จ / ค่าบริการ */}
+            <div style={{ ...ROW_GRID, padding: "12px 23px", fontSize: 13, borderTop: "2px solid #e3e8f2", background: "#f8f9fc", fontWeight: 600 }}>
+              <span />
+              <span>รวมที่เลือก {selected.length} คัน</span>
+              <span />
+              <span />
+              <span style={{ textAlign: "right" }}>{formatMoney(totals?.feeTotal ?? 0)}</span>
+              <span style={{ textAlign: "right" }}>{formatMoney(round2(draftLines.reduce((s, l) => s + (l.serviceFee ?? 0), 0)))}</span>
+              <span />
+            </div>
+            {/* ยอดสรุปเรียงลงมาทีละบรรทัด (ผู้ใช้ 2026-09-28) */}
+            {totals && selected.length > 0 && (
+              <div style={{ display: "grid", justifyContent: "end", padding: "12px 23px 18px", background: "#f8f9fc" }}>
+                <div style={{ display: "grid", gap: 6, fontSize: 14, minWidth: 280 }}>
+                  <SumLine label="ราคาใบเสร็จ" value={totals.feeTotal} />
+                  <SumLine label="ค่าบริการ" value={totals.serviceTotal} />
+                  {totals.vatAmount > 0 && <SumLine label={`VAT ${totals.vatRate}%`} value={totals.vatAmount} />}
+                  {totals.whtAmount > 0 && <SumLine label={`หัก ณ ที่จ่าย ${totals.whtRate}%`} value={-totals.whtAmount} />}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 16, borderTop: "1px solid #d9e0ec", paddingTop: 8, fontWeight: 600, fontSize: 16, color: "#2854d9" }}>
+                    <span>ยอดบิล</span>
+                    <span>{formatMoney(totals.netTotal)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* แถบล่างติดจอ: จำนวนที่ติ๊ก + ยอดรวม + ปุ่มออกบิล (เปิดหน้ายืนยัน) */}
+          <div
+            style={{
+              position: "sticky",
+              bottom: 0,
+              zIndex: 5,
+              marginTop: 16,
+              background: "white",
+              border: "1px solid #e3e8f2",
+              borderRadius: 12,
+              boxShadow: "0 -4px 16px rgba(20,40,80,0.08)",
+              padding: "12px 18px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div style={{ fontSize: 14 }}>
+              เลือก <b>{selected.length}</b> คัน
+              {totals && selected.length > 0 && (
+                <>
+                  {" "}
+                  · ยอดบิล <b>{formatMoney(totals.netTotal)}</b> บาท
+                </>
+              )}
+              {mixedAccounts && <div className="customer-message error">รถที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) - แยกเป็นบิลละบัญชี</div>}
+            </div>
+            <button className="primary" disabled={selected.length === 0 || saving || refreshing} onClick={() => setConfirmOpen(true)}>
+              ออกบิล {selected.length > 0 ? `${selected.length} คัน` : ""}
+            </button>
+          </div>
+          {message.text && (
+            <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 10 }}>
+              {message.text}
+            </div>
+          )}
+
+          {confirmOpen && (
+            <IssueDialog onClose={() => setConfirmOpen(false)}>
+              <h2>ยืนยันออกบิล {selected.length} คัน</h2>
+              <p className="muted" style={{ marginBottom: 12 }}>
+                {customer.company || customer.name} · {ACCOUNT_LABEL[account]}
+              </p>
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+                  <label className="field">
+                    {account === "PERSONAL" ? "เลขที่บิล (บัญชีบุคคล)" : "เลขที่ IV"}
+                    <input
+                      type="text"
+                      value={invoiceNo}
+                      onChange={(e) => setInvoiceNos((prev) => ({ ...prev, [account]: e.target.value }))}
+                      placeholder={account === "PERSONAL" ? "เลขแรกของบัญชีบุคคล" : "IV2026-121"}
+                    />
+                    {/* ระบบเสนอเลขถัดไปให้ (แก้ได้ เพราะยังรันเลขร่วมกับ Google Sheet) + บอกเลขล่าสุดที่ออกในระบบ (ผู้ใช้ 2026-09-28) */}
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {lastInvoiceNos[account] ? `เลขล่าสุดในระบบ: ${lastInvoiceNos[account]} · ระบบใส่เลขถัดไปให้แล้ว แก้ได้` : "ยังไม่เคยออกบิลในระบบ - ใส่เลขแรกเอง แล้วใบต่อไประบบรันต่อให้"}
+                      {invoiceNo.trim() && ` · เอกสารแนบเลขที่ ${invoiceNo.trim()}-A`}
+                    </span>
+                  </label>
+                  <label className="field">
+                    วันที่ออกบิล
+                    <DateInput value={issueDateText} onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} />
+                  </label>
+                </div>
                 <label className="field">
                   ชื่องานบนบิล
                   <input type="text" value={jobLabel} onChange={(e) => setJobLabelEdit(e.target.value)} />
                 </label>
+                {priceBreakdown.length > 0 && (
+                  <div style={{ fontSize: 13, background: "#f5f7fb", borderRadius: 8, padding: "8px 12px" }}>
+                    <b style={{ fontWeight: 600 }}>ราคาที่ใช้</b>
+                    {priceBreakdown.map(([text, count]) => (
+                      <div key={text} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span>{text}</span>
+                        <span>{count} คัน</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: "grid", gap: 6 }}>
+                  {extras.map((e, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="text"
+                        value={e.label}
+                        placeholder="ค่าใช้จ่ายอื่น เช่น ค่าส่งเอกสาร"
+                        onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, label: ev.target.value } : x)))}
+                        style={{ flex: 1, minWidth: 0 }}
+                        aria-label="ชื่อรายการ"
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={e.amountText}
+                        placeholder="จำนวนเงิน"
+                        onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, amountText: ev.target.value } : x)))}
+                        style={{ width: 110, textAlign: "right" }}
+                        aria-label="จำนวนเงิน"
+                      />
+                      <button className="text-button" onClick={() => setExtras((prev) => prev.filter((_, n) => n !== i))} aria-label="ลบรายการ">
+                        ลบ
+                      </button>
+                    </div>
+                  ))}
+                  <button className="text-button" style={{ justifySelf: "start" }} onClick={() => setExtras((prev) => [...prev, { label: "", amountText: "" }])}>
+                    + ค่าใช้จ่ายอื่นของบิลนี้
+                  </button>
+                </div>
                 {totals && (
                   <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
                     <SumLine label="ค่าธรรมเนียม (ตามใบเสร็จ)" value={totals.feeTotal} />
                     <SumLine label="ค่าดำเนินการ" value={totals.serviceTotal} />
                     <SumLine label={totals.vatRate ? `VAT ${totals.vatRate}%` : "VAT (ไม่มี)"} value={totals.vatAmount} />
                     <SumLine label={totals.whtRate ? `หัก ณ ที่จ่าย ${totals.whtRate}%` : "หัก ณ ที่จ่าย (ไม่มี)"} value={-totals.whtAmount} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: "#edf2ff", color: "#2854d9", borderRadius: 10, padding: "12px 14px", fontWeight: 600, marginTop: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: "#edf2ff", color: "#2854d9", borderRadius: 10, padding: "12px 14px", fontWeight: 600 }}>
                       <span>จำนวนเงินทั้งสิ้น</span>
                       <span style={{ fontSize: 22 }}>{formatMoney(totals.netTotal)}</span>
                     </div>
                   </div>
                 )}
-                <button className="primary" style={{ justifyContent: "center" }} disabled={saving || refreshing} onClick={handleIssue}>
-                  ออกใบวางบิลและพิมพ์
+                <button className="text-button" style={{ justifySelf: "start" }} onClick={() => setShowPreview((s) => !s)}>
+                  {showPreview ? "ซ่อนตัวอย่างเอกสาร" : "ดูตัวอย่างเอกสาร"}
                 </button>
-                {message.text && (
-                  <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
+                {showPreview && preview && (
+                  <iframe title="ตัวอย่างใบวางบิล" srcDoc={buildInvoiceHtml(preview)} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />
+                )}
+                {message.text && message.error && (
+                  <div className="customer-message error" role="alert">
                     {message.text}
                   </div>
                 )}
+                <div className="form-actions" style={{ marginTop: 0 }}>
+                  <button type="button" onClick={() => setConfirmOpen(false)} disabled={saving}>
+                    กลับไปแก้
+                  </button>
+                  <button type="button" className="primary" onClick={handleIssue} disabled={saving || refreshing}>
+                    {saving ? "กำลังออกบิล…" : "ยืนยันออกบิลและพิมพ์"}
+                  </button>
+                </div>
               </div>
-            </section>
-          </div>
-
-          <section className="panel" style={{ marginTop: 20 }}>
-            <div className="panel-head">
-              <h2>ตัวอย่างเอกสาร</h2>
-              <span className="muted">ใบวางบิล/ใบแจ้งหนี้ ตามด้วยเอกสารแนบรายคัน</span>
-            </div>
-            {preview ? (
-              <iframe title="ตัวอย่างใบวางบิล" srcDoc={buildInvoiceHtml(preview)} style={{ width: "100%", height: 760, border: 0, borderTop: "1px solid #f0f2f6", background: "white" }} />
-            ) : (
-              <div className="empty-customers">เลือกรถอย่างน้อย 1 คันเพื่อดูตัวอย่างเอกสาร</div>
-            )}
-          </section>
+            </IssueDialog>
+          )}
         </>
       )}
 
@@ -599,6 +986,68 @@ function useModal() {
     ref.current?.showModal();
   }, []);
   return ref;
+}
+
+// งานที่เตรียมไว้ก่อนไปแก้ข้อมูลรถ (ลูกค้า / คันที่ติ๊ก / คันที่เปิด "แก้") - sessionStorage ของแท็บนี้ อ่านครั้งเดียวตอนกลับมา
+// เก็บไม่ได้ (private mode ฯลฯ) = กลับมาแล้วติ๊กใหม่เอง หน้ายังทำงานปกติ
+interface BillingReturnState {
+  customerId: string;
+  checked: string[];
+  expanded: string | null;
+}
+const RETURN_KEY = "billing-return-v1";
+
+function saveBillingReturnState(state: BillingReturnState) {
+  try {
+    sessionStorage.setItem(RETURN_KEY, JSON.stringify(state));
+  } catch {
+    /* ไม่เป็นไร */
+  }
+}
+
+function takeBillingReturnState(): BillingReturnState | null {
+  try {
+    const raw = sessionStorage.getItem(RETURN_KEY);
+    sessionStorage.removeItem(RETURN_KEY);
+    const s = raw ? (JSON.parse(raw) as BillingReturnState) : null;
+    return s && typeof s.customerId === "string" && Array.isArray(s.checked) ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+// ช่องติ๊กเลือกทั้งหมดบนหัวคอลัมน์: ติ๊กครบทุกคันที่พร้อม = ติ๊ก, บางคัน = ขีด (indeterminate)
+function SelectAllBox({ checkedCount, readyCount, onChange }: { checkedCount: number; readyCount: number; onChange: (checked: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const all = readyCount > 0 && checkedCount >= readyCount;
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = checkedCount > 0 && !all;
+  }, [checkedCount, all]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={all}
+      disabled={readyCount === 0 && checkedCount === 0}
+      onChange={() => onChange(!all)} // บางคัน -> เลือกทั้งหมด, ครบแล้ว -> ไม่เลือกเลย
+      aria-label="เลือกทั้งหมด"
+      title="เลือกทั้งหมด"
+      style={{ width: 18, height: 18 }}
+    />
+  );
+}
+
+// หน้ายืนยันออกบิล (ผู้ใช้ 2026-09-28: วางบิลแบบติ๊กอย่างเดียว) - เนื้อหาอยู่ใน BillingPage เพราะใช้ state ของหน้าเดียวกัน
+function IssueDialog({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const dialogRef = useModal();
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(640px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      {children}
+    </dialog>
+  );
 }
 
 const errorText = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);

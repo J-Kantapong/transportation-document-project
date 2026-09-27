@@ -1,5 +1,5 @@
 import type { Invoice } from "@/lib/billing-api";
-import { COMPANY_PROFILE } from "@/lib/company-profile";
+import { COMPANY_PROFILE, PERSONAL_PROFILE } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2, sortLinesByPlate } from "@/lib/invoice";
 
 // ใบวางบิล/ใบแจ้งหนี้ + เอกสารแนบรายคัน (A4 แนวตั้ง) ตามแบบที่บริษัทใช้อยู่ใน Google Sheet "Invoice Tradeinter":
@@ -11,9 +11,28 @@ export type PrintableInvoice = Pick<
   Invoice,
   "invoiceNo" | "issueDate" | "customer" | "jobLabel" | "extras" | "vatRate" | "whtRate" | "feeTotal" | "serviceTotal" | "vatAmount" | "whtAmount" | "netTotal" | "lines"
 > &
-  Partial<Pick<Invoice, "status" | "voidReason">>;
+  Partial<Pick<Invoice, "status" | "voidReason" | "account">>;
+
+const isPersonal = (inv: PrintableInvoice) => inv.account === "PERSONAL";
+
+// หัวผู้ออกบิล: บัญชีบริษัท = บริษัท + เลขผู้เสียภาษี, บัญชีบุคคล = ชื่อตามบัญชีธนาคาร ไม่มีเลขผู้เสียภาษี (ผู้ใช้ 2026-09-27)
+function issuerHtml(inv: PrintableInvoice): string {
+  if (isPersonal(inv)) {
+    const p = PERSONAL_PROFILE;
+    return `<div><b>${escapeHtml(p.name)}</b>${p.addressLines.length ? `<br><span class="k">${p.addressLines.map(escapeHtml).join("<br>")}</span>` : ""}</div>`;
+  }
+  const co = COMPANY_PROFILE;
+  return `<div><b class="en">${escapeHtml(co.nameEn)}</b><br>${escapeHtml(co.nameTh)}<br>
+<span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>`;
+}
+
+const paymentLinesOf = (inv: PrintableInvoice) => (isPersonal(inv) ? PERSONAL_PROFILE.paymentLines : COMPANY_PROFILE.paymentLines);
 
 export const ATTACHMENT_ROWS_PER_PAGE = 40;
+
+// เลขที่เอกสารแนบล้อกับเลขใบวางบิล (ผู้ใช้ 2026-09-28): IV2026-121 -> IV2026-121-A พิมพ์ใต้เลขที่บนหน้าบิลและหัวเอกสารแนบทุกหน้า
+const attachmentNo = (inv: PrintableInvoice) => (inv.invoiceNo ? `${inv.invoiceNo}-A` : "—");
+const attachmentPageCount = (inv: PrintableInvoice) => Math.max(1, Math.ceil(inv.lines.length / ATTACHMENT_ROWS_PER_PAGE));
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
@@ -27,10 +46,8 @@ const voidNoteHtml = (inv: PrintableInvoice) =>
   isVoid(inv) ? `<span class="void-note">บิลนี้ยกเลิกแล้ว${inv.voidReason ? ` – ${escapeHtml(inv.voidReason)}` : ""}</span>` : "";
 
 function headHtml(inv: PrintableInvoice, docTitle: string): string {
-  const co = COMPANY_PROFILE;
-  return `<div class="co"><div><b class="en">${escapeHtml(co.nameEn)}</b><br>${escapeHtml(co.nameTh)}<br>
-<span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>
-<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
+  return `<div class="co">${issuerHtml(inv)}
+<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))} (${attachmentPageCount(inv)} หน้า)<br>วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
 ${isVoid(inv) ? `<div style="margin-top:3mm">${voidNoteHtml(inv)}</div>` : ""}
 <div class="meta"><span class="k">ชื่อลูกค้า</span><br><b>${escapeHtml(customerTitle(inv.customer))}</b><br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(inv.customer.taxId || "—")}<br>${escapeHtml(inv.customer.address || "")}</span></div>`;
@@ -40,11 +57,11 @@ function invoicePageHtml(inv: PrintableInvoice): string {
   const rows = invoiceFaceLines(inv)
     .map((l) => `<tr><td>${escapeHtml(l.name)}</td><td class="r">${l.qty}</td><td class="r">${formatMoney(l.unit)}</td><td class="r">${formatMoney(round2(l.qty * l.unit))}</td></tr>`)
     .join("");
-  return `<section class="page">${voidMarkHtml(inv)}${headHtml(inv, "ใบวางบิล/ใบแจ้งหนี้")}
+  return `<section class="page face">${voidMarkHtml(inv)}${headHtml(inv, "ใบวางบิล/ใบแจ้งหนี้")}
 <table class="items"><colgroup><col><col style="width:12%"><col style="width:18%"><col style="width:20%"></colgroup>
 <thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th class="r">จำนวนเงิน (บาท)</th></tr></thead><tbody>${rows}</tbody></table>
-<div class="foot"><div><span class="k">เงื่อนไขการชำระเงิน :</span><br>${COMPANY_PROFILE.paymentLines.map(escapeHtml).join("<br>")}<br>
-<span class="k">รายละเอียดรถรายคันตามเอกสารแนบ ${escapeHtml(inv.invoiceNo)}</span></div>
+<div class="foot"><div><span class="k">เงื่อนไขการชำระเงิน :</span><br>${paymentLinesOf(inv).map(escapeHtml).join("<br>")}<br>
+<span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</span></div>
 <div class="tot"><div><span>ค่าธรรมเนียม</span><span>${formatMoney(inv.feeTotal)}</span></div>
 <div><span>ค่าดำเนินการ</span><span>${formatMoney(inv.serviceTotal)}</span></div>
 ${inv.vatRate > 0 ? `<div><span>ภาษีมูลค่าเพิ่ม ${inv.vatRate}%</span><span>${formatMoney(inv.vatAmount)}</span></div>` : ""}
@@ -78,9 +95,9 @@ function attachmentPagesHtml(inv: PrintableInvoice): string[] {
     const deductions = [...new Set(lines.filter((l) => l.deduction > 0).map((l) => `${l.deductionNote || "หักยอด"} ${formatMoney(l.deduction)} บาท`))];
     const notes = last
       ? `${deductions.length ? `<div class="k note">* ${deductions.map(escapeHtml).join(" / ")}</div>` : ""}
-${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื่นๆ ของบิล (${inv.extras.map((e) => `${escapeHtml(e.label)} ${formatMoney(e.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้ VAT รายคันปัดเศษแยกกัน ยอดที่ใช้เรียกเก็บคือยอดในหน้าใบวางบิล</div>` : `<div class="k note">VAT รายคันปัดเศษแยกกัน ยอดที่ใช้เรียกเก็บคือยอดในหน้าใบวางบิล</div>`}`
+${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื่นๆ ของบิล (${inv.extras.map((e) => `${escapeHtml(e.label)} ${formatMoney(e.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้</div>` : ""}`
       : "";
-    return `<section class="page att">${voidMarkHtml(inv)}<div class="atthead"><div><b>เอกสารแนบ ${escapeHtml(inv.invoiceNo)}</b> · ${escapeHtml(customerTitle(inv.customer))}${isVoid(inv) ? ` · ${voidNoteHtml(inv)}` : ""}<br>
+    return `<section class="page att">${voidMarkHtml(inv)}<div class="atthead"><div><b>เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</b> <span class="k">(ของใบวางบิล ${escapeHtml(inv.invoiceNo || "—")})</span> · ${escapeHtml(customerTitle(inv.customer))}${isVoid(inv) ? ` · ${voidNoteHtml(inv)}` : ""}<br>
 <span class="k">${escapeHtml(inv.jobLabel)} ${lines.length} คัน · วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div><div class="k">หน้า ${p + 1}/${pageCount}</div></div>
 <table class="grid"><colgroup><col style="width:5%"><col style="width:10%"><col style="width:21%"><col style="width:11%"><col style="width:13%"><col style="width:10%"><col style="width:11%"><col style="width:8%"><col style="width:11%"></colgroup>
 <thead><tr><th>#</th><th>ยี่ห้อ</th><th>เลขตัวรถ</th><th>ทะเบียน</th><th>เลขที่ใบเสร็จ</th><th class="r">ใบเสร็จ</th><th class="r">ค่าดำเนินการ</th><th class="r">VAT ${inv.vatRate}%</th><th class="r">รวม</th></tr></thead>
@@ -124,11 +141,15 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
   .tot .g { border-top: 1px solid #111; margin-top: 1mm; padding-top: 2mm; font-weight: 600; font-size: 11.5pt; }
   .baht { text-align: right; margin-top: 2mm; color: #555; }
   .sign { display: flex; justify-content: space-between; gap: 20mm; margin-top: 22mm; text-align: center; }
+  /* ช่องเซ็นผู้ออกบิล/ผู้รับชิดขอบล่างของหน้าบิล (ผู้ใช้ 2026-09-28) - หน้าบิลสูงเกือบเต็มพื้นที่พิมพ์ A4 (297 - ขอบ 24 = 273mm)
+     เผื่อไว้ 5mm ไม่ให้ล้นเป็นหน้าว่าง · ช่องเซ็นดันลงล่างด้วย margin-top: auto */
+  @media print { .face { display: flex; flex-direction: column; min-height: 268mm; } .face .sign { margin-top: auto; padding-top: 22mm; } }
   .sign div { flex: 1; border-top: 1px solid #999; padding-top: 2mm; }
   .atthead { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 3mm; }
   .grid th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 1.2mm .8mm; font-size: 8.5pt; font-weight: 600; text-align: left; }
   .grid th.r { text-align: right; }
-  .grid td { padding: .9mm .8mm; font-size: 8.5pt; border-bottom: 1px solid #e2e2e2; white-space: nowrap; overflow: hidden; }
+  /* แถวเตี้ยพอให้ 40 คัน (ATTACHMENT_ROWS_PER_PAGE) อยู่ใน A4 หน้าเดียว - เดิมล้นไปหน้าใหม่ 1-2 แถว บิล 61 คันพิมพ์ออกมา 4 หน้า (พบ 2026-09-28) */
+  .grid td { padding: .8mm .8mm; font-size: 8.5pt; line-height: 1.25; border-bottom: 1px solid #e2e2e2; white-space: nowrap; overflow: hidden; }
   .grid .mono { font-family: Consolas, "Courier New", monospace; font-size: 8pt; }
   .grid .sum td { border-top: 1px solid #111; border-bottom: 0; font-weight: 600; padding-top: 1.6mm; }
   .note { margin-top: 2mm; font-size: 8.5pt; }

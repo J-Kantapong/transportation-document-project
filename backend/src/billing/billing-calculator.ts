@@ -32,7 +32,32 @@ export interface RateRow {
   ccMax: number | null;
   amount: number;
   vatInclusive: boolean;
+  includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จแล้ว (YMAC)
+  kind: string; // RATE_KINDS
   sortOrder: number;
+}
+
+// ราคาหลัก 1 แถวต่อคัน + ค่าเพิ่มที่บวกให้เองตามการยื่นของรถคันนั้น (ผู้ใช้ 2026-09-28, TWE: ขอใช้ +100, ด่วน +100 - "ขอใช้" = ขอใช้จังหวัดอื่น)
+export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT'] as const;
+
+// ค่าเพิ่มที่ใช้กับรถคันนี้: แถว OTHER_PROVINCE เมื่อเป็นรถขอใช้ (จดจังหวัดอื่น เช่น กรุงเทพฯ - ใบเสร็จมีค่าธรรมเนียมอื่นๆ 20 + ค่าคำขอ 10
+// แทน 5, ผู้ใช้ 2026-09-28: ไม่ใช่ขอใช้เลขทะเบียน), URGENT เมื่อยื่นด่วน (ชนิดรถต้องตรงหรือ ANY)
+export function suggestAddOns(rates: RateRow[], vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean }): RateRow[] {
+  const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
+  return [...rates]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .filter((r) => r.vehicleKind === 'ANY' || r.vehicleKind === kind)
+    .filter((r) => (r.kind === 'OTHER_PROVINCE' && vehicle.otherProvince) || (r.kind === 'URGENT' && vehicle.urgent));
+}
+
+// ค่าดำเนินการ (ก่อน VAT) ที่เสนอจากแถวราคา - ราคาเหมารวมใบเสร็จ (ผู้ใช้ 2026-09-27): ค่าดำเนินการ = ราคา - ค่าใบเสร็จจริงของคันนั้น
+// (650 - 340 = 310) ถ้ารวม VAT ด้วยถอด VAT จากส่วนที่เหลือ · ยังไม่รู้ค่าใบเสร็จ / ใบเสร็จแพงกว่าราคา = ไม่เสนอ ให้บัญชีกรอกเอง
+export function serviceFeeFromRate(rate: Pick<RateRow, 'amount' | 'vatInclusive' | 'includesReceipt'>, receiptAmount: number | null): number | null {
+  if (!rate.includesReceipt) return rateAmountExVat(rate);
+  if (receiptAmount === null) return null;
+  const rest = round2(rate.amount - receiptAmount);
+  if (rest < 0) return null;
+  return rateAmountExVat({ amount: rest, vatInclusive: rate.vatInclusive });
 }
 
 // ราคาก่อน VAT ของแถวราคา - ลูกค้าบางรายตกลงราคาแบบรวม VAT (1,045 -> 976.64)
@@ -46,6 +71,7 @@ export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: nu
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
   const sorted = [...rates].sort((a, b) => a.sortOrder - b.sortOrder);
   for (const r of sorted) {
+    if (r.kind !== 'BASE') continue; // ค่าเพิ่มไม่ใช่ราคาหลัก
     if (r.vehicleKind !== 'ANY' && r.vehicleKind !== kind) continue;
     if (r.ccMin !== null || r.ccMax !== null) {
       if (vehicle.cc === null) continue;

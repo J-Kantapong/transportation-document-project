@@ -169,6 +169,8 @@ interface PageRule {
 const PAGE_RULES: PageRule[] = [
   { prefix: '/admin', roles: ['ADMIN'] },
   { prefix: '/portal', roles: ['CUSTOMER'] },
+  // บันทึกการจ่ายของลูกค้า + ตารางล้อ (SPI) - พนักงานรถยนต์ดูแลงาน SPI (ผู้ใช้ 2026-09-27) - backend: /api/customer-payments
+  { prefix: '/accounting/customer-payments', roles: ['ADMIN', 'ACCOUNTANT', 'STAFF_CAR'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
   // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
   { prefix: '/registration/new-vehicle/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },

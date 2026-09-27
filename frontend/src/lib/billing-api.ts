@@ -77,6 +77,19 @@ export const slipNoText = (slipNo: number) => `DL-${String(slipNo).padStart(5, "
 export const activeSlip = (slip: DeliverySlip): DeliverySlip => ({ ...slip, items: slip.items.filter((i) => !i.cancelledAt) });
 
 // วางบิลในนามบริษัท (บัญชี) - ดู backend/src/billing/billing.service.ts
+// บัญชีรับเงินของลูกค้า (ผู้ใช้ 2026-09-27) - COMPANY = บัญชีบริษัท (มี VAT), PERSONAL = บัญชีบุคคล (เช่น SPI, YMAC)
+export type BillingAccount = "COMPANY" | "PERSONAL";
+export const ACCOUNT_LABEL: Record<BillingAccount, string> = { COMPANY: "บัญชีบริษัท", PERSONAL: "บัญชีบุคคล" };
+
+export interface AccountPeriod {
+  id: string;
+  account: BillingAccount;
+  effectiveFrom: string; // ISO - ใช้ตั้งแต่วันนี้ งานก่อนหน้ายังอยู่บัญชีเดิม
+  remark: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
 export interface BillingTerms {
   vat: boolean;
   whtRate: number;
@@ -85,6 +98,8 @@ export interface BillingTerms {
 }
 
 export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
+// BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) = ค่าเพิ่มที่บวกให้เอง (ผู้ใช้ 2026-09-28)
+export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT";
 
 export interface ServiceFeeRate {
   id: string;
@@ -94,6 +109,8 @@ export interface ServiceFeeRate {
   ccMax: number | null;
   amount: number;
   vatInclusive: boolean;
+  includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จกรมขนส่งแล้ว (ผู้ใช้ 2026-09-27, YMAC)
+  kind: RateKind;
   sortOrder: number;
 }
 
@@ -109,14 +126,21 @@ export interface BillingVehicle {
   plateCategory: string | null;
   plateNumber: string | null;
   deliveredDate: string;
+  account: BillingAccount; // บัญชีของลูกค้า ณ วันส่งงานของคันนี้
   recipient: string | null;
   plateDelivered: boolean;
   receiptNo: string | null;
   receiptAmount: number | null;
   receiptAmountSource: "RECEIPT" | "BILL_ESTIMATE" | "NONE"; // BILL_ESTIMATE = พนักงานไม่ได้กรอกยอดใบเสร็จ ใช้ยอด Bill ที่ระบบคำนวณแทน
+  receiptImageIds: string[]; // รูปใบเสร็จของการยื่นล่าสุด (ใหม่สุดก่อน) - แสดงในช่อง "แก้" ให้เทียบยอด
+  receiptEstimate: number | null; // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ - ไม่ตรงกับใบเสร็จจริง = หน้าวางบิลเตือน (ผู้ใช้ 2026-09-28)
   requestedPlateNumber: boolean;
   suggestedRateId: string | null;
-  suggestedServiceFee: number | null;
+  suggestedServiceFee: number | null; // ราคาหลัก + ค่าเพิ่มที่ระบบเลือก (ก่อนหักยอด)
+  urgent: boolean; // การยื่นล่าสุดเป็นงานด่วน
+  otherProvince: boolean; // ขอใช้ = จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ
+  // จับคู่อัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนที่ระบบติ๊กให้
+  suggestedAddOnIds: string[];
 }
 
 export interface BillingCustomer {
@@ -126,6 +150,7 @@ export interface BillingCustomer {
   branch: string | null;
   address: string | null;
   taxId: string | null;
+  account: BillingAccount; // บัญชีที่ใช้วันนี้
   terms: BillingTerms;
   rates: ServiceFeeRate[];
   vehicles: BillingVehicle[];
@@ -166,6 +191,7 @@ export interface Invoice {
   paidDate: string | null;
   taxInvoiceNo: string | null;
   voidReason: string | null;
+  account?: BillingAccount; // บัญชีบุคคล = หัวบิลชื่อบุคคล + บัญชีรับเงินบุคคล ไม่มี VAT (บิลเก่าก่อน 2026-09-27 = บัญชีบริษัท)
   // หน้าแก้บิลส่งกลับเป็น expectedUpdatedAt - มีคนแก้/รับเงิน/ยกเลิกไปก่อน backend ตอบ 409 (ผู้ใช้ 2026-09-27)
   updatedAt: string | null;
   // จำนวนประวัติแก้ / ยกเลิก / ยกเลิกการรับเงิน (มาเฉพาะใน listInvoices)
@@ -260,10 +286,19 @@ export const billingApi = {
   cancelDeliverySlip: (id: string, data: { vehicleIds: string[]; remark: string }) =>
     request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}/cancel`, json("POST", data)),
 
-  billingQueue: () => request<{ suggestedInvoiceNo: string; customers: BillingCustomer[] }>("/api/billing/queue"),
+  // เลขบิลรันแยกตามบัญชี - suggestedPersonalInvoiceNo ว่าง = ยังไม่เคยออกบิลบัญชีบุคคล
+  billingQueue: () =>
+    request<{ suggestedInvoiceNo: string; suggestedPersonalInvoiceNo: string; lastInvoiceNo: string | null; lastPersonalInvoiceNo: string | null; customers: BillingCustomer[] }>(
+      "/api/billing/queue",
+    ),
   // remark บังคับ - ค่าก่อน/หลังเก็บในประวัติลูกค้า (ผู้ใช้ 2026-09-27)
   updateTerms: (customerId: string, terms: BillingTerms & { remark: string }) =>
     request<{ terms: BillingTerms }>(`/api/billing/customers/${customerId}/terms`, json("PATCH", terms)),
+  // บัญชีรับเงินพร้อมวันเริ่มใช้ (remark บังคับ) - ADMIN + ACCOUNTANT
+  accountPeriods: (customerId: string) =>
+    request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`),
+  setAccount: (customerId: string, data: { account: BillingAccount; effectiveFrom: string; remark: string }) =>
+    request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`, json("POST", data)),
   replaceRates: (customerId: string, rates: ServiceFeeRateInput[]) =>
     request<{ rates: ServiceFeeRate[] }>(`/api/billing/customers/${customerId}/rates`, json("PUT", { rates })),
   listInvoices: (params: { offset?: number; limit?: number } = {}) =>
