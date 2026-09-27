@@ -3,7 +3,7 @@ import { requestContext } from '../auth/request-context.js';
 import type { UserRole } from '../generated/prisma/enums.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
-import { checkReading, isNearChassis, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
+import { checkReading, isNearChassis, normalizeChassis, normalizePlate, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
 import type { ReceiptStorage } from './receipt-storage.js';
 import { ReceiptsService, detectImageType } from './receipts.service.js';
 
@@ -352,6 +352,49 @@ describe('ReceiptsService.upload - จับคู่ด้วยเลขตั
     expect(create.mock.calls[0][0].data.submissionId).toBeNull();
   });
 
+  // 16/18 ตัว: findMany = รถที่ยื่นแล้วทุกคันที่อาจใกล้ · findFirst ที่มี where.id = ยืนยันว่าคันนั้นยังรอใบเสร็จในขอบเขต
+  const LOT = [moto('s7', 'MLTZT3681T2002196'), moto('s8', 'MLTZT3681T2002197')];
+  const waiting = (ids: string[]) => async ({ where }: { where: { id?: string } }) => (where.id && ids.includes(where.id) ? { id: where.id } : null);
+
+  it('อัปโหลดหลายใบ: อ่านได้ 16 ตัว (ตัวหาย) -> ดูรถที่ยื่นแล้วทุกคัน แนบให้เมื่อใกล้คันเดียวและคันนั้นยังรอใบเสร็จ', async () => {
+    const { svc, create, submissions } = setup(undefined, null, aiReading({ ...READING, chassis: 'MLTZT3681T200196' }), null, {}, LOT);
+    submissions.findFirst.mockImplementation(waiting(['s7']));
+    await svc.upload(file());
+    const where = submissions.findMany.mock.calls.at(-1)![0].where;
+    expect(where.status).toEqual({ not: 'FAILED' });
+    expect(where.receipts).toBeUndefined();
+    expect(where.vehicle.OR).toEqual([
+      { chassis: { endsWith: '196', mode: 'insensitive' } },
+      { chassis: { contains: '001', mode: 'insensitive' } },
+    ]);
+    expect(create.mock.calls[0][0].data).toMatchObject({ submissionId: 's7', extraction: { match: 'chassis-near' } });
+  });
+
+  it('อัปโหลดหลายใบ: ใกล้คันเดียวแต่คันนั้นมีรูป/ได้ใบเสร็จแล้ว (อาจเป็นใบซ้ำ) -> ไม่แนบ รอในถาด', async () => {
+    const { svc, create, submissions } = setup(undefined, null, aiReading({ ...READING, chassis: 'MLTZT3681T200196' }), null, {}, LOT);
+    submissions.findFirst.mockImplementation(waiting([]));
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.submissionId).toBeNull();
+  });
+
+  // พบตอนรีวิว 2026-09-28: เดิมดูแค่รถที่รอใบเสร็จ คันจริง (…2197) มีรูปแล้วจึงหลุดจากรายการ เหลือคันข้างเคียงคันเดียว -> แนบผิดคัน
+  it('อัปโหลดหลายใบ: ตัวท้ายหาย ใกล้ทั้งสองคันในล็อต (แม้คันหนึ่งได้ใบเสร็จแล้ว) -> ไม่เดา รอจับคู่', async () => {
+    const { svc, create, submissions } = setup(undefined, null, aiReading({ ...READING, chassis: 'MLTZT3681T200219' }), null, {}, LOT);
+    submissions.findFirst.mockImplementation(waiting(['s7']));
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.submissionId).toBeNull();
+  });
+
+  it('แนบในแถว: อ่านได้ 16 ตัว ใกล้รถคันนี้คันเดียว -> ใกล้เคียง · ใกล้คันข้างเคียงด้วย -> ไม่ตรง (ให้ยืนยันก่อนบันทึก)', async () => {
+    const row = { id: 's7', status: 'PENDING', vehicle: { chassis: 'MLTZT3681T2002196' } };
+    const one = setup(row, null, aiReading({ ...READING, chassis: 'MLTZT3681T200196' }), null, {}, LOT);
+    await one.svc.upload(file(), 's7');
+    expect(one.create.mock.calls[0][0].data.extraction.match).toBe('chassis-near');
+    const both = setup(row, null, aiReading({ ...READING, chassis: 'MLTZT3681T200219' }), null, {}, LOT);
+    await both.svc.upload(file(), 's7');
+    expect(both.create.mock.calls[0][0].data.extraction.match).toBe('chassis-mismatch');
+  });
+
   it('แนบในแถว: เลขตัวถังใกล้เคียงกับรถคันนั้น -> ไม่นับเป็นรถคันอื่น', async () => {
     const { svc, create } = setup({ id: 's1', status: 'PENDING', vehicle: { chassis: 'MLTZT1509TX007960' } }, null, aiReading(MOTO_READ));
     await svc.upload(file(), 's1');
@@ -429,7 +472,63 @@ describe('isNearChassis', () => {
     // รถล็อตเดียวกันเลขเรียงกัน - อ่านเลขท้ายผิดตัวเดียวก็เป็นคนละคัน
     expect(isNearChassis('MLTZT1509TX007966', 'MLTZT1509TX007960')).toBe(false);
     expect(isNearChassis('MLTZT1509TX007960', 'MLTZT1509TX007960')).toBe(false);
-    expect(isNearChassis('MLTZT1509TX00796', 'MLTZT1509TX007960')).toBe(false);
+  });
+
+  // เคสจริง 2026-09-28 (ผลอ่านเทียบกับเลขที่พนักงานบันทึก)
+  it('อ่านได้ 16 ตัว: ตัวหาย 1 ตัวตรงไหนก็ได้ + 11 ตัวแรกผิดได้อีก 1 ตัว', () => {
+    expect(isNearChassis('MLTZT3681T200196', 'MLTZT3681T2002196')).toBe(true); // เลข 2 หายกลางเลขท้าย
+    expect(isNearChassis('MLESEJ861H088137', 'MLESEJ86111088137')).toBe(true); // 11 อ่านเป็น H
+    expect(isNearChassis('MLTZF368ET500158', 'MLTZT368ET5001581')).toBe(true); // T อ่านเป็น F + ตัวท้ายหาย
+    expect(isNearChassis('MLTZT1509TX00796', 'MLTZT1509TX007960')).toBe(true);
+    // ตัวหาย + เลขท้ายผิด = คนละคัน · ตัวหาย + 11 ตัวแรกผิด 2 ตัว = ไกลเกิน
+    expect(isNearChassis('MLTZT3681T200197', 'MLTZT3681T2002196')).toBe(false);
+    expect(isNearChassis('MLTZF368EX500158', 'MLTZT368ET5001581')).toBe(false);
+    expect(isNearChassis('MLTZT3681T2002', 'MLTZT3681T2002196')).toBe(false);
+  });
+
+  it('อ่านได้ 18 ตัว: ตัวเกิน 1 ตัว', () => {
+    expect(isNearChassis('MLTZT3681T20002196', 'MLTZT3681T2002196')).toBe(true);
+    expect(isNearChassis('MLTZT3681T20002197', 'MLTZT3681T2002196')).toBe(false);
+  });
+});
+
+describe('normalizePlate - หมวด/เลขทะเบียนที่ AI ใส่ผิดช่อง', () => {
+  it('เคสจริง 2026-09-28: รถจักรยานยนต์ได้หมวด "12" เลข "2ฆน 4544"', () => {
+    expect(normalizePlate('12', '2ฆน4544')).toEqual({ plateCategory: '2ฆน', plateNumber: '4544' });
+    expect(normalizePlate('12', '2ฆน 4342')).toEqual({ plateCategory: '2ฆน', plateNumber: '4342' });
+  });
+
+  it('ค่าที่ถูกรูปแบบแล้วคงเดิม (ตัดช่องว่าง) · ชื่อจังหวัดติดมาตัดทิ้ง · หาไม่เจอหรือเจอหลายแบบคงค่าเดิม', () => {
+    expect(normalizePlate('8ขก ', '3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('กข', null)).toEqual({ plateCategory: 'กข', plateNumber: null });
+    expect(normalizePlate(null, null)).toEqual({ plateCategory: null, plateNumber: null });
+    expect(normalizePlate(null, '8ขก 3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('8ขก', '3484 กรุงเทพมหานคร')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('กรุงเทพมหานคร', '8ขก-3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    // หมวดยาวเกินห้ามตัดเหลือ 2 ตัวท้าย ("ถก")
+    expect(normalizePlate('8ยถก', '3484')).toEqual({ plateCategory: '8ยถก', plateNumber: '3484' });
+    expect(normalizePlate('8ขก 1', '2ฆน 3')).toEqual({ plateCategory: '8ขก1', plateNumber: '2ฆน3' });
+  });
+
+  // พบตอนรีวิว 2026-09-28: เดิมได้ค่าที่ดูถูกรูปแบบแต่ผิด (checkReading เลยไม่เตือน)
+  it('หมวดซ้ำในช่องเลข / ชื่อจังหวัดหรือป้ายชื่อช่องติดมา / เลขขาดกลาง -> ไม่ได้ค่าผิดที่ดูถูกรูปแบบ', () => {
+    expect(normalizePlate('8ขก', '8ขก 3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('2ฆน', '2ฆน 4544')).toEqual({ plateCategory: '2ฆน', plateNumber: '4544' });
+    expect(normalizePlate('สมุทรปราการ', '8ขก 3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('ภูเก็ต 8ขก', '3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('เลย', '1กข 1234')).toEqual({ plateCategory: '1กข', plateNumber: '1234' });
+    expect(normalizePlate(null, 'เลขทะเบียน 8ขก 3484')).toEqual({ plateCategory: '8ขก', plateNumber: '3484' });
+    expect(normalizePlate('8ขก', '3,484')).toEqual({ plateCategory: '8ขก', plateNumber: '3,484' });
+    expect(normalizePlate('8ขก3', '484')).toEqual({ plateCategory: '8ขก3', plateNumber: '484' });
+  });
+});
+
+describe('normalizeChassis', () => {
+  it('ตัวใหญ่ ไม่มีช่องว่าง/ขีด · ไม่แก้ตัวอักษร', () => {
+    expect(normalizeChassis(' mltzt 3681-t2002196 ')).toBe('MLTZT3681T2002196');
+    expect(normalizeChassis('LS6CMEOP4TC915148')).toBe('LS6CMEOP4TC915148');
+    expect(normalizeChassis('')).toBeNull();
+    expect(normalizeChassis(null)).toBeNull();
   });
 });
 

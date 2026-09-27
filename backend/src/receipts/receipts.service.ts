@@ -6,7 +6,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { BackgroundReads, isBackgroundFlag } from './background-reads.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
-import { CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
+import { CHASSIS_LENGTH, CHASSIS_PREFIX, CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
 
@@ -192,7 +192,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
   // จับคู่ด้วยเลขตัวถังที่ AI อ่านได้:
   // - อัปโหลดหลายใบ (ไม่ระบุรถ): หารถที่รอใบเสร็จซึ่งเลขตัวถังตรงเป๊ะ -> แนบให้เลย (match = 'chassis')
   // - แนบในแถวของรถ: เลขตัวถังในใบเสร็จไม่ตรงกับรถคันนั้น -> เตือน (match = 'chassis-mismatch') แต่ยังแนบตามที่พนักงานเลือก
-  // - ไม่ตรงเป๊ะแต่ใกล้เคียง (isNearChassis) = AI อ่านเพี้ยน -> match = 'chassis-near' หน้าเว็บให้เช็กเลขตัวถังกับรูป
+  // - ไม่ตรงเป๊ะแต่ใกล้เคียง (isNearChassis: ตัวผิด หรือตัวหาย/เกิน 1 ตัว) = AI อ่านเพี้ยน -> match = 'chassis-near' หน้าเว็บให้เช็กเลขตัวถังกับรูป
   //   อัปโหลดหลายใบ: แนบให้เฉพาะเมื่อมีรถที่รอใบเสร็จ (PENDING และยังไม่มีรูปใบเสร็จ) ใกล้เคียงแค่คันเดียว
   // ไม่มีผลอ่าน/อ่านเลขตัวถังไม่ได้ = ไม่จับคู่ให้ (match = null)
   private async matchByChassis(
@@ -210,21 +210,58 @@ export class ReceiptsService implements OnApplicationBootstrap {
         select: { id: true },
       });
       if (found) return { submissionId: found.id, match: 'chassis' };
-      if (chassis.length !== 17) return { submissionId: null, match: null };
-      const candidates = await this.prisma.documentSubmission.findMany({
-        where: {
-          status: 'PENDING',
-          receipts: { none: {} },
-          vehicle: { chassis: { endsWith: chassis.slice(-CHASSIS_SERIAL_LENGTH), mode: 'insensitive' }, deletedAt: null, ...scope },
-        },
-        select: { id: true, vehicle: { select: { chassis: true } } },
+      if (chassis.length === CHASSIS_LENGTH) {
+        // ครบ 17 ตัว: เลขท้าย 6 ตัวต้องตรง รถคันข้างเคียงในล็อตจึงไม่มีทางใกล้ ดูแค่รถที่รอใบเสร็จ
+        const candidates = await this.prisma.documentSubmission.findMany({
+          where: {
+            status: 'PENDING',
+            receipts: { none: {} },
+            vehicle: { chassis: { endsWith: chassis.slice(-CHASSIS_SERIAL_LENGTH), mode: 'insensitive' }, deletedAt: null, ...scope },
+          },
+          select: { id: true, vehicle: { select: { chassis: true } } },
+        });
+        const near = candidates.filter((c) => isNearChassis(chassis, c.vehicle.chassis));
+        return near.length === 1 ? { submissionId: near[0].id, match: 'chassis-near' } : { submissionId: null, match: null };
+      }
+      // 16/18 ตัว: ต้องเป็นคันเดียวที่ใกล้ในบรรดารถที่ยื่นแล้วทุกคัน และคันนั้นยังรอใบเสร็จอยู่ในขอบเขตของคนอัปโหลด
+      const near = await this.nearSubmittedVehicles(chassis);
+      if (near.length !== 1) return { submissionId: null, match: null };
+      const target = await this.prisma.documentSubmission.findFirst({
+        where: { id: near[0].id, status: 'PENDING', receipts: { none: {} }, vehicle: { deletedAt: null, ...scope } },
+        select: { id: true },
       });
-      const near = candidates.filter((c) => isNearChassis(chassis, c.vehicle.chassis));
-      return near.length === 1 ? { submissionId: near[0].id, match: 'chassis-near' } : { submissionId: null, match: null };
+      return target ? { submissionId: target.id, match: 'chassis-near' } : { submissionId: null, match: null };
     }
     const target = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId }, select: { vehicle: { select: { chassis: true } } } });
     if (!target || target.vehicle.chassis.toUpperCase() === chassis) return { submissionId, match: null };
-    return { submissionId, match: isNearChassis(chassis, target.vehicle.chassis) ? 'chassis-near' : 'chassis-mismatch' };
+    if (!isNearChassis(chassis, target.vehicle.chassis)) return { submissionId, match: 'chassis-mismatch' };
+    if (chassis.length === CHASSIS_LENGTH) return { submissionId, match: 'chassis-near' };
+    // 16/18 ตัว: ใกล้ทั้งรถคันนี้และคันข้างเคียง = อาจแนบผิดคัน -> เตือนแบบไม่ตรง (หน้าเว็บถามยืนยันก่อนบันทึก)
+    const near = await this.nearSubmittedVehicles(chassis);
+    return { submissionId, match: near.length === 1 && near[0].id === submissionId ? 'chassis-near' : 'chassis-mismatch' };
+  }
+
+  // เลขตัวถังที่อ่านได้ 16/18 ตัว: ตัวหาย/เกินทำให้รู้เลขท้ายไม่ครบ ใกล้ได้หลายคันในล็อตเดียวกัน (...00219 ใกล้ทั้ง ...002196 และ ...002197)
+  // จึงดูรถที่ยื่นแล้วทุกคัน (ไม่จำกัดสถานะ/ขอบเขต) ไม่ใช่แค่คันที่รอใบเสร็จ - คันจริงที่มีรูป/ได้ใบเสร็จแล้วต้องทำให้ไม่แนบให้คันข้างเคียง
+  // (พบตอนรีวิว 2026-09-28) · ค้นแคบด้วยเงื่อนไขที่ isNearChassis บังคับอยู่แล้ว: 3 ตัวท้ายตรงกัน (ตัวหาย/เกินไม่อยู่ใน 3 ตัวท้าย)
+  // หรือตัวที่ 12-14 ตรงกัน (ตัวหาย/เกินอยู่ใน 3 ตัวท้าย) แล้วกรองด้วย isNearChassis · รถ 1 คันยื่นได้ครั้งเดียว (FAILED ไม่นับ)
+  private async nearSubmittedVehicles(chassis: string): Promise<{ id: string }[]> {
+    const rows = await this.prisma.documentSubmission.findMany({
+      where: {
+        status: { not: 'FAILED' },
+        vehicle: {
+          deletedAt: null,
+          OR: [
+            { chassis: { endsWith: chassis.slice(-3), mode: 'insensitive' } },
+            { chassis: { contains: chassis.slice(CHASSIS_PREFIX, CHASSIS_PREFIX + 3), mode: 'insensitive' } },
+          ],
+        },
+      },
+      select: { id: true, vehicle: { select: { chassis: true } } },
+    });
+    const near = rows.filter((r) => isNearChassis(chassis, r.vehicle.chassis));
+    // กันกรณีรถคันเดียวมีหลายรายการ (ไม่ควรเกิด) - นับเป็นคันเดียว
+    return [...new Map(near.map((r) => [r.vehicle.chassis.toUpperCase(), r])).values()];
   }
 
   // หาใบเสร็จที่ซ้ำจากข้อมูลที่ AI อ่าน (selfId = รูปนี้เอง ไม่นับ) - ไม่มีผลอ่าน = ไม่รู้ ไม่เตือน
