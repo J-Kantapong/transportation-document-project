@@ -46,14 +46,25 @@ export function displayDateToIso(digits: string): string {
 
 // Batch import cells arrive either as DD-MM-YYYY text (the documented file format) or,
 // for real Excel date cells, already-ISO text (see the Date-cell branch in the file parser).
+// ปี พ.ศ. (ตั้งแต่ 2400) แปลงเป็น ค.ศ. ให้ และรับ วว/ดด/ปปปป ด้วย (พบ 2026-09-27: เดิมไฟล์ที่ใส่ 25-09-2569 ไม่ผ่าน)
 export function parseBatchDate(value: string): string {
-  const ddmmyyyy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value);
+  const ce = (year: string) => (Number(year) >= 2400 ? String(Number(year) - 543) : year);
+  const ddmmyyyy = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(value);
   if (ddmmyyyy) {
     const [, d, m, y] = ddmmyyyy;
-    return isoIfValid(`${y}-${m}-${d}`);
+    return isoIfValid(`${ce(y)}-${m}-${d}`);
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return isoIfValid(value);
+  const iso = /^(\d{4})-(\d{2}-\d{2})$/.exec(value);
+  if (iso) {
+    return isoIfValid(`${ce(iso[1])}-${iso[2]}`);
   }
   return "";
+}
+
+// เวลาเต็ม (ISO timestamp เช่น deletedAt / deliveryConfirmedAt) -> วว/ดด/ปปปป ตามวันในเครื่องผู้ใช้ (เวลาไทย)
+// ห้ามใช้ slice(0, 10) กับเวลาเต็ม: ช่วง 00:00-07:00 จะได้วันเมื่อวาน (พบ 2026-09-27) - ใช้ slice ได้เฉพาะช่องที่เป็นวันที่ล้วน
+export function timestampToDisplayDate(ts: string): string {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "";
+  return [String(date.getDate()).padStart(2, "0"), String(date.getMonth() + 1).padStart(2, "0"), date.getFullYear()].join("/");
 }

@@ -47,8 +47,9 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|tax-renewals)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|document-submission|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|lookup-by-chassis|document-submission|receiving)(\/|$)/, access: SUBMIT },
-  { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
-  { pattern: /^\/api\/vehicles\/[^/]+\/(document-submission|tax-input|tax-calculations|receiving)(\/|$)/, access: SUBMIT },
+  // route ต่อคันของขั้น 4 เหลือแค่ GET :id/tax-calculations (:id/document-submission, :id/tax-input, :id/receiving/:step ถูกถอดแล้ว - พบ 2026-09-27)
+  { pattern: /^\/api\/vehicles\/[^/]+\/tax-calculations(\/|$)/, method: 'GET', access: SUBMIT_READ },
+  { pattern: /^\/api\/vehicles\/[^/]+\/tax-calculations(\/|$)/, access: SUBMIT },
   // ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24) - service กรองประเภทรถอีกชั้น
   { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice$/, access: [...ENTRY, 'STAFF_MOTO'] },
   // ขั้น 1-3 + ข้อมูลอ้างอิง: ทุกกลุ่มอ่านได้ เขียนได้เฉพาะ STAFF_ENTRY

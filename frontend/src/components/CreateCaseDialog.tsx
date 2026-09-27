@@ -1,12 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { REGISTRATION_CATEGORIES } from "@/lib/categories";
+import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
 import { Icon } from "./Icon";
 
 export function CreateCaseDialog() {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [roles, setRoles] = useState<UserRole[] | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
+    setRoles(getCachedUser()?.roles ?? []);
+  }, []);
+
+  // แสดงเฉพาะประเภทงานที่บทบาทเข้าได้ (พบ 2026-09-27: เดิมกดแล้วถูกพากลับหน้าแรกเงียบๆ) - กฎอยู่ใน lib/auth.ts
+  const categories = REGISTRATION_CATEGORIES.filter((category) => roles === null || canAccessPage(category.href, roles));
 
   return (
     <>
@@ -26,7 +36,7 @@ export function CreateCaseDialog() {
         <h2>สร้างรายการใหม่</h2>
         <p>เลือกประเภทงานทะเบียน</p>
         <div className="choices">
-          {REGISTRATION_CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <Link key={category.href} href={category.href} onClick={() => dialogRef.current?.close()}>
               {category.title} <span style={{ float: "right" }}>→</span>
             </Link>

@@ -209,12 +209,20 @@ export interface DeliveryReportInput {
   customerName: string | null; // null = ทุกลูกค้า
   slips: DeliverySlip[];
   platePending: DeliveryRow[]; // ส่งเล่มไปแล้ว ป้ายยังไม่ได้ส่ง
+  truncated?: boolean; // ใบในช่วงนี้เกินที่ระบบแสดงได้ครั้งเดียว (500 ใบล่าสุด) - พิมพ์บอกไว้ในรายงาน
+}
+
+function rangeText(from: string, to: string): string {
+  if (from && to) return `${isoToDisplayDate(from)} - ${isoToDisplayDate(to)}`;
+  if (from) return `ตั้งแต่ ${isoToDisplayDate(from)}`;
+  if (to) return `ถึง ${isoToDisplayDate(to)}`;
+  return "ทั้งหมด";
 }
 
 export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
   const items = r.slips.flatMap((s) => s.items);
   const c = countItems(items);
-  const range = [r.from ? isoToDisplayDate(r.from) : "", r.to ? isoToDisplayDate(r.to) : ""].filter(Boolean).join(" - ") || "ทั้งหมด";
+  const range = rangeText(r.from, r.to);
   const rows = r.slips
     .flatMap((s) =>
       s.items.map(
@@ -232,7 +240,8 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
     .join("");
   const body = `<h1>รายงานส่งงาน</h1>
 <p>วันที่ส่ง ${esc(range)} · ลูกค้า ${esc(r.customerName ?? "ทั้งหมด")}<br>
-${r.slips.length} ใบ · ${c.vehicles} รายการ · เล่ม ${c.book} · ป้าย ${c.plate}</p>
+${r.slips.length} ใบ · ${c.vehicles} รายการ · เล่ม ${c.book} · ป้าย ${c.plate}
+${r.truncated ? "<br><b>* ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ รายงานนี้มีเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงเพื่อให้ครบ</b>" : ""}</p>
 <table class="grid"><thead><tr><th>วันที่ส่ง</th><th>เลขที่ใบ</th><th>ลูกค้า</th><th>ผู้รับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th>
 <th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows || '<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>

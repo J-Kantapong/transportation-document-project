@@ -55,7 +55,8 @@ export const authApi = {
     request<{ user: AuthUser }>('/api/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   login: (email: string, password: string) =>
     request<{ token: string; user: AuthUser }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  me: () => request<{ user: AuthUser }>('/api/auth/me'),
+  // token = token ใหม่ที่มี roles ล่าสุด หมดอายุเวลาเดิม (AppShell เก็บแทนเมื่อ Admin เปลี่ยนบทบาท)
+  me: () => request<{ user: AuthUser; token?: string }>('/api/auth/me'),
   changePassword: (data: { currentPassword: string; password: string; confirmPassword: string }) =>
     request<{ ok: true }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
 

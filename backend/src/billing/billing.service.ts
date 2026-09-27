@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { isMotorcycle } from '../document-submission/document-fee-calculator.js';
+import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { computeInvoiceTotals, nextInvoiceNo, rateAmountExVat, round2, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
 
@@ -9,9 +10,21 @@ import { computeInvoiceTotals, nextInvoiceNo, rateAmountExVat, round2, suggestRa
 const NOT_VOID = { invoice: { status: { not: 'VOID' } } } as const;
 const VEHICLE_KINDS = ['CAR', 'MOTO', 'ANY'];
 
+// รายการบิลส่งประวัติ (รับเงินแล้ว / ยกเลิก) ทีละ 200 ใบ - บิลรอรับเงินส่งครบทุกใบเสมอ
+const INVOICE_HISTORY_PAGE = 200;
+
 const bad = (error: string) => new BadRequestException({ error });
 const iso = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
 const num = (d: unknown) => (d === null || d === undefined ? null : Number(d));
+const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+
+// เลขที่บิลเดียวกันจาก 2 หน้าจอพร้อมกัน ผ่านการตรวจล่วงหน้าทั้งคู่ -> unique index ของ invoiceNo กันไว้อีกชั้น (Prisma P2002)
+export function isInvoiceNoConflict(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || (err as { code?: unknown }).code !== 'P2002') return false;
+  // ชื่อคอลัมน์อยู่ใน meta.target หรือใน meta.driverAdapterError (แล้วแต่ adapter) - ไม่รู้คอลัมน์ = ถือว่าเป็นของ invoiceNo (unique เดียวของบิล)
+  const meta = (err as { meta?: unknown }).meta;
+  return meta === undefined || JSON.stringify(meta).includes('invoiceNo');
+}
 
 function parseIsoDate(raw: unknown, label: string): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
@@ -205,77 +218,140 @@ export class BillingService {
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
     if (await this.prisma.invoice.findUnique({ where: { invoiceNo }, select: { id: true } })) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
 
-    const vehicles = await this.prisma.vehicle.findMany({
-      where: { id: { in: lineInputs.map((l) => l.vehicleId) } },
-      include: { ...QUEUE_VEHICLE_INCLUDE, invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } },
-    });
-    const byId = new Map(vehicles.map((v) => [v.id, v]));
-    const lines = lineInputs.map((l) => {
-      const v = byId.get(l.vehicleId);
-      if (!v) throw bad('ไม่พบข้อมูลรถบางคันในบิล');
-      if (v.customerId !== customer.id) throw bad(`รถ ${v.chassis} ไม่ใช่ของลูกค้ารายนี้`);
-      if (!v.deliveredDate) throw bad(`รถ ${v.chassis} ยังไม่ได้บันทึกส่งงาน`);
-      if (v.invoiceLines.length > 0) throw bad(`รถ ${v.chassis} อยู่ในบิล ${v.invoiceLines[0].invoice.invoiceNo} แล้ว`);
-      return {
-        ...l,
-        chassis: v.chassis,
-        brandName: v.brand.name,
-        body: v.body,
-        plateText: v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '',
-        receiptNo: v.documentSubmissions[0]?.receiptNo ?? null,
-        deliveredDate: v.deliveredDate,
-      };
-    });
+    // ออกบิลพร้อมกัน 2 หน้าจอด้วยรถคันเดียวกัน (พบ 2026-09-27): ล็อกแถวรถในบิลก่อน แล้วค่อยอ่าน/ตรวจรถใน transaction เดียวกัน
+    // อีกคำขอต้องรอจนบิลนี้บันทึกเสร็จ แล้วจะเห็นว่ารถอยู่ในบิลแล้ว - กันรถคันเดียวอยู่ใน 2 บิลที่ยังใช้อยู่ (ล็อกเรียงตาม id กัน deadlock)
+    const vehicleIds = lineInputs.map((l) => l.vehicleId);
+    let invoice;
+    try {
+      invoice = await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Vehicle" WHERE "id" = ANY(${vehicleIds}::text[]) ORDER BY "id" FOR UPDATE`;
+          const vehicles = await tx.vehicle.findMany({
+            where: { id: { in: vehicleIds } },
+            include: { ...QUEUE_VEHICLE_INCLUDE, invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } },
+          });
+          const byId = new Map(vehicles.map((v) => [v.id, v]));
+          const lines = lineInputs.map((l) => {
+            const v = byId.get(l.vehicleId);
+            if (!v) throw bad('ไม่พบข้อมูลรถบางคันในบิล');
+            if (v.customerId !== customer.id) throw bad(`รถ ${v.chassis} ไม่ใช่ของลูกค้ารายนี้`);
+            if (!v.deliveredDate) throw bad(`รถ ${v.chassis} ยังไม่ได้บันทึกส่งงาน`);
+            if (v.invoiceLines.length > 0) throw bad(`รถ ${v.chassis} อยู่ในบิล ${v.invoiceLines[0].invoice.invoiceNo} แล้ว`);
+            return {
+              ...l,
+              chassis: v.chassis,
+              brandName: v.brand.name,
+              body: v.body,
+              plateText: v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '',
+              receiptNo: v.documentSubmissions[0]?.receiptNo ?? null,
+              deliveredDate: v.deliveredDate,
+            };
+          });
 
-    const issueIso = issueDate.toISOString().slice(0, 10);
-    const totals = computeInvoiceTotals({ lines, extras, terms: toTerms(customer), issueDate: issueIso });
+          const issueIso = issueDate.toISOString().slice(0, 10);
+          const totals = computeInvoiceTotals({ lines, extras, terms: toTerms(customer), issueDate: issueIso });
 
-    const invoice = await this.prisma.invoice.create({
-      data: {
-        invoiceNo,
-        issueDate,
-        customerId: customer.id,
-        customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
-        jobLabel,
-        extras,
-        vatRate: totals.vatRate,
-        whtRate: totals.whtRate,
-        feeTotal: totals.feeTotal,
-        serviceTotal: totals.serviceTotal,
-        vatAmount: totals.vatAmount,
-        whtAmount: totals.whtAmount,
-        netTotal: totals.netTotal,
-        lines: { create: lines },
-      },
-      include: { lines: true },
-    });
+          return tx.invoice.create({
+            data: {
+              invoiceNo,
+              issueDate,
+              customerId: customer.id,
+              customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
+              jobLabel,
+              extras,
+              vatRate: totals.vatRate,
+              whtRate: totals.whtRate,
+              feeTotal: totals.feeTotal,
+              serviceTotal: totals.serviceTotal,
+              vatAmount: totals.vatAmount,
+              whtAmount: totals.whtAmount,
+              netTotal: totals.netTotal,
+              // createMany = คำสั่งเดียว บิลหลายสิบคันไม่ชน timeout ของ transaction
+              lines: { createMany: { data: lines } },
+            },
+            include: { lines: true },
+          });
+        },
+        { timeout: 20_000 },
+      );
+    } catch (err) {
+      if (isInvoiceNoConflict(err)) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
+      throw err;
+    }
     return this.mapInvoice(invoice);
   }
 
-  async listInvoices() {
-    const invoices = await this.prisma.invoice.findMany({ orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }], take: 200, include: { lines: true } });
-    return invoices.map((i) => this.mapInvoice(i));
+  // บิลรอรับเงินทุกใบ + ประวัติ (รับเงินแล้ว / ยกเลิก) ใหม่สุดทีละ 200 ใบ (พบ 2026-09-27: เดิมจำกัด 200 ใบรวมทุกสถานะ
+  // บิลค้างรับเงินเก่าหลุดจากหน้าจอ กดรับเงิน/ยกเลิกไม่ได้ และยอดรอรับเงินต่ำกว่าหน้าภาพรวม)
+  // offset = ข้ามประวัติไปกี่ใบ สำหรับปุ่ม "โหลดเพิ่ม" (ส่งกลับเฉพาะประวัติ), limit = ขนาดหน้าประวัติ สูงสุด 1,000
+  // ใช้ตอนโหลดใหม่หลังรับเงิน/ยกเลิกให้ได้เท่าที่เปิดดูอยู่ - outstanding = บิล ISSUED ทั้งหมด ตรงกับหน้าภาพรวม
+  async listInvoices(params: { offset?: string; limit?: string } = {}) {
+    const pageSize = Math.min(1000, Math.max(1, Number.parseInt(params.limit ?? String(INVOICE_HISTORY_PAGE), 10) || INVOICE_HISTORY_PAGE));
+    const offset = Math.max(0, Number.parseInt(params.offset ?? '0', 10) || 0);
+    const orderBy = [{ issueDate: 'desc' as const }, { createdAt: 'desc' as const }];
+    // อ่านทั้ง 3 ใน snapshot เดียวกัน (พบ 2026-09-27): อ่านแยกกันแล้วมีคนกดรับเงิน/ยกเลิกบิลระหว่างนั้น บิลใบเดียวมา 2 แถว
+    // (รอรับเงิน + ประวัติ) และยอดรอรับเงินไม่ตรงกับรายการ - อ่านอย่างเดียวใน RepeatableRead ไม่มี serialization error
+    const { issued, history, outstanding } = await this.prisma.$transaction(
+      async (tx) => ({
+        issued: offset === 0 ? await tx.invoice.findMany({ where: { status: 'ISSUED' }, orderBy, include: { lines: true } }) : [],
+        history: await tx.invoice.findMany({
+          where: { status: { not: 'ISSUED' } },
+          orderBy,
+          skip: offset,
+          take: pageSize + 1, // เกินมา 1 ใบ = ยังมีหน้าถัดไป
+          include: { lines: true },
+        }),
+        outstanding: await tx.invoice.aggregate({ where: { status: 'ISSUED' }, _count: { _all: true }, _sum: { netTotal: true } }),
+      }),
+      { isolationLevel: 'RepeatableRead', timeout: 20_000 }, // บิลรอรับเงินหลายร้อยใบพร้อมรายการรถ เกิน 5 วินาทีตั้งต้นได้
+    );
+    // กันไว้อีกชั้น: บิลที่มาทั้ง 2 ชุดใช้แถวประวัติ (สถานะใหม่กว่า) ไม่ให้แถวรอรับเงินเก่ายังมีปุ่มรับเงิน/ยกเลิก
+    const page = history.slice(0, pageSize);
+    const historyIds = new Set(page.map((i) => i.id));
+    const invoices = [...issued.filter((i) => !historyIds.has(i.id)), ...page].sort(
+      (a, b) => b.issueDate.getTime() - a.issueDate.getTime() || b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    return {
+      invoices: invoices.map((i) => this.mapInvoice(i)),
+      hasMore: history.length > pageSize,
+      outstanding: { count: outstanding._count._all, total: round2(Number(outstanding._sum.netTotal ?? 0)) },
+    };
   }
 
+  // บันทึกรับเงิน: วันที่รับเงินต้องไม่ก่อนวันออกบิลและไม่เกินวันนี้ตามเวลาไทย (พบ 2026-09-27: วันที่ผิดทำให้เงินเข้า/วันเก็บเงิน
+  // ของลูกค้าในหน้าภาพรวมเพี้ยน และบิลที่รับเงินแล้วยังแก้ไม่ได้) เปลี่ยนสถานะแบบมีเงื่อนไข ISSUED -> PAID
+  // กันกดรับเงินกับยกเลิกบิลใบเดียวกันพร้อมกันจาก 2 หน้าจอ (ใครบันทึกก่อนได้ อีกคนได้ข้อความว่าบิลเปลี่ยนสถานะแล้ว)
   async markPaid(id: string, dto: { paidDate?: unknown; taxInvoiceNo?: unknown }) {
     const paidDate = parseIsoDate(dto?.paidDate, 'วันที่รับเงิน');
     const taxInvoiceNo = optionalText(dto.taxInvoiceNo, 'เลขที่ใบกำกับภาษี');
-    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true } });
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, issueDate: true } });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'ISSUED') throw bad('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
-    const updated = await this.prisma.invoice.update({ where: { id }, data: { status: 'PAID', paidDate, taxInvoiceNo }, include: { lines: true } });
-    return this.mapInvoice(updated);
+    const paidIso = paidDate.toISOString().slice(0, 10);
+    const issuedIso = invoice.issueDate.toISOString().slice(0, 10);
+    if (paidIso < issuedIso) throw bad(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${dmy(issuedIso)})`);
+    if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
+    const { count } = await this.prisma.invoice.updateMany({ where: { id, status: 'ISSUED' }, data: { status: 'PAID', paidDate, taxInvoiceNo } });
+    if (count === 0) throw bad('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
+    return this.mapInvoice(await this.invoiceWithLines(id));
   }
 
-  // ยกเลิกบิล - รถทุกคันในบิลกลับเข้าคิวรอวางบิล ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน
+  // ยกเลิกบิล - รถทุกคันในบิลกลับเข้าคิวรอวางบิล ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน (เปลี่ยนสถานะแบบมีเงื่อนไขเหมือน markPaid)
   async voidInvoice(id: string, dto: { reason?: unknown }) {
     const voidReason = optionalText(dto?.reason, 'เหตุผล');
     if (!voidReason) throw bad('ต้องใส่เหตุผลที่ยกเลิกบิล');
     const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true } });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'ISSUED') throw bad('ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน');
-    const updated = await this.prisma.invoice.update({ where: { id }, data: { status: 'VOID', voidReason }, include: { lines: true } });
-    return this.mapInvoice(updated);
+    const { count } = await this.prisma.invoice.updateMany({ where: { id, status: 'ISSUED' }, data: { status: 'VOID', voidReason } });
+    if (count === 0) throw bad('ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน');
+    return this.mapInvoice(await this.invoiceWithLines(id));
+  }
+
+  private async invoiceWithLines(id: string) {
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, include: { lines: true } });
+    if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
+    return invoice;
   }
 
   private mapInvoice(i: {

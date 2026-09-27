@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
 interface RowState {
@@ -25,6 +25,12 @@ function toRowState(vehicle: TransferNoticeVehicle): RowState {
   };
 }
 
+// แถวที่ผู้ใช้แก้จริงเทียบกับตอนโหลด - "บันทึกทั้งหมด" ส่งเฉพาะแถวเหล่านี้ (พบ 2026-09-27: เดิมส่งทุกแถวบนจอ
+// หน้าที่เปิดค้างไว้จึงบันทึกทับคันที่คนอื่นเพิ่งทำเสร็จให้กลับเป็นยังไม่เสร็จ)
+function isRowChanged(row: RowState, loaded: RowState | undefined): boolean {
+  return !loaded || row.done !== loaded.done || row.completedDateText !== loaded.completedDateText || row.costText !== loaded.costText;
+}
+
 const COMPLETED_DETAIL_FIELDS: Array<[string, (v: TransferNoticeVehicle) => string]> = [
   ["วันที่รับงาน", (v) => isoToDisplayDate(v.date) || v.date],
   ["ชื่อลูกค้า", (v) => v.customerName],
@@ -43,6 +49,10 @@ function validateRow(row: RowState): { completedDateIso: string } {
   const completedDateDigits = row.completedDateText.replace(/\D/g, "");
   const completedDateIso = completedDateDigits ? displayDateToIso(completedDateDigits) : "";
   if (completedDateDigits && !completedDateIso) throw new Error("วันที่เสร็จไม่ถูกต้อง");
+  // วันที่เสร็จในอนาคต = พิมพ์ผิด ส่งตรวจด้วยวันจริงไม่ได้ และคันที่ดำเนินการแล้วแก้จากหน้านี้ไม่ได้ (backend บังคับเหมือนกัน - พบ 2026-09-27)
+  if (completedDateIso && completedDateIso > todayIso()) throw new Error("วันที่เสร็จต้องไม่เกินวันนี้");
+  // ดำเนินการแล้วต้องมีวันที่เสร็จ (backend บังคับเหมือนกัน - พบ 2026-09-27)
+  if (row.done && !completedDateIso) throw new Error("กรุณาระบุวันที่เสร็จ");
   if (row.costText && !/^\d+(\.\d+)?$/.test(row.costText)) throw new Error("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
   return { completedDateIso };
 }
@@ -64,7 +74,7 @@ function PendingVehicleTable({
   rows: Record<string, RowState>;
   patchRow: (id: string, patch: Partial<RowState>) => void;
   onDoneChange: (id: string, done: boolean) => void;
-  onSave: (id: string) => void;
+  onSave: (vehicle: TransferNoticeVehicle) => void;
   onSelectAll: (done: boolean) => void;
   bulkSaving: boolean;
   highlightDate?: string;
@@ -125,7 +135,7 @@ function PendingVehicleTable({
                     value={row.completedDateText}
                     disabled={readOnly}
                     onChange={(value) =>
-                      patchRow(v.id, { completedDateText: formatDateDigits(value.replace(/\D/g, "").slice(0, 8)) })
+                      patchRow(v.id, { completedDateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })
                     }
                     style={{ width: 110 }}
                   />
@@ -146,7 +156,7 @@ function PendingVehicleTable({
                   {readOnly ? (
                     <span className="muted" style={{ fontSize: 11 }}>ดูอย่างเดียว</span>
                   ) : (
-                    <button className="text-button" disabled={row.saving || bulkSaving} onClick={() => onSave(v.id)}>
+                    <button className="text-button" disabled={row.saving || bulkSaving} onClick={() => onSave(v)}>
                       บันทึก
                     </button>
                   )}
@@ -172,6 +182,8 @@ export default function TransferNoticePage() {
   // ต้องดำเนินการ: ทุกคันที่ยังไม่ตัดบัญชี ไม่จำกัดวันที่รับงาน
   const [pendingVehicles, setPendingVehicles] = useState<TransferNoticeVehicle[]>([]);
   const [rows, setRows] = useState<Record<string, RowState>>({});
+  // ค่าแต่ละแถวตอนโหลด - ใช้หาแถวที่ผู้ใช้แก้จริง (isRowChanged)
+  const [loadedRows, setLoadedRows] = useState<Record<string, RowState>>({});
   const [pendingLoading, setPendingLoading] = useState(true);
   const [pendingError, setPendingError] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
@@ -194,12 +206,15 @@ export default function TransferNoticePage() {
     setPendingError("");
     try {
       const data = await api.listPendingTransferNotice();
+      const loaded = Object.fromEntries(data.vehicles.map((v) => [v.id, toRowState(v)]));
       setPendingVehicles(data.vehicles);
-      setRows(Object.fromEntries(data.vehicles.map((v) => [v.id, toRowState(v)])));
+      setRows(loaded);
+      setLoadedRows(loaded);
     } catch (err) {
       setPendingError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");
       setPendingVehicles([]);
       setRows({});
+      setLoadedRows({});
     } finally {
       setPendingLoading(false);
     }
@@ -228,7 +243,7 @@ export default function TransferNoticePage() {
   }, []);
 
   function handleDateTextChange(raw: string) {
-    setDateText(formatDateDigits(raw.replace(/\D/g, "").slice(0, 8)));
+    setDateText(formatDateDigitsCe(raw.replace(/\D/g, "").slice(0, 8)));
   }
 
   function patchRow(id: string, patch: Partial<RowState>) {
@@ -255,7 +270,8 @@ export default function TransferNoticePage() {
     });
   }
 
-  async function handleSave(id: string) {
+  async function handleSave(vehicle: TransferNoticeVehicle) {
+    const id = vehicle.id;
     const row = rows[id];
     if (!row) return;
     let completedDateIso: string;
@@ -272,31 +288,41 @@ export default function TransferNoticePage() {
         done: row.done,
         completedDate: completedDateIso || null,
         cost: row.costText || null,
+        expectedTransferDone: vehicle.transferDone,
       });
       // Reload so a completed row moves out of "ต้องดำเนินการ" into "ตัดบัญชีแล้ว" below.
       await Promise.all([loadPending(), loadCompleted()]);
     } catch (err) {
-      patchRow(id, {
-        saving: false,
-        message: { text: err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ", error: true },
-      });
+      const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
+      if (err instanceof ApiError && err.status === 409) {
+        // มีคนบันทึกคันนี้ไปก่อนแล้ว - โหลดรายการใหม่ (แสดงข้อความที่หัวตาราง เพราะแถวนี้อาจหายไปจากรายการแล้ว)
+        setBulkMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message}`, error: true });
+        await Promise.all([loadPending(), loadCompleted()]);
+        return;
+      }
+      patchRow(id, { saving: false, message: { text: message, error: true } });
     }
   }
 
   async function handleSaveAll(shown: TransferNoticeVehicle[]) {
     const vehicles = shown.filter(canEdit);
     if (bulkSaving || !vehicles.length) return;
-    const parsed: Array<{ id: string; done: boolean; completedDateIso: string; cost: string }> = [];
+    const parsed: Array<{ vehicle: TransferNoticeVehicle; done: boolean; completedDateIso: string; cost: string }> = [];
     for (const v of vehicles) {
       const row = rows[v.id];
-      if (!row) continue;
+      // ส่งเฉพาะแถวที่แก้จริง - แถวที่ไม่ได้แตะไม่ถูกบันทึกทับ
+      if (!row || !isRowChanged(row, loadedRows[v.id])) continue;
       try {
         const { completedDateIso } = validateRow(row);
-        parsed.push({ id: v.id, done: row.done, completedDateIso, cost: row.costText });
+        parsed.push({ vehicle: v, done: row.done, completedDateIso, cost: row.costText });
       } catch (err) {
         setBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
       }
+    }
+    if (!parsed.length) {
+      setBulkMessage({ text: "ไม่มีรายการที่เปลี่ยนแปลง" });
+      return;
     }
 
     setBulkSaving(true);
@@ -304,13 +330,26 @@ export default function TransferNoticePage() {
     try {
       const results = await Promise.allSettled(
         parsed.map((p) =>
-          api.updateTransferNotice(p.id, { done: p.done, completedDate: p.completedDateIso || null, cost: p.cost || null }),
+          api.updateTransferNotice(p.vehicle.id, {
+            done: p.done,
+            completedDate: p.completedDateIso || null,
+            cost: p.cost || null,
+            expectedTransferDone: p.vehicle.transferDone,
+          }),
         ),
       );
-      const failed = results.filter((r) => r.status === "rejected").length;
+      // บอกเหตุผลของแถวที่ไม่สำเร็จด้วย (เช่น มีคนบันทึกไปก่อน) - แสดงไม่เกิน 3 แถว
+      const failures = results.flatMap((r, i) =>
+        r.status === "rejected"
+          ? [`${parsed[i].vehicle.chassis}: ${r.reason instanceof ApiError ? r.reason.message : "บันทึกไม่สำเร็จ"}`]
+          : [],
+      );
       setBulkMessage(
-        failed
-          ? { text: `บันทึกสำเร็จ ${parsed.length - failed} จาก ${parsed.length} รายการ · ล้มเหลว ${failed} รายการ`, error: true }
+        failures.length
+          ? {
+              text: `บันทึกสำเร็จ ${parsed.length - failures.length} จาก ${parsed.length} รายการ · ล้มเหลว ${failures.length} รายการ (${failures.slice(0, 3).join(" / ")}${failures.length > 3 ? " …" : ""})`,
+              error: true,
+            }
           : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
       );
       await Promise.all([loadPending(), loadCompleted()]);

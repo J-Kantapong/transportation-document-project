@@ -1,4 +1,6 @@
 import { vi } from 'vitest';
+import { requestContext } from '../auth/request-context.js';
+import type { UserRole } from '../generated/prisma/enums.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
 import { checkReading, isNearChassis, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
@@ -11,6 +13,7 @@ const file = (buffer = JPEG) => ({ buffer, size: buffer.length, originalname: 'r
 function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { chassis: 'LS6CME0P7TC914754' } }, receipt: unknown = null, extractor: ReceiptExtractor = new NoAiReceiptExtractor(), pendingByChassis: unknown = null, dups: { saved?: unknown; image?: unknown; byChassis?: unknown } = {}, nearCandidates: unknown[] = []) {
   const storage = { put: vi.fn().mockResolvedValue(undefined), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) } satisfies ReceiptStorage;
   const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data }));
+  const locked: Record<string, string> = {};
   const prisma = {
     documentSubmission: {
       findUnique: vi.fn().mockResolvedValue(submission),
@@ -24,12 +27,25 @@ function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { c
       create,
       findFirst: vi.fn().mockResolvedValue(dups.image ?? null),
       findUnique: vi.fn().mockResolvedValue(receipt),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       update: vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data })),
-      delete: vi.fn().mockResolvedValue(receipt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    // ล็อกแถวรายการ (SELECT ... FOR UPDATE) คืนสถานะล่าสุด - เทสต์ตั้ง locked[id] เพื่อจำลองสถานะที่เปลี่ยนระหว่างนั้น (ไม่ตั้ง = PENDING)
+    $queryRaw: vi.fn(async (_sql: TemplateStringsArray, ids: string[]) => ids.filter((id) => locked[id] !== 'GONE').map((id) => ({ id, status: locked[id] ?? 'PENDING' }))),
   } as unknown as PrismaService;
-  return { svc: new ReceiptsService(prisma, storage, extractor), storage, create };
+  Object.assign(prisma, { $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)) });
+  const images = (prisma as unknown as { receiptImage: Record<string, ReturnType<typeof vi.fn>> }).receiptImage;
+  const submissions = (prisma as unknown as { documentSubmission: Record<string, ReturnType<typeof vi.fn>> }).documentSubmission;
+  const lockRows = (prisma as unknown as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw;
+  return { svc: new ReceiptsService(prisma, storage, extractor), storage, create, images, submissions, locked, lockRows };
 }
+
+const CAR = 'รย.1-เก๋ง 4 ประตู';
+const MOTO = 'รย.12-รถจักรยานยนต์ส่วนบุคคล';
+const as = <T>(roles: UserRole[], fn: () => T): T => requestContext.run({ user: { id: 'u1', roles, customerId: null, name: 'ทดสอบ' } }, fn);
 
 describe('normalizeReceiptDate', () => {
   it('ใบเสร็จเป็น พ.ศ.: ค.ศ. คงเดิม · พ.ศ. ที่ AI ไม่ได้แปลงลบ 543 · วันที่ไม่มีจริงเป็น null', () => {
@@ -100,6 +116,16 @@ describe('ReceiptsService.upload', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  // พบ 2026-09-27: ตรวจสถานะก่อน AI อ่าน (หลายวินาที) แล้วค่อยเขียน - ระหว่างนั้นอีกคนบันทึกยื่นไม่สำเร็จได้
+  it('แนบในแถว: ล็อกแถวรายการก่อนบันทึก ระหว่างนั้นถูกบันทึกยื่นไม่สำเร็จ -> ไม่แนบ และลบไฟล์ที่เก็บไปแล้ว', async () => {
+    const { svc, storage, create, locked, lockRows } = setup();
+    locked.s1 = 'FAILED';
+    await expect(svc.upload(file(), 's1')).rejects.toMatchObject({ status: 400, response: { error: expect.stringContaining('ยื่นไม่สำเร็จ') } });
+    expect(lockRows.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+    expect(create).not.toHaveBeenCalled();
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+  });
+
   it('อัปโหลดรูปเดียวกันพร้อมกัน (unique index ชน) = "อัพโหลดไปแล้ว" และลบไฟล์ที่เก็บไปแล้ว', async () => {
     const { svc, storage, create } = setup();
     create.mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002', meta: { target: ['contentHash'] } }));
@@ -109,16 +135,154 @@ describe('ReceiptsService.upload', () => {
 });
 
 describe('ReceiptsService.remove', () => {
+  const attached = (status: string, body = CAR) => ({
+    id: 'r1',
+    storageKey: 'k',
+    submissionId: 's1',
+    plateSwapId: null,
+    submission: { status, vehicle: { body } },
+  });
+  const unassigned = { id: 'r1', storageKey: 'k', submissionId: null, plateSwapId: null, submission: null };
+
   it('ลบรูปของรายการที่รับใบเสร็จแล้วไม่ได้ (หลักฐานวางบิล)', async () => {
-    const { svc, storage } = setup(undefined, { id: 'r1', storageKey: 'k', submission: { status: 'RECEIPT_RECEIVED' } });
+    const { svc, storage, images } = setup(undefined, attached('RECEIPT_RECEIVED'));
     await expect(svc.remove('r1')).rejects.toMatchObject({ response: { error: expect.stringContaining('ลบรูปใบเสร็จไม่ได้') } });
+    expect(images.deleteMany).not.toHaveBeenCalled();
     expect(storage.delete).not.toHaveBeenCalled();
   });
 
-  it('ลบรูปที่ยังไม่จับคู่ได้ ทั้งแถวและไฟล์', async () => {
-    const { svc, storage } = setup(undefined, { id: 'r1', storageKey: 'k', submission: null });
+  it('ลบรูปที่ยังไม่จับคู่ได้ ทั้งแถวและไฟล์ (ลบแบบมีเงื่อนไข - ต้องยังไม่ได้จับคู่)', async () => {
+    const { svc, storage, images } = setup(undefined, unassigned);
     await svc.remove('r1');
+    expect(images.deleteMany).toHaveBeenCalledWith({ where: { id: 'r1', plateSwapId: null, submissionId: null } });
     expect(storage.delete).toHaveBeenCalledWith('k');
+  });
+
+  // พบ 2026-09-27: เดิมไม่ตรวจประเภทรถของรายการที่รูปแนบอยู่
+  it('STAFF_MOTO ลบรูปที่แนบกับรถยนต์ไม่ได้', async () => {
+    const { svc, storage, images } = setup(undefined, attached('PENDING', CAR));
+    await expect(as(['STAFF_MOTO'], () => svc.remove('r1'))).rejects.toMatchObject({ status: 403 });
+    expect(images.deleteMany).not.toHaveBeenCalled();
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  // ข้อความต้องใช้ได้ทั้งถาดและหน้าถ่ายบนมือถือ ("ลบแล้วถ่ายใหม่" - หน้านั้นไม่มีถาด) (พบ 2026-09-27)
+  it('ลบจากถาด/หน้าถ่าย (unassignedOnly) แต่อีกเครื่องจับคู่กับรถไปแล้ว -> 409 ไม่ลบ บอกให้ลบจากแถวของรถ', async () => {
+    const { svc, images } = setup(undefined, attached('PENDING'));
+    await expect(svc.remove('r1', '1')).rejects.toMatchObject({
+      status: 409,
+      response: { error: 'รูปนี้ถูกจับคู่กับรถไปแล้ว ลบไม่ได้ - ลบได้จากแถวของรถคันนั้นในหน้ารับใบเสร็จ' },
+    });
+    expect(images.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('ระหว่างกดลบ รูปถูกย้าย/รายการได้ใบเสร็จไปแล้ว (ลบไม่โดนแถวไหน) -> 409 ไม่ลบไฟล์', async () => {
+    const { svc, storage, images } = setup(undefined, attached('PENDING'));
+    images.deleteMany.mockResolvedValueOnce({ count: 0 });
+    await expect(svc.remove('r1')).rejects.toMatchObject({ status: 409 });
+    expect(images.deleteMany.mock.calls[0][0].where).toMatchObject({ submissionId: 's1', submission: { status: { not: 'RECEIPT_RECEIVED' } } });
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it('รูปของรายการ: ล็อกแถวรายการก่อนลบ (การบันทึก "ได้ใบเสร็จ" ที่ทำพร้อมกันต้องรอ) · รูปในถาดไม่ต้องล็อก', async () => {
+    const { svc, lockRows } = setup(undefined, attached('PENDING'));
+    await svc.remove('r1');
+    expect(lockRows.mock.calls[0][1]).toEqual(['s1']);
+    const tray = setup(undefined, unassigned);
+    await tray.svc.remove('r1', '1');
+    expect(tray.lockRows).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReceiptsService.assign - จับคู่เอง', () => {
+  const photo = (extra: Record<string, unknown> = {}) => ({ id: 'r1', extraction: null, submissionId: null, plateSwapId: null, submission: null, ...extra });
+
+  it('รูปที่ยังไม่จับคู่ -> จับคู่แบบมีเงื่อนไข (ต้องยังอยู่ที่เดิม)', async () => {
+    const { svc, images } = setup(undefined, photo());
+    await svc.assign('r1', 's1', true);
+    expect(images.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'r1', plateSwapId: null, submissionId: null }, data: { submissionId: 's1' } });
+  });
+
+  // พบ 2026-09-27: เดิมย้ายหลักฐานวางบิลออกจากรายการที่รับใบเสร็จแล้วได้ หรือรูปเป็นของงานสลับเลขและรถใหม่พร้อมกัน
+  it.each([
+    [{ submissionId: 's0', submission: { status: 'RECEIPT_RECEIVED', vehicle: { body: CAR } } }, 'รับใบเสร็จแล้ว'],
+    [{ plateSwapId: 'ps1' }, 'งานสลับเลข'],
+  ])('ย้ายรูปที่เป็นหลักฐานของรายการอื่นไม่ได้ %j', async (extra, message) => {
+    const { svc, images } = setup(undefined, photo(extra));
+    await expect(svc.assign('r1', 's1')).rejects.toMatchObject({ response: { error: expect.stringContaining(message) } });
+    expect(images.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('รูปที่แนบกับรถประเภทอื่นอยู่ ย้ายไม่ได้ (ตรวจขอบเขตรายการเดิม)', async () => {
+    const { svc, images } = setup({ id: 's1', status: 'PENDING', vehicle: { chassis: 'X', body: MOTO } }, photo({ submissionId: 's0', submission: { status: 'PENDING', vehicle: { body: CAR } } }));
+    await expect(as(['STAFF_MOTO'], () => svc.assign('r1', 's1'))).rejects.toMatchObject({ status: 403 });
+    expect(images.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('จับคู่จากถาดที่เก่า: อีกเครื่องจับคู่รูปนี้กับรถคันอื่นไปแล้ว -> 409', async () => {
+    const { svc, images } = setup(undefined, photo({ submissionId: 's0', submission: { status: 'PENDING', vehicle: { body: CAR } } }));
+    await expect(svc.assign('r1', 's1', true)).rejects.toMatchObject({ status: 409 });
+    expect(images.updateMany).not.toHaveBeenCalled();
+  });
+
+  // พบ 2026-09-27: ตรวจสถานะแล้วค่อยเขียน - ระหว่างนั้นอีกคนบันทึกใบยื่นได้ ล็อกแถวรายการทั้งสองก่อนแล้วดูสถานะล่าสุด
+  it('ย้ายรูประหว่างรายการ: ล็อกรายการเดิมและรายการใหม่ (เรียงตาม id) แล้วเขียนเฉพาะที่รายการเดิมยังไม่ได้ใบเสร็จ', async () => {
+    const { svc, images, lockRows } = setup(undefined, photo({ submissionId: 's9', submission: { status: 'PENDING', vehicle: { body: CAR } } }));
+    await svc.assign('r1', 's1');
+    expect(lockRows.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+    expect(lockRows.mock.calls[0][1]).toEqual(['s1', 's9']);
+    expect(images.updateMany.mock.calls[0][0].where).toEqual({ id: 'r1', plateSwapId: null, submissionId: 's9', submission: { status: { not: 'RECEIPT_RECEIVED' } } });
+  });
+
+  it('ระหว่างนั้นรายการใหม่ถูกบันทึกยื่นไม่สำเร็จ -> ไม่แนบ (รูปจะค้างกับรายการที่ไม่มีหน้าไหนเข้าถึง)', async () => {
+    const { svc, images, locked } = setup(undefined, photo());
+    locked.s1 = 'FAILED';
+    await expect(svc.assign('r1', 's1', true)).rejects.toMatchObject({ status: 400, response: { error: expect.stringContaining('ยื่นไม่สำเร็จ') } });
+    expect(images.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ระหว่างนั้นรายการเดิมเพิ่งได้ใบเสร็จ -> ไม่ย้ายหลักฐานวางบิลออก', async () => {
+    const { svc, images, locked } = setup(undefined, photo({ submissionId: 's9', submission: { status: 'PENDING', vehicle: { body: CAR } } }));
+    locked.s9 = 'RECEIPT_RECEIVED';
+    await expect(svc.assign('r1', 's1')).rejects.toMatchObject({ response: { error: expect.stringContaining('รับใบเสร็จแล้ว') } });
+    expect(images.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ระหว่างนั้นรายการใหม่ถูกยกเลิก -> ไม่พบ / รูปถูกย้ายหรือลบไปแล้ว (เขียนไม่โดนแถวไหน) -> 409', async () => {
+    const gone = setup(undefined, photo());
+    gone.locked.s1 = 'GONE';
+    await expect(gone.svc.assign('r1', 's1', true)).rejects.toMatchObject({ status: 404 });
+    const moved = setup(undefined, photo());
+    moved.images.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(moved.svc.assign('r1', 's1', true)).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe('ReceiptsService - ขอบเขตการดูรูป / ถาดรอจับคู่', () => {
+  it('ถามผลรูปหลายรูป: เห็นเฉพาะรูปที่ยังไม่จับคู่ หรือของรถในขอบเขตการอ่าน', async () => {
+    const { svc, images } = setup();
+    await as(['STAFF_MOTO'], () => svc.findByIds('a,b'));
+    expect(images.findMany.mock.calls[0][0].where).toEqual({
+      id: { in: ['a', 'b'] },
+      OR: [{ submissionId: null }, { submission: { vehicle: { AND: [{ body: { startsWith: 'รย.12-' } }] } } }],
+    });
+  });
+
+  it('ดูรูปของรถนอกขอบเขต -> ไม่พบ', async () => {
+    const { svc, images } = setup();
+    images.findFirst.mockResolvedValueOnce(null);
+    await expect(as(['STAFF_CAR'], () => svc.getImage('r1'))).rejects.toMatchObject({ status: 404 });
+    expect(images.findFirst.mock.calls[0][0].where.OR).toHaveLength(2);
+  });
+
+  it('ถาดรอจับคู่: บอกจำนวนทั้งหมด และโหลดเพิ่มด้วย offset', async () => {
+    const { svc, images } = setup();
+    images.findMany.mockResolvedValueOnce([{ id: 'r201' }]);
+    images.count.mockResolvedValueOnce(201);
+    const res = await svc.listUnassigned('200');
+    expect(images.findMany.mock.calls[0][0]).toMatchObject({ where: { submissionId: null, plateSwapId: null }, skip: 200, take: 200 });
+    expect(res).toEqual({ receipts: [{ id: 'r201' }], total: 201, hasMore: false });
+    await expect(svc.listUnassigned('-1')).rejects.toMatchObject({ status: 400 });
   });
 });
 
@@ -140,11 +304,20 @@ const aiReading = (reading: ReceiptReading): ReceiptExtractor => ({
 
 describe('ReceiptsService.upload - จับคู่ด้วยเลขตัวถังที่ AI อ่าน', () => {
   it('อัปโหลดหลายใบ: เลขตัวถังตรงกับรถที่รอใบเสร็จ -> แนบให้เลย', async () => {
-    const { svc, create } = setup(undefined, null, aiReading(READING), { id: 's9' });
+    const { svc, create, submissions } = setup(undefined, null, aiReading(READING), { id: 's9' });
     await svc.upload(file());
     const data = create.mock.calls[0][0].data;
     expect(data.submissionId).toBe('s9');
     expect(data.extraction.match).toBe('chassis');
+    // เลขตัวถังที่คีย์ไว้เป็นตัวเล็กก็ต้องเจอ (พบ 2026-09-27)
+    expect(submissions.findFirst.mock.calls.at(-1)![0].where.vehicle.chassis).toEqual({ equals: 'LS6CME0P7TC914754', mode: 'insensitive' });
+  });
+
+  it('อัปโหลดหลายใบ: รถที่จับคู่ได้ไม่ได้รอใบเสร็จแล้วตอนบันทึก (ล็อกแล้วดูสถานะ) -> รอในถาดแทน ไม่ error', async () => {
+    const { svc, create, locked } = setup(undefined, null, aiReading(READING), { id: 's9' });
+    locked.s9 = 'FAILED';
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data).toMatchObject({ submissionId: null, extraction: { match: null } });
   });
 
   it('อัปโหลดหลายใบ: ไม่เจอรถ -> รอจับคู่', async () => {
@@ -216,6 +389,26 @@ describe('ReceiptsService.upload - อ่านเบื้องหลัง (b
     await svc.upload(file(), undefined, '1');
     await vi.waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0][0].data.submissionId).toBe('s1');
+  });
+
+  it('รถที่ AI จับคู่ได้ถูกบันทึกยื่นไม่สำเร็จระหว่างนั้น (ล็อกแล้วดูสถานะ) -> ไม่แนบ รอในถาดพร้อมผลอ่าน', async () => {
+    const { svc, update, locked } = backgroundSetup(aiReading(READING));
+    locked.s9 = 'FAILED';
+    await svc.upload(file(), undefined, '1');
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].data).toMatchObject({ readPending: false, submissionId: null, extraction: { match: null } });
+  });
+
+  // พบ 2026-09-27: เดิมบันทึกผลพังแล้วรูปค้าง "กำลังอ่าน" จนรีสตาร์ท (แล้วจ่าย AI ซ้ำ)
+  it('บันทึกผลอ่านไม่สำเร็จ (รายการที่จับคู่ถูกยกเลิกระหว่างนั้น) -> เลิกสถานะรออ่าน เก็บผลอ่านไว้แต่ไม่จับคู่', async () => {
+    const { svc, update, images } = backgroundSetup(aiReading(READING));
+    update.mockRejectedValueOnce(Object.assign(new Error('fk'), { code: 'P2003' }));
+    await svc.upload(file(), undefined, '1');
+    await vi.waitFor(() => expect(images.updateMany).toHaveBeenCalled());
+    expect(images.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: 'r1', readPending: true },
+      data: { readPending: false, extraction: { reading: { chassis: 'LS6CME0P7TC914754' }, match: null, duplicate: null } },
+    });
   });
 
   it('ไม่มี AI หรือแนบในแถวรถ -> ไม่ใช้แบบเบื้องหลัง', async () => {

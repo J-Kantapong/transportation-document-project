@@ -104,7 +104,15 @@ export class VehicleSearchService {
         documentSubmissions: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true },
+          select: {
+            status: true,
+            submitDate: true,
+            receiptDate: true,
+            receiptReceivedDate: true,
+            failRemark: true,
+            receiptCarriedAt: true,
+            _count: { select: { receipts: true } },
+          },
         },
         plateSwapsAsNew: { where: { returnedDate: null }, take: 1, select: { id: true } },
         invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },

@@ -9,7 +9,9 @@ import {
   type TaxRenewalPreview,
   type TaxRenewalVehicleHit,
 } from "@/lib/api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { canEditSubmitSteps, getCachedUser, writeScopeFor, type UserRole, type VehicleScope } from "@/lib/auth";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { FUEL_TYPES, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
 import { DateInput } from "@/components/DateInput";
 
@@ -30,6 +32,9 @@ interface FormState {
   firstRegistrationDate: string;
   // "" = ยังไม่ได้เลือก - ประเภทเจ้าของรถบังคับกรอกเสมอ จึงไม่ตั้งค่าเริ่มต้นเป็นบุคคลธรรมดาให้เงียบๆ
   ownerType: "" | "INDIVIDUAL" | "JURISTIC";
+  // ติดไฟแนนซ์ (เช่าซื้อ) - ติ๊กแล้ว ownerType คือประเภทผู้ครอบครอง (ผู้เช่าซื้อ) แบบเดียวกับหน้าเพิ่มข้อมูลรถ
+  // ใช้เฉพาะรถที่กรอกเอง/รถในระบบที่ยังไม่มีเจ้าของ - รถที่มีเจ้าของแล้ว backend อ่านเรื่องไฟแนนซ์จากรถเอง
+  financed: boolean;
   ownerName: string;
   taxExpiryDate: string;
   paymentDate: string;
@@ -52,6 +57,7 @@ const EMPTY: FormState = {
   weight: "",
   firstRegistrationDate: "",
   ownerType: "",
+  financed: false,
   ownerName: "",
   taxExpiryDate: "",
   paymentDate: "",
@@ -90,6 +96,7 @@ function toInput(form: FormState): TaxRenewalInput {
       cc: form.cc || null,
       weight: form.weight || null,
       ownerType: form.ownerType || undefined,
+      financed: form.financed,
       // รถที่ยังไม่ได้รับป้ายไม่มีทะเบียนในระบบ - ส่งค่าที่กรอกเสริมไป (backend ใช้ของ Vehicle ก่อนเสมอ)
       plateCategory: form.plateCategory || undefined,
       plateNumber: form.plateNumber || undefined,
@@ -106,6 +113,7 @@ function toInput(form: FormState): TaxRenewalInput {
     weight: form.weight || null,
     firstRegistrationDate: toIso(form.firstRegistrationDate),
     ownerType: form.ownerType || undefined,
+    financed: form.financed,
     ownerName: form.ownerName || null,
   };
 }
@@ -125,11 +133,38 @@ function missingVehicleFields(v: TaxRenewalVehicleHit | null): Array<keyof FormS
   const isMoto = v.body?.startsWith("รย.12-") ?? false;
   const isRy1 = v.body?.startsWith("รย.1-") ?? false;
   const needsCc = isRy1 && fuel !== "ไฟฟ้า (BEV)";
+  // cc/น้ำหนัก 0 = ยังไม่รู้ค่าจริง ต้องเปิดช่องให้กรอกเหมือนค่าว่าง (พบ 2026-09-27)
   if (!isMoto) {
-    if (needsCc && v.cc === null) missing.push("cc");
-    if (!needsCc && v.weight === null) missing.push("weight");
+    if (needsCc && !v.cc) missing.push("cc");
+    if (!needsCc && !v.weight) missing.push("weight");
   }
   return missing;
+}
+
+// ช่องวันที่ที่พิมพ์แล้วแต่แปลงเป็นวันที่ไม่ได้ (พิมพ์ไม่ครบ 8 หลัก หรือวันที่ไม่มีจริง เช่น 31/02) - เดิมส่งไปเป็นค่าว่างเงียบๆ
+// วันที่ชำระจึงถูกบันทึกเป็นยังไม่ชำระ และวันที่บังคับขึ้นว่า "กรุณาระบุ…" ทั้งที่กรอกแล้ว (พบ 2026-09-27)
+function invalidDateMessage(form: FormState, missing: Array<keyof FormState>): string | null {
+  const fields: Array<[keyof FormState, string]> = [
+    ["submitDate", "วันที่ยื่นงาน"],
+    ["taxExpiryDate", "วันครบกำหนดภาษี"],
+    ["paymentDate", "วันที่ชำระภาษี"],
+  ];
+  // วันจดทะเบียนครั้งแรกมีช่องเฉพาะรถที่กรอกเอง หรือรถในระบบที่ยังไม่มีวันนี้
+  if (form.source === "MANUAL" || missing.includes("firstRegistrationDate")) {
+    fields.push(["firstRegistrationDate", "วันจดทะเบียนครั้งแรก"]);
+  }
+  for (const [key, label] of fields) {
+    const text = String(form[key]);
+    if (text.replace(/\D/g, "") && !toIso(text)) return `${label}ไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป`;
+  }
+  return null;
+}
+
+// บันทึก/แก้ได้เฉพาะประเภทรถในขอบเขตของผู้ใช้ (STAFF_CAR = รถยนต์, STAFF_MOTO = จักรยานยนต์) - backend กันอีกชั้น
+function inWriteScope(scope: VehicleScope, vehicleType: string | null): boolean {
+  if (scope === "ALL") return true;
+  if (scope === "NONE") return false;
+  return isMotorcycleBody(vehicleType) === (scope === "MOTO");
 }
 
 // ครบพอที่จะคิดยอดได้หรือยัง - กัน preview ยิงรัวตอนพิมพ์วันที่ยังไม่ครบ 8 หลัก
@@ -162,6 +197,18 @@ export function TaxRenewalPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // บันทึก/แก้ได้เฉพาะ ADMIN / STAFF_CAR / STAFF_MOTO (backend: POST/PATCH /api/tax-renewals = SUBMIT)
+  // ACCOUNTANT เปิดหน้าได้แต่อ่านอย่างเดียว - ซ่อนฟอร์มและแสดงตารางเป็นข้อความ (พบ 2026-09-27)
+  // localStorage อ่านได้เฉพาะฝั่ง browser จึงตั้งค่าใน effect (null = ยังไม่รู้ ไม่ขึ้น "ดูอย่างเดียว" แวบให้คนที่บันทึกได้)
+  const [roles, setRoles] = useState<UserRole[] | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRoles(getCachedUser()?.roles ?? []);
+  }, []);
+  const canWrite = canEditSubmitSteps(roles ?? []);
+  const readOnly = roles !== null && !canWrite;
+  const writeScope = writeScopeFor(roles ?? []);
+  const canWriteRow = (vehicleType: string) => canWrite && inWriteScope(writeScope, vehicleType);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -210,9 +257,14 @@ export function TaxRenewalPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setError("");
     setMessage("");
+    const dateError = invalidDateMessage(form, missing);
+    if (dateError) {
+      setError(dateError);
+      return;
+    }
+    setSaving(true);
     try {
       await api.createTaxRenewal(toInput(form));
       setForm(freshForm());
@@ -241,58 +293,129 @@ export function TaxRenewalPage() {
 
   return (
     <>
-      <div className="panel">
-        <div className="panel-head">
-          <h2>เพิ่มงานต่อภาษี</h2>
-        </div>
-        <form onSubmit={submit} style={{ padding: "0 23px 24px" }}>
-          {/* วันที่ยื่นงาน - ข้อมูลของงาน ไม่ใช่ของรถ จึงอยู่เหนือแท็บเลือกรถ */}
-          <div className="vehicle-fields" style={{ marginBottom: 18 }}>
-            <label className="field">
-              <span>วันที่ยื่นงาน *</span>
-              <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
-            </label>
+      {canWrite && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>เพิ่มงานต่อภาษี</h2>
           </div>
-          <div className="vehicle-tabs" style={{ marginBottom: 22 }}>
-            {(["VEHICLE", "MANUAL"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`vehicle-tab${form.source === s ? " active" : ""}`}
-                onClick={() => set("source", s)}
-              >
-                {s === "VEHICLE" ? "เลือกรถจากระบบ" : "กรอกข้อมูลรถเอง"}
-              </button>
-            ))}
-          </div>
+          <form onSubmit={submit} style={{ padding: "0 23px 24px" }}>
+            {/* วันที่ยื่นงาน - ข้อมูลของงาน ไม่ใช่ของรถ จึงอยู่เหนือแท็บเลือกรถ */}
+            <div className="vehicle-fields" style={{ marginBottom: 18 }}>
+              <label className="field">
+                <span>วันที่ยื่นงาน *</span>
+                <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
+              </label>
+            </div>
+            <div className="vehicle-tabs" style={{ marginBottom: 22 }}>
+              {(["VEHICLE", "MANUAL"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`vehicle-tab${form.source === s ? " active" : ""}`}
+                  onClick={() => set("source", s)}
+                >
+                  {s === "VEHICLE" ? "เลือกรถจากระบบ" : "กรอกข้อมูลรถเอง"}
+                </button>
+              ))}
+            </div>
 
-          <div className="vehicle-fields">
-            {form.source === "VEHICLE" ? (
-              <div className="field wide">
-                <span>ค้นหารถในฐานข้อมูล</span>
-                <VehicleSearch
-                  selected={selectedVehicle}
-                  onSelect={(v) => {
-                    setSelectedVehicle(v);
-                    set("vehicleId", v?.id ?? "");
-                  }}
-                />
-                {missing.length > 0 && (
-                  <p className="sub" style={{ marginTop: 10 }}>
-                    รถคันนี้ยังไม่มีข้อมูลที่ต้องใช้คำนวณภาษี กรุณากรอกเพิ่ม
-                  </p>
-                )}
-              </div>
-            ) : (
-              <>
-                <label className="field">
-                  <span>เลขตัวถัง *</span>
-                  <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} required />
-                </label>
-                <label className="field">
-                  <span>เลขเครื่อง</span>
-                  <input value={form.engine} onChange={(e) => set("engine", e.target.value)} />
-                </label>
+            <div className="vehicle-fields">
+              {form.source === "VEHICLE" ? (
+                <div className="field wide">
+                  <span>ค้นหารถในฐานข้อมูล</span>
+                  <VehicleSearch
+                    selected={selectedVehicle}
+                    onSelect={(v) => {
+                      setSelectedVehicle(v);
+                      set("vehicleId", v?.id ?? "");
+                    }}
+                  />
+                  {missing.length > 0 && (
+                    <p className="sub" style={{ marginTop: 10 }}>
+                      รถคันนี้ยังไม่มีข้อมูลที่ต้องใช้คำนวณภาษี กรุณากรอกเพิ่ม
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <label className="field">
+                    <span>เลขตัวถัง *</span>
+                    <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} required />
+                  </label>
+                  <label className="field">
+                    <span>เลขเครื่อง</span>
+                    <input value={form.engine} onChange={(e) => set("engine", e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>หมวดทะเบียน *</span>
+                    <input
+                      value={form.plateCategory}
+                      onChange={(e) => set("plateCategory", e.target.value)}
+                      placeholder="4กข"
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    <span>เลขทะเบียน *</span>
+                    <input
+                      value={form.plateNumber}
+                      onChange={(e) => set("plateNumber", e.target.value)}
+                      placeholder="4444"
+                      required
+                    />
+                  </label>
+                  <label className="field wide">
+                    <span>ชื่อเจ้าของรถ</span>
+                    <input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>ประเภทรถ</span>
+                    <select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} required>
+                      <option value="">เลือกประเภทรถ</option>
+                      {VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t)).map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>ประเภทเชื้อเพลิง</span>
+                    <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)} required>
+                      <option value="">เลือกเชื้อเพลิง</option>
+                      {FUEL_TYPES.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>ขนาด CC</span>
+                    <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
+                  </label>
+                  <label className="field">
+                    <span>น้ำหนักรถ (กก.)</span>
+                    <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
+                  </label>
+                  <label className="field">
+                    <span>วันจดทะเบียนครั้งแรก</span>
+                    <DateTextInput
+                      value={form.firstRegistrationDate}
+                      onChange={(v) => set("firstRegistrationDate", v)}
+                      required
+                    />
+                  </label>
+                  <OwnerTypeFields
+                    ownerType={form.ownerType}
+                    financed={form.financed}
+                    onOwnerTypeChange={(v) => set("ownerType", v)}
+                    onFinancedChange={(v) => set("financed", v)}
+                  />
+                </>
+              )}
+
+              {missing.includes("plateCategory") && (
                 <label className="field">
                   <span>หมวดทะเบียน *</span>
                   <input
@@ -302,6 +425,8 @@ export function TaxRenewalPage() {
                     required
                   />
                 </label>
+              )}
+              {missing.includes("plateNumber") && (
                 <label className="field">
                   <span>เลขทะเบียน *</span>
                   <input
@@ -311,21 +436,18 @@ export function TaxRenewalPage() {
                     required
                   />
                 </label>
-                <label className="field wide">
-                  <span>ชื่อเจ้าของรถ</span>
-                  <input value={form.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
-                </label>
+              )}
+              {missing.includes("firstRegistrationDate") && (
                 <label className="field">
-                  <span>ประเภทรถ</span>
-                  <select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} required>
-                    <option value="">เลือกประเภทรถ</option>
-                    {VEHICLE_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                  <span>วันจดทะเบียนครั้งแรก</span>
+                  <DateTextInput
+                    value={form.firstRegistrationDate}
+                    onChange={(v) => set("firstRegistrationDate", v)}
+                    required
+                  />
                 </label>
+              )}
+              {missing.includes("fuel") && (
                 <label className="field">
                   <span>ประเภทเชื้อเพลิง</span>
                   <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)} required>
@@ -337,168 +459,95 @@ export function TaxRenewalPage() {
                     ))}
                   </select>
                 </label>
+              )}
+              {missing.includes("cc") && (
                 <label className="field">
                   <span>ขนาด CC</span>
-                  <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
+                  <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" required />
                 </label>
+              )}
+              {missing.includes("weight") && (
                 <label className="field">
                   <span>น้ำหนักรถ (กก.)</span>
-                  <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
-                </label>
-                <label className="field">
-                  <span>วันจดทะเบียนครั้งแรก</span>
-                  <DateTextInput
-                    value={form.firstRegistrationDate}
-                    onChange={(v) => set("firstRegistrationDate", v)}
+                  <input
+                    value={form.weight}
+                    onChange={(e) => set("weight", e.target.value)}
+                    inputMode="decimal"
                     required
                   />
                 </label>
-                <label className="field">
-                  <span>ประเภทเจ้าของรถ *</span>
-                  <select
-                    value={form.ownerType}
-                    onChange={(e) => set("ownerType", e.target.value as FormState["ownerType"])}
-                    required
-                  >
-                    <option value="">เลือกประเภทเจ้าของรถ</option>
-                    <option value="INDIVIDUAL">บุคคลธรรมดา</option>
-                    <option value="JURISTIC">นิติบุคคล</option>
-                  </select>
-                </label>
-              </>
-            )}
+              )}
+              {missing.includes("ownerType") && (
+                <OwnerTypeFields
+                  ownerType={form.ownerType}
+                  financed={form.financed}
+                  onOwnerTypeChange={(v) => set("ownerType", v)}
+                  onFinancedChange={(v) => set("financed", v)}
+                />
+              )}
 
-            {missing.includes("plateCategory") && (
               <label className="field">
-                <span>หมวดทะเบียน *</span>
+                <span>วันครบกำหนดภาษี</span>
+                <DateTextInput value={form.taxExpiryDate} onChange={(v) => set("taxExpiryDate", v)} required />
+              </label>
+              <label className="field">
+                <span>วันที่ชำระภาษี (เว้นว่างได้ กรอกทีหลังในตาราง)</span>
+                <DateTextInput value={form.paymentDate} onChange={(v) => set("paymentDate", v)} />
+              </label>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginTop: 22 }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
                 <input
-                  value={form.plateCategory}
-                  onChange={(e) => set("plateCategory", e.target.value)}
-                  placeholder="4กข"
-                  required
+                  type="checkbox"
+                  checked={form.inspectionConfirmed}
+                  onChange={(e) => set("inspectionConfirmed", e.target.checked)}
                 />
+                มีใบตรวจ ตรอ. แล้ว
               </label>
-            )}
-            {missing.includes("plateNumber") && (
-              <label className="field">
-                <span>เลขทะเบียน *</span>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
                 <input
-                  value={form.plateNumber}
-                  onChange={(e) => set("plateNumber", e.target.value)}
-                  placeholder="4444"
-                  required
+                  type="checkbox"
+                  checked={form.insuranceConfirmed}
+                  onChange={(e) => set("insuranceConfirmed", e.target.checked)}
                 />
+                มี พ.ร.บ. แล้ว
               </label>
-            )}
-            {missing.includes("firstRegistrationDate") && (
-              <label className="field">
-                <span>วันจดทะเบียนครั้งแรก</span>
-                <DateTextInput
-                  value={form.firstRegistrationDate}
-                  onChange={(v) => set("firstRegistrationDate", v)}
-                  required
-                />
-              </label>
-            )}
-            {missing.includes("fuel") && (
-              <label className="field">
-                <span>ประเภทเชื้อเพลิง</span>
-                <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)} required>
-                  <option value="">เลือกเชื้อเพลิง</option>
-                  {FUEL_TYPES.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {missing.includes("cc") && (
-              <label className="field">
-                <span>ขนาด CC</span>
-                <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" required />
-              </label>
-            )}
-            {missing.includes("weight") && (
-              <label className="field">
-                <span>น้ำหนักรถ (กก.)</span>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
                 <input
-                  value={form.weight}
-                  onChange={(e) => set("weight", e.target.value)}
-                  inputMode="decimal"
-                  required
+                  type="checkbox"
+                  checked={form.skipContribution}
+                  onChange={(e) => set("skipContribution", e.target.checked)}
                 />
+                ไม่มีค่าลงขัน
               </label>
-            )}
-            {missing.includes("ownerType") && (
-              <label className="field">
-                <span>ประเภทเจ้าของรถ *</span>
-                <select
-                  value={form.ownerType}
-                  onChange={(e) => set("ownerType", e.target.value as FormState["ownerType"])}
-                  required
-                >
-                  <option value="">เลือกประเภทเจ้าของรถ</option>
-                  <option value="INDIVIDUAL">บุคคลธรรมดา</option>
-                  <option value="JURISTIC">นิติบุคคล</option>
-                </select>
-              </label>
-            )}
+            </div>
 
-            <label className="field">
-              <span>วันครบกำหนดภาษี</span>
-              <DateTextInput value={form.taxExpiryDate} onChange={(v) => set("taxExpiryDate", v)} required />
-            </label>
-            <label className="field">
-              <span>วันที่ชำระภาษี (เว้นว่างได้ กรอกทีหลังในตาราง)</span>
-              <DateTextInput value={form.paymentDate} onChange={(v) => set("paymentDate", v)} />
-            </label>
-          </div>
+            {ready && previewError && <p className="customer-message error">{previewError}</p>}
+            {ready && preview && <PreviewSummary preview={preview} />}
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginTop: 22 }}>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
-              <input
-                type="checkbox"
-                checked={form.inspectionConfirmed}
-                onChange={(e) => set("inspectionConfirmed", e.target.checked)}
-              />
-              มีใบตรวจ ตรอ. แล้ว
-            </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
-              <input
-                type="checkbox"
-                checked={form.insuranceConfirmed}
-                onChange={(e) => set("insuranceConfirmed", e.target.checked)}
-              />
-              มี พ.ร.บ. แล้ว
-            </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
-              <input
-                type="checkbox"
-                checked={form.skipContribution}
-                onChange={(e) => set("skipContribution", e.target.checked)}
-              />
-              ไม่มีค่าลงขัน
-            </label>
-          </div>
-
-          {ready && previewError && <p className="customer-message error">{previewError}</p>}
-          {ready && preview && <PreviewSummary preview={preview} />}
-
-          <div className="form-actions">
-            <button type="submit" className="primary" disabled={saving}>
-              {saving ? "กำลังบันทึก..." : "บันทึกงานต่อภาษี"}
-            </button>
-            {message && <span className="customer-message success">{message}</span>}
-            {error && <span className="customer-message error">{error}</span>}
-          </div>
-        </form>
-      </div>
+            <div className="form-actions">
+              <button type="submit" className="primary" disabled={saving}>
+                {saving ? "กำลังบันทึก..." : "บันทึกงานต่อภาษี"}
+              </button>
+              {message && <span className="customer-message success">{message}</span>}
+              {error && <span className="customer-message error">{error}</span>}
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="panel customer-list">
         <div className="panel-head">
           <h2>รายการงานต่อภาษี</h2>
+          {readOnly && <span className="muted">ดูอย่างเดียว</span>}
         </div>
+        {/* error โหลดรายการ - ปกติแสดงใต้ฟอร์มด้านบน แต่ผู้ใช้ที่ดูอย่างเดียวไม่มีฟอร์ม */}
+        {!canWrite && error && (
+          <p className="customer-message error" style={{ padding: "0 23px" }}>
+            {error}
+          </p>
+        )}
         {rows.length === 0 ? (
           <p className="empty-customers">ยังไม่มีงานต่อภาษี</p>
         ) : (
@@ -519,52 +568,70 @@ export function TaxRenewalPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <div className="job">
-                        {row.plateCategory} {row.plateNumber}
-                      </div>
-                      {row.customer && <div className="sub">{row.customer.company || row.customer.name}</div>}
-                    </td>
-                    <td>{row.vehicleType}</td>
-                    <td>{isoToDisplayDate(row.taxExpiryDate.slice(0, 10))}</td>
-                    <td>
-                      {row.inspectionRequired ? (
-                        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input
-                            type="checkbox"
-                            checked={row.inspectionConfirmed}
-                            onChange={(e) => void patch(row.id, { inspectionConfirmed: e.target.checked })}
-                          />
-                          <span className={row.inspectionConfirmed ? "badge" : "badge warn"}>
-                            {row.inspectionConfirmed ? "มีใบตรวจ" : "ต้องตรวจ"}
-                          </span>
-                        </label>
-                      ) : (
-                        <span className="muted">ไม่ต้องตรวจ</span>
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={row.insuranceConfirmed}
-                        onChange={(e) => void patch(row.id, { insuranceConfirmed: e.target.checked })}
-                      />
-                    </td>
-                    <td>{baht(row.billTotal)}</td>
-                    <td>{baht(row.noBillTotal)}</td>
-                    <td>
-                      <DateCell value={row.paymentDate} onSave={(v) => patch(row.id, { paymentDate: v })} />
-                    </td>
-                    <td>
-                      <DateCell value={row.receivedDate} onSave={(v) => patch(row.id, { receivedDate: v })} />
-                    </td>
-                    <td>
-                      <DateCell value={row.deliveredDate} onSave={(v) => patch(row.id, { deliveredDate: v })} />
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  // ดูอย่างเดียว (ACCOUNTANT / รถนอกขอบเขตของผู้ใช้): ช่องติ๊ก disabled และวันที่เป็นข้อความ
+                  const editable = canWriteRow(row.vehicleType);
+                  return (
+                    <tr key={row.id}>
+                      <td>
+                        <div className="job">
+                          {row.plateCategory} {row.plateNumber}
+                        </div>
+                        {row.customer && <div className="sub">{row.customer.company || row.customer.name}</div>}
+                      </td>
+                      <td>{row.vehicleType}</td>
+                      <td>{isoToDisplayDate(row.taxExpiryDate.slice(0, 10))}</td>
+                      <td>
+                        {row.inspectionRequired ? (
+                          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={row.inspectionConfirmed}
+                              disabled={!editable}
+                              onChange={(e) => void patch(row.id, { inspectionConfirmed: e.target.checked })}
+                            />
+                            <span className={row.inspectionConfirmed ? "badge" : "badge warn"}>
+                              {row.inspectionConfirmed ? "มีใบตรวจ" : "ต้องตรวจ"}
+                            </span>
+                          </label>
+                        ) : (
+                          <span className="muted">ไม่ต้องตรวจ</span>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={row.insuranceConfirmed}
+                          disabled={!editable}
+                          onChange={(e) => void patch(row.id, { insuranceConfirmed: e.target.checked })}
+                        />
+                      </td>
+                      <td>{baht(row.billTotal)}</td>
+                      <td>{baht(row.noBillTotal)}</td>
+                      <td>
+                        <DateCell
+                          value={row.paymentDate}
+                          readOnly={!editable}
+                          onSave={(v) => patch(row.id, { paymentDate: v })}
+                        />
+                      </td>
+                      <td>
+                        <DateCell
+                          value={row.receivedDate}
+                          readOnly={!editable}
+                          onSave={(v) => patch(row.id, { receivedDate: v })}
+                        />
+                      </td>
+                      <td>
+                        <DateCell
+                          value={row.deliveredDate}
+                          readOnly={!editable}
+                          onSave={(v) => patch(row.id, { deliveredDate: v })}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -733,28 +800,85 @@ function DateTextInput({
       className={className}
       required={required}
       value={value}
-      onChange={(value) => onChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+      // ป้ายภาษี/ใบเสร็จพิมพ์ปี พ.ศ. - พิมพ์ 2569 ครบ 8 หลักแล้วแปลงเป็น ค.ศ. ให้ทันที (เดิมกลายเป็นค่าว่างเงียบๆ - พบ 2026-09-27)
+      onChange={(value) => onChange(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
     />
   );
 }
 
 // ช่องวันที่ในตาราง - บันทึกเมื่อพิมพ์ครบ 8 หลักหรือลบจนว่าง ถ้า backend ปฏิเสธให้ดึงค่าเดิมกลับมาแสดง
-function DateCell({ value, onSave }: { value: string | null; onSave: (v: string | null) => Promise<boolean> }) {
-  const [text, setText] = useState(() => isoToDisplayDate((value ?? "").slice(0, 10)));
+// ครบ 8 หลักแต่ไม่ใช่วันที่จริง (เช่น 31/02) ขึ้นเตือนใต้ช่อง - เดิมค้างข้อความไว้เหมือนบันทึกแล้วทั้งที่ไม่ได้ส่ง (พบ 2026-09-27)
+function DateCell({
+  value,
+  readOnly,
+  onSave,
+}: {
+  value: string | null;
+  readOnly?: boolean;
+  onSave: (v: string | null) => Promise<boolean>;
+}) {
+  const saved = isoToDisplayDate((value ?? "").slice(0, 10));
+  const [text, setText] = useState(saved);
+  const [invalid, setInvalid] = useState(false);
+
+  if (readOnly) return <span>{saved || "-"}</span>;
 
   async function handleChange(next: string) {
     setText(next);
     const digits = next.replace(/\D/g, "");
     if (digits.length === 0) {
-      if (!(await onSave(null))) setText(isoToDisplayDate((value ?? "").slice(0, 10)));
+      setInvalid(false);
+      if (!(await onSave(null))) setText(saved);
       return;
     }
     const iso = displayDateToIso(digits);
-    if (iso && !(await onSave(iso))) setText(isoToDisplayDate((value ?? "").slice(0, 10)));
+    setInvalid(digits.length === 8 && !iso);
+    if (iso && !(await onSave(iso))) setText(saved);
   }
 
   return (
-    <DateTextInput value={text} onChange={handleChange} className="inspect-input inspect-input--date" />
+    <>
+      <DateTextInput value={text} onChange={handleChange} className="inspect-input inspect-input--date" />
+      {invalid && <div className="field-error">วันที่ไม่ถูกต้อง</div>}
+    </>
+  );
+}
+
+// ประเภทเจ้าของรถ + ติ๊กไฟแนนซ์ แบบเดียวกับหน้าเพิ่มข้อมูลรถ (ติ๊กแล้วประเภทที่เลือกคือผู้ครอบครอง/ผู้เช่าซื้อ)
+// รถติดไฟแนนซ์ที่ผู้เช่าซื้อเป็นบุคคลธรรมดาไม่คูณสองแบบนิติบุคคล (รย.1) - เดิมไม่มีช่องนี้จึงคิดภาษีสองเท่า (พบ 2026-09-27)
+function OwnerTypeFields({
+  ownerType,
+  financed,
+  onOwnerTypeChange,
+  onFinancedChange,
+}: {
+  ownerType: FormState["ownerType"];
+  financed: boolean;
+  onOwnerTypeChange: (v: FormState["ownerType"]) => void;
+  onFinancedChange: (v: boolean) => void;
+}) {
+  return (
+    <>
+      <label className="field">
+        <span>{financed ? "ประเภทผู้ครอบครอง (ผู้เช่าซื้อ) *" : "ประเภทเจ้าของรถ *"}</span>
+        <select value={ownerType} onChange={(e) => onOwnerTypeChange(e.target.value as FormState["ownerType"])} required>
+          <option value="">{financed ? "เลือกประเภทผู้ครอบครอง" : "เลือกประเภทเจ้าของรถ"}</option>
+          <option value="INDIVIDUAL">บุคคลธรรมดา</option>
+          <option value="JURISTIC">นิติบุคคล</option>
+        </select>
+      </label>
+      <div className="field">
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            style={{ width: 18, height: 18, minHeight: 0, padding: 0, margin: 0 }}
+            checked={financed}
+            onChange={(e) => onFinancedChange(e.target.checked)}
+          />
+          ติดไฟแนนซ์ (เช่าซื้อ)
+        </label>
+      </div>
+    </>
   );
 }
 

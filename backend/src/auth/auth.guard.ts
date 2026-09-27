@@ -38,6 +38,6 @@ export class AuthGuard implements CanActivate {
       select: { id: true, roles: true, status: true, customerId: true, name: true, displayName: true },
     });
     if (!user || user.status !== 'APPROVED') return null;
-    return { id: user.id, roles: user.roles, customerId: user.customerId, name: user.displayName || user.name };
+    return { id: user.id, roles: user.roles, customerId: user.customerId, name: user.displayName || user.name, tokenExp: payload.exp };
   }
 }

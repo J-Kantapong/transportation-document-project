@@ -120,6 +120,9 @@ export function ExecutiveOverview() {
   const { spend, cash, workingCapital: wc, forecast, process, stuck, alerts } = data;
   const isToday = data.asOf === data.today;
   const dayWord = isToday ? "วันนี้" : `วันที่ ${isoToDisplayDate(data.asOf)}`;
+  // ดูวันย้อนหลัง: ตัวเลขรายวัน/เดือนเป็นของวันที่เลือก แต่เงินจมและประมาณการเป็นข้อมูลสดเสมอ จึงบอกกำกับไว้ (พบ 2026-09-27)
+  const monthWord = isToday ? "เดือนนี้" : `เดือน ${data.asOf.slice(5, 7)}/${data.asOf.slice(0, 4)} `;
+  const liveNote = isToday ? "" : "ข้อมูล ณ ตอนนี้";
   const updated = new Date(data.generatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
   const maxCategory = Math.max(1, ...spend.categories.map((c) => c.last30));
   const net30 = cash.net30;
@@ -172,7 +175,7 @@ export function ExecutiveOverview() {
           <div className="foot">
             วางบิลใหม่ {baht(cash.billedToday)} บาท
             <br />
-            เดือนนี้รับแล้ว {baht(cash.collectedMonth)} บาท
+            {monthWord}รับแล้ว {baht(cash.collectedMonth)} บาท
           </div>
         </div>
         <div className="stat">
@@ -188,7 +191,7 @@ export function ExecutiveOverview() {
           </div>
         </div>
         <div className="stat">
-          <div className="stat-top">เงินจมรอเรียกคืน</div>
+          <div className="stat-top">เงินจมรอเรียกคืน{liveNote && ` (${liveNote})`}</div>
           <div className="num">
             {baht(wc.total)}
             <small>บาท</small>
@@ -232,7 +235,7 @@ export function ExecutiveOverview() {
 
       {/* ---------- งานแต่ละขั้นตอน + รถที่ติดขัด (แยกรถยนต์/จักรยานยนต์) ---------- */}
       <ProcessBoard rows={process} dayWord={dayWord} />
-      <StuckList total={stuck.total} byKind={stuck.byKind} items={stuck.items} />
+      <StuckList total={stuck.total} byKind={stuck.byKind} limit={stuck.limit} items={stuck.items} />
 
       {/* ---------- กระแสเงินรายวัน ---------- */}
       <section className="panel exec-panel">
@@ -354,13 +357,21 @@ export function ExecutiveOverview() {
         <section className="panel">
           <div className="panel-head">
             <h2>เงินจมอยู่ที่ไหน</h2>
-            <span className="muted">รวม {baht(wc.total)} บาท</span>
+            <span className="muted">
+              รวม {baht(wc.total)} บาท{liveNote && ` · ${liveNote}`}
+            </span>
           </div>
           <div className="exec-pipeline">
             <div>
               <span>จ่ายแล้ว ระหว่างดำเนินการ</span>
               <b>{baht(wc.inProcess.amount)}</b>
               <small>{wc.inProcess.count} คัน · ยังไม่ส่งงาน</small>
+              {/* งานที่คีย์ล่วงหน้ายังไม่ได้จ่ายจริง - แสดงให้เห็นแต่ไม่นับรวม (พบ 2026-09-27) */}
+              {wc.advance?.count > 0 && (
+                <small>
+                  + คีย์ล่วงหน้า {wc.advance.count} คัน {baht(wc.advance.amount)} บาท (ยังไม่จ่าย ไม่นับรวม)
+                </small>
+              )}
             </div>
             <div>
               <span>ส่งงานแล้ว รอวางบิล</span>
@@ -409,7 +420,8 @@ export function ExecutiveOverview() {
           <div>
             <h2>ประมาณการกระแสเงินสด 4 สัปดาห์</h2>
             <p className="exec-sub">
-              เงินเข้า = บิลค้างรับ + งานที่ส่งแล้วรอวางบิล ตามรอบจ่ายของลูกค้า · เงินออก = ค่าเฉลี่ยใช้เงิน 28 วันล่าสุด (
+              {liveNote && `${liveNote} (เริ่มจากวันนี้ ไม่ขึ้นกับวันที่เลือก) · `}
+              เงินเข้า = บิลค้างรับ + งานที่ส่งแล้วรอวางบิล ตามรอบจ่ายของลูกค้า · เงินออก = ค่าเฉลี่ยใช้เงิน 28 วันถึงวันนี้ (
               {baht(forecast.avgDailySpend)} บาท/วัน)
             </p>
           </div>

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
-import type { TaxService } from '../tax/tax.service.js';
 import { VehiclesService } from './vehicles.service.js';
 
 // แก้ไขผลตรวจที่บันทึกไปแล้ว (ผู้ใช้ 2026-09-23): เช่น บันทึกว่า "ผ่าน" ไปแล้ว แต่จริงๆ ตรวจไม่ผ่านเพราะเลขตัวรถผิด
@@ -25,15 +24,17 @@ function vehicleRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function service(found: unknown) {
-  const update = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: 'v1', ...data }));
+// update = คำสั่งบันทึกแบบมีเงื่อนไข (updateMany) ใน transaction - count 0 = มีคนแก้ไปก่อน
+function service(found: unknown, options: { count?: number } = {}) {
+  const update = vi.fn().mockResolvedValue({ count: options.count ?? 1 });
   const editLogCreate = vi.fn().mockResolvedValue({ id: 'log1' });
+  const tx = { vehicle: { updateMany: update }, vehicleEditLog: { create: editLogCreate } };
   const prisma = {
-    vehicle: { findFirst: vi.fn().mockResolvedValue(found), update },
+    vehicle: { findFirst: vi.fn().mockResolvedValue(found), updateMany: update },
     vehicleEditLog: { create: editLogCreate },
-    $transaction: vi.fn().mockImplementation((ops: unknown[]) => Promise.all(ops)),
+    $transaction: vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   } as unknown as PrismaService;
-  return { service: new VehiclesService(prisma, {} as TaxService), update, editLogCreate };
+  return { service: new VehiclesService(prisma), update, editLogCreate };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<string> {
@@ -42,6 +43,15 @@ async function errorOf(promise: Promise<unknown>): Promise<string> {
     return '';
   } catch (e) {
     return (e as { response?: { error?: string } }).response?.error ?? '';
+  }
+}
+
+async function statusOf(promise: Promise<unknown>): Promise<number | undefined> {
+  try {
+    await promise;
+    return undefined;
+  } catch (e) {
+    return (e as { getStatus?: () => number }).getStatus?.();
   }
 }
 
@@ -57,6 +67,7 @@ describe('VehiclesService.correctInspectionResult', () => {
       inspectionFailRemark: 'เลขตัวรถผิด',
     });
     expect(update.mock.calls[0][0].data.inspectionResultBillCost).toBeNull();
+    expect(update.mock.calls[0][0].data.inspectionResultDate).toEqual(new Date('2026-09-24T00:00:00.000Z'));
     expect(editLogCreate).toHaveBeenCalledTimes(1);
     const log = editLogCreate.mock.calls[0][0].data as { remark: string; changes: string };
     expect(log.remark).toBe('แก้ไขผลตรวจ (ผ่าน → ไม่ผ่าน): บันทึกผลตรวจผิด');
@@ -104,6 +115,37 @@ describe('VehiclesService.correctInspectionResult', () => {
     expect(await errorOf(svc.correctInspectionResult('v1', { ...base, resultDate: '24/09/2026' }))).toBe(
       'วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง',
     );
+  });
+
+  it('วันที่ทราบผลใหม่ต้องไม่ก่อนวันที่ส่งตรวจ และไม่เกินวันนี้ (พบ 2026-09-27)', async () => {
+    const { service: svc, update } = service(vehicleRow());
+    expect(await errorOf(svc.correctInspectionResult('v1', { ...base, resultDate: '2026-09-22' }))).toBe(
+      'วันที่ทราบผลต้องไม่ก่อนวันที่ส่งตรวจ (23/09/2026)',
+    );
+    expect(await errorOf(svc.correctInspectionResult('v1', { ...base, resultDate: '2099-01-01' }))).toBe('วันที่ทราบผลต้องไม่เกินวันนี้');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('บันทึกแบบมีเงื่อนไขว่าผลตรวจยังเป็นแบบที่อ่านมาและยังไม่ยื่นเอกสาร (พบ 2026-09-27)', async () => {
+    const { service: svc, update } = service(vehicleRow());
+    await svc.correctInspectionResult('v1', base);
+    expect(update.mock.calls[0][0].where).toEqual({
+      id: 'v1',
+      deletedAt: null,
+      inspectionSentDate: new Date('2026-09-23T00:00:00.000Z'),
+      inspectionResult: 'ผ่าน',
+      inspectionResultDate: new Date('2026-09-24T00:00:00.000Z'),
+      inspectionFailRemark: null,
+      documentSubmissions: { none: { status: { in: ['PENDING', 'RECEIPT_RECEIVED'] } } },
+    });
+  });
+
+  it('มีคนแก้/ยื่นเอกสาร/ส่งตรวจรอบ 2 ไปก่อนระหว่างนั้น ตอบ 409 และไม่บันทึกประวัติ', async () => {
+    const { service: svc, editLogCreate } = service(vehicleRow(), { count: 0 });
+    const promise = svc.correctInspectionResult('v1', base);
+    expect(await statusOf(promise)).toBe(409);
+    expect(await errorOf(promise)).toBe('ข้อมูลถูกแก้ไขโดยผู้อื่น - โหลดรายการใหม่');
+    expect(editLogCreate).not.toHaveBeenCalled();
   });
 
   it('รถที่ยังไม่มีผลตรวจ ใช้หน้าแก้ไขไม่ได้', async () => {

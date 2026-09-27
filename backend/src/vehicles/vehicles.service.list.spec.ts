@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
-import type { TaxService } from '../tax/tax.service.js';
 import { VehiclesService } from './vehicles.service.js';
 
 // รายการรถในหน้าเพิ่มข้อมูลรถจดใหม่: ทีละ 100 คัน + ค้นหา + กรองช่วงวันที่ (ผู้ใช้ 2026-09-25)
@@ -8,7 +7,7 @@ import { VehiclesService } from './vehicles.service.js';
 function service(rowCount: number) {
   const findMany = vi.fn().mockResolvedValue(Array.from({ length: rowCount }, (_, i) => ({ id: `v${i}` })));
   const prisma = { vehicle: { findMany } } as unknown as PrismaService;
-  const svc = new VehiclesService(prisma, {} as TaxService);
+  const svc = new VehiclesService(prisma);
   // mapVehicleFull ต้องใช้ include ครบทุกความสัมพันธ์ - ในเทสต์นี้สนใจแค่ query ที่ส่งไป
   vi.spyOn(svc as unknown as { mapVehicleFull: (v: unknown) => unknown }, 'mapVehicleFull').mockImplementation((v) => v);
   return { svc, findMany };

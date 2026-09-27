@@ -8,7 +8,7 @@ import { isoToDisplayDate } from "@/lib/date";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import { classify, GroupTable } from "@/components/SubmittedRecordsView";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
-import { PICK_HREF, RECORDS_HREF, SETTINGS_HREF } from "@/components/submit-flow/shared";
+import { compareSubmittedOrder, isMotoBody, PICK_HREF, RECORDS_HREF, SETTINGS_HREF } from "@/components/submit-flow/shared";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
 
 // ขั้น 4 ยื่นแล้ว (ผู้ใช้ 2026-09-25): รถทุกคันที่เพิ่งยื่นในรอบนี้ แยกกลุ่มตามแบบใบส่งงาน (รถยนต์ รย.1 ธรรมดา/ด่วน,
@@ -41,11 +41,8 @@ export default function SubmitDonePage() {
       .then(({ submissions }) => {
         if (cancelled) return;
         setLoadError("");
-        setRecords(
-          submissions
-            .filter((s) => ids.has(s.vehicleId) && s.status === "PENDING")
-            .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-        );
+        // ลำดับที่ยื่น = ลำดับที่เลือก (backend บันทึกทีละคันตามลำดับ) เวลาเท่ากันเรียงด้วย id ให้พิมพ์ได้ลำดับเดิมทุกครั้ง
+        setRecords(submissions.filter((s) => ids.has(s.vehicleId) && s.status === "PENDING").sort(compareSubmittedOrder));
       })
       .catch((err) => !cancelled && setLoadError(err instanceof ApiError ? err.message : "โหลดรายการที่ยื่นไม่สำเร็จ"));
     return () => {
@@ -155,7 +152,11 @@ export default function SubmitDonePage() {
         ))}
 
       <div className="submit-footer">
-        <Link href={RECORDS_HREF} className="text-button">
+        {/* ยื่นแต่มอเตอร์ไซค์ = เปิดแท็บมอเตอร์ไซค์ของหน้าดูข้อมูลที่ยื่นแล้วเลย */}
+        <Link
+          href={result.succeeded.length > 0 && result.succeeded.every((v) => isMotoBody(v.body)) ? `${RECORDS_HREF}?tab=moto` : RECORDS_HREF}
+          className="text-button"
+        >
           ดูข้อมูลที่ยื่นแล้วทั้งหมด →
         </Link>
         <button type="button" className="primary" onClick={startNext}>

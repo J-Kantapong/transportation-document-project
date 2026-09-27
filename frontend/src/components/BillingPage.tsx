@@ -2,10 +2,10 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { billingApi, type BillingCustomer, type BillingVehicle, type Invoice } from "@/lib/billing-api";
+import { billingApi, type BillingCustomer, type BillingVehicle } from "@/lib/billing-api";
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
 import { BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { computeTotals, formatMoney, round2, termsSummary } from "@/lib/invoice";
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { comparePlate } from "@/lib/plate-order";
@@ -24,6 +24,9 @@ interface RowState {
   serviceText: string;
   label: string;
   deduct: boolean;
+  // ค่าที่ระบบเสนอตอนสร้างแถว - ใช้ดูว่าบัญชีแก้ช่องนั้นเองหรือยังตอนโหลดคิวใหม่ (mergeRow)
+  receiptBase: string;
+  serviceBase: string;
 }
 
 interface ExtraState {
@@ -38,13 +41,25 @@ const money = (text: string): number | null => {
 
 const plateText = (v: BillingVehicle) => (v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : "");
 
-const newRow = (v: BillingVehicle): RowState => ({
-  checked: false,
-  receiptText: v.receiptAmount === null ? "" : formatMoney(v.receiptAmount),
-  serviceText: v.suggestedServiceFee === null ? "" : formatMoney(v.suggestedServiceFee),
-  label: "",
-  deduct: false,
-});
+const newRow = (v: BillingVehicle): RowState => {
+  const receiptText = v.receiptAmount === null ? "" : formatMoney(v.receiptAmount);
+  const serviceText = v.suggestedServiceFee === null ? "" : formatMoney(v.suggestedServiceFee);
+  return { checked: false, receiptText, serviceText, label: "", deduct: false, receiptBase: receiptText, serviceBase: serviceText };
+};
+
+// โหลดคิวใหม่ระหว่างเตรียมบิล: คันที่ยังอยู่ในคิวเก็บที่ติ๊ก/กรอกไว้ ช่องที่บัญชียังไม่ได้แก้เองใช้ค่าใหม่จากระบบ
+// (เช่น ราคาใหม่หลังแก้ตารางค่าดำเนินการ) ช่องที่แก้เองแล้วคงไว้
+function mergeRow(prev: RowState | undefined, v: BillingVehicle): RowState {
+  const fresh = newRow(v);
+  if (!prev) return fresh;
+  return {
+    ...prev,
+    receiptText: prev.receiptText === prev.receiptBase ? fresh.receiptText : prev.receiptText,
+    serviceText: prev.serviceText === prev.serviceBase ? fresh.serviceText : prev.serviceText,
+    receiptBase: fresh.receiptBase,
+    serviceBase: fresh.serviceBase,
+  };
+}
 
 function defaultJobLabel(vehicles: BillingVehicle[]): string {
   if (vehicles.length > 0 && vehicles.every((v) => v.isMoto)) return "จดทะเบียนรถจักรยานยนต์";
@@ -54,7 +69,7 @@ function defaultJobLabel(vehicles: BillingVehicle[]): string {
 
 export function BillingPage() {
   const [customers, setCustomers] = useState<BillingCustomer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoiceReload, setInvoiceReload] = useState(0); // เพิ่มค่า = ให้รายการบิลที่ออกแล้วโหลดใหม่
   const [customerId, setCustomerId] = useState("");
   const focusApplied = useRef(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -63,16 +78,19 @@ export function BillingPage() {
   const [issueDateText, setIssueDateText] = useState(isoToDisplayDate(todayIso()));
   const [jobLabelEdit, setJobLabelEdit] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<"" | "terms" | "rates">("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // โหลดคิวครั้งแรก
+  const [refreshing, setRefreshing] = useState(false); // โหลดคิวใหม่ - ตารางยังแสดงอยู่ แต่ยังออกบิลไม่ได้จนกว่าจะเสร็จ
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
-  async function loadAll(keepInvoiceNo = false) {
-    setLoading(true);
+  // reset = เริ่มบิลใหม่ (เปิดหน้า / หลังออกบิล): ทุกแถวกลับเป็นค่าจากระบบ ล้างค่าใช้จ่ายอื่นๆ/ชื่องาน และใช้เลขที่ IV ที่ระบบเสนอใหม่
+  // ไม่ reset = โหลดคิวใหม่ระหว่างเตรียมบิล (หลังแก้ตารางค่าดำเนินการ / ยกเลิกบิล): เก็บงานที่กำลังเตรียมไว้และอยู่ที่ลูกค้าเดิม (shownId)
+  // (พบ 2026-09-27: เดิมโหลดใหม่ทุกครั้งแล้วคันที่ติ๊ก ราคาที่แก้ ข้อความต่อท้าย ค่าใช้จ่ายอื่นๆ หายหมดโดยไม่เตือน)
+  async function loadQueue(reset: boolean, shownId = "") {
+    setRefreshing(true);
     try {
-      const [q, inv] = await Promise.all([billingApi.billingQueue(), billingApi.listInvoices()]);
+      const q = await billingApi.billingQueue();
       setCustomers(q.customers);
-      setInvoices(inv.invoices);
       // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกลูกค้าของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
       if (!focusApplied.current) {
         focusApplied.current = true;
@@ -80,21 +98,34 @@ export function BillingPage() {
         const owner = chassis ? q.customers.find((c) => c.vehicles.some((v) => sameChassis(v.chassis, chassis))) : undefined;
         if (owner) setCustomerId(owner.id);
       }
-      setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
-      setExtras([]);
-      setJobLabelEdit(null);
-      if (!keepInvoiceNo) setInvoiceNo(q.suggestedInvoiceNo);
+      if (reset) {
+        setRows(Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, newRow(v)]))));
+        setExtras([]);
+        setJobLabelEdit(null);
+        setInvoiceNo(q.suggestedInvoiceNo);
+      } else {
+        // คันที่ออกจากคิวแล้วหายไป คันใหม่ (เช่น รถจากบิลที่เพิ่งยกเลิก) ได้แถวใหม่ที่ยังไม่ติ๊ก
+        setRows((prev) => Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, mergeRow(prev[v.id], v)]))));
+        if (q.customers.some((c) => c.id === shownId)) {
+          setCustomerId(shownId); // ลูกค้าอื่นเพิ่งเข้าคิวก็ยังอยู่ที่ลูกค้าเดิม
+        } else {
+          // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องานของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
+          setExtras([]);
+          setJobLabelEdit(null);
+        }
+      }
     } catch (err) {
       setMessage({ text: err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ", error: true });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
-    // Standard fetch-on-mount; loadAll sets the loading flag before its first await.
+    // Standard fetch-on-mount; loadQueue sets the refreshing flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadAll();
+    loadQueue(true);
   }, []);
 
   const customer = customers.find((c) => c.id === customerId) ?? customers[0] ?? null;
@@ -221,7 +252,8 @@ export function BillingPage() {
         })),
         extras: draftExtras.map((e) => ({ label: e.label, amount: e.amount! })),
       });
-      await loadAll();
+      await loadQueue(true);
+      setInvoiceReload((n) => n + 1);
       setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน ยอด ${formatMoney(invoice.netTotal)} บาท` });
       printInvoice(invoice);
     } catch (err) {
@@ -296,7 +328,7 @@ export function BillingPage() {
                 rates={customer.rates}
                 onSaved={() => {
                   setSettingsOpen("");
-                  loadAll(true); // ราคาที่เสนอรายคันคำนวณฝั่ง backend - โหลดคิวใหม่ให้ราคาใหม่มีผล
+                  loadQueue(false, customer.id); // ราคาที่เสนอรายคันคำนวณฝั่ง backend - โหลดคิวใหม่ให้ราคาใหม่มีผล (คันที่แก้ราคาเองแล้วคงไว้)
                 }}
               />
             )}
@@ -460,8 +492,13 @@ export function BillingPage() {
                   วันที่ออกบิล
                   <DateInput
                     value={issueDateText}
-                    onChange={(value) => setIssueDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+                    onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
                   />
+                  {!issueDateIso && issueDateText.replace(/\D/g, "").length === 8 && (
+                    <span className="customer-message error" style={{ fontSize: 11 }}>
+                      วันที่ออกบิลไม่ถูกต้อง - ยอดด้านล่างคิดตามวันนี้
+                    </span>
+                  )}
                 </label>
                 <label className="field">
                   ชื่องานบนบิล
@@ -479,7 +516,7 @@ export function BillingPage() {
                     </div>
                   </div>
                 )}
-                <button className="primary" style={{ justifyContent: "center" }} disabled={saving} onClick={handleIssue}>
+                <button className="primary" style={{ justifyContent: "center" }} disabled={saving || refreshing} onClick={handleIssue}>
                   ออกใบวางบิลและพิมพ์
                 </button>
                 {message.text && (
@@ -505,7 +542,8 @@ export function BillingPage() {
         </>
       )}
 
-      <BillingInvoiceList invoices={invoices} onChanged={() => loadAll(true)} />
+      {/* รับเงินแล้วไม่กระทบคิว - ยกเลิกบิลแล้วรถกลับเข้าคิว จึงโหลดคิวใหม่แบบเก็บงานที่เตรียมไว้ */}
+      <BillingInvoiceList reloadKey={invoiceReload} onVoided={() => loadQueue(false, customer?.id)} />
     </section>
   );
 }

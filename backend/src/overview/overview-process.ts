@@ -16,7 +16,8 @@ export { vehicleKindOf };
 export const STAGES = {
   transfer: { label: 'แจ้งย้าย/ตัดบัญชี', href: '/registration/new-vehicle/transfer-notice', sla: 3 },
   inspectSend: { label: 'ส่งตรวจรถ', href: '/registration/new-vehicle/inspection', sla: 3 },
-  inspectResult: { label: 'ผลตรวจรถ', href: '/registration/new-vehicle/inspection', sla: 7 },
+  // แท็บ "ผลตรวจ" ที่กรอกผลได้ - หน้า /inspection เฉยๆ เป็นแท็บส่งตรวจ (พบ 2026-09-27)
+  inspectResult: { label: 'ผลตรวจรถ', href: '/registration/new-vehicle/inspection/result', sla: 7 },
   submit: { label: 'ยื่นเอกสารจดทะเบียน', href: '/registration/new-vehicle/submit-documents', sla: 3 },
   receipt: { label: 'รับใบเสร็จ', href: '/registration/new-vehicle/receive-receipt', sla: 7 },
   plate: { label: 'รับป้ายทะเบียน', href: '/registration/new-vehicle/receive-plate', sla: 7 },
@@ -68,6 +69,7 @@ export interface OpenVehicle {
     receiptReceivedDate: Date | null;
     failRemark: string | null;
     receiptCarriedAt: Date | null;
+    _count?: { receipts: number }; // รูปใบเสร็จที่แนบแล้ว - ค้างจากใบก่อนแต่แนบรูปแล้ว = รอบันทึก ไม่ใช่ "ไม่ทราบสาเหตุ"
   } | null;
   hasPendingPlateSwap: boolean;
   billed: boolean; // อยู่ในบิลที่ยังไม่ถูกยกเลิกแล้ว
@@ -86,7 +88,8 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
   const waits: Wait[] = [];
 
   if (sub?.status === 'PENDING') {
-    const unknown = sub.receiptCarriedAt !== null;
+    // ค้างจากใบก่อนแล้วมีรูปใบเสร็จแนบเข้ามาทีหลัง = ได้ใบเสร็จแล้ว รอบันทึกใบยื่น ไม่ต้องติดธง (พบ 2026-09-27)
+    const unknown = sub.receiptCarriedAt !== null && !sub._count?.receipts;
     waits.push(wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null]));
   } else if (sub?.status === 'RECEIPT_RECEIVED') {
     // รายการก่อนมีช่องวันที่ในใบเสร็จ (ยังไม่ backfill) ใช้วันที่รับใบเสร็จ แล้วค่อยวันที่ยื่น
@@ -225,4 +228,11 @@ const rank = (i: StuckItem) => (i.severity === 'high' ? 100_000 : 0) + i.overdue
 
 export function sortStuck(items: StuckItem[]): StuckItem[] {
   return [...items].sort((a, b) => rank(b) - rank(a));
+}
+
+// ตัดรายการที่ส่งให้หน้าจอทีละประเภทรถ (ไม่ใช่ตัดรวม) - ปุ่มกรองรถยนต์/จักรยานยนต์ที่มีตัวเลขจึงมีรถให้แสดงเสมอ (พบ 2026-09-27)
+// รับรายการที่เรียงแล้ว (sortStuck) และคงลำดับเดิม: limit แถวแรกของผลลัพธ์จึงยังเป็นคันที่ด่วนที่สุดของทั้งหมด
+export function limitStuckPerKind(sorted: StuckItem[], limit: number): StuckItem[] {
+  const taken: Record<VehicleKind, number> = { car: 0, moto: 0 };
+  return sorted.filter((item) => taken[item.kind]++ < limit);
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { BillingService, type CreateInvoiceDto } from './billing.service.js';
 
 @Controller('api/billing')
@@ -20,9 +20,10 @@ export class BillingController {
     return { rates: await this.billingService.replaceRates(id, body) };
   }
 
+  // { invoices, hasMore, outstanding } - บิลรอรับเงินครบทุกใบ + ประวัติทีละหน้า (offset / limit ของประวัติ)
   @Get('invoices')
-  async listInvoices() {
-    return { invoices: await this.billingService.listInvoices() };
+  listInvoices(@Query('offset') offset?: string, @Query('limit') limit?: string) {
+    return this.billingService.listInvoices({ offset, limit });
   }
 
   @Post('invoices')

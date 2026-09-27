@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, receiptImageUrl } from "@/lib/api";
+import { api, ApiError, fetchAuthedBlob, receiptImageUrl } from "@/lib/api";
 import { getCachedUser, getToken } from "@/lib/auth";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { plateSwapApi, type PlateSwap, type PlateSwapNewVehicle, type PlateSwapStatusFilter } from "@/lib/plate-swap-api";
 import {
   calculatePlateSwapCarFees,
@@ -37,18 +37,16 @@ function useCanWrite(): boolean | null {
 }
 
 // รูปอยู่หลัง backend ที่ต้องมี Authorization - โหลดเป็น blob แล้วเปิดในแท็บใหม่ (เปิดแท็บก่อน await กัน popup ถูกบล็อก)
+// 401 (token หมดอายุ) fetchAuthedBlob พาไปหน้าล็อกอินเองและล้าง session แล้ว - ไม่ต้องเตือน "เปิดไม่สำเร็จ" ซ้ำ (พบ 2026-09-27)
 async function openReceiptImage(id: string) {
   const win = window.open("", "_blank");
   try {
-    const token = getToken();
-    const res = await fetch(receiptImageUrl(id), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const objectUrl = URL.createObjectURL(await res.blob());
+    const objectUrl = URL.createObjectURL(await fetchAuthedBlob(receiptImageUrl(id)));
     if (win) win.location.href = objectUrl;
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -57,7 +55,8 @@ function DateTextInput({ value, onChange, label }: { value: string; onChange: (t
     <DateInput
       aria-label={label}
       value={value}
-      onChange={(value) => onChange(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+      // พิมพ์ปี พ.ศ. ตามใบเสร็จได้ - ครบ 8 หลักแล้วแปลงเป็น ค.ศ. ให้ (เดิมขึ้น "กรุณากรอกวันที่ให้ถูกต้อง" - พบ 2026-09-27)
+      onChange={(value) => onChange(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
     />
   );
 }

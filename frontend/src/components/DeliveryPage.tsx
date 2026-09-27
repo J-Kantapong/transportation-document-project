@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { canAccessPage, getCachedUser } from "@/lib/auth";
 import { billingApi, slipNoText, type DeliveryRow } from "@/lib/billing-api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { downloadDeliverySlipPdf, printDeliverySlips } from "@/lib/delivery-print";
 import { jobSheetGroup } from "@/lib/job-sheet";
 import { comparePlate } from "@/lib/plate-order";
@@ -68,7 +69,12 @@ export function DeliveryPage() {
   // ใบส่งงานของการบันทึกครั้งล่าสุด - พิมพ์ให้ผู้รับเซ็นได้ทันที (ใบเก่าพิมพ์ซ้ำได้ที่หน้ารายงานส่งงาน)
   const [lastSlip, setLastSlip] = useState<{ id: string; slipNo: number } | null>(null);
   const [printing, setPrinting] = useState(false);
-  const [confirmDate, setConfirmDate] = useState<string | null>(null); // เปิดป๊อปอัปยืนยันด้วยวันที่ส่ง (YYYY-MM-DD)
+  // ป๊อปอัปยืนยัน: วันที่ส่ง (YYYY-MM-DD) + คันที่เลือกตอนเปิด - บันทึกส่งชนิดงานของชุดนี้ไปให้ backend ตรวจ (ตรงกับที่ผู้ใช้เห็น)
+  const [confirm, setConfirm] = useState<{ dateIso: string; rows: DeliveryRow[] } | null>(null);
+  // ลิงก์กลับเมนูจดทะเบียนรถใหม่ - บทบาท DELIVERY อย่างเดียวเปิดหน้านั้นไม่ได้ (กดแล้วเด้งกลับมาที่นี่) จึงไม่แสดง (พบ 2026-09-27)
+  const [canOpenMenu, setCanOpenMenu] = useState(false);
+  const loadSeq = useRef(0);
+  const lastRefresh = useRef(0);
   // ตัวกรองแบบหน้ารับป้าย/รับเล่ม
   const [fromText, setFromText] = useState("");
   const [toText, setToText] = useState("");
@@ -78,14 +84,25 @@ export function DeliveryPage() {
   const [plateQuery, setPlateQuery] = useState("");
   const [sortMode, setSortMode] = useState<"submit" | "plate">("submit");
 
-  async function loadAll() {
-    setLoading(true);
+  // quiet = โหลดเบื้องหลัง ไม่ขึ้น "กำลังโหลด" / keepSelection = เก็บคันที่เลือกไว้ถ้ายังติ๊กได้ (หลังบันทึกไม่ผ่าน / กดโหลดใหม่)
+  // โหลดซ้อนกันได้ ผลของครั้งล่าสุดเท่านั้นที่ใช้ (ผลเก่าที่มาช้าไม่ทับข้อมูลใหม่)
+  // คืน true = โหลดสำเร็จและใช้ผลนี้แล้ว
+  async function loadAll(options: { quiet?: boolean; keepSelection?: boolean } = {}): Promise<boolean> {
+    const seq = ++loadSeq.current;
+    if (!options.quiet) setLoading(true);
     try {
       const [q, r] = await Promise.all([billingApi.deliveryQueue(), billingApi.deliveryRecent()]);
+      if (seq !== loadSeq.current) return false;
       setQueue(q.vehicles);
       setLotOthers(q.lotVehicles ?? []);
       setRecent(r.vehicles);
-      setSelected(new Set());
+      if (options.keepSelection) {
+        // ป๊อปอัปยืนยันนับชนิดงานใหม่จากข้อมูลล่าสุดทุกครั้ง คันที่ยังเลือกค้างไว้จึงไม่บันทึกผิดจากที่เห็น
+        const still = new Set(q.vehicles.filter((v) => v.kind !== "WAITING_PLATE").map((v) => v.id));
+        setSelected((prev) => new Set([...prev].filter((id) => still.has(id))));
+      } else {
+        setSelected(new Set());
+      }
       // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): กางการ์ดของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
       if (!focusApplied.current) {
         focusApplied.current = true;
@@ -93,10 +110,12 @@ export function DeliveryPage() {
         const target = chassis ? q.vehicles.find((v) => sameChassis(v.chassis, chassis)) : undefined;
         if (target) setOpenLots(new Set([lotKeyOf(target)]));
       }
+      return true;
     } catch (err) {
-      setMessage({ text: err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ", error: true });
+      if (seq === loadSeq.current) setMessage({ text: err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ", error: true });
+      return false;
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
@@ -104,7 +123,26 @@ export function DeliveryPage() {
     // Standard fetch-on-mount; loadAll sets the loading flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
+    setCanOpenMenu(canAccessPage("/registration/new-vehicle", getCachedUser()?.roles ?? []));
   }, []);
+
+  // หน้าเปิดค้างไว้นาน (พบ 2026-09-27): กลับมาที่แท็บนี้แล้วโหลดคิวใหม่เบื้องหลัง - เฉพาะตอนยังไม่ได้ติ๊กคันไหน (ไม่ล้างที่เลือกไว้)
+  // focus กับ visibilitychange มักมาคู่กัน - เว้นระยะ 2 วินาที
+  const idle = selected.size === 0 && !saving && !confirm;
+  useEffect(() => {
+    if (!idle) return;
+    function refresh() {
+      if (document.visibilityState !== "visible" || Date.now() - lastRefresh.current < 2000) return;
+      lastRefresh.current = Date.now();
+      loadAll({ quiet: true, keepSelection: true }); // ติ๊กระหว่างรอผล คันที่ติ๊กไม่หาย
+    }
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [idle]);
 
   const queueIds = new Set(queue.map((r) => r.id));
   const pickable = (r: DeliveryRow) => queueIds.has(r.id) && r.kind !== "WAITING_PLATE";
@@ -197,17 +235,19 @@ export function DeliveryPage() {
     if (!dateIso) return fail("วันที่ส่งไม่ถูกต้อง");
     if (!recipient.trim()) return fail("ใส่ชื่อผู้รับงาน");
     setMessage({ text: "" });
-    setConfirmDate(dateIso);
+    setConfirm({ dateIso, rows: selectedRows });
   }
 
-  async function saveDelivery(dateIso: string) {
+  async function saveDelivery(dateIso: string, rows: DeliveryRow[]) {
     const fail = (text: string) => setMessage({ text, error: true });
-    setConfirmDate(null);
+    setConfirm(null);
     setSaving(true);
     setLastSlip(null);
     setMessage({ text: "กำลังบันทึก…" });
     try {
-      const result = await billingApi.submitDelivery({ vehicleIds: [...selected], date: dateIso, recipient, note });
+      // ส่งชนิดงานที่ป๊อปอัปแสดง - รถเปลี่ยนสถานะไปแล้ว (เพิ่งรับป้าย / มีคนส่งไปก่อน) backend ไม่บันทึกทั้งชุด
+      const items = rows.map((r) => ({ vehicleId: r.id, kind: r.kind }));
+      const result = await api.submitDelivery({ items, date: dateIso, recipient, note });
       const parts = [
         result.delivered ? `ส่งงาน ${result.delivered} คัน ส่งต่อให้บัญชีรอวางบิล` : "",
         result.plateOnly ? `ส่งป้าย ${result.plateOnly} คัน` : "",
@@ -219,7 +259,12 @@ export function DeliveryPage() {
       setLastSlip({ id: result.slipId, slipNo: result.slipNo });
       setMessage({ text: `บันทึกแล้ว ใบส่งงาน ${slipNoText(result.slipNo)}: ${parts.join(" · ")}` });
     } catch (err) {
-      fail(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+      const text = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
+      fail(text);
+      // บันทึกไม่ผ่านส่วนใหญ่เพราะข้อมูลในหน้านี้เก่า - โหลดคิวใหม่ทันที เก็บคันที่เลือกไว้ถ้ายังส่งได้ (พบ 2026-09-27)
+      const reloaded = await loadAll({ quiet: true, keepSelection: true });
+      // บอกว่ารายการล่าสุดโหลดให้แล้ว ไม่ต้องกด F5 (ผู้รับ/หมายเหตุ/คันที่ติ๊กไว้จะหาย) - พบ 2026-09-27
+      if (reloaded && err instanceof ApiError && (err.status === 409 || err.status === 400)) fail(`${text} - โหลดรายการล่าสุดให้แล้ว`);
     } finally {
       setSaving(false);
     }
@@ -229,9 +274,11 @@ export function DeliveryPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
-      </Link>
+      {canOpenMenu && (
+        <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+          ← จดทะเบียนรถใหม่
+        </Link>
+      )}
       <h1 tabIndex={-1}>Delivery</h1>
       <p>ติ๊กคันที่ส่งให้ลูกค้าแล้ว ใส่วันที่ส่งและผู้รับ แล้วกดบันทึก รถที่ส่งแล้วจะไปรอฝ่ายบัญชีวางบิลต่อ ใบยื่นที่ยังไม่พร้อมทุกคัน ส่งคันที่พร้อมไปก่อนได้</p>
       <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
@@ -247,33 +294,39 @@ export function DeliveryPage() {
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-head">
           <h2>รอส่ง ({filtering ? `${lots.length} จาก ${allLots.length}` : allLots.length} ใบยื่น)</h2>
-          {filtering && (
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => {
-                setFromText("");
-                setToText("");
-                setOwnerFilter("");
-                setReceiptQuery("");
-                setChassisQuery("");
-                setPlateQuery("");
-              }}
-            >
-              ล้างตัวกรอง
+          <span>
+            {filtering && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setFromText("");
+                  setToText("");
+                  setOwnerFilter("");
+                  setReceiptQuery("");
+                  setChassisQuery("");
+                  setPlateQuery("");
+                }}
+              >
+                ล้างตัวกรอง
+              </button>
+            )}
+            {/* คิวเปลี่ยนได้ตลอด (อีกคนส่งไปแล้ว / ป้ายเพิ่งรับเข้ามา) - โหลดใหม่เองได้ คันที่เลือกไว้ยังอยู่ถ้ายังส่งได้ */}
+            <button type="button" className="text-button" disabled={loading || saving} onClick={() => loadAll({ keepSelection: true })}>
+              ↻ โหลดใหม่
             </button>
-          )}
+          </span>
         </div>
         {!loading && allLots.length > 0 && (
           <>
             <div className="queue-filter">
               <label className="field">
                 <span>วันที่ยื่น ตั้งแต่</span>
-                <DateInput value={fromText} onChange={(v) => setFromText(formatDateDigits(v.replace(/\D/g, "").slice(0, 8)))} />
+                <DateInput value={fromText} onChange={(v) => setFromText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
               </label>
               <label className="field">
                 <span>ถึง</span>
-                <DateInput value={toText} onChange={(v) => setToText(formatDateDigits(v.replace(/\D/g, "").slice(0, 8)))} />
+                <DateInput value={toText} onChange={(v) => setToText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
               </label>
               <label className="field">
                 <span>เจ้าของงาน</span>
@@ -502,7 +555,7 @@ export function DeliveryPage() {
               </div>
               <label className="field">
                 <span>วันที่ส่ง</span>
-                <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))} style={{ width: 130 }} />
+                <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} style={{ width: 130 }} />
               </label>
               <label className="field">
                 <span>ผู้รับงาน</span>
@@ -541,14 +594,14 @@ export function DeliveryPage() {
           )}
         </div>
       )}
-      {confirmDate && (
+      {confirm && (
         <DeliveryConfirmDialog
-          dateIso={confirmDate}
-          customerName={selectedCustomerName}
+          dateIso={confirm.dateIso}
+          customerName={confirm.rows[0]?.customerName ?? selectedCustomerName}
           recipient={recipient.trim()}
-          rows={selectedRows}
-          onClose={() => setConfirmDate(null)}
-          onConfirm={() => saveDelivery(confirmDate)}
+          rows={confirm.rows}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => saveDelivery(confirm.dateIso, confirm.rows)}
         />
       )}
     </section>

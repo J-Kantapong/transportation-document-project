@@ -17,10 +17,16 @@ export class DeliveryController {
     return { vehicles: await this.deliveryService.recent() };
   }
 
-  // ใบส่งงาน / รายงานส่งงานย้อนหลัง - ?from=YYYY-MM-DD&to=YYYY-MM-DD&customerId=
+  // รายงานส่งงาน: รถที่ส่งเล่มแล้วแต่ป้ายค้างส่ง -> { vehicles } (แถวแบบเดียวกับคิว) ขอบเขตการอ่านเดียวกับ GET slips
+  @Get('plate-pending')
+  async platePending() {
+    return { vehicles: await this.deliveryService.platePending() };
+  }
+
+  // ใบส่งงาน / รายงานส่งงานย้อนหลัง - ?from=YYYY-MM-DD&to=YYYY-MM-DD&customerId= -> { slips, truncated } (truncated = เกินเพดาน)
   @Get('slips')
-  async slips(@Query() query: { from?: string; to?: string; customerId?: string }) {
-    return { slips: await this.deliveryService.slips(query) };
+  slips(@Query() query: { from?: string; to?: string; customerId?: string }) {
+    return this.deliveryService.slips(query);
   }
 
   @Get('slips/:id')
@@ -39,8 +45,15 @@ export class DeliveryController {
     return this.deliveryService.cancelSlip(id, body);
   }
 
+  // ป้ายไปพร้อมเล่มแล้ว (ผู้ใช้ 2026-09-27): ติ๊กป้ายในใบส่งเล่มเดิม - สิทธิ์เดียวกับแก้/ยกเลิกใบ, remark ไม่บังคับ
+  @Post('slips/:id/add-plate')
+  addPlate(@Param('id') id: string, @Body() body: { vehicleId?: unknown; remark?: unknown }) {
+    return this.deliveryService.addPlate(id, body);
+  }
+
+  // items = [{ vehicleId, kind }] ตามที่ผู้ใช้ยืนยัน - สถานะรถเปลี่ยนไปแล้วตอบ 409 (vehicleIds อย่างเดียว = แบบเดิม)
   @Post()
-  submit(@Body() body: { vehicleIds?: unknown; date?: unknown; recipient?: unknown; note?: unknown }) {
+  submit(@Body() body: { items?: unknown; vehicleIds?: unknown; date?: unknown; recipient?: unknown; note?: unknown }) {
     return this.deliveryService.submit(body);
   }
 }

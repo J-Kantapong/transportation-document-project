@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { Icon } from "@/components/Icon";
 import { ApiError } from "@/lib/api";
-import { canAccessPage, homeFor, saveSession } from "@/lib/auth";
+import { homeFor, safeNextPath, saveSession } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
 
 function LoginForm() {
@@ -23,10 +23,8 @@ function LoginForm() {
     try {
       const { token, user } = await authApi.login(email, password);
       saveSession(token, user);
-      // กลับไปหน้าที่ตั้งใจจะเข้า (ถ้ามีสิทธิ์) ไม่งั้นไปหน้าแรกของบทบาท - ใช้ full reload ให้ proxy.ts เห็น cookie
-      const next = params.get("next");
-      const target = next && next.startsWith("/") && canAccessPage(next.split("?")[0], user.roles) ? next : homeFor(user.roles);
-      window.location.href = target;
+      // กลับไปหน้าที่ตั้งใจจะเข้า (ถ้าเป็นหน้าในเว็บนี้และมีสิทธิ์) ไม่งั้นไปหน้าแรกของบทบาท - ใช้ full reload ให้ proxy.ts เห็น cookie
+      window.location.href = safeNextPath(params.get("next"), user.roles) ?? homeFor(user.roles);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "เข้าสู่ระบบไม่สำเร็จ");
       setBusy(false);

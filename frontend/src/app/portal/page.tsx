@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { authApi, type PortalVehicle } from "@/lib/auth-api";
+import { timestampToDisplayDate } from "@/lib/date";
 
 // Portal ลูกค้า (เฟสแรก): รายการรถของบริษัทตัวเองพร้อมสถานะ 8 ขั้นตอน + ปุ่มยืนยันรับของ - ไม่แสดงราคาใดๆ
 
+// วันที่ล้วน (YYYY-MM-DD) เท่านั้น - เวลาเต็มอย่าง deliveryConfirmedAt ใช้ timestampToDisplayDate (วันตามเวลาไทย)
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   const [y, m, d] = iso.slice(0, 10).split("-");
@@ -67,7 +69,7 @@ function VehicleCard({ vehicle, onConfirmed }: { vehicle: PortalVehicle; onConfi
         </span>
         {vehicle.deliveredDate &&
           (vehicle.deliveryConfirmedAt ? (
-            <span className="badge done">ยืนยันรับของแล้ว {formatDate(vehicle.deliveryConfirmedAt)}</span>
+            <span className="badge done">ยืนยันรับของแล้ว {timestampToDisplayDate(vehicle.deliveryConfirmedAt)}</span>
           ) : (
             <button type="button" className="primary" disabled={busy} onClick={confirm}>
               ยืนยันว่าได้รับของแล้ว

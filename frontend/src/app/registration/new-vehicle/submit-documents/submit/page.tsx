@@ -3,10 +3,19 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { api, ApiError, type SubmitCandidate } from "@/lib/api";
-import { isoToDisplayDate, todayIso } from "@/lib/date";
+import { isoToDisplayDate } from "@/lib/date";
 import { FOCUS_PARAM } from "@/lib/vehicle-focus";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
-import { isMotoBody, jobTypeLabel, lastFailedLabel, SETTINGS_HREF, summarizeList } from "@/components/submit-flow/shared";
+import {
+  isInWriteScope,
+  isMotoBody,
+  jobTypeLabel,
+  lastFailedLabel,
+  SETTINGS_HREF,
+  summarizeList,
+  useTodayIso,
+  useWriteScope,
+} from "@/components/submit-flow/shared";
 
 // ขั้น 1 เลือกรถ (ผู้ใช้ 2026-09-25): คิวรถที่พร้อมยื่น (ไม่ผูกกับวันที่ยื่น) ติ๊กเลือกแล้วไปขั้นตั้งค่า - ตั้งค่ารายคัน (เจ้าของรถ/
 // ขอเลข/ป้าย/ด่วน) ทำในขั้นตรวจทานที่เดียว ไม่มีฟอร์มรายคันแยกแล้ว
@@ -44,9 +53,12 @@ export default function SubmitPickPage() {
 function SubmitPickStep() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { selected, selectedIds, select, unselect } = useSubmitFlow();
+  const { selected, selectedIds, select, unselect, refreshSelected } = useSubmitFlow();
   // คิวไม่ผูกกับวันที่ยื่นแล้ว (ผู้ใช้ 2026-09-25: บางทีคีย์งานไว้ล่วงหน้า) - แสดงรถที่พร้อมยื่น ณ วันนี้ วันที่ยื่นกรอกในขั้นตั้งค่า
-  const [queueDate] = useState(() => todayIso());
+  // เปิดค้างข้ามคืนแล้วกลับมาที่หน้าต่าง = วันใหม่ โหลดคิวใหม่ (พบ 2026-09-27: เดิมคิวยังเป็นของเมื่อวาน มีรถที่ผลตรวจเพิ่งหมดอายุ)
+  const queueDate = useTodayIso();
+  // ยื่นได้เฉพาะประเภทรถที่บัญชีนี้บันทึกได้ (เช่น STAFF_CAR + ACCOUNTANT เห็นมอเตอร์ไซค์ในคิวแต่ยื่นไม่ได้ - พบ 2026-09-27)
+  const writeScope = useWriteScope();
 
   const [queue, setQueue] = useState<SubmitCandidate[]>([]);
   // โหลดคิวสำเร็จแล้วหรือยัง (ห้ามแสดง "ไม่มีรถ" ตอนโหลดไม่ขึ้น)
@@ -81,17 +93,21 @@ function SubmitPickStep() {
         if (cancelled) return;
         setQueue(vehicles);
         setLoaded(true);
+        // รถที่เลือกไว้แล้วใช้ข้อมูลล่าสุด (เช่น เจ้าของรถที่เพิ่งกรอกในหน้าเพิ่มข้อมูลรถ - พบ 2026-09-27)
+        refreshSelected(vehicles);
       })
       .catch((err) => !cancelled && setLoadError(err instanceof ApiError ? err.message : "โหลดคิวรอยื่นเอกสารไม่สำเร็จ"))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
+    // refreshSelected เปลี่ยนตาม state ของขั้นตอนทุกครั้ง - โหลดคิวใหม่เฉพาะเมื่อเปลี่ยนวัน/กดลองใหม่
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueDate, reload]);
 
   // ---- ตัวกรองแบบ faceted: ตัวเลือกของแต่ละตัวกรองนับจากรถที่ผ่านตัวกรองอื่นแล้ว ----
   const queueReady = loaded;
-  const rows = queueReady ? queue : [];
+  const rows = queueReady ? queue.filter((v) => isInWriteScope(writeScope, v.body)) : [];
 
   function matches(v: SubmitCandidate, except: FacetKey | null, f: { date: string; brand: string; owner: string; kind: KindFilter }) {
     if (except !== "date" && f.date && v.inspectionResultDate !== f.date) return false;
@@ -168,7 +184,14 @@ function SubmitPickStep() {
     setPasteBusy(true);
     setNotice(null);
     try {
-      const { found, notFound, blocked } = await api.lookupVehiclesByChassis(lines, queueDate);
+      const lookup = await api.lookupVehiclesByChassis(lines, queueDate);
+      const { notFound } = lookup;
+      // คันนอกประเภทรถที่บัญชีนี้ยื่นได้ นับเป็นยื่นไม่ได้พร้อมเหตุผล
+      const found = lookup.found.filter((v) => isInWriteScope(writeScope, v.body));
+      const blocked = [
+        ...lookup.blocked,
+        ...lookup.found.filter((v) => !isInWriteScope(writeScope, v.body)).map((v) => ({ chassis: v.chassis, reason: "บัญชีของคุณยื่นรถประเภทนี้ไม่ได้" })),
+      ];
       // ใช้ข้อมูลจากคิว (มีวันที่ตรวจ/หมายเหตุครบ) ถ้ามี
       const vehicles = found.map((v) => queueById.get(v.id) ?? v);
       const fresh = vehicles.filter((v) => !selectedIds.has(v.id));
@@ -308,7 +331,7 @@ function SubmitPickStep() {
           <div>
             <strong style={{ fontSize: 15 }}>รถที่ยื่นได้ {filtered.length} คัน</strong>
             <span className="muted" role="status">
-              {loading ? " · กำลังโหลด…" : queueReady ? ` · ในคิวทั้งหมด ${queue.length} คัน` : ""}
+              {loading ? " · กำลังโหลด…" : queueReady ? ` · ในคิวทั้งหมด ${rows.length} คัน` : ""}
             </span>
           </div>
         </div>
@@ -333,7 +356,7 @@ function SubmitPickStep() {
                   {lookupLoading ? "กำลังค้นหา…" : "ตรวจสอบว่าทำไมไม่อยู่ในคิว"}
                 </button>
               </>
-            ) : queue.length === 0 ? (
+            ) : rows.length === 0 ? (
               "ยังไม่มีรถที่พร้อมยื่น (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านแล้ว)"
             ) : (
               "ไม่มีรถตรงกับตัวกรอง"
@@ -413,7 +436,10 @@ function SubmitPickStep() {
                       <td>{v.customerName}</td>
                       <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
                       <td>
-                        {v.submitBlockReason ? (
+                        {/* ค้นหาใช้ขอบเขตที่ดูได้ (เช่น STAFF_CAR + ACCOUNTANT เห็นมอเตอร์ไซค์) - บอกเหตุผลเดียวกับช่องวางเลขตัวถัง (พบ 2026-09-27) */}
+                        {!isInWriteScope(writeScope, v.body) ? (
+                          <span className="badge warn">บัญชีของคุณยื่นรถประเภทนี้ไม่ได้</span>
+                        ) : v.submitBlockReason ? (
                           <span className="badge warn">{v.submitBlockReason}</span>
                         ) : (
                           <span className="badge done">ยื่นได้</span>

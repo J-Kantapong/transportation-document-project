@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { ApiError } from "@/lib/api";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError } from "@/lib/api";
 import { activeSlip, billingApi, slipNoText, type DeliveryRow, type DeliverySlip } from "@/lib/billing-api";
-import { getCachedUser, vehicleScopeFor, type VehicleScope } from "@/lib/auth";
+import { getCachedUser, submitWriteScopeFor, writeScopeFor, type VehicleScope } from "@/lib/auth";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { focusHref } from "@/lib/vehicle-focus";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import {
   countItems,
   downloadDeliveryReportPdf,
@@ -16,37 +17,51 @@ import {
   type DeliveryReportInput,
 } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
-import { DeliverySlipCancelDialog, DeliverySlipEditDialog } from "@/components/DeliverySlipDialogs";
+import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialog } from "@/components/DeliverySlipDialogs";
 
 // รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งเล่ม / ป้าย (ใบเสร็จไปกับใบวางบิล ผู้ใช้ 2026-09-26)
 // พิมพ์ใบส่งงานซ้ำได้ทีละใบ + ท้ายรายงานมีรถที่ป้ายยังค้างส่ง - ไม่มีราคา (DELIVERY เปิดหน้านี้ได้)
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
+const DELIVERY_PAGE = "/registration/new-vehicle/delivery";
 const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done">✓</span> : <span className="muted">—</span>);
 const CANCELLED_ROW = { color: "#9aa3b5", textDecoration: "line-through" } as const;
 
 // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN ทุกใบ, STAFF_CAR ใบรถยนต์, STAFF_MOTO ใบจักรยานยนต์ - DELIVERY ดูอย่างเดียว
 // backend ตรวจซ้ำอีกชั้น (access-policy.ts + DeliveryService.assertItemInScope)
+function inScope(body: string | null, scope: VehicleScope | null): boolean {
+  if (!scope || scope === "NONE") return false;
+  return scope === "ALL" || (scope === "MOTO") === isMotorcycleBody(body);
+}
+
 function canManageSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
-  if (!scope || scope === "NONE" || slip.cancelledAt) return false;
-  return slip.items
-    .filter((i) => !i.cancelledAt)
-    .every((i) => scope === "ALL" || (scope === "MOTO") === isMotorcycleBody(i.body));
+  if (slip.cancelledAt) return false;
+  return slip.items.filter((i) => !i.cancelledAt).every((i) => inScope(i.body, scope));
 }
 
 export function DeliveryReportPage() {
+  // ถึงวันที่ว่าง = ไม่จำกัด - ใบที่คีย์วันส่งล่วงหน้า (ทำได้ตามปกติ) ต้องเห็นด้วย (พบ 2026-09-27: เดิมสิ้นสุดที่วันนี้ ใบพรุ่งนี้หาย)
   const [fromText, setFromText] = useState(isoToDisplayDate(firstOfMonthIso()));
-  const [toText, setToText] = useState(isoToDisplayDate(todayIso()));
-  const [range, setRange] = useState({ from: firstOfMonthIso(), to: todayIso() });
+  const [toText, setToText] = useState("");
+  const [range, setRange] = useState({ from: firstOfMonthIso(), to: "" });
   const [slips, setSlips] = useState<DeliverySlip[]>([]);
-  const [queue, setQueue] = useState<DeliveryRow[]>([]);
+  const [truncated, setTruncated] = useState(false);
+  const [pendingRows, setPendingRows] = useState<DeliveryRow[]>([]);
   const [customerId, setCustomerId] = useState("");
+  // ตัวเลือกลูกค้าสะสมจากทุกครั้งที่โหลด - กรองลูกค้าฝั่ง server แล้วรายการอื่นยังเลือกได้
+  const [customerNames, setCustomerNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [makingPdf, setMakingPdf] = useState(false);
   const [editScope, setEditScope] = useState<VehicleScope | null>(null);
+  // ประเภทรถที่บันทึกส่งที่หน้า Delivery ได้ (สำเนาของ currentDeliveryScope ใน backend) - ป้ายค้างส่งแสดงตามขอบเขตการอ่าน
+  // ซึ่งกว้างกว่าได้ (STAFF_CAR + ACCOUNTANT) คันนอกขอบเขตไม่มีในคิวหน้า Delivery จึงไม่แสดงลิงก์ไปบันทึก
+  const [deliverScope, setDeliverScope] = useState<VehicleScope | null>(null);
   const [dialog, setDialog] = useState<{ kind: "edit" | "cancel"; slip: DeliverySlip } | null>(null);
+  const [plateDialog, setPlateDialog] = useState<DeliveryRow | null>(null);
   const [showCancelled, setShowCancelled] = useState(true);
   const [notice, setNotice] = useState("");
+  const loadSeq = useRef(0);
+  const lastRefresh = useRef(0);
 
   async function savePdf(make: () => Promise<void>) {
     setMakingPdf(true);
@@ -60,72 +75,114 @@ export function DeliveryReportPage() {
     }
   }
 
-  async function load(from: string, to: string) {
-    setLoading(true);
-    setError("");
+  // ลูกค้าส่งไปกรองที่ server (เพดาน 500 ใบนับเฉพาะลูกค้านั้น) - quiet = โหลดเบื้องหลังตอนกลับมาที่แท็บ ผลครั้งล่าสุดเท่านั้นที่ใช้
+  async function load(from: string, to: string, customer: string, options: { quiet?: boolean } = {}) {
+    const seq = ++loadSeq.current;
+    if (!options.quiet) {
+      setLoading(true);
+      setError("");
+    }
     try {
-      const [s, q] = await Promise.all([billingApi.deliverySlips({ from, to }), billingApi.deliveryQueue()]);
+      // ป้ายค้างส่งใช้ขอบเขตการอ่านเดียวกับใบส่งงาน ไม่ใช่คิวหน้า Delivery (พบ 2026-09-27: STAFF_CAR + ACCOUNTANT จักรยานยนต์หาย)
+      const [s, q] = await Promise.all([billingApi.deliverySlips({ from, to, customerId: customer }), api.deliveryPlatePending()]);
+      if (seq !== loadSeq.current) return;
+      const rows = q.vehicles;
       setSlips(s.slips);
-      setQueue(q.vehicles);
+      setTruncated(!!s.truncated);
+      setPendingRows(rows);
       setRange({ from, to });
+      setCustomerNames((prev) => {
+        const next = { ...prev };
+        for (const slip of s.slips) next[slip.customer.id] = slip.customer.displayName;
+        for (const r of rows) if (r.deliveredDate) next[r.customerId] = r.customerName;
+        return next;
+      });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "โหลดรายงานไม่สำเร็จ");
+      if (seq === loadSeq.current) setError(err instanceof ApiError ? err.message : "โหลดรายงานไม่สำเร็จ");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
   useEffect(() => {
-    // สิทธิ์แก้/ยกเลิก: DELIVERY ดูได้อย่างเดียว - อ่านหลัง mount เพื่อไม่ให้ hydration ไม่ตรง
-    const roles = (getCachedUser()?.roles ?? []).filter((r) => r !== "DELIVERY");
-    if (roles.some((r) => r === "ADMIN" || r === "STAFF_CAR" || r === "STAFF_MOTO")) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEditScope(vehicleScopeFor(roles));
-    }
+    // สิทธิ์แก้/ยกเลิก: ADMIN / STAFF_CAR / STAFF_MOTO ตามขอบเขตการแก้ - DELIVERY / ACCOUNTANT ดูอย่างเดียว
+    // ถือ DELIVERY / ACCOUNTANT คู่กับ STAFF_* ก็แก้ได้เฉพาะประเภทรถของ STAFF_* (submitWriteScopeFor ตรงกับ backend, พบ 2026-09-27)
+    // อ่านหลัง mount เพื่อไม่ให้ hydration ไม่ตรง
+    const roles = getCachedUser()?.roles ?? [];
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEditScope(submitWriteScopeFor(roles));
+    setDeliverScope(roles.includes("DELIVERY") ? "ALL" : writeScopeFor(roles));
   }, []);
+
+  // โหลดช่วงเดิมใหม่เบื้องหลัง: ใบอื่นที่ค้างบนจอ (ป้ายส่งตามในใบไหน) + ป้ายค้างส่ง ต้องตรงกับ server ทั้งคู่
+  function reloadQuietly() {
+    load(range.from, range.to, customerId, { quiet: true });
+  }
 
   function replaceSlip(updated: DeliverySlip, message: string) {
     setSlips((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
     setNotice(message);
-    // รถที่ยกเลิกกลับเข้าคิว -> รายการป้ายค้างส่งเปลี่ยนตาม
-    billingApi
-      .deliveryQueue()
-      .then((q) => setQueue(q.vehicles))
-      .catch(() => undefined);
+    // ยกเลิก/แก้ใบส่งป้าย -> ใบส่งเล่มอีกใบที่บอก "ป้ายส่งตามใน ..." ต้องเปลี่ยนตาม, รถที่ยกเลิกกลับเข้ารายการป้ายค้างส่ง
+    // (พบ 2026-09-27: เดิมเปลี่ยนแค่ใบที่แก้ ใบส่งเล่มยังอ้างใบส่งป้ายที่ยกเลิกแล้วขณะที่รถขึ้นป้ายค้างส่ง)
+    reloadQuietly();
   }
 
   useEffect(() => {
     // Standard fetch-on-mount; load sets the loading flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load(firstOfMonthIso(), todayIso());
+    load(firstOfMonthIso(), "", "");
   }, []);
+
+  // หน้าเปิดค้างไว้ (พบ 2026-09-27): กลับมาที่แท็บนี้แล้วโหลดช่วงเดิมใหม่เบื้องหลัง - ยกเว้นตอนเปิดหน้าต่างแก้/ยกเลิก หรือกำลังทำ PDF
+  const idle = !dialog && !plateDialog && !makingPdf;
+  useEffect(() => {
+    if (!idle) return;
+    function refresh() {
+      if (document.visibilityState !== "visible" || Date.now() - lastRefresh.current < 2000) return;
+      lastRefresh.current = Date.now();
+      load(range.from, range.to, customerId, { quiet: true });
+    }
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [idle, range.from, range.to, customerId]);
 
   function applyRange() {
     const from = fromText ? displayDateToIso(fromText.replace(/\D/g, "")) : "";
     const to = toText ? displayDateToIso(toText.replace(/\D/g, "")) : "";
     if ((fromText && !from) || (toText && !to)) return setError("วันที่ไม่ถูกต้อง (วว/ดด/ปปปป)");
     if (from && to && from > to) return setError("วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
-    load(from, to);
+    load(from, to, customerId);
   }
 
-  // ตัวเลือกลูกค้า = ลูกค้าที่มีใบส่งงานในช่วงนี้หรือมีป้ายค้างส่ง
-  const customers = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of slips) map.set(s.customer.id, s.customer.displayName);
-    for (const r of queue) if (r.deliveredDate) map.set(r.customerId, r.customerName);
-    return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th"));
-  }, [slips, queue]);
+  function chooseCustomer(id: string) {
+    setCustomerId(id);
+    load(range.from, range.to, id);
+  }
+
+  // ตัวเลือกลูกค้า = ลูกค้าที่เคยมีใบส่งงานในรายงานนี้หรือมีป้ายค้างส่ง
+  const customers = useMemo(
+    () => Object.entries(customerNames).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th")),
+    [customerNames],
+  );
   const activeCustomer = customers.find((c) => c.id === customerId) ?? null;
 
-  const customerSlips = slips.filter((s) => !activeCustomer || s.customer.id === activeCustomer.id);
+  const customerSlips = slips.filter((s) => !customerId || s.customer.id === customerId);
   const shownSlips = customerSlips.filter((s) => showCancelled || !s.cancelledAt);
   // พิมพ์ / นับ / PDF ใช้เฉพาะคันที่ยังไม่ยกเลิก
   const liveSlips = customerSlips.filter((s) => !s.cancelledAt).map(activeSlip);
   const cancelledCount = customerSlips.length - liveSlips.length;
   // ส่งเล่มไปแล้วแต่ป้ายยังไม่ได้ส่ง (รอป้ายออก / ป้ายมาแล้วรอส่ง) - ไม่ขึ้นกับช่วงวันที่
-  const platePending = queue.filter((r) => r.deliveredDate && (!activeCustomer || r.customerId === activeCustomer.id));
-  const counts = countItems(liveSlips.flatMap((s) => s.items));
-  const report: DeliveryReportInput = { ...range, customerName: activeCustomer?.name ?? null, slips: liveSlips, platePending };
+  const platePending = pendingRows.filter((r) => r.deliveredDate && (!customerId || r.customerId === customerId));
+  const liveItems = liveSlips.flatMap((s) => s.items);
+  const counts = countItems(liveItems);
+  // คัน = นับรถไม่ซ้ำ: ส่งเล่มใบหนึ่งแล้วส่งป้ายตามอีกใบในช่วงเดียวกัน = 1 คัน (พบ 2026-09-27: เดิมนับ 2)
+  const vehicleCount = new Set(liveItems.map((i) => i.vehicleId)).size;
+  const report: DeliveryReportInput = { ...range, customerName: activeCustomer?.name ?? null, slips: liveSlips, platePending, truncated };
+  const canAddPlate = (r: DeliveryRow) => r.kind === "PLATE_ONLY" && !!r.bookSlip && inScope(r.body, editScope);
 
   return (
     <section className="content">
@@ -141,19 +198,20 @@ export function DeliveryReportPage() {
             ส่งตั้งแต่วันที่
             <DateInput
               value={fromText}
-              onChange={(value) => setFromText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setFromText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
             />
           </label>
           <label className="field">
             ถึงวันที่
             <DateInput
               value={toText}
-              onChange={(value) => setToText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))}
+              onChange={(value) => setToText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
+              placeholder="ไม่จำกัด"
             />
           </label>
           <label className="field">
             ลูกค้า
-            <select value={activeCustomer?.id ?? ""} onChange={(e) => setCustomerId(e.target.value)}>
+            <select value={activeCustomer?.id ?? ""} onChange={(e) => chooseCustomer(e.target.value)}>
               <option value="">ทุกลูกค้า</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -182,6 +240,11 @@ export function DeliveryReportPage() {
             {notice}
           </div>
         )}
+        {truncated && !loading && (
+          <div className="customer-message" role="status" style={{ marginTop: 14, color: "#bb6a00" }}>
+            ⚠ ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ แสดงเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงหรือเลือกลูกค้า เพื่อให้เห็นครบ
+          </div>
+        )}
       </section>
 
       {loading ? (
@@ -192,7 +255,7 @@ export function DeliveryReportPage() {
         <>
           <div className="stats" style={{ marginTop: 20 }}>
             {[
-              ["ใบส่งงาน", `${liveSlips.length} ใบ · ${counts.vehicles} คัน`],
+              ["ใบส่งงาน", `${liveSlips.length} ใบ · ${vehicleCount} คัน`],
               ["เล่มทะเบียน", counts.book],
               ["ป้าย", counts.plate],
             ].map(([label, value]) => (
@@ -274,20 +337,29 @@ export function DeliveryReportPage() {
                             )}
                           </td>
                         </tr>
-                        {s.items.map((i) => (
-                          <tr key={`${s.id}-${i.vehicleId}`} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
-                            <td>{i.plateText || "—"}</td>
-                            <td>{i.chassis}</td>
-                            <td>{i.brandName}</td>
-                            <td>{i.receiptNo || "—"}</td>
-                            <td>
-                              <Tick sent={i.book} />
-                            </td>
-                            <td>
-                              <Tick sent={i.plate} />
-                            </td>
-                          </tr>
-                        ))}
+                        {s.items.map((i) => {
+                          const later = i.plateSentLater;
+                          return (
+                            <tr key={`${s.id}-${i.vehicleId}`} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
+                              <td>{i.plateText || "—"}</td>
+                              <td>{i.chassis}</td>
+                              <td>{i.brandName}</td>
+                              <td>{i.receiptNo || "—"}</td>
+                              <td>
+                                <Tick sent={i.book} />
+                              </td>
+                              <td>
+                                <Tick sent={i.plate} />
+                                {/* ใบนี้ส่งเล่มอย่างเดียว ป้ายไปในใบอื่นทีหลัง - บอกไว้ให้รู้ว่าทำไมช่องนี้ว่าง (ผู้ใช้ 2026-09-27) */}
+                                {later && (
+                                  <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
+                                    ป้ายส่งตามใน {slipNoText(later.slipNo)} {isoToDisplayDate(later.date)}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                         {!s.cancelledAt && s.items.some((i) => i.cancelledAt) && (
                           <tr>
                             <td colSpan={6} className="muted" style={{ fontSize: 13 }}>
@@ -322,6 +394,7 @@ export function DeliveryReportPage() {
                       <th>เลขตัวถัง</th>
                       <th>ส่งเล่มเมื่อ</th>
                       <th>สถานะ</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -330,9 +403,29 @@ export function DeliveryReportPage() {
                         <td>{r.customerName}</td>
                         <td>{r.plateCategory && r.plateNumber ? `${r.plateCategory} ${r.plateNumber}` : "—"}</td>
                         <td>{r.chassis}</td>
-                        <td>{r.deliveredDate ? isoToDisplayDate(r.deliveredDate) : "—"}</td>
+                        <td>
+                          {r.deliveredDate ? isoToDisplayDate(r.deliveredDate) : "—"}
+                          {r.bookSlip && <span className="muted"> · {slipNoText(r.bookSlip.slipNo)}</span>}
+                        </td>
                         <td>
                           {r.kind === "PLATE_ONLY" ? <span className="badge warn">ป้ายมาแล้ว รอส่ง</span> : <span className="badge">รอป้ายออก</span>}
+                        </td>
+                        <td>
+                          {/* ป้ายมาแล้ว: ส่งป้ายตามที่หน้า Delivery หรือถ้าป้ายไปพร้อมเล่มจริงแต่แนบรูปช้า ติ๊กในใบเดิม (ผู้ใช้ 2026-09-27) */}
+                          {r.kind === "PLATE_ONLY" && (
+                            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                              {inScope(r.body, deliverScope) && (
+                                <Link href={focusHref(DELIVERY_PAGE, r.chassis)} className="text-button">
+                                  บันทึกส่งป้าย →
+                                </Link>
+                              )}
+                              {canAddPlate(r) && (
+                                <button className="text-button" onClick={() => setPlateDialog(r)}>
+                                  ป้ายไปพร้อมเล่มแล้ว
+                                </button>
+                              )}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -348,6 +441,7 @@ export function DeliveryReportPage() {
           slip={dialog.slip}
           onClose={() => setDialog(null)}
           onSaved={(updated) => replaceSlip(updated, `แก้ใบส่งงาน ${slipNoText(updated.slipNo)} แล้ว`)}
+          onRefused={reloadQuietly}
         />
       )}
       {dialog?.kind === "cancel" && (
@@ -355,6 +449,23 @@ export function DeliveryReportPage() {
           slip={dialog.slip}
           onClose={() => setDialog(null)}
           onCancelled={(updated) => replaceSlip(updated, `ยกเลิกการส่งใน ${slipNoText(updated.slipNo)} แล้ว - รถกลับเข้าคิว Delivery ให้บันทึกส่งใหม่`)}
+          onRefused={reloadQuietly}
+        />
+      )}
+      {plateDialog?.bookSlip && (
+        <DeliveryAddPlateDialog
+          vehicle={{
+            id: plateDialog.id,
+            chassis: plateDialog.chassis,
+            plateText: plateDialog.plateCategory && plateDialog.plateNumber ? `${plateDialog.plateCategory} ${plateDialog.plateNumber}` : "",
+            customerName: plateDialog.customerName,
+          }}
+          slip={plateDialog.bookSlip}
+          onClose={() => setPlateDialog(null)}
+          onSaved={(updated) =>
+            replaceSlip(updated, `บันทึกแล้ว: ป้ายของรถ ${plateDialog.chassis} ไปพร้อมเล่มใน ${slipNoText(updated.slipNo)} (${isoToDisplayDate(updated.date)})`)
+          }
+          onRefused={reloadQuietly}
         />
       )}
     </section>

@@ -169,6 +169,23 @@ describe('calculateGovernmentTax - fail closed when no verified rate exists', ()
     }
   });
 
+  // พบ 2026-09-27: cc/น้ำหนัก 0 เคยได้ภาษี 0 บาท (หรือช่วงน้ำหนักต่ำสุด) เป็นยอดปกติ
+  it.each([0, -1, '0', ''])('รย.1 cc=%j -> ไม่มีข้อมูล CC (MISSING_INPUT) ไม่คืน 0 บาท', (cc) => {
+    const result = calculateGovernmentTax(vehicle({ cc }), INDIVIDUAL, baseRules());
+    expect(result.amount).toBeNull();
+    expect(result.reason).toBe('ไม่มีข้อมูลขนาด CC ของรถคันนี้');
+  });
+
+  it.each([0, -1, '0'])('รย.3 น้ำหนัก=%j -> ไม่มีข้อมูลน้ำหนัก ไม่ตกช่วงต่ำสุด', (weight) => {
+    const result = calculateGovernmentTax(
+      { body: 'รย.3-กระบะบรรทุก', fuel: 'ดีเซล', cc: null, weight, firstRegistrationDate: null },
+      INDIVIDUAL,
+      baseRules({ weightBrackets: [{ vehicleFamily: GovTaxVehicleFamily.RY3, fuelGroup: null, weightFrom: 0, weightTo: 500, amount: 300 }] }),
+    );
+    expect(result.amount).toBeNull();
+    expect(result.reason).toBe('ไม่มีข้อมูลน้ำหนักรถของรถคันนี้');
+  });
+
   it('rule ที่ไม่ผ่านการกรอง active+VERIFIED ที่ TaxService จะไม่ถูกส่งเข้ามาเลย จึงคำนวณไม่ได้เหมือนไม่มีข้อมูล', () => {
     // จำลองผลของ TaxService.loadRuleSet() ที่กรอง DRAFT/inactive ออกไปแล้ว - ruleset ว่างเปล่า
     const result = calculateGovernmentTax(vehicle({ cc: 600 }), INDIVIDUAL, baseRules({ ccBrackets: [] }));

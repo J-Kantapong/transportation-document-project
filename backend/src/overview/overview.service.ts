@@ -1,9 +1,24 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { addDays, agingBuckets, bangkokToday, buildForecast, daysBetween, isoOf, paymentBehaviour, pctChange, round2, toDate } from './overview-calculator.js';
+import {
+  addDays,
+  agingBuckets,
+  bangkokToday,
+  billValueOf,
+  buildForecast,
+  daysBetween,
+  FORECAST_SPEND_DAYS,
+  inProcessMoney,
+  isoOf,
+  paymentBehaviour,
+  pctChange,
+  round2,
+  toDate,
+} from './overview-calculator.js';
 import {
   INSPECTION_WARN_DAYS,
+  limitStuckPerKind,
   STAGES,
   sortStuck,
   stuckItemFor,
@@ -20,7 +35,8 @@ import {
 
 // ภาพรวมผู้บริหาร (ADMIN เท่านั้น - ดู access-policy.ts): สรุปการใช้เงินรายวัน งานแต่ละขั้นตอน (แยกรถยนต์/จักรยานยนต์)
 // คันที่ติดขัด กระแสเงินสด และประมาณการ - อ่านอย่างเดียว ไม่เขียนข้อมูล
-// "ใช้เงิน" = เงินที่ร้านจ่ายออกไปจริงในแต่ละงาน (Bill + No bill ที่บันทึกไว้ตอนทำงาน) ส่วน "รับเงิน" = บิลที่บัญชีบันทึกรับเงินแล้ว
+// "ใช้เงิน" = เงินที่ร้านจ่ายออกไปจริงในแต่ละงาน (Bill + No bill ที่บันทึกไว้ตอนทำงาน - งานยื่นเอกสารที่ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จ
+// แทน Bill ที่ระบบคำนวณ ดู billValueOf) ส่วน "รับเงิน" = บิลที่บัญชีบันทึกรับเงินแล้ว
 // (Invoice PAID) ระบบยังไม่มียอดเงินในบัญชีธนาคาร จึงแสดงได้แค่กระแสสุทธิ ไม่ใช่ยอดคงเหลือ
 // ค่าที่ผู้ใช้ยังไม่ได้กำหนด (กำหนดเวลาแต่ละขั้น, เกณฑ์เตือน, ค่าตั้งต้นประมาณการ) อยู่ใน overview-process.ts / overview-calculator.ts
 
@@ -101,6 +117,10 @@ export class OverviewService {
 
     const day = toDate(asOf);
     const range = { gte: toDate(addDays(asOf, -(SERIES_DAYS * 2 - 1))), lte: day }; // 60 วัน: 30 วันล่าสุด + 30 วันก่อนหน้าไว้เทียบ
+    // ประมาณการเริ่มจากวันนี้เสมอ จึงใช้ค่าเฉลี่ยใช้เงินถึงวันนี้ ไม่ใช่ถึงวันที่เลือก - ดูวันย้อนหลังต้องดึงช่วงนั้นมาด้วย (พบ 2026-09-27)
+    const forecastFrom = addDays(today, -(FORECAST_SPEND_DAYS - 1));
+    const spendWindows = asOf === today ? [range] : [range, { gte: toDate(forecastFrom), lte: toDate(today) }];
+    const inSpendWindow = (d: Date) => spendWindows.some((w) => d >= w.gte && d <= w.lte);
     const live = { deletedAt: null };
     const bodyOf = { select: { body: true } };
 
@@ -126,23 +146,29 @@ export class OverviewService {
       openRenewals,
       pendingUsers,
     ] = await Promise.all([
-      // --- ค่าใช้จ่าย 60 วัน (กราฟรายวัน + เทียบช่วงก่อนหน้า) ---
+      // --- ค่าใช้จ่าย 60 วัน (กราฟรายวัน + เทียบช่วงก่อนหน้า) + 28 วันถึงวันนี้ (ประมาณการ) ---
       this.prisma.documentSubmission.findMany({
-        where: { status: { not: 'FAILED' }, submitDate: range, vehicle: live },
-        select: { submitDate: true, billFeeTotal: true, noBillTotal: true, taxAmount: true, vehicle: bodyOf },
+        where: { status: { not: 'FAILED' }, OR: spendWindows.map((w) => ({ submitDate: w })), vehicle: live },
+        select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, noBillTotal: true, taxAmount: true, vehicle: bodyOf },
       }),
       this.prisma.plateSwap.findMany({
-        where: { OR: [{ submitDate: range }, { returnedDate: day }] },
+        where: { OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
         select: { submitDate: true, returnedDate: true, billTotal: true, noBillTotal: true },
       }),
-      this.prisma.taxRenewal.findMany({ where: { paymentDate: range }, select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true } }),
-      this.prisma.yamahaRelocationEntry.findMany({ where: { date: range }, select: { date: true, count: true, billFee: true, noBillFee: true } }),
+      this.prisma.taxRenewal.findMany({
+        where: { OR: spendWindows.map((w) => ({ paymentDate: w })) },
+        select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true },
+      }),
+      this.prisma.yamahaRelocationEntry.findMany({
+        where: { OR: spendWindows.map((w) => ({ date: w })) },
+        select: { date: true, count: true, billFee: true, noBillFee: true },
+      }),
       this.prisma.vehicle.findMany({
-        where: { ...live, transferDone: true, transferCompletedDate: range },
+        where: { ...live, transferDone: true, OR: spendWindows.map((w) => ({ transferCompletedDate: w })) },
         select: { transferCompletedDate: true, transferCost: true, body: true },
       }),
       this.prisma.vehicle.findMany({
-        where: { ...live, inspectionSentDate: range },
+        where: { ...live, OR: spendWindows.map((w) => ({ inspectionSentDate: w })) },
         select: {
           body: true,
           inspectionSentDate: true,
@@ -170,12 +196,17 @@ export class OverviewService {
           customerId: true,
           deliveredDate: true,
           customer: { select: { name: true } },
-          documentSubmissions: { orderBy: { createdAt: 'desc' }, take: 1, select: { receiptAmount: true, billFeeTotal: true, taxAmount: true } },
+          documentSubmissions: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { status: true, receiptAmount: true, billFeeTotal: true, taxAmount: true },
+          },
         },
       }),
+      // รวมงานที่คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ด้วย แล้วแยกออกใน inProcessMoney - ยังไม่ได้จ่ายจริง
       this.prisma.documentSubmission.findMany({
         where: { status: { in: ACTIVE_SUBMISSION_STATUSES }, vehicle: { ...live, deliveredDate: null } },
-        select: { billFeeTotal: true, taxAmount: true },
+        select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, taxAmount: true },
       }),
       this.prisma.documentSubmission.findMany({
         where: {
@@ -212,7 +243,15 @@ export class OverviewService {
           documentSubmissions: {
             orderBy: { createdAt: 'desc' },
             take: 1,
-            select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true },
+            select: {
+              status: true,
+              submitDate: true,
+              receiptDate: true,
+              receiptReceivedDate: true,
+              failRemark: true,
+              receiptCarriedAt: true,
+              _count: { select: { receipts: true } },
+            },
           },
           plateSwapsAsNew: { where: { returnedDate: null }, take: 1, select: { id: true } },
           invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
@@ -277,13 +316,13 @@ export class OverviewService {
         date: isoOf(s.submitDate),
         category: 'submit',
         kind: vehicleKindOf(s.vehicle.body),
-        bill: num(s.billFeeTotal) + num(s.taxAmount),
+        bill: billValueOf(s),
         noBill: num(s.noBillTotal),
         other: 0,
       });
     }
     for (const s of swaps) {
-      if (s.submitDate >= range.gte) {
+      if (inSpendWindow(s.submitDate)) {
         events.push({ date: isoOf(s.submitDate), category: 'plateSwap', kind: 'car', bill: num(s.billTotal), noBill: num(s.noBillTotal), other: 0 });
       }
     }
@@ -383,12 +422,13 @@ export class OverviewService {
     }));
     const unbilledItems = unbilledVehicles.map((v) => {
       const sub = v.documentSubmissions[0];
-      const receipt = sub?.receiptAmount != null ? num(sub.receiptAmount) : sub ? num(sub.billFeeTotal) + num(sub.taxAmount) : 0;
-      return { customerId: v.customerId, customerName: v.customer.name, deliveredDate: isoOf(v.deliveredDate!), amount: receipt };
+      return { customerId: v.customerId, customerName: v.customer.name, deliveredDate: isoOf(v.deliveredDate!), amount: sub ? billValueOf(sub) : 0 };
     });
     const receivableTotal = round2(receivableItems.reduce((a, r) => a + r.amount, 0));
     const unbilledTotal = round2(unbilledItems.reduce((a, r) => a + r.amount, 0));
-    const inProcessTotal = round2(inProcessSubs.reduce((a, s) => a + num(s.billFeeTotal) + num(s.taxAmount), 0));
+    // ระหว่างดำเนินการเป็นข้อมูล ณ ตอนนี้ จึงแยกงานคีย์ล่วงหน้าด้วยวันนี้ ไม่ใช่วันที่เลือก
+    const { inProcess, advance } = inProcessMoney(inProcessSubs, today);
+    const inProcessTotal = inProcess.amount;
 
     const behaviour = paymentBehaviour(
       paidHistory.map((i) => ({
@@ -414,8 +454,8 @@ export class OverviewService {
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
-    // ---------- ประมาณการ 4 สัปดาห์ ----------
-    const avgDailySpend = sumEvents(addDays(asOf, -27), asOf).total / 28;
+    // ---------- ประมาณการ 4 สัปดาห์ (เริ่มวันนี้เสมอ ไม่ขึ้นกับวันที่เลือก) ----------
+    const avgDailySpend = sumEvents(forecastFrom, today).total / FORECAST_SPEND_DAYS;
     const forecast = buildForecast({
       today,
       weeks: FORECAST_WEEKS,
@@ -586,6 +626,14 @@ export class OverviewService {
     const variance = receiptRows
       .map((r) => num(r.receiptAmount) - (num(r.billFeeTotal) + num(r.taxAmount)))
       .filter((d) => Math.abs(d) >= 1);
+    // ยื่นแล้วแต่ระบบคำนวณภาษีไม่ได้ (taxAmount = null เช่น จักรยานยนต์ไฟฟ้า) ยอดระหว่างดำเนินการนับภาษีเป็น 0 - ต้องบอกให้รู้
+    // ไม่ให้ดูเหมือนยอดครบ (พบ 2026-09-27) · ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จจริง จึงไม่นับ · งานคีย์ล่วงหน้าไม่อยู่ในยอดนั้น จึงไม่นับเช่นกัน
+    const taxMissing = inProcessSubs.filter(
+      (s) =>
+        isoOf(s.submitDate) <= today &&
+        s.taxAmount === null &&
+        !(s.status === 'RECEIPT_RECEIVED' && s.receiptAmount !== null),
+    ).length;
     const flags = (f: Flag) => flagCount.get(f) ?? 0;
     const late = (key: StageKey) => backlog[key].lateCount;
 
@@ -653,6 +701,13 @@ export class OverviewService {
         detail: `${variance.length} ใบ ส่วนต่างสุทธิ ${fmt(variance.reduce((a, b) => a + b, 0))} บาท - ตรวจว่าอัตราค่าธรรมเนียมยังถูกต้อง`,
         href: STAGES.receipt.href,
       },
+      taxMissing && {
+        key: 'tax-missing',
+        severity: 'info',
+        title: 'ยื่นแล้วแต่ยังคำนวณภาษีไม่ได้',
+        detail: `${taxMissing} คัน - ยอดจ่ายแล้วระหว่างดำเนินการยังไม่รวมภาษีของคันเหล่านี้`,
+        href: '/registration/new-vehicle/submit-documents/records',
+      },
       pendingUsers && {
         key: 'pending-users',
         severity: 'info',
@@ -692,7 +747,8 @@ export class OverviewService {
         daily,
       },
       workingCapital: {
-        inProcess: { amount: inProcessTotal, count: inProcessSubs.length }, // จ่ายไปแล้ว ยังอยู่ระหว่างดำเนินการ ยังไม่ส่งงาน
+        inProcess, // จ่ายไปแล้ว ยังอยู่ระหว่างดำเนินการ ยังไม่ส่งงาน
+        advance, // คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ยังไม่ได้จ่าย - ไม่นับรวมใน total
         unbilled: { amount: unbilledTotal, count: unbilledItems.length }, // ส่งงานแล้ว ยังไม่วางบิล (ยอดตามใบเสร็จ ไม่รวมค่าดำเนินการ)
         receivable: { amount: receivableTotal, count: receivableItems.length }, // วางบิลแล้ว รอรับเงิน
         total: round2(inProcessTotal + unbilledTotal + receivableTotal),
@@ -718,7 +774,8 @@ export class OverviewService {
         total: sortedStuck.length,
         byKind: tally(sortedStuck, (s) => s.kind),
         high: sortedStuck.filter((s) => s.severity === 'high').length,
-        items: sortedStuck.slice(0, STUCK_LIMIT),
+        limit: STUCK_LIMIT, // แสดงได้สูงสุดกี่คันต่อตัวกรอง (ทั้งหมด / รถยนต์ / จักรยานยนต์)
+        items: limitStuckPerKind(sortedStuck, STUCK_LIMIT),
       },
       alerts,
     };

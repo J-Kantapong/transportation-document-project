@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiError,
+  fetchAuthedBlob,
   yamahaRelocationAttachmentUrl,
   type YamahaRelocationAttachment,
   type YamahaRelocationEntry,
@@ -12,7 +13,7 @@ import {
   type YamahaRelocationSummary,
 } from "@/lib/api";
 import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { DateInput } from "@/components/DateInput";
 
@@ -50,13 +51,11 @@ function joinLabel(prefix: string, label: string): string {
 
 // ไฟล์อยู่หลัง backend ที่ต้องมี Authorization - <a href> ตรงๆ ส่ง header ไม่ได้ จึงโหลดเป็น blob แล้วเปิดในแท็บใหม่
 // (เปิดแท็บก่อน await เพื่อไม่ให้ browser บล็อก popup) ถ้า browser บล็อก popup อยู่ดี ให้ดาวน์โหลดไฟล์แทน
+// 401 (token หมดอายุ) fetchAuthedBlob พาไปหน้าล็อกอินเองและล้าง session แล้ว - ไม่ต้องเตือน "เปิดไม่สำเร็จ" ซ้ำ (พบ 2026-09-27)
 async function openAuthedFile(url: string, fileName: string) {
   const win = window.open("", "_blank");
   try {
-    const token = getToken();
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const objectUrl = URL.createObjectURL(await res.blob());
+    const objectUrl = URL.createObjectURL(await fetchAuthedBlob(url));
     if (win) {
       win.location.href = objectUrl;
     } else {
@@ -68,7 +67,7 @@ async function openAuthedFile(url: string, fileName: string) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch {
     win?.close();
-    window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -184,8 +183,9 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
     setCanEdit(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
 
+  // พิมพ์ปี พ.ศ. ตามใบเสร็จได้ - ครบ 8 หลักแล้วแปลงเป็น ค.ศ. ให้ (เดิมขึ้น "กรุณากรอกวันที่ให้ถูกต้อง" - พบ 2026-09-27)
   function handleDateTextChange(raw: string) {
-    setDateText(formatDateDigits(raw.replace(/\D/g, "").slice(0, 8)));
+    setDateText(formatDateDigitsCe(raw.replace(/\D/g, "").slice(0, 8)));
   }
 
   const count = parseCount(countText);

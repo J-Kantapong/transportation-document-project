@@ -9,7 +9,7 @@ import { canDeleteVehicle, canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { FUEL_TYPES, OWNER_TYPES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, getVehicleStatus } from "@/lib/vehicle-reference-data";
 import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type NormalizedVehicleRow } from "@/lib/vehicle-validation";
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
-import { displayDateToIso, formatDateDigits, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, todayIso } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
 type Tab = "single" | "batch";
@@ -88,7 +88,14 @@ function VehicleFieldsFieldset({
       </label>
       <label className="field">
         เลขตัวถัง *
-        <input maxLength={250} required value={row.chassis} onChange={(e) => onFieldChange("chassis", e.target.value)} />
+        {/* บันทึกเป็นตัวพิมพ์ใหญ่ไม่มีช่องว่างเสมอ (normalizeVehicleRow) - แสดงตัวใหญ่ให้เห็นตั้งแต่ตอนพิมพ์ */}
+        <input
+          maxLength={250}
+          required
+          value={row.chassis}
+          onChange={(e) => onFieldChange("chassis", e.target.value)}
+          style={{ textTransform: "uppercase" }}
+        />
       </label>
       <label className="field">
         เลขเครื่อง *
@@ -118,13 +125,21 @@ function VehicleFieldsFieldset({
       </label>
       <label className="field">
         ขนาด CC{sizeField === "cc" ? " *" : ""}
-        <input type="number" min={0} step="any" required={sizeField === "cc"} value={row.cc} onChange={(e) => onFieldChange("cc", e.target.value)} />
+        {/* ช่องที่ใช้คิดภาษีต้องมากกว่า 0 (ดู getVehicleRowErrors) */}
+        <input
+          type="number"
+          min={sizeField === "cc" ? 0.01 : 0}
+          step="any"
+          required={sizeField === "cc"}
+          value={row.cc}
+          onChange={(e) => onFieldChange("cc", e.target.value)}
+        />
       </label>
       <label className="field">
         น้ำหนักรถ (กก.){sizeField === "weight" ? " *" : ""}
         <input
           type="number"
-          min={0}
+          min={sizeField === "weight" ? 0.01 : 0}
           step="any"
           required={sizeField === "weight"}
           value={row.weight}
@@ -509,10 +524,11 @@ export default function VehicleEntryPage() {
     return financeOn && !row.financeId ? "กรุณาเลือกไฟแนนซ์ หรือเอาติ๊กไฟแนนซ์ออก" : null;
   }
 
+  // พิมพ์ปี พ.ศ. ได้ แปลงเป็น ค.ศ. ให้ทันที (พบ 2026-09-27: เดิมพิมพ์ 2569 แล้วขึ้นวันที่ไม่ถูกต้อง)
   function handleDateTextChange(raw: string) {
-    const digits = raw.replace(/\D/g, "").slice(0, 8);
-    setDateText(formatDateDigits(digits));
-    updateSingle("date", displayDateToIso(digits));
+    const text = formatDateDigitsCe(raw.replace(/\D/g, "").slice(0, 8));
+    setDateText(text);
+    updateSingle("date", displayDateToIso(text.replace(/\D/g, "")));
   }
 
   async function handleAddBrand(event: FormEvent<HTMLFormElement>) {
@@ -523,6 +539,8 @@ export default function VehicleEntryPage() {
       const data = await api.createBrand(brandName);
       await loadLookups();
       setSingle((s) => ({ ...s, brandId: data.brand.id }));
+      // ชื่อซ้ำต่างตัวพิมพ์ = backend คืนยี่ห้อเดิม (ไม่สร้างซ้ำ) - บอกให้รู้ว่าเลือกยี่ห้อที่มีอยู่แล้วให้
+      if (data.brand.name !== brandName.trim()) setLookupMessage(`มียี่ห้อ "${data.brand.name}" อยู่แล้ว - เลือกให้ในฟอร์มแล้ว`);
       setBrandName("");
       setShowBrandForm(false);
     } catch (error) {
@@ -542,6 +560,9 @@ export default function VehicleEntryPage() {
       // เลือกไฟแนนซ์ที่เพิ่งเพิ่มให้ในฟอร์ม Single ทันที (เหมือนยี่ห้อ) และเปิดติ๊กไฟแนนซ์ให้ด้วย
       setSingleFinanceOn(true);
       setSingle((s) => ({ ...s, financeId: data.financeCompany.id }));
+      if (data.financeCompany.name !== financeName.trim()) {
+        setLookupMessage(`มีไฟแนนซ์ "${data.financeCompany.name}" อยู่แล้ว - เลือกให้ในฟอร์มแล้ว`);
+      }
       setFinanceName("");
       setShowFinanceForm(false);
     } catch (error) {
@@ -774,9 +795,9 @@ export default function VehicleEntryPage() {
   }
 
   function handleEditDateTextChange(raw: string) {
-    const digits = raw.replace(/\D/g, "").slice(0, 8);
-    setEditDateText(formatDateDigits(digits));
-    updateEditRow("date", displayDateToIso(digits));
+    const text = formatDateDigitsCe(raw.replace(/\D/g, "").slice(0, 8));
+    setEditDateText(text);
+    updateEditRow("date", displayDateToIso(text.replace(/\D/g, "")));
   }
 
   async function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
@@ -981,7 +1002,7 @@ export default function VehicleEntryPage() {
                 <p style={{ lineHeight: 1.9 }}>
                   รองรับ Excel (.xlsx) และ CSV UTF-8 · สูงสุด 1,000 คันต่อไฟล์ · ไม่เกิน 5 MB
                   <br />
-                  ใช้ {VEHICLE_COLUMNS.length} คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
+                  ใช้ {VEHICLE_COLUMNS.length} คอลัมน์ตามแบบฟอร์ม วันที่เป็น DD-MM-YYYY (ปี ค.ศ. หรือ พ.ศ.) และตั้งเลขตัวถัง / เลขเครื่องเป็นข้อความ
                   <br />
                   คอลัมน์ลูกค้า ยี่ห้อ และไฟแนนซ์ใช้ชื่อที่มีในฐานข้อมูล หรือรหัสจากรายการอ้างอิง กรณีชื่อซ้ำให้ใช้รหัส
                   <br />
@@ -1231,7 +1252,7 @@ export default function VehicleEntryPage() {
                 <tbody>
                   {deletedVehicles.map((v) => (
                     <tr key={v.id}>
-                      <td>{v.deletedAt ? isoToDisplayDate(v.deletedAt.slice(0, 10)) : "—"}</td>
+                      <td>{v.deletedAt ? timestampToDisplayDate(v.deletedAt) : "—"}</td>
                       <td>{v.customerName}</td>
                       <td>{v.chassis}</td>
                       <td>{v.brandName}</td>

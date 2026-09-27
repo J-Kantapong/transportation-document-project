@@ -23,3 +23,20 @@ describe('access policy path matching', () => {
     expect(accessFor('/something-else', 'GET')).toEqual(['ADMIN']);
   });
 });
+
+describe('access policy step 4-8 rules', () => {
+  it('lets accounting read a vehicle tax calculation but not the step 1-3 writes', () => {
+    expect(isAllowed(accessFor('/api/vehicles/v1/tax-calculations', 'GET'), ['ACCOUNTANT'])).toBe(true);
+    expect(isAllowed(accessFor('/api/vehicles/v1/tax-calculations', 'GET'), ['DELIVERY'])).toBe(false);
+    expect(isAllowed(accessFor('/api/vehicles/v1/inspection-result', 'PATCH'), ['STAFF_CAR'])).toBe(false);
+  });
+
+  // ใบส่งงาน: DELIVERY อ่านได้ แต่แก้ / ยกเลิก / ส่งป้ายตามไปไม่ได้ (ผู้ใช้ 2026-09-26)
+  it('keeps slip changes to ADMIN / STAFF_CAR / STAFF_MOTO', () => {
+    expect(isAllowed(accessFor('/api/delivery/slips/s1', 'GET'), ['DELIVERY'])).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1/add-plate', 'POST'), ['DELIVERY'])).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1/cancel', 'POST'), ['DELIVERY'])).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/slips/s1/add-plate', 'POST'), ['STAFF_MOTO'])).toBe(true);
+    expect(isAllowed(accessFor('/api/delivery', 'POST'), ['DELIVERY'])).toBe(true);
+  });
+});

@@ -48,6 +48,12 @@ export default function SubmitSettingsPage() {
   // วันที่ยื่นเอกสาร (ผู้ใช้ 2026-09-25: ย้ายมาอยู่ขั้นนี้ กรอกล่วงหน้าได้ ไม่ตรวจสิทธิ์ยื่นตามวันที่ที่หน้าจอ - backend ตรวจตอนยื่น)
   // ใช้วันที่ใหม่เมื่อกรอกครบและถูกต้องเท่านั้น ระหว่างพิมพ์วันที่เดิมยังใช้อยู่
   const [dateText, setDateText] = useState(submitDateText);
+  // วันที่ยื่นเปลี่ยนจากที่อื่น (ยังไม่ได้แก้เอง + เปิดค้างข้ามคืน = เลื่อนเป็นวันนี้ให้) - ช่องกรอกตามไปด้วย
+  const [syncedDateText, setSyncedDateText] = useState(submitDateText);
+  if (syncedDateText !== submitDateText) {
+    setSyncedDateText(submitDateText);
+    setDateText(submitDateText);
+  }
   const typedDate = displayDateToIso(dateText.replace(/\D/g, ""));
 
   function changeDate(raw: string) {

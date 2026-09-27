@@ -108,7 +108,8 @@ export function buildJobSheets(
   titleOverrides: Record<string, string> = {},
 ): JobSheet[] {
   const groups = new Map<string, { key: string; defaultTitle: string; date: string; records: DocumentSubmission[] }>();
-  for (const r of [...records].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+  // เวลาบันทึกเท่ากันเรียงด้วย id - พิมพ์ซ้ำได้ลำดับเดิมทุกครั้ง (พบ 2026-09-27)
+  for (const r of [...records].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))) {
     const defaultTitle = defaultTitleFor(r);
     const date = r.submitDate.slice(0, 10);
     const key = `${date}|${defaultTitle}`;

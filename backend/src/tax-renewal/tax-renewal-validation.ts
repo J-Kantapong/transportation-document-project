@@ -10,10 +10,13 @@ export function parseDate(raw: unknown, field: string, required = false): Date |
     if (required) throw new BadRequestException({ error: `กรุณาระบุ${field}` });
     return null;
   }
-  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
+  // Date.parse ยอม 2026-02-31 (เลื่อนไป 3 มี.ค.) และปี พ.ศ. 2569 - ต้องแปลงกลับได้วันเดิมและอยู่ในช่วงปี ค.ศ. (พบ 2026-09-27)
+  const date = typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00.000Z`) : null;
+  const year = Number(String(raw).slice(0, 4));
+  if (!date || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw || year < 1900 || year > 2100) {
     throw new BadRequestException({ error: `${field}ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง` });
   }
-  return new Date(`${raw}T00:00:00.000Z`);
+  return date;
 }
 
 export function parseText(raw: unknown, field: string, required: boolean, max = 250): string | null {
@@ -59,4 +62,31 @@ export function parseOwnerType(raw: unknown): OwnerType {
     throw new BadRequestException({ error: 'ประเภทเจ้าของรถต้องเป็น INDIVIDUAL หรือ JURISTIC' });
   }
   return raw;
+}
+
+// เจ้าของที่ใช้คิดตัวคูณนิติบุคคล (รย.1) - ต้องมีเรื่องเช่าซื้อด้วย ไม่งั้นรถติดไฟแนนซ์ที่ผู้เช่าซื้อเป็นบุคคลธรรมดาโดนคูณสอง
+export interface RenewalOwner {
+  ownerType: OwnerType;
+  isHirePurchaseBusiness: boolean;
+  hirerType: OwnerType | null;
+}
+
+// ฟอร์มกรอกเอง: ประเภทเจ้าของรถ + ติ๊ก "ติดไฟแนนซ์" แบบเดียวกับหน้าเพิ่มข้อมูลรถ (VehiclesService.ownerDataFor)
+// ติดไฟแนนซ์ = ไฟแนนซ์เป็นเจ้าของตามทะเบียน (นิติบุคคลที่ประกอบธุรกิจเช่าซื้อ) ส่วนประเภทที่เลือกคือผู้เช่าซื้อ (พบ 2026-09-27)
+export function parseRenewalOwner(body: Record<string, unknown>): RenewalOwner {
+  const chosen = parseOwnerType(body.ownerType);
+  if (body.financed === true) return { ownerType: OwnerType.JURISTIC, isHirePurchaseBusiness: true, hirerType: chosen };
+  return { ownerType: chosen, isHirePurchaseBusiness: false, hirerType: null };
+}
+
+// เจ้าของที่เก็บไว้ใน TaxRenewal.taxBreakdown.owner (ยังไม่มีคอลัมน์ของตัวเอง) - ค่าเสีย/ไม่มี = null
+export function storedRenewalOwner(taxBreakdown: unknown): RenewalOwner | null {
+  const owner = (taxBreakdown as { owner?: Partial<Record<keyof RenewalOwner, unknown>> } | null)?.owner;
+  const isOwnerType = (v: unknown): v is OwnerType => v === OwnerType.INDIVIDUAL || v === OwnerType.JURISTIC;
+  if (!owner || !isOwnerType(owner.ownerType)) return null;
+  return {
+    ownerType: owner.ownerType,
+    isHirePurchaseBusiness: owner.isHirePurchaseBusiness === true,
+    hirerType: isOwnerType(owner.hirerType) ? owner.hirerType : null,
+  };
 }

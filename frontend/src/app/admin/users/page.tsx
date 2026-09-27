@@ -35,7 +35,11 @@ function UserRow({
   self: boolean;
   onSaved: (u: AuthUser) => void;
 }) {
-  const isCustomer = user.requestedRole === "CUSTOMER" || user.roles.includes("CUSTOMER");
+  // ประเภทบัญชี (พนักงาน / ลูกค้า) Admin สลับได้ (พบ 2026-09-27): สมัครผิดแท็บแล้วไม่ต้องสมัครใหม่ด้วยอีเมลอื่น
+  // เริ่มจากบทบาทที่มีอยู่ ถ้ายังไม่มีบทบาทใช้ตามแท็บที่สมัคร - backend กันลูกค้าปนบทบาทพนักงาน / ลูกค้าไม่มีบริษัทอยู่แล้ว
+  const [isCustomer, setIsCustomer] = useState(
+    user.roles.length ? user.roles.includes("CUSTOMER") : user.requestedRole === "CUSTOMER",
+  );
   const [roles, setRoles] = useState<UserRole[]>(
     user.roles.length ? user.roles : isCustomer ? ["CUSTOMER"] : user.requestedRole ? [user.requestedRole] : [],
   );
@@ -64,6 +68,19 @@ function UserRow({
     setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
   }
 
+  function switchKind(customer: boolean) {
+    setIsCustomer(customer);
+    if (customer) {
+      setRoles(["CUSTOMER"]);
+      setCustomerId(user.customerId ?? "");
+    } else {
+      // เป็นพนักงาน: เริ่มจากบทบาทพนักงานที่มีอยู่ ไม่มีก็ตำแหน่งที่ขอตอนสมัคร (ถ้าขอเป็นพนักงาน) แล้วให้ Admin ติ๊กเอง
+      const staffRoles = user.roles.filter((r) => r !== "CUSTOMER");
+      setRoles(staffRoles.length ? staffRoles : user.requestedRole && user.requestedRole !== "CUSTOMER" ? [user.requestedRole] : []);
+      setCustomerId("");
+    }
+  }
+
   return (
     <tr className={user.status === "PENDING" ? "row-backlog" : undefined}>
       <td>
@@ -88,6 +105,21 @@ function UserRow({
         )}
       </td>
       <td>
+        <div
+          className="admin-roles"
+          role="radiogroup"
+          aria-label="ประเภทบัญชี"
+          style={{ flexDirection: "row", gap: 14, paddingBottom: 6, marginBottom: 6, borderBottom: "1px solid #e3e8f1" }}
+        >
+          <label>
+            <input type="radio" name={`kind-${user.id}`} checked={!isCustomer} onChange={() => switchKind(false)} disabled={busy || self} />
+            พนักงาน
+          </label>
+          <label>
+            <input type="radio" name={`kind-${user.id}`} checked={isCustomer} onChange={() => switchKind(true)} disabled={busy || self} />
+            ลูกค้า
+          </label>
+        </div>
         {isCustomer ? (
           <div className="admin-roles">
             <label>

@@ -2,11 +2,12 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import type { CreateVehiclesDto } from './dto/create-vehicles.dto.js';
 import type { UpdateTransferNoticeDto } from './dto/update-transfer-notice.dto.js';
 import type { UpdateInspectionSentDto } from './dto/update-inspection-sent.dto.js';
+import type { CorrectInspectionSentDto } from './dto/correct-inspection-sent.dto.js';
+import type { CancelInspectionSentDto } from './dto/cancel-inspection-sent.dto.js';
 import type { UpdateInspectionResultDto } from './dto/update-inspection-result.dto.js';
 import type { CorrectInspectionResultDto } from './dto/correct-inspection-result.dto.js';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import type { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
-import type { UpdateTaxInputDto } from '../tax/dto/update-tax-input.dto.js';
 import { VehiclesService } from './vehicles.service.js';
 
 @Controller('api/vehicles')
@@ -104,6 +105,17 @@ export class VehiclesController {
     return { vehicle: await this.vehiclesService.updateInspectionSent(id, body) };
   }
 
+  // แก้ประเภท/วันที่ส่งตรวจ และยกเลิกส่งตรวจ ของรถที่ยังรอผล (ต้องมีเหตุผล) - สิทธิ์เท่ากับขั้น 1-3 คือ ADMIN + STAFF_ENTRY
+  @Patch(':id/inspection-sent-correction')
+  async correctInspectionSent(@Param('id') id: string, @Body() body: CorrectInspectionSentDto) {
+    return { vehicle: await this.vehiclesService.correctInspectionSent(id, body) };
+  }
+
+  @Post(':id/inspection-sent/cancel')
+  async cancelInspectionSent(@Param('id') id: string, @Body() body: CancelInspectionSentDto) {
+    return { vehicle: await this.vehiclesService.cancelInspectionSent(id, body) };
+  }
+
   @Patch(':id/inspection-result')
   async updateInspectionResult(@Param('id') id: string, @Body() body: UpdateInspectionResultDto) {
     return { vehicle: await this.vehiclesService.updateInspectionResult(id, body) };
@@ -113,10 +125,5 @@ export class VehiclesController {
   @Patch(':id/inspection-result-correction')
   async correctInspectionResult(@Param('id') id: string, @Body() body: CorrectInspectionResultDto) {
     return { vehicle: await this.vehiclesService.correctInspectionResult(id, body) };
-  }
-
-  @Patch(':id/tax-input')
-  async updateTaxInput(@Param('id') id: string, @Body() body: UpdateTaxInputDto) {
-    return { taxCalculation: await this.vehiclesService.updateTaxInput(id, body) };
   }
 }

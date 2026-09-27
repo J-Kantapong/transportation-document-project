@@ -20,6 +20,14 @@ export class FinanceCompaniesService {
       throw new BadRequestException({ error: 'กรุณากรอกชื่อไฟแนนซ์ไม่เกิน 100 ตัวอักษร' });
     }
 
+    // ชื่อซ้ำต่างตัวพิมพ์ = ไฟแนนซ์เดิม คืนแถวที่มีอยู่แล้วแทนการสร้างใหม่ (พบ 2026-09-27 - แบบเดียวกับยี่ห้อ)
+    const existing = await this.prisma.financeCompany.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' } },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true, name: true },
+    });
+    if (existing) return { financeCompany: existing };
+
     const financeCompany = await this.prisma.financeCompany.upsert({
       where: { name },
       create: { name },

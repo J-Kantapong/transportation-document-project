@@ -18,8 +18,18 @@ function sign(data: string, secret: string): Buffer {
 
 export function signToken(userId: string, roles: string[], secret: string, ttlSeconds: number): string {
   const now = Math.floor(Date.now() / 1000);
+  return build({ sub: userId, roles, iat: now, exp: now + ttlSeconds }, secret);
+}
+
+// ออก token ใหม่ด้วย roles ล่าสุด แต่หมดอายุเวลาเดิม (ไม่ต่ออายุการล็อกอิน) - /api/auth/me ส่งให้หน้าเว็บ
+// เมื่อ Admin เปลี่ยนบทบาทระหว่างที่ล็อกอินอยู่ (พบ 2026-09-27: proxy.ts ใช้ roles เก่าใน token จนออกแล้วเข้าใหม่)
+export function resignToken(userId: string, roles: string[], secret: string, exp: number): string {
+  return build({ sub: userId, roles, iat: Math.floor(Date.now() / 1000), exp }, secret);
+}
+
+function build(payload: TokenPayload, secret: string): string {
   const head = encode({ alg: 'HS256', typ: 'JWT' });
-  const body = encode({ sub: userId, roles, iat: now, exp: now + ttlSeconds } satisfies TokenPayload);
+  const body = encode(payload);
   return `${head}.${body}.${encode(sign(`${head}.${body}`, secret))}`;
 }
 

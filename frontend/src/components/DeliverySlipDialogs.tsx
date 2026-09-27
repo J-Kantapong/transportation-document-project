@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { billingApi, slipNoText, type DeliverySlip } from "@/lib/billing-api";
-import { displayDateToIso, formatDateDigits, isoToDisplayDate } from "@/lib/date";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
 // แก้ / ยกเลิกใบส่งงานที่คีย์ผิด (ผู้ใช้ 2026-09-26) - ต้องมีเหตุผลเสมอ (เก็บในประวัติการแก้ไขของรถ)
 // ยกเลิกแล้วรถกลับเข้าคิว Delivery ให้บันทึกใหม่ได้ ส่วนใบ/รายการที่ยกเลิกยังอยู่ในรายงานพร้อมเหตุผล (ไม่ลบ)
 
 const errorText = (err: unknown, fallback: string) => (err instanceof ApiError || err instanceof Error ? err.message : fallback);
+// backend ตอบปฏิเสธ (มีคนแก้/ยกเลิก/ส่งไปก่อน ฯลฯ) = รายการในหน้าหลักอาจเก่า -> onRefused ให้หน้าหลักโหลดใหม่เบื้องหลัง (พบ 2026-09-27)
+const refusedByServer = (err: unknown) => err instanceof ApiError && err.status !== undefined;
 
 function useModal() {
   const ref = useRef<HTMLDialogElement>(null);
@@ -23,10 +25,12 @@ export function DeliverySlipEditDialog({
   slip,
   onClose,
   onSaved,
+  onRefused,
 }: {
   slip: DeliverySlip;
   onClose: () => void;
   onSaved: (slip: DeliverySlip) => void;
+  onRefused?: () => void;
 }) {
   const dialogRef = useModal();
   const [recipient, setRecipient] = useState(slip.recipient);
@@ -34,7 +38,8 @@ export function DeliverySlipEditDialog({
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const billed = slip.items.filter((i) => !i.cancelledAt && i.invoiceNo);
+  // บิลเก็บเฉพาะวันส่งเล่ม - รายการส่งป้ายตามทีหลังเปลี่ยนวันที่ได้แม้วางบิลแล้ว (ผู้ใช้ 2026-09-27)
+  const billed = slip.items.filter((i) => !i.cancelledAt && i.book && i.invoiceNo);
 
   async function handleSave() {
     setError("");
@@ -49,6 +54,7 @@ export function DeliverySlipEditDialog({
       dialogRef.current?.close();
     } catch (err) {
       setError(errorText(err, "แก้ใบส่งงานไม่สำเร็จ"));
+      if (refusedByServer(err)) onRefused?.();
     } finally {
       setSaving(false);
     }
@@ -69,7 +75,7 @@ export function DeliverySlipEditDialog({
       </label>
       <label className="field" style={{ marginTop: 12 }}>
         วันที่ส่ง *
-        <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigits(value.replace(/\D/g, "").slice(0, 8)))} />
+        <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} />
       </label>
       {billed.length > 0 && (
         <p className="muted" style={{ marginTop: 8 }}>
@@ -101,18 +107,22 @@ export function DeliverySlipCancelDialog({
   slip,
   onClose,
   onCancelled,
+  onRefused,
 }: {
   slip: DeliverySlip;
   onClose: () => void;
   onCancelled: (slip: DeliverySlip) => void;
+  onRefused?: () => void;
 }) {
   const dialogRef = useModal();
   const items = slip.items.filter((i) => !i.cancelledAt);
-  const [picked, setPicked] = useState(() => new Set(items.filter((i) => !i.invoiceNo).map((i) => i.vehicleId)));
+  // วางบิลแล้วล็อกเฉพาะรายการส่งเล่ม - ใบส่งป้ายตามทีหลังยกเลิกได้ (ผู้ใช้ 2026-09-27)
+  const locked = (i: (typeof items)[number]) => i.book && !!i.invoiceNo;
+  const [picked, setPicked] = useState(() => new Set(items.filter((i) => !locked(i)).map((i) => i.vehicleId)));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const allBilled = items.every((i) => i.invoiceNo);
+  const allBilled = items.every(locked);
 
   function toggle(vehicleId: string) {
     setPicked((prev) => {
@@ -134,6 +144,7 @@ export function DeliverySlipCancelDialog({
       dialogRef.current?.close();
     } catch (err) {
       setError(errorText(err, "ยกเลิกไม่สำเร็จ"));
+      if (refusedByServer(err)) onRefused?.();
     } finally {
       setSaving(false);
     }
@@ -158,11 +169,11 @@ export function DeliverySlipCancelDialog({
           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
             {items.map((i) => (
               <label key={i.vehicleId} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={!!i.invoiceNo} onChange={() => toggle(i.vehicleId)} />
+                <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={locked(i)} onChange={() => toggle(i.vehicleId)} />
                 <span>
                   {i.plateText || "—"} · {i.chassis}
                   {i.book ? "" : " (ใบส่งป้าย)"}
-                  {i.invoiceNo ? <span className="muted"> · วางบิลแล้ว {i.invoiceNo} ยกเลิกไม่ได้</span> : null}
+                  {locked(i) ? <span className="muted"> · วางบิลแล้ว {i.invoiceNo} ยกเลิกไม่ได้</span> : null}
                 </span>
               </label>
             ))}
@@ -187,6 +198,81 @@ export function DeliverySlipCancelDialog({
             {saving ? "กำลังยกเลิก..." : `ยืนยันยกเลิก ${picked.size} คัน`}
           </button>
         )}
+      </div>
+    </dialog>
+  );
+}
+
+// ป้ายไปพร้อมเล่มแล้ว (ผู้ใช้ 2026-09-27): ใบส่งเล่มที่บันทึกว่าป้ายตามทีหลัง แต่จริงๆ ป้ายไปกับเล่ม (แนบรูปป้ายทีหลัง)
+// ติ๊กป้ายในใบเดิม วันที่ส่งป้าย = วันที่ในใบ - หมายเหตุไม่บังคับ (ระบบบันทึกประวัติการแก้ไขให้เอง) ทำกับคันที่วางบิลแล้วได้
+export function DeliveryAddPlateDialog({
+  vehicle,
+  slip,
+  onClose,
+  onSaved,
+  onRefused,
+}: {
+  vehicle: { id: string; chassis: string; plateText: string; customerName: string };
+  slip: { id: string; slipNo: number; date: string };
+  onClose: () => void;
+  onSaved: (slip: DeliverySlip) => void;
+  onRefused?: () => void;
+}) {
+  const dialogRef = useModal();
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const slipText = `${slipNoText(slip.slipNo)} วันที่ ${isoToDisplayDate(slip.date)}`;
+
+  async function handleConfirm() {
+    setError("");
+    setSaving(true);
+    try {
+      const saved = await api.addPlateToDeliverySlip(slip.id, { vehicleId: vehicle.id, remark: remark.trim() || undefined });
+      onSaved(saved);
+      dialogRef.current?.close();
+    } catch (err) {
+      setError(errorText(err, "บันทึกไม่สำเร็จ"));
+      // เช่น อีกคนบันทึกส่งป้ายไปก่อน - แถวนี้และปุ่ม "ป้ายไปพร้อมเล่มแล้ว" ในรายงานต้องเปลี่ยนตามข้อมูลจริง
+      if (refusedByServer(err)) onRefused?.();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>ป้ายไปพร้อมเล่มแล้ว</h2>
+      <p className="muted">
+        {vehicle.customerName} · {vehicle.plateText || "—"} · {vehicle.chassis}
+      </p>
+      <p style={{ marginTop: 12 }}>
+        ป้ายของรถคันนี้ไปพร้อมเล่มใน <b>ใบส่งงาน {slipText}</b> แล้วใช่ไหม
+      </p>
+      <p className="muted" style={{ marginTop: 8 }}>
+        ระบบจะติ๊กป้ายในใบ {slipNoText(slip.slipNo)} และบันทึกวันที่ส่งป้ายเป็น {isoToDisplayDate(slip.date)} (ถ้าวันที่รับป้ายที่บันทึกไว้หลังวันนั้น
+        จะปรับวันที่รับป้ายเป็น {isoToDisplayDate(slip.date)} ด้วย) - ถ้าป้ายยังอยู่ที่ร้าน ให้กด
+        &quot;บันทึกส่งป้าย&quot; แล้วบันทึกที่หน้า Delivery แทน
+      </p>
+      <label className="field" style={{ marginTop: 12 }}>
+        หมายเหตุ (ไม่บังคับ)
+        <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น แนบรูปป้ายช้า" />
+      </label>
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+          ไม่ใช่
+        </button>
+        <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
+          {saving ? "กำลังบันทึก..." : "ยืนยัน ป้ายไปพร้อมเล่มแล้ว"}
+        </button>
       </div>
     </dialog>
   );
