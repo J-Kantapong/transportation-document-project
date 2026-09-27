@@ -129,7 +129,19 @@ function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
 
-type RateDbRow = { id: string; label: string; vehicleKind: string; ccMin: unknown; ccMax: unknown; amount: unknown; vatInclusive: boolean; includesReceipt: boolean; kind: string; sortOrder: number };
+type RateDbRow = {
+  id: string;
+  label: string;
+  vehicleKind: string;
+  ccMin: unknown;
+  ccMax: unknown;
+  chassisPrefix: string | null;
+  amount: unknown;
+  vatInclusive: boolean;
+  includesReceipt: boolean;
+  kind: string;
+  sortOrder: number;
+};
 
 const toPeriods = (rows: Array<{ account: string; effectiveFrom: Date }>): AccountPeriod[] =>
   rows.map((p) => ({ account: p.account, effectiveFrom: iso(p.effectiveFrom)! }));
@@ -175,7 +187,19 @@ function currentBillEstimate(
 }
 
 function toRate(r: RateDbRow): RateRow {
-  return { id: r.id, label: r.label, vehicleKind: r.vehicleKind, ccMin: num(r.ccMin), ccMax: num(r.ccMax), amount: Number(r.amount), vatInclusive: r.vatInclusive, includesReceipt: r.includesReceipt, kind: r.kind, sortOrder: r.sortOrder };
+  return {
+    id: r.id,
+    label: r.label,
+    vehicleKind: r.vehicleKind,
+    ccMin: num(r.ccMin),
+    ccMax: num(r.ccMax),
+    chassisPrefix: r.chassisPrefix,
+    amount: Number(r.amount),
+    vatInclusive: r.vatInclusive,
+    includesReceipt: r.includesReceipt,
+    kind: r.kind,
+    sortOrder: r.sortOrder,
+  };
 }
 
 const QUEUE_VEHICLE_INCLUDE = {
@@ -278,7 +302,7 @@ export class BillingService {
             const sub = v.documentSubmissions[0];
             const isMoto = isMotorcycle(v.body);
             const cc = num(v.cc);
-            const rate = suggestRate(rates, { isMoto, cc });
+            const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis });
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
             const estimate = sub && sub.taxAmount !== null ? round2(Number(sub.billFeeTotal) + Number(sub.taxAmount)) : null;
@@ -433,7 +457,21 @@ export class BillingService {
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);
       const ccMax = r.ccMax === null || r.ccMax === undefined ? null : parseMoney(r.ccMax, `แถวที่ ${i + 1}: CC น้อยกว่า`);
       if (ccMin !== null && ccMax !== null && ccMin >= ccMax) throw bad(`แถวที่ ${i + 1}: ช่วง CC ไม่ถูกต้อง`);
-      return { customerId, label, vehicleKind, ccMin, ccMax, amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`), vatInclusive: r.vatInclusive === true, includesReceipt: r.includesReceipt === true, kind, sortOrder: i };
+      // ราคาแยกตามเลขตัวถังขึ้นต้น (ผู้ใช้ 2026-09-28, MC Superbike) - เว้นว่างได้ ไม่จำกัดชนิด/ความยาว
+      const chassisPrefix = optionalText(r.chassisPrefix, `แถวที่ ${i + 1}: เลขตัวถังขึ้นต้น`);
+      return {
+        customerId,
+        label,
+        vehicleKind,
+        ccMin,
+        ccMax,
+        chassisPrefix,
+        amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`),
+        vatInclusive: r.vatInclusive === true,
+        includesReceipt: r.includesReceipt === true,
+        kind,
+        sortOrder: i,
+      };
     });
 
     const exists = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });

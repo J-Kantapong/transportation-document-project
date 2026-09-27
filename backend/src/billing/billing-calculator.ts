@@ -30,6 +30,7 @@ export interface RateRow {
   vehicleKind: string; // CAR | MOTO | ANY
   ccMin: number | null;
   ccMax: number | null;
+  chassisPrefix: string | null; // ราคาแยกตามรุ่น/ยี่ห้อผู้ผลิตที่ CC ทับซ้อนกัน (ผู้ใช้ 2026-09-28, MC Superbike)
   amount: number;
   vatInclusive: boolean;
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จแล้ว (YMAC)
@@ -65,10 +66,12 @@ export function rateAmountExVat(rate: Pick<RateRow, 'amount' | 'vatInclusive'>):
   return rate.vatInclusive ? round2(rate.amount / (1 + VAT_RATE / 100)) : round2(rate.amount);
 }
 
-// แถวราคาแรก (เรียงตาม sortOrder) ที่ชนิดรถและช่วง CC ตรงกับรถ - ccMin <= cc < ccMax
+// แถวราคาแรก (เรียงตาม sortOrder) ที่ชนิดรถ ช่วง CC และเลขตัวถังขึ้นต้นตรงกับรถ - ccMin <= cc < ccMax
 // แถวที่กำหนดช่วง CC จะไม่จับคู่กับรถที่ไม่มีข้อมูล CC (ให้บัญชีเลือกเอง ดีกว่าเดาราคาผิด)
-export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: number | null }): RateRow | null {
+// chassisPrefix (ผู้ใช้ 2026-09-28, MC Superbike: ML=885/JH=2685 ทับซ้อนกันในช่วง 300-799cc) เทียบไม่สนตัวพิมพ์ใหญ่เล็ก
+export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: number | null; chassis?: string | null }): RateRow | null {
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
+  const chassis = (vehicle.chassis ?? '').toUpperCase();
   const sorted = [...rates].sort((a, b) => a.sortOrder - b.sortOrder);
   for (const r of sorted) {
     if (r.kind !== 'BASE') continue; // ค่าเพิ่มไม่ใช่ราคาหลัก
@@ -78,6 +81,7 @@ export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: nu
       if (r.ccMin !== null && vehicle.cc < r.ccMin) continue;
       if (r.ccMax !== null && vehicle.cc >= r.ccMax) continue;
     }
+    if (r.chassisPrefix && !chassis.startsWith(r.chassisPrefix.toUpperCase())) continue;
     return r;
   }
   return null;

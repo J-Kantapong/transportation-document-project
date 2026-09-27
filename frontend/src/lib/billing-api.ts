@@ -107,6 +107,9 @@ export interface ServiceFeeRate {
   vehicleKind: RateVehicleKind;
   ccMin: number | null;
   ccMax: number | null;
+  // ราคาแยกตามรุ่น/ยี่ห้อผู้ผลิตที่ CC ทับซ้อนกัน (ผู้ใช้ 2026-09-28, MC Superbike: เลขตัวถังขึ้นต้น ML=885 / JH=2685
+  // ทั้งคู่อยู่ในช่วง 300-799cc) - เทียบไม่สนตัวพิมพ์ใหญ่เล็ก null/ว่าง = ไม่จำกัด
+  chassisPrefix: string | null;
   amount: number;
   vatInclusive: boolean;
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จกรมขนส่งแล้ว (ผู้ใช้ 2026-09-27, YMAC)

@@ -216,6 +216,7 @@ interface RateState {
   vehicleKind: RateVehicleKind;
   ccMinText: string;
   ccMaxText: string;
+  chassisPrefixText: string; // ราคาแยกตามเลขตัวถังขึ้นต้น (ผู้ใช้ 2026-09-28, MC Superbike) - เว้นว่าง = ไม่จำกัด
   amountText: string;
   vatInclusive: boolean;
   includesReceipt: boolean;
@@ -238,6 +239,7 @@ const toState = (r: ServiceFeeRate): RateState => ({
   vehicleKind: r.vehicleKind,
   ccMinText: ccText(r.ccMin),
   ccMaxText: ccText(r.ccMax),
+  chassisPrefixText: r.chassisPrefix ?? "",
   amountText: String(r.amount),
   vatInclusive: r.vatInclusive,
   includesReceipt: r.includesReceipt,
@@ -262,7 +264,17 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
       const ccMax = parseCc(r.ccMaxText);
       const ccInvalid = (ccMin !== null && !Number.isFinite(ccMin)) || (ccMax !== null && !Number.isFinite(ccMax));
       if (ccInvalid || (ccMin !== null && ccMax !== null && ccMin >= ccMax)) return setError(`${at}: ช่วง CC ไม่ถูกต้อง`);
-      payload.push({ label: r.label.trim(), vehicleKind: r.vehicleKind, ccMin, ccMax, amount, vatInclusive: r.vatInclusive, includesReceipt: r.includesReceipt, kind: r.kind });
+      payload.push({
+        label: r.label.trim(),
+        vehicleKind: r.vehicleKind,
+        ccMin,
+        ccMax,
+        chassisPrefix: r.chassisPrefixText.trim() || null,
+        amount,
+        vatInclusive: r.vatInclusive,
+        includesReceipt: r.includesReceipt,
+        kind: r.kind,
+      });
     }
     setSaving(true);
     setError("");
@@ -278,7 +290,8 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
   return (
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f2f6", display: "grid", gap: 12 }}>
       <p style={{ fontSize: 12 }}>
-        ราคาหลัก: ระบบเลือกแถวแรกจากบนลงล่างที่ชนิดรถและช่วง CC ตรงกับรถ · ค่าเพิ่ม: &quot;ขอใช้&quot; ระบบบวกให้เองเมื่อรถจดจังหวัดอื่น (จังหวัดที่จดทะเบียนไม่ตรงกับจังหวัดเจ้าของรถ เช่น กรุงเทพฯ) และ &quot;ด่วน&quot; เมื่อยื่นเป็นงานด่วน · ช่อง CC (ตั้งแต่ ≤ CC &lt; น้อยกว่า) เว้นช่อง CC ว่าง = ไม่จำกัด ติ๊ก &quot;ราคารวม VAT&quot; เมื่อราคาที่ตกลงกับลูกค้ารวม VAT แล้ว และ &quot;ราคารวมใบเสร็จ&quot; เมื่อเป็นราคาเหมารวมค่าใบเสร็จ (เช่น YMAC จดใหม่ 650 = ใบเสร็จ 340 + ค่าดำเนินการ 310 ระบบหักค่าใบเสร็จจริงรายคันให้)
+        ราคาหลัก: ระบบเลือกแถวแรกจากบนลงล่างที่ชนิดรถและช่วง CC ตรงกับรถ · ค่าเพิ่ม: &quot;ขอใช้&quot; ระบบบวกให้เองเมื่อรถจดจังหวัดอื่น (จังหวัดที่จดทะเบียนไม่ตรงกับจังหวัดเจ้าของรถ เช่น กรุงเทพฯ) และ &quot;ด่วน&quot; เมื่อยื่นเป็นงานด่วน · ช่อง CC (ตั้งแต่ ≤ CC &lt; น้อยกว่า) เว้นช่อง CC ว่าง = ไม่จำกัด · &quot;เลขตัวถังขึ้นต้น&quot; ใช้เมื่อรุ่น/ยี่ห้อราคาต่างกันแต่ CC ทับซ้อนกันแยกไม่ออก
+        (เช่น เลขตัวถัง ML ราคาต่างจาก JH) เว้นว่าง = ไม่จำกัด ติ๊ก &quot;ราคารวม VAT&quot; เมื่อราคาที่ตกลงกับลูกค้ารวม VAT แล้ว และ &quot;ราคารวมใบเสร็จ&quot; เมื่อเป็นราคาเหมารวมค่าใบเสร็จ (เช่น YMAC จดใหม่ 650 = ใบเสร็จ 340 + ค่าดำเนินการ 310 ระบบหักค่าใบเสร็จจริงรายคันให้)
         เช่น 1,045 ระบบจะถอดเป็น 976.64 ให้
       </p>
       {rows.length > 0 && (
@@ -291,6 +304,7 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                 <th>ชนิดรถ</th>
                 <th>CC ตั้งแต่</th>
                 <th>CC น้อยกว่า</th>
+                <th>เลขตัวถังขึ้นต้น</th>
                 <th>ราคา (บาท)</th>
                 <th>ราคารวม VAT</th>
                 <th>ราคารวมใบเสร็จ</th>
@@ -324,6 +338,17 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                     <input type="text" inputMode="decimal" value={r.ccMaxText} onChange={(e) => patch(i, { ccMaxText: e.target.value })} style={{ width: 80 }} aria-label="CC น้อยกว่า" />
                   </td>
                   <td>
+                    {/* ราคาแยกตามรุ่น/ยี่ห้อผู้ผลิตที่ CC ทับซ้อนกันแยกไม่ออก (ผู้ใช้ 2026-09-28, MC Superbike: ML=885/JH=2685) */}
+                    <input
+                      type="text"
+                      value={r.chassisPrefixText}
+                      onChange={(e) => patch(i, { chassisPrefixText: e.target.value.toUpperCase() })}
+                      style={{ width: 90 }}
+                      placeholder="ไม่จำกัด"
+                      aria-label="เลขตัวถังขึ้นต้น"
+                    />
+                  </td>
+                  <td>
                     <input type="text" inputMode="decimal" value={r.amountText} onChange={(e) => patch(i, { amountText: e.target.value })} style={{ width: 100, textAlign: "right" }} aria-label="ราคา" />
                   </td>
                   <td>
@@ -346,7 +371,12 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button
           className="text-button"
-          onClick={() => setRows((prev) => [...prev, { label: "", vehicleKind: "ANY", ccMinText: "", ccMaxText: "", amountText: "", vatInclusive: false, includesReceipt: false, kind: "BASE" }])}
+          onClick={() =>
+            setRows((prev) => [
+              ...prev,
+              { label: "", vehicleKind: "ANY", ccMinText: "", ccMaxText: "", chassisPrefixText: "", amountText: "", vatInclusive: false, includesReceipt: false, kind: "BASE" },
+            ])
+          }
         >
           + เพิ่มแถวราคา
         </button>

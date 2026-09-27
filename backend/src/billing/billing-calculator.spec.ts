@@ -41,7 +41,7 @@ describe('effectiveWhtRate', () => {
 });
 
 describe('suggestRate', () => {
-  const rate = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'ANY', ccMin: null, ccMax: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
+  const rate = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'ANY', ccMin: null, ccMax: null, chassisPrefix: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
   const rates = [
     rate({ id: 'small', vehicleKind: 'MOTO', ccMax: 150, amount: 360, sortOrder: 1 }),
     rate({ id: 'mid', vehicleKind: 'MOTO', ccMin: 150, ccMax: 300, amount: 440, sortOrder: 2 }),
@@ -91,7 +91,7 @@ describe('serviceFeeFromRate', () => {
 });
 
 describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด่วน +100)', () => {
-  const row = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'MOTO', ccMin: null, ccMax: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
+  const row = (o: Partial<RateRow>): RateRow => ({ id: 'r', label: '', vehicleKind: 'MOTO', ccMin: null, ccMax: null, chassisPrefix: null, amount: 0, vatInclusive: false, includesReceipt: false, kind: 'BASE', sortOrder: 0, ...o });
   const rates = [
     row({ id: 'plate', kind: 'OTHER_PROVINCE', amount: 100, sortOrder: 0 }),
     row({ id: 'small', ccMax: 300, amount: 520, sortOrder: 1 }),
@@ -108,5 +108,37 @@ describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด�
     expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false })).toEqual([]);
     expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true }).map((r) => r.id)).toEqual(['plate', 'urgent']);
     expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true })).toEqual([]); // motorcycle-only add-ons
+  });
+});
+
+describe('suggestRate with chassisPrefix (MC Superbike: ML=885, JH=2685, both 300-799cc)', () => {
+  const rate = (o: Partial<RateRow>): RateRow => ({
+    id: 'r',
+    label: '',
+    vehicleKind: 'MOTO',
+    ccMin: null,
+    ccMax: null,
+    chassisPrefix: null,
+    amount: 0,
+    vatInclusive: false,
+    includesReceipt: false,
+    kind: 'BASE',
+    sortOrder: 0,
+    ...o,
+  });
+  const rates = [
+    rate({ id: 'jh', chassisPrefix: 'JH', amount: 2685, sortOrder: 0 }),
+    rate({ id: 'ml', chassisPrefix: 'ML', amount: 885, sortOrder: 1 }),
+  ];
+
+  it('picks the row whose chassisPrefix matches, even when CC overlaps between rows', () => {
+    expect(suggestRate(rates, { isMoto: true, cc: 471, chassis: 'MLHPC7272T5100369' })?.id).toBe('ml');
+    expect(suggestRate(rates, { isMoto: true, cc: 745, chassis: 'JH2RH21T6TK101029' })?.id).toBe('jh');
+    expect(suggestRate(rates, { isMoto: true, cc: 348, chassis: 'JH2NC64TXTK000575' })?.id).toBe('jh');
+  });
+
+  it('matches case-insensitively and ignores rows whose prefix does not match', () => {
+    expect(suggestRate(rates, { isMoto: true, cc: 200, chassis: 'mlhpc123' })?.id).toBe('ml');
+    expect(suggestRate(rates, { isMoto: true, cc: 200, chassis: 'ZZZ12345' })).toBeNull();
   });
 });
