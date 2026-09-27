@@ -61,9 +61,25 @@ function matches(rule: Rule, path: string, method: string): boolean {
   return rule.pattern.test(path);
 }
 
-export function accessFor(path: string, method: string): Access {
+// Express จับ route แบบไม่สนตัวพิมพ์ (/API/admin/users ไปถึง controller เดียวกับ /api/admin/users) แต่กฎด้านบนเป็นตัวเล็ก
+// จึงต้องทำ path ให้เป็นรูปเดียวกันก่อนเทียบ ไม่งั้นพิมพ์ URL ตัวใหญ่แล้วข้ามการเข้าสู่ระบบ/ตรวจสิทธิ์ได้ (พบ 2026-09-27)
+export function normalizePath(raw: string): string | null {
+  let path: string;
+  try {
+    path = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  return path.toLowerCase().replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/';
+}
+
+export function accessFor(rawPath: string, method: string): Access {
+  const path = normalizePath(rawPath);
+  if (path === null) return ['ADMIN'];
   const rule = RULES.find((r) => matches(r, path, method.toUpperCase()));
-  return rule?.access ?? 'PUBLIC'; // นอก /api (เช่น health check ที่ "/") เปิดสาธารณะ
+  if (rule) return rule.access;
+  // นอก /api มีแค่ health check ที่ "/" ที่เปิดสาธารณะ - path อื่นที่ไม่มีกฎรองรับให้ ADMIN เท่านั้น (ปิดไว้ก่อนเสมอ)
+  return path === '/' ? 'PUBLIC' : ['ADMIN'];
 }
 
 export function isAllowed(access: Access, roles: UserRole[] | null): boolean {

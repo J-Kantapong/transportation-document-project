@@ -17,8 +17,7 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request & { user?: RequestUser }>();
-    const path = req.path.replace(/\/+$/, '') || '/';
-    const access = accessFor(path, req.method);
+    const access = accessFor(req.path, req.method); // accessFor ทำ path เป็นตัวเล็ก/ตัด / ซ้ำเองก่อนเทียบกฎ
     if (access === 'PUBLIC') return true;
 
     const user = await this.resolveUser(req.headers.authorization);
