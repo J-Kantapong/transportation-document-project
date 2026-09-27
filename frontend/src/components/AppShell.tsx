@@ -59,6 +59,7 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
   if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
+  if (within(pathname, "/accounting/customer-payments")) return [{ label: "งานบัญชี" }, { label: "การจ่ายของลูกค้า", href: "/accounting/customer-payments" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
   if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
   const category = REGISTRATION_CATEGORIES.find((c) => within(pathname, c.href));
@@ -220,10 +221,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink href="/registration/new-vehicle/delivery" icon="move" label="Delivery" pathname={pathname} onClick={close} />
               </>
             )}
-            {has("ADMIN", "ACCOUNTANT") && (
+            {has("ADMIN", "ACCOUNTANT", "STAFF_CAR") && (
               <>
                 <div className="label">งานบัญชี</div>
-                <NavLink href="/accounting/billing" icon="stack" label="วางบิล" pathname={pathname} onClick={close} />
+                {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/billing" icon="stack" label="วางบิล" pathname={pathname} onClick={close} />}
+                <NavLink href="/accounting/customer-payments" icon="stack" label="การจ่ายของลูกค้า" pathname={pathname} onClick={close} />
               </>
             )}
             {has("ADMIN") && (

@@ -22,6 +22,17 @@ export class BillingController {
     return { terms: await this.billingService.updateTerms(id, body) };
   }
 
+  // บัญชีรับเงิน (บริษัท/บุคคล) พร้อมวันเริ่มใช้ - remark บังคับ (ผู้ใช้ 2026-09-27)
+  @Get('customers/:id/account')
+  accountPeriods(@Param('id') id: string) {
+    return this.billingService.accountPeriods(id);
+  }
+
+  @Post('customers/:id/account')
+  setAccount(@Param('id') id: string, @Body() body: { account?: unknown; effectiveFrom?: unknown; remark?: unknown }) {
+    return this.billingService.setAccount(id, body ?? {});
+  }
+
   @Put('customers/:id/rates')
   async replaceRates(@Param('id') id: string, @Body() body: { rates?: unknown }) {
     return { rates: await this.billingService.replaceRates(id, body) };

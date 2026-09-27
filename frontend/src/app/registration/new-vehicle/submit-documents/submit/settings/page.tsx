@@ -120,6 +120,13 @@ export default function SubmitSettingsPage() {
                   <tr>
                     <td>
                       <strong>{v.chassis}</strong>
+                      {/* ขอใช้ = จดจังหวัดอื่น (จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ) - ให้พนักงานเห็นก่อนยื่น ถ้าไม่ตรงกับงานจริงให้แก้ข้อมูลรถก่อน
+                          เพราะค่าธรรมเนียมตอนยื่นและค่าบริการตอนวางบิลคิดจากข้อนี้ (ผู้ใช้ 2026-09-28) */}
+                      {state.kind === "ok" && state.fee.isOtherProvince && (
+                        <span className="badge warn" style={{ marginLeft: 8 }} title="จังหวัดที่จดทะเบียนไม่ตรงกับจังหวัดเจ้าของรถ">
+                          ขอใช้
+                        </span>
+                      )}
                       <div className="sub">
                         {v.customerName} · {v.brandName} · {v.body || "—"} · {jobTypeLabel(v)}
                       </div>

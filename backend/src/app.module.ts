@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { BookPhotosModule } from './book-photos/book-photos.module.js';
 import { BrandsModule } from './brands/brands.module.js';
+import { CustomerPaymentsModule } from './customer-payments/customer-payments.module.js';
 import { CustomersModule } from './customers/customers.module.js';
 import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
@@ -46,6 +47,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BookPhotosModule,
     DeliveryModule,
     BillingModule,
+    CustomerPaymentsModule,
     OverviewModule,
     VehicleSearchModule,
   ],

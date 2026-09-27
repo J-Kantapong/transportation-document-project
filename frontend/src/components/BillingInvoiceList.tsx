@@ -464,9 +464,10 @@ function InvoiceEditDialog({
     // เงื่อนไขวางบิลปัจจุบันของลูกค้า ไว้เทียบกับอัตราที่บิลออกไป - โหลดไม่ได้ก็แก้บิลได้ด้วยอัตราเดิม
     billingApi
       .customerTerms(invoice.customerId)
-      .then((r) => setCurrentTerms(r.terms))
+      // บิลบัญชีบุคคลไม่มี VAT เสมอ (เหมือน backend termsFor) - เทียบเฉพาะหัก ณ ที่จ่าย
+      .then((r) => setCurrentTerms(invoice.account === "PERSONAL" ? { ...r.terms, vat: false } : r.terms))
       .catch(() => setCurrentTerms(null));
-  }, [invoice.customerId]);
+  }, [invoice.customerId, invoice.account]);
 
   useEffect(() => {
     billingApi

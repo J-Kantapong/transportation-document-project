@@ -6,7 +6,8 @@ import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type Re
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { useAutoRefresh, usePendingReceipts } from "@/lib/receipt-upload";
-import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
+import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
+import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { ReceiptEditButton, ReceivedReceiptFixButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary, useCanEditReceipts } from "./ReceiptPhotos";
 import { DateInput } from "@/components/DateInput";
@@ -82,7 +83,7 @@ const AMOUNT_RE = /^\d+(\.\d{1,2})?$/;
 const RECEIPT_NO_RE = /^\d+\/\d+$/;
 const toIso = (display: string) => displayDateToIso(display.replace(/\D/g, ""));
 
-function CompareBadge({ s, amountText }: { s: DocumentSubmission; amountText: string }) {
+function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission; amountText: string; canEditVehicle: boolean }) {
   const text = amountText.trim();
   if (!text) return null;
   if (!AMOUNT_RE.test(text)) return <span className="badge warn">ตัวเลขไม่ถูกต้อง</span>;
@@ -90,12 +91,32 @@ function CompareBadge({ s, amountText }: { s: DocumentSubmission; amountText: st
   if (bill === null) return <span className="badge">เทียบไม่ได้ (ยังคำนวณภาษีไม่ได้)</span>;
   const diff = Math.round((Number(text) - bill) * 100) / 100;
   if (diff === 0) return <span className="badge done">ตรง Bill</span>;
+  const hint = otherProvinceHint(s, diff);
   return (
-    <span className="badge warn">
-      ไม่ตรง Bill ({diff > 0 ? "+" : ""}
-      {money(diff)})
-    </span>
+    <>
+      <span className="badge warn">
+        ไม่ตรง Bill ({diff > 0 ? "+" : ""}
+        {money(diff)})
+      </span>
+      {/* ข้อมูลรถผิดที่ต้นทาง (ผู้ใช้ 2026-09-28) - บอกว่าน่าจะผิดตรงไหน + ปุ่มไปแก้ข้อมูลรถ (เฉพาะคนที่แก้ข้อมูลรถได้) */}
+      {hint && <div style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{hint}</div>}
+      {canEditVehicle ? (
+        <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 11 }}>
+          แก้ข้อมูลรถ ↗
+        </a>
+      ) : (
+        hint && <div style={{ fontSize: 11, color: "#576781" }}>แจ้งผู้ลงข้อมูลรถให้แก้จังหวัด</div>
+      )}
+    </>
   );
+}
+
+// ใบเสร็จแพงกว่า Bill แต่ระบบคิดเป็นจังหวัดเดียวกัน = น่าจะเป็นรถขอใช้ที่จังหวัดเจ้าของรถลงผิด (และกลับกัน) - ค่าบริการตอนวางบิลขึ้นกับข้อนี้
+function otherProvinceHint(s: DocumentSubmission, diff: number): string | null {
+  const billOtherProvince = s.billItems.some((it) => it.label.includes("ขอใช้จังหวัดอื่น"));
+  if (diff > 0 && !billOtherProvince) return "ใบเสร็จแพงกว่า - อาจเป็นรถขอใช้ (จดจังหวัดอื่น) แต่จังหวัดเจ้าของรถลงไว้ผิด";
+  if (diff < 0 && billOtherProvince) return "ใบเสร็จถูกกว่า - อาจไม่ใช่รถขอใช้ แต่จังหวัดเจ้าของรถลงไว้ผิด";
+  return null;
 }
 
 type Ai = Extract<NonNullable<ReceiptSummary["extraction"]>, { reading: unknown }>;
@@ -324,6 +345,11 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // ปุ่ม "แก้ข้อมูลรถ" ข้างยอดที่ไม่ตรง Bill - เฉพาะ ADMIN / STAFF_ENTRY (คนที่แก้ข้อมูลรถได้)
+  const [canEditVehicle, setCanEditVehicle] = useState(false);
+  useEffect(() => {
+    setCanEditVehicle(canEditEntrySteps(getCachedUser()?.roles ?? []));
+  }, []);
 
   // รูปของแถวเปลี่ยน (โหลดใหม่ / AI อ่านเสร็จ): แทนรายการรูป แถวใหม่ได้ค่าเริ่มต้น และแถวที่มีผลอ่านใหม่เติมค่าตามผลอ่าน
   // แถวที่ผลอ่านเหมือนเดิมไม่แตะ - ค่าที่พนักงานกรอก/แก้ค้างไว้ยังอยู่
@@ -559,6 +585,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
     const entries: ReceiptCheckEntry[] = [];
     const errors: Record<string, string> = {};
     const mismatched: string[] = [];
+    const billMismatched: string[] = [];
     const stillReading: string[] = [];
     for (const s of activeRows) {
       const input = inputs[s.id];
@@ -575,6 +602,14 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
         else if (receiptIso > receivedDate) errors[s.id] = `วันที่ในใบเสร็จต้องไม่หลังวันที่รับใบเสร็จ (${isoToDisplayDate(receivedDate)})`;
         else {
           if (isReading(receipts[s.id])) stillReading.push(s.vehicle.chassis);
+          // ยอดไม่ตรง Bill = ข้อมูลรถอาจผิด (เช่น จังหวัด -> ขอใช้ -> ค่าบริการตอนวางบิล) ต้องยืนยันก่อนบันทึก (ผู้ใช้ 2026-09-28)
+          const bill = billOf(s);
+          const amount = AMOUNT_RE.test(input.amountText.trim()) ? Number(input.amountText.trim()) : null;
+          if (amount !== null && bill !== null && Math.round((amount - bill) * 100) !== 0) {
+            const diff = Math.round((amount - bill) * 100) / 100;
+            const hint = otherProvinceHint(s, diff);
+            billMismatched.push(`${s.vehicle.plateCategory ?? ""} ${s.vehicle.plateNumber ?? ""} ${s.vehicle.chassis}: ใบเสร็จ ${money(amount)} / Bill ${money(bill)}${hint ? ` - ${hint}` : ""}`.trim());
+          }
           entries.push({
             submissionId: s.id,
             action: "RECEIVED",
@@ -602,6 +637,14 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
       mismatched.length > 0 &&
       !window.confirm(
         `เลขตัวถังในใบเสร็จไม่ตรงกับรถ ${mismatched.length} คัน:\n\n${mismatched.join("\n")}\n\nเทียบกับรูปแล้วเป็นใบเสร็จของคันนั้นจริง (AI อ่านผิด) ใช่ไหม?`,
+      )
+    )
+      return;
+
+    if (
+      billMismatched.length > 0 &&
+      !window.confirm(
+        `ยอดใบเสร็จไม่ตรง Bill ${billMismatched.length} คัน:\n\n${billMismatched.join("\n")}\n\nตรวจกับใบเสร็จจริงแล้ว ยอดที่กรอกถูกต้องใช่ไหม?\n(ถ้าจังหวัดเจ้าของรถผิด ให้แก้ข้อมูลรถด้วย ไม่งั้นค่าบริการตอนวางบิลจะผิด)`,
       )
     )
       return;
@@ -926,7 +969,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                                   style={{ width: 96, ...(check.total ? CHECK_STYLE : {}) }}
                                 />
                                 <div style={{ marginTop: 4 }}>
-                                  <CompareBadge s={s} amountText={input.amountText} />
+                                  <CompareBadge s={s} amountText={input.amountText} canEditVehicle={canEditVehicle} />
                                 </div>
                               </div>
                             ) : (

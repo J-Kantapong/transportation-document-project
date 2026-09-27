@@ -1,11 +1,19 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { diffChanges, requireRemark, writeAudit, type AuditChanges } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
-import { isMotorcycle, requestsPlateNumber } from '../document-submission/document-fee-calculator.js';
+import {
+  computeDocumentFees,
+  isMotorcycle,
+  requestsPlateNumber,
+  type DocumentFeeRuleSet,
+  type NewPlateOption,
+  type PlateNumberOption,
+} from '../document-submission/document-fee-calculator.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { computeInvoiceTotals, nextInvoiceNo, rateAmountExVat, round2, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
+import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
+import { computeInvoiceTotals, nextInvoiceNo, rateAmountExVat, RATE_KINDS, round2, serviceFeeFromRate, suggestAddOns, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถเข้าคิวเมื่อพนักงานบันทึกส่งงานแล้ว (Vehicle.deliveredDate) และยังไม่อยู่ในบิลที่ยังใช้อยู่
 // (บิลที่ VOID ไม่นับ - รถกลับเข้าคิว) เลขที่บิลพิมพ์เอง เพราะช่วงแรกยังรันเลขร่วมกับ Google Sheet ของงานประเภทอื่น
@@ -121,10 +129,53 @@ function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
 
-type RateDbRow = { id: string; label: string; vehicleKind: string; ccMin: unknown; ccMax: unknown; amount: unknown; vatInclusive: boolean; sortOrder: number };
+type RateDbRow = { id: string; label: string; vehicleKind: string; ccMin: unknown; ccMax: unknown; amount: unknown; vatInclusive: boolean; includesReceipt: boolean; kind: string; sortOrder: number };
+
+const toPeriods = (rows: Array<{ account: string; effectiveFrom: Date }>): AccountPeriod[] =>
+  rows.map((p) => ({ account: p.account, effectiveFrom: iso(p.effectiveFrom)! }));
+
+// บิลบัญชีบุคคลไม่มี VAT เสมอ (ผู้ใช้ 2026-09-27) ไม่ว่าเงื่อนไข VAT ของลูกค้าจะตั้งไว้อย่างไร - หัก ณ ที่จ่ายยังตามลูกค้า (SPI หัก, YMAC ไม่หัก)
+const termsFor = (account: string, terms: BillingTerms): BillingTerms => (account === 'PERSONAL' ? { ...terms, vat: false } : terms);
+
+const feeRows = (rows: Array<{ key: string; amount: unknown }>) => rows.map((r) => ({ key: r.key, amount: r.amount === null ? null : Number(r.amount) }));
+
+// ยอด Bill ที่ควรเป็นจากข้อมูลรถ "ล่าสุด" + ตัวเลือกตอนยื่น (ผู้ใช้ 2026-09-28): แก้จังหวัดหลังยื่นแล้ว ยอดที่ใช้เทียบใบเสร็จตามไปด้วย
+// คำนวณแบบเดียวกับตอนยื่น (computeDocumentFees) + ภาษีที่ยื่นไว้ - คำนวณไม่ได้ (ไม่มีภาษี / ไม่มีตารางอัตรา) = null ให้ใช้ยอดตอนยื่นแทน
+function currentBillEstimate(
+  vehicle: { body: string | null; registrationProvince: string | null; ownerProvince: string | null },
+  sub: {
+    taxAmount: unknown;
+    plateNumberOption: string;
+    includePlateFee: boolean;
+    newPlateOption: string | null;
+    relocateAddon: boolean;
+    stopUseRelocateOut: boolean;
+    urgent: boolean;
+  } | undefined,
+  rules: DocumentFeeRuleSet | null,
+): number | null {
+  if (!sub || !rules || sub.taxAmount === null) return null;
+  try {
+    const fee = computeDocumentFees(
+      vehicle,
+      {
+        plateNumberOption: sub.plateNumberOption as PlateNumberOption,
+        includePlateFee: sub.includePlateFee,
+        newPlateOption: sub.newPlateOption as NewPlateOption | null,
+        relocateAddon: sub.relocateAddon,
+        stopUseRelocateOut: sub.stopUseRelocateOut,
+        urgent: sub.urgent,
+      },
+      rules,
+    );
+    return round2(fee.billTotal + Number(sub.taxAmount));
+  } catch {
+    return null;
+  }
+}
 
 function toRate(r: RateDbRow): RateRow {
-  return { id: r.id, label: r.label, vehicleKind: r.vehicleKind, ccMin: num(r.ccMin), ccMax: num(r.ccMax), amount: Number(r.amount), vatInclusive: r.vatInclusive, sortOrder: r.sortOrder };
+  return { id: r.id, label: r.label, vehicleKind: r.vehicleKind, ccMin: num(r.ccMin), ccMax: num(r.ccMax), amount: Number(r.amount), vatInclusive: r.vatInclusive, includesReceipt: r.includesReceipt, kind: r.kind, sortOrder: r.sortOrder };
 }
 
 const QUEUE_VEHICLE_INCLUDE = {
@@ -133,7 +184,22 @@ const QUEUE_VEHICLE_INCLUDE = {
   documentSubmissions: {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
-    select: { status: true, receiptNo: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, plateNumberOption: true },
+    select: {
+      status: true,
+      receiptNo: true,
+      receiptAmount: true,
+      billFeeTotal: true,
+      taxAmount: true,
+      plateNumberOption: true,
+      urgent: true,
+      // ตัวเลือกตอนยื่น - ใช้คำนวณยอด Bill ใหม่จากข้อมูลรถล่าสุด (เทียบกับใบเสร็จ)
+      includePlateFee: true,
+      newPlateOption: true,
+      relocateAddon: true,
+      stopUseRelocateOut: true,
+      // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28)
+      receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true } },
+    },
   },
 } as const;
 
@@ -168,12 +234,13 @@ export class BillingService {
   // รถที่ถูกลบ (deletedAt) และรถที่ปิดงาน - วางบิลนอกระบบ (billingClosedAt) ไม่อยู่ในคิว
   async queue() {
     const waiting = { deletedAt: null, billingClosedAt: null, deliveredDate: { not: null }, invoiceLines: { none: NOT_VOID } };
-    const [customers, lastInvoice] = await Promise.all([
+    const [customers, lastInvoice, lastPersonal] = await Promise.all([
       this.prisma.customer.findMany({
         where: { vehicles: { some: waiting } },
         orderBy: { name: 'asc' },
         include: {
           serviceFeeRates: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+          accountPeriods: { select: { account: true, effectiveFrom: true } },
           vehicles: {
             where: waiting,
             orderBy: [{ deliveredDate: 'asc' }, { plateCategory: 'asc' }, { plateNumber: 'asc' }],
@@ -181,13 +248,22 @@ export class BillingService {
           },
         },
       }),
-      this.prisma.invoice.findFirst({ orderBy: { createdAt: 'desc' }, select: { invoiceNo: true } }),
+      this.prisma.invoice.findFirst({ where: { account: 'COMPANY' }, orderBy: { createdAt: 'desc' }, select: { invoiceNo: true } }),
+      this.prisma.invoice.findFirst({ where: { account: 'PERSONAL' }, orderBy: { createdAt: 'desc' }, select: { invoiceNo: true } }),
     ]);
 
+    const today = bangkokToday();
+    const feeRules = await this.loadFeeRules();
     return {
+      // เลขบิลรันแยกตามบัญชี - บัญชีบุคคลยังไม่เคยออก = ว่าง ให้พิมพ์เลขแรกเอง
       suggestedInvoiceNo: nextInvoiceNo(lastInvoice?.invoiceNo ?? null),
+      suggestedPersonalInvoiceNo: nextInvoiceNo(lastPersonal?.invoiceNo ?? null),
+      // เลขล่าสุดที่ออกในระบบ (แสดงใต้ช่องเลขที่ให้เทียบก่อนกรอก - ผู้ใช้ 2026-09-28)
+      lastInvoiceNo: lastInvoice?.invoiceNo ?? null,
+      lastPersonalInvoiceNo: lastPersonal?.invoiceNo ?? null,
       customers: customers.map((c) => {
         const rates = c.serviceFeeRates.map(toRate);
+        const periods = toPeriods(c.accountPeriods ?? []);
         return {
           id: c.id,
           name: c.name,
@@ -195,6 +271,7 @@ export class BillingService {
           branch: c.branch,
           address: c.address,
           taxId: c.taxId,
+          account: accountOn(periods, today),
           terms: toTerms(c),
           rates,
           vehicles: c.vehicles.map((v) => {
@@ -205,6 +282,12 @@ export class BillingService {
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
             const estimate = sub && sub.taxAmount !== null ? round2(Number(sub.billFeeTotal) + Number(sub.taxAmount)) : null;
+            const requestedPlateNumber = requestsPlateNumber(sub?.plateNumberOption);
+            const urgent = sub?.urgent ?? false;
+            // ขอใช้ = จดจังหวัดอื่น (จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ) เงื่อนไขเดียวกับค่าธรรมเนียมอื่นๆ 20 ตอนยื่น (document-fee-calculator)
+            const otherProvince = !!v.registrationProvince && !!v.ownerProvince && v.registrationProvince !== v.ownerProvince;
+            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent });
+            const base = rate ? serviceFeeFromRate(rate, receiptAmount ?? estimate) : null;
             return {
               id: v.id,
               chassis: v.chassis,
@@ -215,15 +298,26 @@ export class BillingService {
               plateCategory: v.plateCategory,
               plateNumber: v.plateNumber,
               deliveredDate: iso(v.deliveredDate),
+              // บัญชีของงานคันนี้ = บัญชีของลูกค้า ณ วันส่งงาน (ย้ายบัญชีแล้วงานที่ส่งก่อนวันย้ายยังอยู่บัญชีเดิม)
+              account: accountOn(periods, iso(v.deliveredDate)!),
               recipient: v.deliveryRecipient,
               plateDelivered: v.plateDeliveredDate !== null,
               receiptNo: sub?.receiptNo ?? null,
               receiptAmount: receiptAmount ?? estimate,
               receiptAmountSource: receiptAmount !== null ? 'RECEIPT' : estimate !== null ? 'BILL_ESTIMATE' : 'NONE',
+              // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ (ค่าธรรมเนียม + ภาษี) - หน้าวางบิลเทียบกับยอดใบเสร็จจริง ไม่ตรง = เตือน
+              // (ผู้ใช้ 2026-09-28: พบรถ 2 คันที่ใบเสร็จเป็นขอใช้แต่จังหวัดในข้อมูลรถบอกไม่ใช่ ค่าบริการเลยผิดคันละ 100)
+              receiptEstimate: currentBillEstimate(v, sub, feeRules) ?? estimate,
+              receiptImageIds: sub?.receipts?.map((r) => r.id) ?? [],
               // ขอใช้เลขทะเบียน - เผื่อเคสลูกค้าชำระค่าขอใช้เลขเอง; SWAP_* (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข (ผู้ใช้ 2026-09-27)
-              requestedPlateNumber: requestsPlateNumber(sub?.plateNumberOption),
+              requestedPlateNumber,
+              urgent,
+              otherProvince,
+              // จับคู่ราคาอัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ราคาหลักตามชนิดรถ/CC + ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนตามการยื่นล่าสุด
+              // หน้าจอเปลี่ยนแถวราคา / ติ๊กค่าเพิ่มเองได้ แล้วคิดค่าดำเนินการใหม่ฝั่งหน้าจอ (บิลเก็บเป็นยอด ไม่ผูกกับแถวราคา)
               suggestedRateId: rate?.id ?? null,
-              suggestedServiceFee: rate ? rateAmountExVat(rate) : null,
+              suggestedAddOnIds: addOns.map((a) => a.id),
+              suggestedServiceFee: base === null ? null : round2(base + addOns.reduce((s, a) => s + rateAmountExVat(a), 0)),
             };
           }),
         };
@@ -264,18 +358,82 @@ export class BillingService {
     });
   }
 
+  // ---------- บัญชีรับเงินของลูกค้า (ผู้ใช้ 2026-09-26/27) ----------
+  // ประวัติบัญชีเรียงวันเริ่มใช้ + บัญชีที่ใช้วันนี้
+  async accountPeriods(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        accountPeriods: { orderBy: { effectiveFrom: 'asc' }, include: { createdBy: { select: { name: true, displayName: true } } } },
+      },
+    });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const rows = customer.accountPeriods;
+    return {
+      current: accountOn(toPeriods(rows), bangkokToday()),
+      periods: rows.map((p) => ({
+        id: p.id,
+        account: p.account,
+        effectiveFrom: iso(p.effectiveFrom),
+        remark: p.remark,
+        createdBy: nameOf(p.createdBy),
+        createdAt: p.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  // ตั้ง/ย้ายบัญชีตั้งแต่วันที่ effectiveFrom (เหตุผลบังคับ + AuditLog ของลูกค้า) - วันเดียวกับแถวเดิม = แก้แถวนั้น
+  // งานก่อนวันนั้นยังอยู่บัญชีเดิม · บัญชีที่ใช้อยู่แล้ว ณ วันนั้นตั้งซ้ำไม่ได้
+  async setAccount(customerId: string, dto: { account?: unknown; effectiveFrom?: unknown; remark?: unknown }) {
+    const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่ตั้ง/ย้ายบัญชี');
+    if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
+    if (!isBillingAccount(dto.account)) throw bad('บัญชีต้องเป็น COMPANY หรือ PERSONAL');
+    const account = dto.account;
+    const effectiveFrom = parseIsoDate(dto.effectiveFrom, 'วันที่เริ่มใช้');
+    const fromIso = iso(effectiveFrom)!;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} FOR UPDATE`;
+      const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true, accountPeriods: true } });
+      if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+      const sameDay = customer.accountPeriods.find((p) => iso(p.effectiveFrom) === fromIso);
+      const others = toPeriods(customer.accountPeriods.filter((p) => p !== sameDay));
+      // บัญชีที่มีผลก่อนวันนี้ (ไม่นับแถววันเดียวกัน) - ตั้งบัญชีเดิมซ้ำ = ไม่มีอะไรเปลี่ยน
+      const before = accountOn(others, fromIso);
+      if (sameDay?.account === account || (!sameDay && before === account)) {
+        throw bad(`ตั้งแต่ ${dmy(fromIso)} ลูกค้ารายนี้ใช้${ACCOUNT_LABEL[account]}อยู่แล้ว`);
+      }
+      const createdById = currentUser()?.id ?? null;
+      if (sameDay) {
+        await tx.customerAccountPeriod.update({ where: { id: sameDay.id }, data: { account, remark, createdById } });
+      } else {
+        await tx.customerAccountPeriod.create({ data: { customerId, account, effectiveFrom, remark, createdById } });
+      }
+      await writeAudit(tx, {
+        entity: 'Customer',
+        entityId: customerId,
+        action: 'set-account',
+        remark,
+        changes: { [`บัญชีรับเงิน ตั้งแต่ ${fromIso}`]: { from: sameDay?.account ?? before, to: account } },
+      });
+    });
+    return this.accountPeriods(customerId);
+  }
+
   // บันทึกตารางค่าดำเนินการของลูกค้าทั้งชุด (แทนที่ของเดิม) - ลำดับในรายการ = ลำดับที่ใช้จับคู่
   async replaceRates(customerId: string, dto: { rates?: unknown }) {
     if (!Array.isArray(dto?.rates)) throw bad('rates ต้องเป็นรายการ');
     const rows = (dto.rates as Array<Record<string, unknown>>).map((r, i) => {
       const label = optionalText(r?.label, 'ชื่อรายการ');
       if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
+      const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
+      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE หรือ URGENT`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
       if (!vehicleKind) throw bad(`แถวที่ ${i + 1}: ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);
       const ccMax = r.ccMax === null || r.ccMax === undefined ? null : parseMoney(r.ccMax, `แถวที่ ${i + 1}: CC น้อยกว่า`);
       if (ccMin !== null && ccMax !== null && ccMin >= ccMax) throw bad(`แถวที่ ${i + 1}: ช่วง CC ไม่ถูกต้อง`);
-      return { customerId, label, vehicleKind, ccMin, ccMax, amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`), vatInclusive: r.vatInclusive === true, sortOrder: i };
+      return { customerId, label, vehicleKind, ccMin, ccMax, amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`), vatInclusive: r.vatInclusive === true, includesReceipt: r.includesReceipt === true, kind, sortOrder: i };
     });
 
     const exists = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
@@ -302,8 +460,9 @@ export class BillingService {
 
     const extras = parseExtras(dto.extras);
 
-    const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+    const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const periods = toPeriods(customer.accountPeriods ?? []);
     if (await this.prisma.invoice.findUnique({ where: { invoiceNo }, select: { id: true } })) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
 
     // ออกบิลพร้อมกัน 2 หน้าจอด้วยรถคันเดียวกัน (พบ 2026-09-27): ล็อกแถวรถในบิลก่อน แล้วค่อยอ่าน/ตรวจรถใน transaction เดียวกัน
@@ -330,13 +489,18 @@ export class BillingService {
             return { ...l, ...lineSnapshotOf(v), deliveredDate: v.deliveredDate };
           });
 
+          // บัญชีของบิล = บัญชีของลูกค้า ณ วันส่งงานของรถ - บิลเดียวต้องอยู่บัญชีเดียว (ช่วงย้ายบัญชีต้องแยกบิล)
+          const accounts = new Set(lines.map((l) => accountOn(periods, iso(l.deliveredDate)!)));
+          if (accounts.size > 1) throw bad('รถในบิลนี้ส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี');
+          const account = [...accounts][0];
           const issueIso = issueDate.toISOString().slice(0, 10);
-          const totals = computeInvoiceTotals({ lines, extras, terms: toTerms(customer), issueDate: issueIso });
+          const totals = computeInvoiceTotals({ lines, extras, terms: termsFor(account, toTerms(customer)), issueDate: issueIso });
 
           return tx.invoice.create({
             data: {
               invoiceNo,
               issueDate,
+              account,
               customerId: customer.id,
               customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
               jobLabel,
@@ -570,7 +734,7 @@ export class BillingService {
         if (applyCurrentTerms) {
           const customer = await tx.customer.findUnique({ where: { id: invoice.customerId } });
           if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
-          terms = toTerms(customer);
+          terms = termsFor(invoice.account, toTerms(customer));
         }
         const nextExtras = extras ?? extrasOf(invoice.extras);
         const totals = computeInvoiceTotals({ lines: nextLines, extras: nextExtras, terms, issueDate: nextIssueIso });
@@ -729,7 +893,22 @@ export class BillingService {
     }));
   }
 
-  private editLog(tx: Pick<Prisma.TransactionClient, 'vehicleEditLog'>, vehicleId: string, remark: string, changes: Record<string, unknown>) {
+  // ตารางอัตราค่าธรรมเนียมขั้นยื่นเอกสาร (ชุดเดียวกับ DocumentSubmissionService.loadRuleSet) - โหลดไม่ได้ = null (ใช้ยอดตอนยื่น)
+  private async loadFeeRules(): Promise<DocumentFeeRuleSet | null> {
+    try {
+      const [carBill, carNoBill, motoBill, motoNoBill] = await Promise.all([
+        this.prisma.feeCarBillParam.findMany(),
+        this.prisma.feeCarNoBillParam.findMany(),
+        this.prisma.feeMotorcycleBillParam.findMany(),
+        this.prisma.feeMotorcycleNoBillParam.findMany(),
+      ]);
+      return { carBill: feeRows(carBill), carNoBill: feeRows(carNoBill), motoBill: feeRows(motoBill), motoNoBill: feeRows(motoNoBill) };
+    } catch {
+      return null;
+    }
+  }
+
+  private editLog(tx:Pick<Prisma.TransactionClient, 'vehicleEditLog'>, vehicleId: string, remark: string, changes: Record<string, unknown>) {
     return tx.vehicleEditLog.create({ data: { vehicleId, remark, changes: JSON.stringify(changes), editedById: currentUser()?.id ?? null } });
   }
 
@@ -758,6 +937,7 @@ export class BillingService {
     paidDate: Date | null;
     taxInvoiceNo: string | null;
     voidReason: string | null;
+    account?: string;
     updatedAt?: Date;
     lines: Array<{
       id: string;
@@ -794,6 +974,7 @@ export class BillingService {
       paidDate: iso(i.paidDate),
       taxInvoiceNo: i.taxInvoiceNo,
       voidReason: i.voidReason,
+      account: i.account,
       // หน้าแก้บิลส่งกลับมาเทียบ (expectedUpdatedAt) - รับเงิน/ยกเลิก/แก้ ทำให้ค่านี้เปลี่ยน
       updatedAt: i.updatedAt?.toISOString() ?? null,
       // จำนวนประวัติใน AuditLog - ส่งเฉพาะรายการบิล (listInvoices) หน้าจอโหลดรายการใหม่หลังทุกการกระทำอยู่แล้ว

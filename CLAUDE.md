@@ -203,6 +203,50 @@ This private repository is the shared development surface for the user, Claude C
   - Admin: `PATCH /api/admin/users/:id/password` { password, confirmPassword, remark } sets a temporary password for another user (the user changes it in เปลี่ยนรหัสผ่าน); `npm run seed:admin` no longer promotes an existing non-admin. `PATCH /api/customers/:id` { 7 fields, remark, terms?, expectedUpdatedAt } (ADMIN) with history at `GET /api/customers/:id/history`; issued invoices keep their customer snapshot.
   - Delivery: one slip = one customer and one vehicle kind (400 'ส่งรถยนต์กับจักรยานยนต์คนละใบ'); old mixed slips carry `hiddenItems` for single-kind staff. ใบยื่น/lot key = submit date + job-sheet group + customerId on every page (`jobSheetKey` / `customerDisplayNames` in `lib/job-sheet.ts`).
   - Executive overview: a submission's Bill value is the receipt amount once RECEIPT_RECEIVED, else the computed Bill + tax; jobs keyed with a future submit date are shown apart (`workingCapital.advance`) and not counted as paid. The money basis of เงินจม is still undecided (user may redesign the page).
+- Collection accounts (user 2026-09-26/27): money goes into the company account (VAT) or a personal account (e.g. SPI,
+  YMAC; no VAT). One account per customer, but it can move later (the user splits accounts to spread the tax base), so
+  `CustomerAccountPeriod` keeps the history with a start date: a job belongs to the account in effect on its date
+  (`accountOn` in `backend/src/billing/billing-account.ts`; no rows = company). Set on the billing page ("บัญชีรับเงิน",
+  `GET/POST /api/billing/customers/:id/account` `{ account, effectiveFrom, remark }`, remark mandatory, AuditLog
+  `set-account`). The billing queue returns `account` per customer and per vehicle (by delivered date). `Invoice.account`
+  = the account of its vehicles (one bill may not mix accounts). Personal-account bills never have VAT (WHT still per
+  customer), number in their own series (`suggestedPersonalInvoiceNo`), and print the personal issuer (name as on the
+  bank account, no tax ID, no address yet) with its bank account: `PERSONAL_PROFILE` in `frontend/src/lib/company-profile.ts`.
+  `ServiceFeeRate.includesReceipt` (user 2026-09-27, YMAC): the price already includes the DLT receipt, so the service
+  fee = price − that vehicle's actual receipt (`serviceFeeFromRate`; the billing page recalculates when the receipt is
+  edited). YMAC prices (all-in): new motorcycle 650 (receipt 340), 300cc 1,200 (not used yet), tax renewal 150 (100),
+  transfer 800 (105/130), transfer with fine 1,000 (305/330) - transfer and tax renewal are not billable in the system yet.
+  Auto price matching (user 2026-09-28, "fewest mistakes"): `ServiceFeeRate.kind` = `BASE` (one per vehicle, chosen by
+  vehicle kind/CC) or an add-on `OTHER_PROVINCE` (ขอใช้) / `URGENT`, added automatically when the vehicle is registered in
+  another province than the owner's / its latest submission was urgent (`suggestAddOns`; queue rows carry `urgent`, `otherProvince`, `suggestedRateId`,
+  `suggestedAddOnIds`). The billing page shows a rate dropdown + add-on checkboxes per vehicle and computes the fee
+  (typing a fee only via "กำหนดเอง"), flags rows changed from the system's choice or with no matching rate, and shows a
+  per-price breakdown before issuing. "ขอใช้" here = ขอใช้จังหวัดอื่น (registrationProvince ≠ ownerProvince, the same rule
+  as the ธรรมเนียมอื่นๆ 20 fee), kind `OTHER_PROVINCE` - not a plate-number request; it will apply to cars too.
+  Tick-only billing (user 2026-09-28): the queue is a compact list per delivery date (plate, chassis, "ใบเสร็จ x +
+  ค่าบริการ y", tags), no sideways scrolling; details (receipt, rate, add-ons, bill text, ปิดงาน) sit behind "แก้"; cars
+  with a problem (no receipt amount / no price) are flagged and cannot be ticked; a sticky bottom bar shows count + total
+  and "ออกบิล" opens a confirm dialog (invoice no., date, job label, breakdown, extras, totals, preview). Receipt check
+  (user 2026-09-28): queue rows carry `receiptEstimate` (Bill fees + tax computed at submission from the vehicle data); a
+  receipt amount that differs is a blocking "ต้องตรวจ" with a hint (+ = maybe ขอใช้ though the data says no, − = the
+  reverse) until the accountant ticks "ตรวจกับใบเสร็จจริงแล้ว" in "แก้" (found 2 real TWE cars with the wrong province).
+  `receiptEstimate` is recomputed from the vehicle's current data + the submission's options (`currentBillEstimate`), so
+  fixing the province clears the warning; "แก้" also shows the receipt photo(s) and an "แก้ข้อมูลรถ" link (ADMIN /
+  STAFF_ENTRY) to `/registration/new-vehicle/entry?focus=<chassis>&edit=1&returnTo=/accounting/billing` (same tab),
+  which opens that car's edit form and, after a successful save, returns to billing (`returnTo` only accepts the billing
+  page); the ticked cars and the open "แก้" panel are restored from sessionStorage (`billing-return-v1`). The same check runs earlier: step 5 (รับใบเสร็จ) explains a "ไม่ตรง Bill"
+  (maybe ขอใช้), links to the vehicle edit and asks for confirmation before saving; step 4 settings tag ขอใช้ cars. Company-account prices are always on top of the receipt (user); TWE: <300cc 520,
+  300-799cc 885, ขอใช้ +100, ด่วน +100 (taken as before VAT).
+- Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
+  negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
+  transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,
+  `vehicleId` null when not found) and shows a mirror table of delivered vehicles with the amount paid per vehicle. Lines
+  are pasted from Excel (chassis then amount per row). Not linked to `Invoice`. Cancel is soft with a mandatory reason
+  (AuditLog entity `CustomerPayment`). API `/api/customer-payments` (`GET ?customerId&offset`, `GET /vehicles?customerId&
+  from&to&status=paid|unpaid`, `POST /match`, `POST`, `POST /:id/cancel`), access ADMIN / ACCOUNTANT / STAFF_CAR
+  (STAFF_CAR matches and sees cars only). Accounting flow decided with the user but not built yet:
+  Yamaha monthly bill to YM (company account, small 20 → 21 from 2027-01-01 → 22 from 2028-01-01, large 50, + 9,000),
+  cross-account netting, staff cash advance with a 100-baht shortage tolerance, subcontractor WHT (ภ.ง.ด.3/53), payroll.
 - Owner names at vehicle entry: without finance the form requires `ชื่อผู้ถือกรรมสิทธิ์` (stored in `VehicleOwner.name`); with finance the registered owner is the finance company name (read-only) and the form requires `ชื่อผู้ครอบครอง` (stored in `VehicleOwner.hirerName`).
 
 ## Login, roles, and customer portal (added 2026-09-22, branch feature/login)
