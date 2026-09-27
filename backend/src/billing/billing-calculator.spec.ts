@@ -105,15 +105,27 @@ describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด�
   });
 
   it('adds the ขอใช้ (other-province) add-on for other-province cars and the urgent add-on for urgent submissions', () => {
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false })).toEqual([]);
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true, requestedPlateNumber: false }).map((r) => r.id)).toEqual(['plate', 'urgent']);
-    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true, requestedPlateNumber: false })).toEqual([]); // motorcycle-only add-ons
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false }).map((r) => r.id)).toEqual(['plate', 'urgent']);
+    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false })).toEqual([]); // motorcycle-only add-ons
   });
 
   it('adds the ขอใช้เลข (plate number request) add-on when the vehicle requested a plate number (Spac EV)', () => {
     const withPlateRow = [...rates, row({ id: 'plateReq', kind: 'PLATE_REQUEST', amount: 98.13, sortOrder: 4 })];
-    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: true }).map((r) => r.id)).toEqual(['plateReq']);
-    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false })).toEqual([]);
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: true, transferNotice: false }).map((r) => r.id)).toEqual(['plateReq']);
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
+  });
+
+  it('adds the แจ้งย้าย add-on only when the vehicle actually goes through แจ้งย้าย, separately from ขอใช้ (Spac EV)', () => {
+    const withTransferRow = [...rates, row({ id: 'transfer', kind: 'TRANSFER_NOTICE', amount: 182.24, sortOrder: 5 })];
+    expect(
+      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: true }).map((r) => r.id),
+    ).toEqual(['transfer']);
+    // otherProvince (จดจังหวัดอื่นจากเจ้าของรถ) และ transferNotice (จดต่างจังหวัดจากกรุงเทพฯ) เป็นเงื่อนไขคนละอย่าง ไม่ผูกกัน
+    expect(
+      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: true, urgent: false, requestedPlateNumber: false, transferNotice: false }).map((r) => r.id),
+    ).toEqual(['plate']);
+    expect(suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
   });
 });
 

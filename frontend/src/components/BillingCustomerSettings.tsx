@@ -320,6 +320,7 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                       <option value="OTHER_PROVINCE">ค่าเพิ่ม: ขอใช้ (จดจังหวัดอื่น)</option>
                       <option value="URGENT">ค่าเพิ่ม: ด่วน</option>
                       <option value="PLATE_REQUEST">ค่าเพิ่ม: ขอใช้เลขทะเบียน</option>
+                      <option value="TRANSFER_NOTICE">ค่าเพิ่ม: แจ้งย้าย</option>
                     </select>
                   </td>
                   <td>
