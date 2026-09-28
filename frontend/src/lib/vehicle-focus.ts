@@ -15,8 +15,9 @@ export function sameChassis(a: string | null | undefined, b: string): boolean {
   return !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
 }
 
-// หน้ารับเอกสารสลับเลขกลับ - แถวของงานแสดงทั้งเลขตัวถังรถเก่าและรถใหม่ที่ลิงก์ไว้ จึง focus ได้ทั้งสองคัน
-export const PLATE_SWAP_RETURN_PAGE = "/registration/plate-swap/old-new/return";
+// หน้ารับใบเสร็จของงานสลับเลข (เดิมชื่อ "รับเอกสารกลับ" แยกเป็น 3 ขั้นตั้งแต่ 2026-09-28: รับใบเสร็จ/รับป้าย/รับเล่ม
+// แต่ "งานเสร็จ" ยังตัดสินด้วยรับใบเสร็จอย่างเดียวเหมือนเดิม จึงยังพาไปหน้านี้) - แถวของงานแสดงทั้งเลขตัวถังรถเก่าและรถใหม่ที่ลิงก์ไว้ จึง focus ได้ทั้งสองคัน
+export const PLATE_SWAP_RETURN_PAGE = "/registration/plate-swap/car/old-new/receive-receipt";
 
 // หน้า/แท็บของแต่ละขั้นที่รถรออยู่ - ต่างจาก STAGES.href ของภาพรวมตรงที่ชี้ไปหน้าที่มีรายการรถจริง (ไม่ใช่หน้าเมนู)
 const STAGE_PAGES: Record<string, string> = {

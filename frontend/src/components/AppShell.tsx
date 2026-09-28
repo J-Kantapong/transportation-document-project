@@ -8,9 +8,9 @@ import { FocusVehicleRow } from "./FocusVehicleRow";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
   type RegistrationSubtask,
   NEW_VEHICLE_SUBTASKS,
-  PLATE_SWAP_SUBTASKS,
   REGISTRATION_CATEGORIES,
   YAMAHA_RELOCATION_SUBTASKS,
+  plateSwapSubtasks,
 } from "@/lib/categories";
 import {
   type AuthUser,
@@ -34,9 +34,10 @@ interface Crumb {
   href?: string; // ไม่มี href = หัวข้อที่ไม่มีหน้าของตัวเอง (เช่น งานบัญชี)
 }
 
+// การสลับเลขแยกรถยนต์/มอเตอร์ไซค์ก่อน (ผู้ใช้ 2026-09-28) - รวมงานย่อยของทั้งสองประเภทไว้ค้นหา breadcrumb ในที่เดียว
 const SUBTASKS_BY_CATEGORY: Record<string, RegistrationSubtask[]> = {
   "/registration/new-vehicle": NEW_VEHICLE_SUBTASKS,
-  "/registration/plate-swap": PLATE_SWAP_SUBTASKS,
+  "/registration/plate-swap": [...plateSwapSubtasks("car"), ...plateSwapSubtasks("moto")],
   "/registration/yamaha-relocation": YAMAHA_RELOCATION_SUBTASKS,
 };
 
@@ -48,6 +49,8 @@ const DETAIL_CRUMBS: Record<string, string> = {
   "/registration/new-vehicle/receive-plate/moto": "มอเตอร์ไซค์",
   "/registration/new-vehicle/receive-book/car": "รถยนต์",
   "/registration/new-vehicle/receive-book/moto": "มอเตอร์ไซค์",
+  "/registration/plate-swap/car": "รถยนต์",
+  "/registration/plate-swap/moto": "มอเตอร์ไซค์",
 };
 
 function within(pathname: string, href: string): boolean {
@@ -66,10 +69,15 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (!category) return [];
   const crumbs: Crumb[] = [{ label: category.title, href: category.href }];
   const subtask = SUBTASKS_BY_CATEGORY[category.href]?.find((s) => within(pathname, s.href));
-  if (subtask) crumbs.push({ label: subtask.title, href: subtask.href });
   const detail = Object.entries(DETAIL_CRUMBS).find(([href]) => within(pathname, href));
-  if (detail) crumbs.push({ label: detail[1], href: detail[0] });
-  return crumbs;
+  // ทั้งงานย่อยและหน้าย่อยต่างเป็นต้นทางของ pathname อยู่แล้ว จึงเรียงตามความลึกของ path เสมอ
+  // (พบ 2026-09-28: การสลับเลขมีประเภทรถอยู่ "เหนือ" งานย่อย /plate-swap/car/old-new แต่เดิมดันงานย่อยขึ้นก่อน
+  //  breadcrumb จึงขึ้นสลับกันเป็น "การสลับเลข / รถเก่า กับ รถใหม่ / รถยนต์" - ของรถจดใหม่ลึกกว่าจึงยังอยู่หลังเหมือนเดิม)
+  const rest: Crumb[] = [];
+  if (subtask) rest.push({ label: subtask.title, href: subtask.href });
+  if (detail) rest.push({ label: detail[1], href: detail[0] });
+  rest.sort((a, b) => (a.href ?? "").split("/").length - (b.href ?? "").split("/").length);
+  return [...crumbs, ...rest];
 }
 
 // ทุกส่วนของ breadcrumb กดได้ (ผู้ใช้ 2026-09-24) ยกเว้นหน้าที่อยู่ตอนนี้ และหน้าที่บทบาทนี้เปิดไม่ได้

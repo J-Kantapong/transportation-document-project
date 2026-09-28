@@ -1,4 +1,4 @@
-// ค่าใช้จ่ายงานสลับเลข "รถเก่า <-> รถใหม่" ของรถยนต์ - ตัวเลขจากผู้ใช้ 2026-09-22 (ยังไม่มีอัตราจักรยานยนต์)
+// ค่าใช้จ่ายงานสลับเลข - ตัวเลขรถยนต์จากผู้ใช้ 2026-09-22, รถจักรยานยนต์จากผู้ใช้ 2026-09-28
 // frontend/src/lib/plate-swap-fee.ts มีสำเนาไว้แสดงยอดสดในฟอร์ม - แก้ให้ตรงกันทั้งสองที่
 // Bill (ใบเสร็จกรมขนส่ง): รายการพื้นฐาน 3 รายการ + รายการตามที่มาของเลขทะเบียนใหม่ (numberSource) + แผ่นป้ายที่ติ๊กซื้อ
 // No Bill: ลงขัน 200 บาท เสมอ
@@ -39,10 +39,35 @@ export const PLATE_SWAP_CAR_NO_BILL_ITEMS: FeeItem[] = [
   { label: 'ค่าอากร', amount: 10 },
 ];
 
+// --- รถจักรยานยนต์ (ผู้ใช้ 2026-09-28) ---------------------------------------------------------
+// ต่างจากรถยนต์ 4 จุด: ค่าขอแก้ไขฯ 10 (รถยนต์ 50), ค่าแผ่นป้าย 100 (รถยนต์ 200), ลงขัน 100 (รถยนต์ 200)
+// และ "ไม่มีตัวเลือกเลขประมูล/ชุดสงวน" - ใช้เลขที่ไม่เคยออกให้รถคันอื่น 500 เสมอ จึงไม่มี numberSource ให้เลือก
+// อีกจุดที่รถยนต์ไม่มีคือ "งานด่วน" บวก 50 ใน No Bill (ชื่อรายการตามงานจดรถใหม่ที่ใช้ "ลงขันด่วนเพิ่ม" กับมอเตอร์ไซค์)
+export const PLATE_SWAP_MOTO_BASE_ITEMS: FeeItem[] = [
+  { label: 'คำขอ', amount: 5 },
+  { label: 'ใบแทนเครื่องหมายการเสียภาษีประจำปี', amount: 20 },
+  { label: 'ค่าขอแก้ไขเพิ่มเติมรายการในทะเบียนและใบคู่มือจดทะเบียน', amount: 10 },
+];
+
+export const PLATE_SWAP_MOTO_NUMBER_ITEM: FeeItem = { label: 'ขอใช้เลขทะเบียนที่ไม่เคยออกให้รถคันอื่น', amount: 500 };
+export const PLATE_SWAP_MOTO_PLATE_ITEM: FeeItem = { label: 'ค่าแผ่นป้ายทะเบียนรถจักรยานยนต์', amount: 100 };
+
+export const PLATE_SWAP_MOTO_NO_BILL_ITEMS: FeeItem[] = [
+  { label: 'ลงขัน', amount: 100 },
+  { label: 'ค่าอากร', amount: 10 },
+];
+
+export const PLATE_SWAP_MOTO_URGENT_ITEM: FeeItem = { label: 'ลงขันด่วนเพิ่ม', amount: 50 };
+
 export interface PlateSwapFeeOptions {
   numberSource: PlateSwapNumberSource;
   buyNormalPlate: boolean;
   buyAuctionPlate: boolean;
+}
+
+export interface PlateSwapMotoFeeOptions {
+  buyNormalPlate: boolean; // ค่าแผ่นป้ายรถจักรยานยนต์ (ติ๊กซื้อ)
+  urgent: boolean; // งานด่วน +50 (No Bill)
 }
 
 export interface PlateSwapFees {
@@ -72,5 +97,17 @@ export function calculatePlateSwapCarFees(options: PlateSwapFeeOptions): PlateSw
   const noBillTotal = sum(noBillItems);
   const dutyTotal = dutyAmountOf(noBillItems);
   // ยอดรวมไม่นับค่าอากร - ค่าอากรแสดงแยกบรรทัดของตัวเอง (ผู้ใช้ 2026-09-23)
+  return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
+}
+
+// ค่าใช้จ่ายงานสลับเลขของรถจักรยานยนต์ (ผู้ใช้ 2026-09-28) - ไม่มี numberSource ให้เลือกเหมือนรถยนต์
+export function calculatePlateSwapMotoFees(options: PlateSwapMotoFeeOptions): PlateSwapFees {
+  const billItems: FeeItem[] = [...PLATE_SWAP_MOTO_BASE_ITEMS, PLATE_SWAP_MOTO_NUMBER_ITEM];
+  if (options.buyNormalPlate) billItems.push(PLATE_SWAP_MOTO_PLATE_ITEM);
+  const noBillItems = [...PLATE_SWAP_MOTO_NO_BILL_ITEMS];
+  if (options.urgent) noBillItems.push(PLATE_SWAP_MOTO_URGENT_ITEM);
+  const billTotal = sum(billItems);
+  const noBillTotal = sum(noBillItems);
+  const dutyTotal = dutyAmountOf(noBillItems);
   return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
 }

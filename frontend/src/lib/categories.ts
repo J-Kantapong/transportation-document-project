@@ -42,8 +42,14 @@ export const YAMAHA_RELOCATION_SUBTASKS: RegistrationSubtask[] = [
   { title: "แจ้งย้ายรถใหญ่", href: "/registration/yamaha-relocation/large" },
 ];
 
-// งานย่อยของ "การสลับเลข" (ผู้ใช้ 2026-09-22) - รถเก่า กับ รถเก่า ยังรอเงื่อนไข
-export const PLATE_SWAP_SUBTASKS: RegistrationSubtask[] = [
-  { title: "รถเก่า กับ รถใหม่ (รถยนต์)", href: "/registration/plate-swap/old-new" },
-  { title: "รถเก่า กับ รถเก่า", href: "/registration/plate-swap/old-old" },
-];
+// งานย่อยของ "การสลับเลข" แยกตามประเภทรถ (ผู้ใช้ 2026-09-28: รถยนต์/มอเตอร์ไซค์ก่อน แล้วค่อยแตกเป็น 2 เคสเดิม)
+// รถเก่า กับ รถเก่า (ทั้งสองประเภทรถ) และมอเตอร์ไซค์ทั้งหมด ยังรอเงื่อนไขจากผู้ใช้ (EmptyWorkPage)
+export type PlateSwapVehicleKind = "car" | "moto";
+
+export function plateSwapSubtasks(kind: PlateSwapVehicleKind): RegistrationSubtask[] {
+  const label = kind === "car" ? "รถยนต์" : "รถจักรยานยนต์";
+  return [
+    { title: `รถเก่า กับ รถใหม่ (${label})`, href: `/registration/plate-swap/${kind}/old-new` },
+    { title: "รถเก่า กับ รถเก่า", href: `/registration/plate-swap/${kind}/old-old` },
+  ];
+}

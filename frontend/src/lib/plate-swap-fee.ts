@@ -70,4 +70,34 @@ export function calculatePlateSwapCarFees(options: {
   return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
 }
 
+// --- รถจักรยานยนต์ (ผู้ใช้ 2026-09-28) ---------------------------------------------------------
+// ต่างจากรถยนต์: ค่าขอแก้ไขฯ 10, ค่าแผ่นป้าย 100, ลงขัน 100, ไม่มีตัวเลือกเลขประมูล/ชุดสงวน (ใช้เลขที่ไม่เคยออก 500 เสมอ)
+// และมี "งานด่วน" บวก 50 ใน No Bill ซึ่งฝั่งรถยนต์ไม่มี
+export const PLATE_SWAP_MOTO_BASE_ITEMS: FeeItem[] = [
+  { label: "คำขอ", amount: 5 },
+  { label: "ใบแทนเครื่องหมายการเสียภาษีประจำปี", amount: 20 },
+  { label: "ค่าขอแก้ไขเพิ่มเติมรายการในทะเบียนและใบคู่มือจดทะเบียน", amount: 10 },
+];
+
+export const PLATE_SWAP_MOTO_NUMBER_ITEM: FeeItem = { label: "ขอใช้เลขทะเบียนที่ไม่เคยออกให้รถคันอื่น", amount: 500 };
+export const PLATE_SWAP_MOTO_PLATE_ITEM: FeeItem = { label: "ค่าแผ่นป้ายทะเบียนรถจักรยานยนต์", amount: 100 };
+
+export const PLATE_SWAP_MOTO_NO_BILL_ITEMS: FeeItem[] = [
+  { label: "ลงขัน", amount: 100 },
+  { label: "ค่าอากร", amount: 10 },
+];
+
+export const PLATE_SWAP_MOTO_URGENT_ITEM: FeeItem = { label: "ลงขันด่วนเพิ่ม", amount: 50 };
+
+export function calculatePlateSwapMotoFees(options: { buyNormalPlate: boolean; urgent: boolean }): PlateSwapFees {
+  const billItems: FeeItem[] = [...PLATE_SWAP_MOTO_BASE_ITEMS, PLATE_SWAP_MOTO_NUMBER_ITEM];
+  if (options.buyNormalPlate) billItems.push(PLATE_SWAP_MOTO_PLATE_ITEM);
+  const noBillItems = [...PLATE_SWAP_MOTO_NO_BILL_ITEMS];
+  if (options.urgent) noBillItems.push(PLATE_SWAP_MOTO_URGENT_ITEM);
+  const billTotal = sum(billItems);
+  const noBillTotal = sum(noBillItems);
+  const dutyTotal = dutyAmountOf(noBillItems);
+  return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
+}
+
 export const formatBaht = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 });
