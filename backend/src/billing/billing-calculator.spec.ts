@@ -23,6 +23,31 @@ describe('computeInvoiceTotals', () => {
     expect(t).toMatchObject({ feeTotal: 1000, serviceTotal: 1400, vatAmount: 98, whtAmount: 42, grossTotal: 2498, netTotal: 2456 });
   });
 
+  it('custom lines: fee has no VAT or WHT, service has both, goods has VAT but no WHT', () => {
+    const t = computeInvoiceTotals({
+      lines: [],
+      extras: [],
+      items: [
+        { kind: 'FEE', amount: 340 },
+        { kind: 'SERVICE', amount: 1000 },
+        { kind: 'GOODS', amount: 280000 },
+      ],
+      terms: terms(),
+      issueDate: '2026-09-29',
+    });
+    expect(t).toMatchObject({ feeTotal: 340, serviceTotal: 1000, goodsTotal: 280000, vatAmount: 19670, whtAmount: 30, grossTotal: 301010, netTotal: 300980 });
+  });
+
+  it('custom lines on a no-VAT (personal account) bill: goods get no VAT, service still withheld', () => {
+    const t = computeInvoiceTotals({ lines: [], extras: [], items: [{ kind: 'SERVICE', amount: 500 }, { kind: 'GOODS', amount: 1000 }], terms: terms({ vat: false }), issueDate: '2026-09-29' });
+    expect(t).toMatchObject({ vatAmount: 0, whtAmount: 15, netTotal: 1485 });
+  });
+
+  it('vehicle lines and custom lines add up on one bill', () => {
+    const t = computeInvoiceTotals({ lines: [{ receiptAmount: 340, serviceFee: 520 }], extras: [], items: [{ kind: 'FEE', amount: 100 }, { kind: 'SERVICE', amount: 480 }], terms: terms(), issueDate: '2026-09-29' });
+    expect(t).toMatchObject({ feeTotal: 440, serviceTotal: 1000, goodsTotal: 0, vatAmount: 70, whtAmount: 30 });
+  });
+
   it('ลูกค้าที่ไม่มี VAT และไม่หัก ณ ที่จ่าย', () => {
     const t = computeInvoiceTotals({ lines: [{ receiptAmount: 500, serviceFee: 300 }], extras: [], terms: terms({ vat: false, whtRate: 0 }), issueDate: '2026-09-21' });
     expect(t).toMatchObject({ vatRate: 0, vatAmount: 0, whtAmount: 0, netTotal: 800 });

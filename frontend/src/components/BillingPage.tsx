@@ -9,7 +9,9 @@ import { ACCOUNT_LABEL, billingApi, type BillingAccount, type BillingCustomer, t
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
 import { BillingAccountEditor, BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
-import { computeTotals, formatMoney, rateAmountExVat, round2, serviceFeeFromRate, termsSummary } from "@/lib/invoice";
+import { computeTotals, effectiveWhtRate, formatMoney, rateAmountExVat, round2, serviceFeeFromRate, termsSummary } from "@/lib/invoice";
+import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
+import { InvoiceItemsEditor, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
@@ -40,10 +42,6 @@ interface RowState {
   addOnBase: string[];
 }
 
-interface ExtraState {
-  label: string;
-  amountText: string;
-}
 
 const money = (text: string): number | null => {
   const n = Number.parseFloat(text.replace(/,/g, ""));
@@ -120,7 +118,8 @@ export function BillingPage() {
   const focusApplied = useRef(false);
   const returnState = useRef<BillingReturnState | null | undefined>(undefined); // งานที่เตรียมไว้ก่อนไปแก้ข้อมูลรถ (undefined = ยังไม่อ่าน)
   const [rows, setRows] = useState<Record<string, RowState>>({});
-  const [extras, setExtras] = useState<ExtraState[]>([]);
+  // บรรทัดกำหนดเองในบิลเดียวกับรถ (ผู้ใช้ 2026-09-29: งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น) แทนช่อง "ค่าใช้จ่ายอื่นๆ" เดิม
+  const [itemRows, setItemRows] = useState<ItemRow[]>([]);
   // เลขที่บิลแยกตามบัญชี (ผู้ใช้ 2026-09-27): บัญชีบริษัท IV… / บัญชีบุคคลรันชุดของตัวเอง - ช่องเลขที่บิลแสดงของบัญชีที่รถที่เลือกอยู่
   const [invoiceNos, setInvoiceNos] = useState<Record<BillingAccount, string>>({ COMPANY: "", PERSONAL: "" });
   const [lastInvoiceNos, setLastInvoiceNos] = useState<Record<BillingAccount, string | null>>({ COMPANY: null, PERSONAL: null });
@@ -139,6 +138,9 @@ export function BillingPage() {
   const [expanded, setExpanded] = useState<string | null>(null); // คันที่เปิด "แก้" อยู่
   const [fixedIds, setFixedIds] = useState<Set<string>>(new Set()); // คันที่เพิ่งแก้ข้อมูลรถเสร็จ (ป้าย "แก้ไขเรียบร้อย")
   const [confirmOpen, setConfirmOpen] = useState(false); // หน้ายืนยันออกบิล
+  // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29) null = ตามลูกค้า · checked = ยืนยันอัตราที่ไม่ตรงกับลูกค้าแล้ว
+  const [whtValue, setWhtValue] = useState<number | null>(null);
+  const [whtChecked, setWhtChecked] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
@@ -185,7 +187,7 @@ export function BillingPage() {
           }
         }
         setRows(fresh);
-        setExtras([]);
+        setItemRows([]);
         setJobLabelEdit(null);
         setInvoiceNos({ COMPANY: q.suggestedInvoiceNo, PERSONAL: q.suggestedPersonalInvoiceNo });
         setLastInvoiceNos({ COMPANY: q.lastInvoiceNo, PERSONAL: q.lastPersonalInvoiceNo });
@@ -196,7 +198,7 @@ export function BillingPage() {
           setCustomerId(shownId); // ลูกค้าอื่นเพิ่งเข้าคิวก็ยังอยู่ที่ลูกค้าเดิม
         } else {
           // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องานของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
-          setExtras([]);
+          setItemRows([]);
           setJobLabelEdit(null);
         }
       }
@@ -326,13 +328,16 @@ export function BillingPage() {
       }, new Map<string, number>())
       .entries(),
   ];
-  const draftExtras = extras.map((e) => ({ label: e.label.trim(), amount: money(e.amountText) }));
+  const draftItems = itemRowsToItems(itemRows);
+  const customerWht = customer ? effectiveWhtRate(customer.terms, issueDateIso || todayIso()) : 0;
   const totals = customer
     ? computeTotals(
         draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0, swapReceiptAmount: l.swapReceiptAmount })),
-        draftExtras.map((e) => ({ amount: e.amount ?? 0 })),
+        [],
         account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
+        draftItems,
+        whtOverrideOf(whtValue),
       )
     : null;
 
@@ -344,14 +349,16 @@ export function BillingPage() {
           issueDate: issueDateIso || todayIso(),
           customer: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
           jobLabel,
-          extras: draftExtras.filter((e) => e.label && e.amount !== null).map((e) => ({ label: e.label, amount: e.amount! })),
+          extras: [],
           vatRate: totals.vatRate,
           whtRate: totals.whtRate,
           feeTotal: totals.feeTotal,
           serviceTotal: totals.serviceTotal,
+          goodsTotal: totals.goodsTotal,
           vatAmount: totals.vatAmount,
           whtAmount: totals.whtAmount,
           netTotal: totals.netTotal,
+          items: draftItems,
           lines: draftLines.map((l) => ({
             id: l.vehicle.id,
             vehicleId: l.vehicle.id,
@@ -383,10 +390,12 @@ export function BillingPage() {
   function chooseCustomer(id: string) {
     setChecked(vehicles.map((v) => v.id), false);
     setCustomerId(id);
-    setExtras([]);
+    setItemRows([]);
     setJobLabelEdit(null);
     setSettingsOpen("");
     setMessage({ text: "" });
+    setWhtValue(null);
+    setWhtChecked(false);
   }
 
   function patchCustomer(patch: Partial<BillingCustomer>) {
@@ -411,10 +420,10 @@ export function BillingPage() {
         return fail(`ค่าดำเนินการของ ${name} ไม่ถูกต้อง - ตรวจราคาและค่าใบเสร็จ`);
       }
     }
-    for (const e of draftExtras) {
-      if (!e.label) return fail("ค่าใช้จ่ายอื่นๆ ต้องมีชื่อรายการ");
-      if (e.amount === null) return fail(`ใส่จำนวนเงินของ "${e.label}"`);
-    }
+    const itemError = itemRowsProblem(itemRows);
+    if (itemError) return fail(itemError);
+    const whtError = whtProblem(customerWht, whtValue, whtChecked);
+    if (whtError) return fail(whtError);
 
     setSaving(true);
     setMessage({ text: "กำลังออกบิล…" });
@@ -434,9 +443,13 @@ export function BillingPage() {
           plateSwapId: l.plateSwapId,
           swapReceiptAmount: l.swapReceiptAmount,
         })),
-        extras: draftExtras.map((e) => ({ label: e.label, amount: e.amount! })),
+        extras: [],
+        ...(draftItems.length ? { items: draftItems } : {}),
+        whtRate: whtOverrideOf(whtValue) ?? undefined,
       });
       returnState.current = null; // ออกบิลแล้ว - ไม่ติ๊กคันเดิมซ้ำ
+      setWhtValue(null);
+      setWhtChecked(false);
       await loadQueue(true);
       setConfirmOpen(false);
       setShowPreview(false);
@@ -467,6 +480,10 @@ export function BillingPage() {
       {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
       <Link href="/accounting/billing/customers" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
         ตั้งราคาล่วงหน้าให้ลูกค้า →
+      </Link>
+      {/* บิลที่ไม่มีรถในระบบ: งานเก่าจากระบบเดิม / ขายสินค้า (ผู้ใช้ 2026-09-29) */}
+      <Link href="/accounting/billing/custom" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
+        + บิลกำหนดเอง (งานเก่า / ขายสินค้า) →
       </Link>
 
       {loading ? (
@@ -852,6 +869,7 @@ export function BillingPage() {
                 <div style={{ display: "grid", gap: 6, fontSize: 14, minWidth: 280 }}>
                   <SumLine label="ราคาใบเสร็จ" value={totals.feeTotal} />
                   <SumLine label="ค่าบริการ" value={totals.serviceTotal} />
+                  {totals.goodsTotal > 0 && <SumLine label="ค่าสินค้า" value={totals.goodsTotal} />}
                   {totals.vatAmount > 0 && <SumLine label={`VAT ${totals.vatRate}%`} value={totals.vatAmount} />}
                   {totals.whtAmount > 0 && <SumLine label={`หัก ณ ที่จ่าย ${totals.whtRate}%`} value={-totals.whtAmount} />}
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 16, borderTop: "1px solid #d9e0ec", paddingTop: 8, fontWeight: 600, fontSize: 16, color: "#2854d9" }}>
@@ -944,39 +962,13 @@ export function BillingPage() {
                     ))}
                   </div>
                 )}
-                <div style={{ display: "grid", gap: 6 }}>
-                  {extras.map((e, i) => (
-                    <div key={i} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        type="text"
-                        value={e.label}
-                        placeholder="ค่าใช้จ่ายอื่น เช่น ค่าส่งเอกสาร"
-                        onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, label: ev.target.value } : x)))}
-                        style={{ flex: 1, minWidth: 0 }}
-                        aria-label="ชื่อรายการ"
-                      />
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={e.amountText}
-                        placeholder="จำนวนเงิน"
-                        onChange={(ev) => setExtras((prev) => prev.map((x, n) => (n === i ? { ...x, amountText: ev.target.value } : x)))}
-                        style={{ width: 110, textAlign: "right" }}
-                        aria-label="จำนวนเงิน"
-                      />
-                      <button className="text-button" onClick={() => setExtras((prev) => prev.filter((_, n) => n !== i))} aria-label="ลบรายการ">
-                        ลบ
-                      </button>
-                    </div>
-                  ))}
-                  <button className="text-button" style={{ justifySelf: "start" }} onClick={() => setExtras((prev) => [...prev, { label: "", amountText: "" }])}>
-                    + ค่าใช้จ่ายอื่นของบิลนี้
-                  </button>
-                </div>
+                <InvoiceItemsEditor rows={itemRows} onChange={setItemRows} addLabel="+ เพิ่มบรรทัดอื่นในบิลนี้ (งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น)" />
+                <WhtRatePicker defaultRate={customerWht} value={whtValue} onChange={setWhtValue} checked={whtChecked} onCheckedChange={setWhtChecked} />
                 {totals && (
                   <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
                     <SumLine label="ค่าธรรมเนียม (ตามใบเสร็จ)" value={totals.feeTotal} />
-                    <SumLine label="ค่าดำเนินการ" value={totals.serviceTotal} />
+                    <SumLine label="ค่าบริการ" value={totals.serviceTotal} />
+                    {totals.goodsTotal > 0 && <SumLine label="ค่าสินค้า" value={totals.goodsTotal} />}
                     <SumLine label={totals.vatRate ? `VAT ${totals.vatRate}%` : "VAT (ไม่มี)"} value={totals.vatAmount} />
                     <SumLine label={totals.whtRate ? `หัก ณ ที่จ่าย ${totals.whtRate}%` : "หัก ณ ที่จ่าย (ไม่มี)"} value={-totals.whtAmount} />
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: "#edf2ff", color: "#2854d9", borderRadius: 10, padding: "12px 14px", fontWeight: 600 }}>

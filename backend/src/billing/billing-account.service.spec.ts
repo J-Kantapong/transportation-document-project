@@ -79,6 +79,7 @@ describe('BillingService.createInvoice with collection accounts', () => {
       voidReason: null,
       ...data,
       lines: data.lines.createMany.data.map((l: object, n: number) => ({ id: `l${n}`, ...l })),
+    items: [],
     }));
     const prisma = {
       customer: {

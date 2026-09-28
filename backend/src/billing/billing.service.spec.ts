@@ -44,6 +44,7 @@ function service(vehicles: unknown[], existingInvoice: unknown = null, swaps: un
     voidReason: null,
     ...data,
     lines: data.lines.createMany.data.map((l: object, n: number) => ({ id: `l${n}`, ...l })),
+    items: data.items ? data.items.createMany.data.map((it: object, n: number) => ({ id: `it${n}`, ...it })) : [],
   }));
   const queryRaw = vi.fn().mockResolvedValue([]);
   const findVehicles = vi.fn().mockResolvedValue(vehicles);
@@ -70,6 +71,73 @@ const dto = (o: Record<string, unknown> = {}) => ({
   ...o,
 });
 
+describe('BillingService.createCustomInvoice', () => {
+  function customService() {
+    const create = vi.fn().mockImplementation(async ({ data }) => ({
+      id: 'i9',
+      status: 'ISSUED',
+      paidDate: null,
+      taxInvoiceNo: null,
+      voidReason: null,
+      ...data,
+      lines: [],
+      items: data.items.createMany.data.map((it: object, n: number) => ({ id: `it${n}`, ...it })),
+    }));
+    const prisma = {
+      customer: { findUnique: vi.fn().mockResolvedValue({ ...customer, accountPeriods: [] }) },
+      invoice: { create },
+    } as unknown as PrismaService;
+    return { svc: new BillingService(prisma), create };
+  }
+  const customDto = (o: Record<string, unknown> = {}) => ({
+    customerId: 'c1',
+    invoiceNo: 'IV2026-130',
+    issueDate: '2027-02-01',
+    items: [
+      { kind: 'FEE', description: 'ค่าใบเสร็จกรมขนส่ง 1กข 1234', quantity: 1, unitPrice: 340, cost: 999 },
+      { kind: 'SERVICE', description: 'ค่าบริการจดทะเบียน 1กข 1234', quantity: 1, unitPrice: 1000, cost: 200 },
+      { kind: 'GOODS', description: 'ขายรถ Toyota Vios', quantity: 1, unitPrice: 280000, cost: null },
+    ],
+    ...o,
+  });
+
+  it('prices each kind with its own tax rule and keeps cost internal (none for fees)', async () => {
+    const { svc, create } = customService();
+    const invoice = await svc.createCustomInvoice(customDto());
+    expect(invoice).toMatchObject({ feeTotal: 340, serviceTotal: 1000, goodsTotal: 280000, vatAmount: 19670, whtRate: 3, whtAmount: 30, netTotal: 300980, jobLabel: '', account: 'COMPANY' });
+    expect(invoice.items.map((it) => it.cost)).toEqual([null, 200, null]);
+    expect(create.mock.calls[0][0].data.items.createMany.data[1]).toMatchObject({ kind: 'SERVICE', sortOrder: 1 });
+  });
+
+  it('multiplies quantity by unit price on the server (motorcycle tax renewal 100 x 12)', async () => {
+    const { svc, create } = customService();
+    const invoice = await svc.createCustomInvoice(
+      customDto({ items: [{ kind: 'SERVICE', description: 'ค่าบริการต่อภาษีรถจักรยานยนต์', quantity: 12, unitPrice: 100, cost: 40, amount: 1 }] }),
+    );
+    expect(invoice).toMatchObject({ serviceTotal: 1200, vatAmount: 84, whtAmount: 36 });
+    expect(invoice.items[0]).toMatchObject({ quantity: 12, unitPrice: 100, amount: 1200, cost: 40 });
+    expect(create.mock.calls[0][0].data.items.createMany.data[0].amount).toBe(1200);
+    await expect(svc.createCustomInvoice(customDto({ items: [{ kind: 'SERVICE', description: 'x', quantity: 1.5, unitPrice: 100 }] }))).rejects.toMatchObject({
+      response: { error: expect.stringContaining('จำนวนต้องเป็นจำนวนเต็ม') },
+    });
+  });
+
+  it('takes the WHT rate chosen for the bill', async () => {
+    const { svc } = customService();
+    const invoice = await svc.createCustomInvoice(customDto({ whtRate: 1 }));
+    expect(invoice).toMatchObject({ whtRate: 1, whtAmount: 10 });
+  });
+
+  it('refuses empty bills, unknown kinds, blank descriptions and zero amounts', async () => {
+    const { svc, create } = customService();
+    await expect(svc.createCustomInvoice(customDto({ items: [] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('อย่างน้อย 1 บรรทัด') } });
+    await expect(svc.createCustomInvoice(customDto({ items: [{ kind: 'OTHER', description: 'x', quantity: 1, unitPrice: 1 }] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ประเภทต้องเป็น') } });
+    await expect(svc.createCustomInvoice(customDto({ items: [{ kind: 'GOODS', description: ' ', quantity: 1, unitPrice: 1 }] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ต้องใส่รายละเอียด') } });
+    await expect(svc.createCustomInvoice(customDto({ items: [{ kind: 'GOODS', description: 'x', quantity: 1, unitPrice: 0 }] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ต้องมากกว่า 0') } });
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe('BillingService.createInvoice', () => {
   it('คำนวณยอดฝั่ง server ตามเงื่อนไขลูกค้า ณ วันออกบิล (หัก 1% ถึงสิ้นปี)', async () => {
     const { svc } = service([vehicle()]);
@@ -77,6 +145,30 @@ describe('BillingService.createInvoice', () => {
     expect(invoice).toMatchObject({ feeTotal: 3745, serviceTotal: 900, vatAmount: 63, whtRate: 1, whtAmount: 9, netTotal: 4699 });
     expect(invoice.lines[0]).toMatchObject({ chassis: 'CH1', plateText: 'กก 7733', receiptNo: '69/0035371', serviceFee: 700, deduction: 500 });
     expect(invoice.customer.name).toBe('บริษัท เลกซัส ออโต้ ซิตี้ จำกัด');
+  });
+
+  it('bills custom lines together with vehicles, each kind taxed by its own rule', async () => {
+    const { svc, create } = service([vehicle()]);
+    const invoice = await svc.createInvoice(
+      dto({
+        extras: [],
+        items: [
+          { kind: 'FEE', description: 'ค่าธรรมเนียมงานเก่า', quantity: 1, unitPrice: 255 },
+          { kind: 'SERVICE', description: 'ค่าบริการงานเก่า', quantity: 1, unitPrice: 800, cost: 300 },
+        ],
+      }),
+    );
+    // รถ: ใบเสร็จ 3,745 ค่าบริการ 700 · งานเก่า: ธรรมเนียม 255 บริการ 800 · VAT 7% ของ 1,500 · หัก 1% (อัตราพิเศษ) ของ 1,500
+    expect(invoice).toMatchObject({ feeTotal: 4000, serviceTotal: 1500, goodsTotal: 0, vatAmount: 105, whtAmount: 15, netTotal: 5590 });
+    expect(invoice.items.map((it) => it.description)).toEqual(['ค่าธรรมเนียมงานเก่า', 'ค่าบริการงานเก่า']);
+    expect(create.mock.calls[0][0].data.lines.createMany.data).toHaveLength(1);
+  });
+
+  it('uses the WHT rate chosen for this bill instead of the customer default', async () => {
+    const { svc } = service([vehicle()]);
+    const invoice = await svc.createInvoice(dto({ whtRate: 3 }));
+    expect(invoice).toMatchObject({ whtRate: 3, whtAmount: 27 });
+    await expect(svc.createInvoice(dto({ whtRate: 150 }))).rejects.toMatchObject({ response: { error: expect.stringContaining('อัตราหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0 ถึง 100') } });
   });
 
   it('พ้นวันสิ้นสุดอัตราพิเศษแล้วกลับไปหัก 3%', async () => {
@@ -179,6 +271,8 @@ function invoiceRow(id: string, status: string, issueDate: string, o: Record<str
     customerSnapshot: { name: 'Lexus', branch: null, address: null, taxId: null },
     jobLabel: 'จดทะเบียนรถยนต์',
     extras: [],
+    items: [],
+    goodsTotal: 0,
     vatRate: 7,
     whtRate: 3,
     feeTotal: 0,

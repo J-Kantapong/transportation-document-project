@@ -9,7 +9,21 @@ import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2, sortLin
 // (พบ 2026-09-27: เดิมพิมพ์ออกมาเหมือนบิลปกติ ถ้าหลุดไปถึงลูกค้าจะเท่ากับเรียกเก็บรถชุดเดียวกันซ้ำกับบิลใบใหม่)
 export type PrintableInvoice = Pick<
   Invoice,
-  "invoiceNo" | "issueDate" | "customer" | "jobLabel" | "extras" | "vatRate" | "whtRate" | "feeTotal" | "serviceTotal" | "vatAmount" | "whtAmount" | "netTotal" | "lines"
+  | "invoiceNo"
+  | "issueDate"
+  | "customer"
+  | "jobLabel"
+  | "extras"
+  | "vatRate"
+  | "whtRate"
+  | "feeTotal"
+  | "serviceTotal"
+  | "goodsTotal"
+  | "vatAmount"
+  | "whtAmount"
+  | "netTotal"
+  | "lines"
+  | "items"
 > &
   Partial<Pick<Invoice, "status" | "voidReason" | "account">>;
 
@@ -33,6 +47,8 @@ export const ATTACHMENT_ROWS_PER_PAGE = 40;
 // เลขที่เอกสารแนบล้อกับเลขใบวางบิล (ผู้ใช้ 2026-09-28): IV2026-121 -> IV2026-121-A พิมพ์ใต้เลขที่บนหน้าบิลและหัวเอกสารแนบทุกหน้า
 const attachmentNo = (inv: PrintableInvoice) => (inv.invoiceNo ? `${inv.invoiceNo}-A` : "—");
 const attachmentPageCount = (inv: PrintableInvoice) => Math.max(1, Math.ceil(inv.lines.length / ATTACHMENT_ROWS_PER_PAGE));
+// บิลกำหนดเองที่ไม่มีรถ (ผู้ใช้ 2026-09-29) ไม่มีเอกสารแนบรายคัน - หน้าบิลหน้าเดียว
+const hasAttachment = (inv: PrintableInvoice) => inv.lines.length > 0;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
@@ -47,7 +63,7 @@ const voidNoteHtml = (inv: PrintableInvoice) =>
 
 function headHtml(inv: PrintableInvoice, docTitle: string): string {
   return `<div class="co">${issuerHtml(inv)}
-<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))} (${attachmentPageCount(inv)} หน้า)<br>วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
+<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>${hasAttachment(inv) ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))} (${attachmentPageCount(inv)} หน้า)<br>` : ""}วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
 ${isVoid(inv) ? `<div style="margin-top:3mm">${voidNoteHtml(inv)}</div>` : ""}
 <div class="meta"><span class="k">ชื่อลูกค้า</span><br><b>${escapeHtml(customerTitle(inv.customer))}</b><br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(inv.customer.taxId || "—")}<br>${escapeHtml(inv.customer.address || "")}</span></div>`;
@@ -61,11 +77,12 @@ function invoicePageHtml(inv: PrintableInvoice): string {
 <table class="items"><colgroup><col><col style="width:12%"><col style="width:18%"><col style="width:20%"></colgroup>
 <thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th class="r">จำนวนเงิน (บาท)</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="foot"><div><span class="k">เงื่อนไขการชำระเงิน :</span><br>${paymentLinesOf(inv).map(escapeHtml).join("<br>")}<br>
-<span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</span></div>
+${hasAttachment(inv) ? `<span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</span>` : ""}</div>
 <div class="tot"><div><span>ค่าธรรมเนียม</span><span>${formatMoney(inv.feeTotal)}</span></div>
 <div><span>ค่าบริการ</span><span>${formatMoney(inv.serviceTotal)}</span></div>
+${inv.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${formatMoney(inv.goodsTotal)}</span></div>` : ""}
 ${inv.vatRate > 0 ? `<div><span>ภาษีมูลค่าเพิ่ม ${inv.vatRate}%</span><span>${formatMoney(inv.vatAmount)}</span></div>` : ""}
-${inv.whtRate > 0 ? `<div><span>ภาษีหัก ณ ที่จ่าย ${inv.whtRate}%</span><span>${formatMoney(inv.whtAmount)}</span></div>` : ""}
+${inv.whtRate > 0 ? `<div><span>ภาษีหัก ณ ที่จ่าย ${inv.whtRate}%${inv.goodsTotal > 0 ? " (จากค่าบริการ)" : ""}</span><span>${formatMoney(inv.whtAmount)}</span></div>` : ""}
 <div class="g"><span>จำนวนเงินทั้งสิ้น</span><span>${formatMoney(inv.netTotal)}</span></div></div></div>
 <div class="baht">(${escapeHtml(bahtText(inv.netTotal))})</div>
 <div class="sign"><div>ผู้ออกใบวางบิล/ใบแจ้งหนี้<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div><div>ผู้รับสินค้า/บริการ<br><span class="k">วันที่ : ____/____/______</span></div></div>
@@ -78,6 +95,8 @@ function attachmentPagesHtml(inv: PrintableInvoice): string[] {
   const vatOf = (fee: number) => round2((fee * inv.vatRate) / 100);
   const serviceCars = round2(lines.reduce((s, l) => s + l.serviceFee, 0));
   const vatCars = round2(lines.reduce((s, l) => s + vatOf(l.serviceFee), 0));
+  // ค่าธรรมเนียมของรถในตารางนี้ = ทั้งบิลหักบรรทัดค่าธรรมเนียมกำหนดเอง (พิมพ์ในหน้าบิล ไม่อยู่ในตารางรายคัน)
+  const feeCars = round2(inv.feeTotal - inv.items.filter((it) => it.kind === "FEE").reduce((s, it) => s + it.amount, 0));
 
   return Array.from({ length: pageCount }, (_, p) => {
     const slice = lines.slice(p * ATTACHMENT_ROWS_PER_PAGE, (p + 1) * ATTACHMENT_ROWS_PER_PAGE);
@@ -90,11 +109,12 @@ function attachmentPagesHtml(inv: PrintableInvoice): string[] {
       .join("");
     const last = p === pageCount - 1;
     const totalRow = last
-      ? `<tr class="sum"><td colspan="5">รวม ${lines.length} คัน</td><td class="r">${formatMoney(inv.feeTotal)}</td><td class="r">${formatMoney(serviceCars)}</td><td class="r">${formatMoney(vatCars)}</td><td class="r">${formatMoney(round2(inv.feeTotal + serviceCars + vatCars))}</td></tr>`
+      ? `<tr class="sum"><td colspan="5">รวม ${lines.length} คัน</td><td class="r">${formatMoney(feeCars)}</td><td class="r">${formatMoney(serviceCars)}</td><td class="r">${formatMoney(vatCars)}</td><td class="r">${formatMoney(round2(feeCars + serviceCars + vatCars))}</td></tr>`
       : "";
     const deductions = [...new Set(lines.filter((l) => l.deduction > 0).map((l) => `${l.deductionNote || "หักยอด"} ${formatMoney(l.deduction)} บาท`))];
     const notes = last
       ? `${deductions.length ? `<div class="k note">* ${deductions.map(escapeHtml).join(" / ")}</div>` : ""}
+${inv.items.length ? `<div class="k note">รายการอื่นของบิลนี้ ${inv.items.length} บรรทัด (${inv.items.map((it) => `${escapeHtml(it.description)} ${formatMoney(it.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้</div>` : ""}
 ${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื่นๆ ของบิล (${inv.extras.map((e) => `${escapeHtml(e.label)} ${formatMoney(e.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้</div>` : ""}`
       : "";
     return `<section class="page att">${voidMarkHtml(inv)}<div class="atthead"><div><b>เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</b> <span class="k">(ของใบวางบิล ${escapeHtml(inv.invoiceNo || "—")})</span> · ${escapeHtml(customerTitle(inv.customer))}${isVoid(inv) ? ` · ${voidNoteHtml(inv)}` : ""}<br>
@@ -158,7 +178,7 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
 </head>
 <body>
 ${invoicePageHtml(inv)}
-${attachmentPagesHtml(inv).join("\n")}
+${hasAttachment(inv) ? attachmentPagesHtml(inv).join("\n") : ""}
 </body>
 </html>`;
 }

@@ -31,8 +31,6 @@ export function BillingCustomerRatesPage() {
 
   useEffect(() => {
     if (!customerId) return;
-    setLoadingDetail(true);
-    setError("");
     Promise.all([billingApi.customerTerms(customerId), billingApi.getRates(customerId)])
       .then(([t, r]) => {
         setTerms(t.terms);
@@ -50,6 +48,8 @@ export function BillingCustomerRatesPage() {
     setCustomerId(id);
     setTerms(null);
     setRates(null);
+    setLoadingDetail(true);
+    setError("");
     setSettingsOpen("rates");
   }
 

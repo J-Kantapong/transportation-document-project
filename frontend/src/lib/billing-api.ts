@@ -203,6 +203,20 @@ export interface InvoiceLine {
   swapReceiptAmount: number | null;
 }
 
+// บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29): FEE = ค่าธรรมเนียมราชการ ไม่มี VAT ไม่หัก · SERVICE = ค่าบริการ VAT + หัก · GOODS = ขายสินค้า VAT ไม่หัก
+export type InvoiceItemKind = "FEE" | "SERVICE" | "GOODS";
+export const ITEM_KIND_LABEL: Record<InvoiceItemKind, string> = { FEE: "ค่าธรรมเนียมราชการ", SERVICE: "ค่าบริการ", GOODS: "ขายสินค้า" };
+
+export interface InvoiceItem {
+  id?: string;
+  kind: InvoiceItemKind;
+  description: string;
+  quantity: number; // จำนวน เช่น 12 คัน
+  unitPrice: number; // ราคาต่อหน่วยก่อน VAT
+  amount: number; // quantity x unitPrice (backend คำนวณเองตอนบันทึก)
+  cost: number | null; // ต้นทุนต่อหน่วย ภายใน ไม่พิมพ์บนบิล (null = ไม่ทราบ, FEE = null เสมอ)
+}
+
 export interface Invoice {
   id: string;
   invoiceNo: string;
@@ -215,9 +229,11 @@ export interface Invoice {
   whtRate: number;
   feeTotal: number;
   serviceTotal: number;
+  goodsTotal: number;
   vatAmount: number;
   whtAmount: number;
   netTotal: number;
+  items: InvoiceItem[];
   status: "ISSUED" | "PAID" | "VOID";
   paidDate: string | null;
   taxInvoiceNo: string | null;
@@ -241,6 +257,8 @@ export interface UpdateInvoiceInput {
   removeLineIds?: string[];
   refreshLineIds?: string[];
   applyCurrentTerms?: boolean;
+  items?: InvoiceItem[]; // บรรทัดกำหนดเอง ส่งมา = แทนที่ทั้งชุด
+  whtRate?: number; // ส่งมา = ใช้อัตรานี้ (มาก่อน applyCurrentTerms)
   expectedUpdatedAt?: string | null;
   remark: string;
 }
@@ -308,6 +326,24 @@ export interface CreateInvoiceInput {
     swapReceiptAmount?: number | null;
   }>;
   extras: Array<{ label: string; amount: number }>;
+  whtRate?: number; // อัตราหัก ณ ที่จ่ายของบิลนี้ ไม่ส่ง = ตามเงื่อนไขลูกค้า (ผู้ใช้ 2026-09-29)
+}
+
+// บิลกำหนดเอง (ผู้ใช้ 2026-09-29) - งานเก่าจากระบบเดิม / ขายสินค้า ไม่มีรถ
+export interface CreateCustomInvoiceInput {
+  customerId: string;
+  invoiceNo: string;
+  issueDate: string;
+  jobLabel: string;
+  items: InvoiceItem[];
+  whtRate?: number;
+}
+
+export interface NextInvoiceNumbers {
+  suggestedInvoiceNo: string;
+  suggestedPersonalInvoiceNo: string;
+  lastInvoiceNo: string | null;
+  lastPersonalInvoiceNo: string | null;
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
@@ -348,6 +384,9 @@ export const billingApi = {
   listInvoices: (params: { offset?: number; limit?: number } = {}) =>
     request<InvoiceList>(`/api/billing/invoices?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`),
   createInvoice: (data: CreateInvoiceInput) => request<{ invoice: Invoice }>("/api/billing/invoices", json("POST", data)),
+  createCustomInvoice: (data: CreateCustomInvoiceInput) => request<{ invoice: Invoice }>("/api/billing/custom-invoices", json("POST", data)),
+  nextInvoiceNumbers: () => request<NextInvoiceNumbers>("/api/billing/next-invoice-no"),
+  getInvoice: (id: string) => request<{ invoice: Invoice }>(`/api/billing/invoices/${encodeURIComponent(id)}`),
   markInvoicePaid: (id: string, data: { paidDate: string; taxInvoiceNo: string }) =>
     request<{ invoice: Invoice }>(`/api/billing/invoices/${id}/paid`, json("PATCH", data)),
   voidInvoice: (id: string, reason: string) => request<{ invoice: Invoice }>(`/api/billing/invoices/${id}/void`, json("PATCH", { reason })),
