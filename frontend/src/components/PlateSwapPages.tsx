@@ -1,22 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, fetchAuthedBlob, receiptImageUrl } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError, fetchAuthedBlob, plateSwapBookPhotoImageUrl, plateSwapPlatePhotoImageUrl, receiptImageUrl } from "@/lib/api";
 import { getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import {
   plateSwapApi,
   type PlateSwap,
+  type PlateSwapKind,
   type PlateSwapNewVehicle,
+  type PlateSwapVehicleClass,
   type PlateSwapStatusFilter,
   type PlateSwapVehicleHit,
 } from "@/lib/plate-swap-api";
 import {
   calculatePlateSwapCarFees,
+  calculatePlateSwapMotoFees,
   dutyAmountOf,
   formatBaht,
   PLATE_SWAP_CAR_NUMBER_ITEMS,
+  PLATE_SWAP_MOTO_NUMBER_ITEM,
+  PLATE_SWAP_MOTO_PLATE_ITEM,
+  PLATE_SWAP_MOTO_URGENT_ITEM,
   type PlateSwapNumberSource,
 } from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
@@ -25,15 +31,42 @@ import { DateInput } from "@/components/DateInput";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
-// หน้ารับเอกสารกลับ (PlateSwapReturnPage): ถ่าย/แนบรูปใบเสร็จ (บังคับ) แล้วยืนยันวันที่รับเอกสารกลับ
+// หน้ารับใบเสร็จ (PlateSwapReturnPage, เดิมชื่อ "รับเอกสารกลับ"): ถ่าย/แนบรูปใบเสร็จ (บังคับ, อ่าน OCR จริงเติมเลขที่/วันที่/ยอดเงินให้)
+// แล้วยืนยันวันที่รับเอกสารกลับ - "งานเสร็จ" ยังตัดสินด้วยขั้นนี้อย่างเดียวเหมือนเดิม (ผู้ใช้ 2026-09-28)
+// หน้ารับป้าย/รับเล่ม (PlateSwapReceivePlatePage / PlateSwapReceiveBookPage, ใหม่ 2026-09-28): แนบรูปแล้วบันทึกทันที
+// ไม่ใช้ AI (เหมือน Step 6/7) เฉพาะฝั่งรถเก่าของงานเอง ไม่ผูกกับ returnedDate/กฎใดๆ
 // แก้/ยกเลิก (ผู้ใช้ 2026-09-27): ADMIN + STAFF_CAR แก้ข้อมูลงาน (✎ แก้) ยกเลิกรับกลับ และยกเลิกงานได้ ต้องระบุเหตุผลเสมอ
 // (เก็บประวัติ) - ไม่มีการลบงานแล้ว งานที่ยกเลิกหายจากรายการและยอดรวม แต่ยังอยู่ในฐานข้อมูล
 // รถใหม่รับ "ทะเบียนเก่า" ของรถเก่า ส่วน "ทะเบียนใหม่" คือเลขที่รถเก่าได้รับ (ผู้ใช้ยืนยัน 2026-09-27)
 
 export const PLATE_SWAP_HOME = "/registration/plate-swap";
-export const OLD_NEW_HOME = "/registration/plate-swap/old-new";
+export const OLD_NEW_HOME = "/registration/plate-swap/car/old-new";
+export const OLD_OLD_HOME = "/registration/plate-swap/car/old-old";
+
+// ทั้ง 4 ชุด (รถยนต์/มอเตอร์ไซค์ × 2 เคส) ใช้หน้าทำงานชุดเดียวกัน ต่างกันแค่ข้อมูลที่ดึงมา อัตราค่าใช้จ่าย และลิงก์กลับ
+// (ผู้ใช้ 2026-09-28: "ล้อระบบเหมือนสลับเลขของรถยนต์เลย ... แต่แค่เปลี่ยนเป็นลิงก์ข้อมูลเป็นรถจักรยานยนต์แทน")
+const CLASS_SEGMENT: Record<PlateSwapVehicleClass, string> = { CAR: "car", MOTO: "moto" };
+const CLASS_LABEL: Record<PlateSwapVehicleClass, string> = { CAR: "รถยนต์", MOTO: "มอเตอร์ไซค์" };
+const KIND_SEGMENT: Record<PlateSwapKind, string> = { OLD_NEW: "old-new", OLD_OLD: "old-old" };
+const KIND_LABEL: Record<PlateSwapKind, string> = { OLD_NEW: "รถเก่า กับ รถใหม่", OLD_OLD: "รถเก่า กับ รถเก่า" };
+
+const caseHome = (vehicleClass: PlateSwapVehicleClass, kind: PlateSwapKind) => ({
+  href: `/registration/plate-swap/${CLASS_SEGMENT[vehicleClass]}/${KIND_SEGMENT[kind]}`,
+  label: KIND_LABEL[kind],
+});
+
+// อัตราค่าใช้จ่ายตามประเภทรถ - มอเตอร์ไซค์ไม่มีตัวเลือกที่มาของเลข (ใช้เลขที่ไม่เคยออกเสมอ) แต่มีงานด่วน +50
+const feesFor = (
+  vehicleClass: PlateSwapVehicleClass,
+  o: { numberSource: PlateSwapNumberSource; buyNormalPlate: boolean; buyAuctionPlate: boolean; urgent: boolean },
+) => (vehicleClass === "MOTO" ? calculatePlateSwapMotoFees({ buyNormalPlate: o.buyNormalPlate, urgent: o.urgent }) : calculatePlateSwapCarFees(o));
 
 const errorText = (err: unknown, fallback: string) => (err instanceof ApiError || err instanceof Error ? err.message : fallback);
+
+// ค้นรถใหม่ระหว่างพิมพ์ (ผู้ใช้ 2026-09-28) - หน่วงเท่าหน้าค้นหารถ และเริ่มค้นตั้งแต่ 2 ตัวอักษร
+// (1 ตัวอักษรได้รถเกือบทั้งฐานซึ่งไม่ช่วยอะไร แต่ตั้งไว้ต่ำเพราะจุดประสงค์คือไม่ต้องพิมพ์เลขตัวถังให้ครบ)
+const TYPING_DELAY_MS = 300;
+const MIN_VEHICLE_QUERY = 2;
 
 // บันทึกได้เฉพาะ ADMIN / STAFF_CAR (backend กันอีกชั้น) - บัญชี (ACCOUNTANT) อ่านอย่างเดียว จึงซ่อนฟอร์ม/ปุ่มบันทึก
 function useCanWrite(): boolean | null {
@@ -81,6 +114,17 @@ const oldVehicleText = (s: PlateSwap) => `${s.oldBrand} · เครื่อง
 // ทะเบียนแสดงเป็น "หมวด เลข" (ผู้ใช้ 2026-09-23: เก็บแยก 2 ช่องเหมือนหน้ายื่นเอกสารรถจดใหม่)
 const oldPlateText = (s: PlateSwap) => `${s.oldPlateCategory} ${s.oldPlateNumber}`;
 const newPlateText = (s: PlateSwap) => (s.newPlateCategory && s.newPlateNumber ? `${s.newPlateCategory} ${s.newPlateNumber}` : "");
+
+// เจ้าของงานในตาราง (ผู้ใช้ 2026-09-28) - งานที่บันทึกก่อนวันนั้นไม่มีลูกค้า แก้ได้ที่ ✎ แก้
+function CustomerCell({ swap }: { swap: PlateSwap }) {
+  if (!swap.customer) return <span className="muted">ยังไม่ระบุ</span>;
+  return (
+    <>
+      <div className="job">{swap.customer.company ?? swap.customer.name}</div>
+      {swap.customer.company && <div className="sub">{swap.customer.name}</div>}
+    </>
+  );
+}
 
 const dangerButton: React.CSSProperties = { color: "#b43434" };
 const warnBox: React.CSSProperties = {
@@ -309,15 +353,123 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
   );
 }
 
+// เลขที่ใบเสร็จ/วันที่/ยอดเงิน (ผู้ใช้ 2026-09-28) - เติมจาก OCR ครั้งแรกที่อ่านสำเร็จ (ช่องยังว่างทั้ง 3) แก้เองได้เสมอทีหลัง
+// งานที่รับเอกสารกลับแล้ว แก้ได้แต่ต้องมีเหตุผล (โครงเดียวกับ NewPlateCell)
+function ReceiptFieldsCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite: boolean; onChange: (swap: PlateSwap) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [receiptNo, setReceiptNo] = useState(swap.receiptNo ?? "");
+  const [dateText, setDateText] = useState(() => (swap.receiptDate ? isoToDisplayDate(swap.receiptDate) : ""));
+  const [amount, setAmount] = useState(swap.receiptAmount ?? "");
+  const [remark, setRemark] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const needsRemark = Boolean(swap.returnedDate);
+
+  async function save() {
+    setError("");
+    const receiptDate = dateText.trim() ? textToIso(dateText) : "";
+    if (dateText.trim() && !receiptDate) return setError("วันที่ใบเสร็จไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป");
+    if (needsRemark && !remark.trim()) return setError("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ข้อมูลใบเสร็จ");
+    setBusy(true);
+    try {
+      const { swap: updated } = await plateSwapApi.updateReceiptFields(
+        swap.id,
+        { receiptNo: receiptNo.trim(), receiptDate, receiptAmount: amount.trim() },
+        needsRemark ? remark.trim() : undefined,
+      );
+      onChange(updated);
+      setEditing(false);
+      setRemark("");
+    } catch (err) {
+      setError(errorText(err, "บันทึกไม่สำเร็จ"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <div>{swap.receiptNo || <span className="muted">ยังไม่มีเลขที่ใบเสร็จ</span>}</div>
+        <div className="sub">
+          {swap.receiptDate ? `วันที่ ${isoToDisplayDate(swap.receiptDate)}` : ""}
+          {swap.receiptAmount ? `${swap.receiptDate ? " · " : ""}${formatBaht(Number(swap.receiptAmount))} บาท` : ""}
+        </div>
+        {canWrite && (
+          <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
+            ✎ แก้
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, minWidth: 160 }}>
+      <input
+        value={receiptNo}
+        onChange={(e) => setReceiptNo(e.target.value)}
+        placeholder="เลขที่ใบเสร็จ"
+        aria-label="เลขที่ใบเสร็จ"
+        className="inspect-input"
+      />
+      <DateTextInput value={dateText} onChange={setDateText} label="วันที่ใบเสร็จ" />
+      <input
+        value={amount}
+        onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+        placeholder="ยอดเงิน"
+        aria-label="ยอดเงินตามใบเสร็จ"
+        inputMode="decimal"
+        className="inspect-input"
+      />
+      {needsRemark && (
+        <input
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          placeholder="เหตุผลที่แก้ *"
+          aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ"
+          className="inspect-input"
+        />
+      )}
+      {error && (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" className="text-button" disabled={busy} onClick={save}>
+          บันทึก
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => {
+            setReceiptNo(swap.receiptNo ?? "");
+            setDateText(swap.receiptDate ? isoToDisplayDate(swap.receiptDate) : "");
+            setAmount(swap.receiptAmount ?? "");
+            setRemark("");
+            setError("");
+            setEditing(false);
+          }}
+        >
+          ยกเลิก
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ค้นรถใหม่ด้วยเลขตัวถังแล้วเลือก 1 คัน (ปุ่มลิงก์ข้อมูลรถในฐานข้อมูลรถจดใหม่)
 // F51 (ผู้ใช้ 2026-09-27): รถที่ยื่นเอกสารแล้ว หรือผูกกับงานสลับเลขอื่นที่ยังไม่รับกลับ เลือกไม่ได้ (แสดงเหตุผล)
 // excludeSwapId = งานที่กำลังเปลี่ยนคัน - รถที่ผูกกับงานนี้เองไม่นับว่าผูกซ้ำ
 function NewVehiclePicker({
   excludeSwapId,
+  vehicleClass = "CAR",
   onPick,
   onCancel,
 }: {
   excludeSwapId?: string;
+  vehicleClass?: PlateSwapVehicleClass;
   onPick: (v: PlateSwapNewVehicle) => void;
   onCancel?: () => void;
 }) {
@@ -325,20 +477,52 @@ function NewVehiclePicker({
   const [results, setResults] = useState<PlateSwapVehicleHit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // ลำดับคำค้นล่าสุด - คำตอบของคำค้นเก่าที่มาช้าต้องไม่ทับผลของคำที่พิมพ์ทีหลัง (ผู้ใช้ 2026-09-28)
+  const searchSeq = useRef(0);
 
-  async function search() {
-    if (!query.trim()) {
-      setError("พิมพ์เลขตัวถังของรถใหม่ (บางส่วนก็ได้)");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      setResults((await plateSwapApi.searchNewVehicles(query, excludeSwapId)).vehicles);
-    } catch (err) {
-      setError(errorText(err, "ค้นหาไม่สำเร็จ"));
+  const runSearch = useCallback(
+    async (raw: string) => {
+      const chassis = raw.trim();
+      const seq = ++searchSeq.current;
+      if (!chassis) {
+        setResults(null);
+        setError("");
+        setBusy(false);
+        return;
+      }
+      setBusy(true);
+      setError("");
+      try {
+        const { vehicles } = await plateSwapApi.searchNewVehicles(chassis, excludeSwapId, vehicleClass);
+        if (seq !== searchSeq.current) return; // พิมพ์ต่อไปแล้ว ผลนี้เก่า
+        setResults(vehicles);
+      } catch (err) {
+        if (seq !== searchSeq.current) return;
+        setError(errorText(err, "ค้นหาไม่สำเร็จ"));
+        setResults(null);
+      } finally {
+        if (seq === searchSeq.current) setBusy(false);
+      }
+    },
+    [excludeSwapId, vehicleClass],
+  );
+
+  // ผู้ใช้ 2026-09-28: "เวลาพิม เลขที่ใกลเคียงกับข้อมูลโชวมาเลยไม่ต้องพิมครบ" - ค้นเองระหว่างพิมพ์
+  // หน่วง 300 ms เท่าหน้าค้นหารถ (TYPING_DELAY_MS ใน app/vehicles/page.tsx) และเริ่มค้นตั้งแต่ 2 ตัวอักษร
+  // (การล้างผลตอนพิมพ์สั้นกว่าเกณฑ์ทำใน onChange ไม่ใช่ที่นี่ - effect นี้จึงมีหน้าที่ตั้งเวลาอย่างเดียว)
+  useEffect(() => {
+    const chassis = query.trim();
+    if (chassis.length < MIN_VEHICLE_QUERY) return;
+    const timer = setTimeout(() => runSearch(chassis), TYPING_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [query, runSearch]);
+
+  function changeQuery(next: string) {
+    setQuery(next);
+    // ลบเลขทิ้งจนสั้นกว่าเกณฑ์ = ทิ้งผลที่ค้างอยู่ และตัดคำตอบที่ยังค้างอยู่ ไม่ให้เด้งกลับมาทีหลัง
+    if (next.trim().length < MIN_VEHICLE_QUERY) {
+      searchSeq.current++;
       setResults(null);
-    } finally {
       setBusy(false);
     }
   }
@@ -348,18 +532,18 @@ function NewVehiclePicker({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input
           type="text"
-          placeholder="เลขตัวถังรถใหม่"
+          placeholder={`เลขตัวถัง${CLASS_LABEL[vehicleClass]}ที่จะรับเลข`}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              search();
+              runSearch(query); // กด Enter = ค้นทันทีไม่ต้องรอหน่วง
             }
           }}
           style={{ flex: "1 1 200px", minWidth: 0 }}
         />
-        <button type="button" className="filter-chip" onClick={search} disabled={busy}>
+        <button type="button" className="filter-chip" onClick={() => runSearch(query)} disabled={busy}>
           {busy ? "กำลังค้นหา…" : "ค้นหา"}
         </button>
         {onCancel && (
@@ -369,7 +553,14 @@ function NewVehiclePicker({
         )}
       </div>
       {error && <div className="customer-message error">{error}</div>}
-      {results && results.length === 0 && <div className="customer-message">ไม่พบรถยนต์ที่เลขตัวถังตรงกันในฐานข้อมูลรถจดใหม่</div>}
+      {!error && query.trim().length > 0 && query.trim().length < MIN_VEHICLE_QUERY && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          พิมพ์เลขตัวถังอย่างน้อย {MIN_VEHICLE_QUERY} ตัว แล้วรายการจะขึ้นเอง (ไม่ต้องพิมพ์ครบ)
+        </div>
+      )}
+      {results && results.length === 0 && (
+        <div className="customer-message">ไม่พบ{CLASS_LABEL[vehicleClass]}ที่เลขตัวถังตรงกันในฐานข้อมูลรถจดใหม่</div>
+      )}
       {results && results.length > 0 && (
         <div className="choices" style={{ marginTop: 0 }}>
           {results.map((v) => (
@@ -429,6 +620,9 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
   const [buyNormalPlate, setBuyNormalPlate] = useState(swap.buyNormalPlate);
   const [buyAuctionPlate, setBuyAuctionPlate] = useState(swap.buyAuctionPlate);
   const [brandNames, setBrandNames] = useState<string[]>([swap.oldBrand]);
+  // เจ้าของงาน (ผู้ใช้ 2026-09-28) - งานเก่าที่ยังไม่มีเจ้าของงานมาเติมตรงนี้ได้ แต่ล้างให้ว่างอีกไม่ได้
+  const [customerId, setCustomerId] = useState(swap.customer?.id ?? "");
+  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -438,6 +632,10 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
     api
       .listBrands()
       .then((data) => setBrandNames(Array.from(new Set([swap.oldBrand, ...data.brands.map((b) => b.name)]))))
+      .catch(() => undefined);
+    api
+      .listCustomers()
+      .then((data) => setCustomerOptions(data.customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") }))))
       .catch(() => undefined);
   }, [swap.oldBrand]);
 
@@ -460,6 +658,8 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
     try {
       const { swap: updated } = await plateSwapApi.update(swap.id, {
         ...form,
+        // ส่งเฉพาะตอนเลือกไว้จริง - งานเก่าที่ยังไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
+        ...(customerId ? { customerId } : {}),
         submitDate,
         numberSource,
         buyNormalPlate,
@@ -486,6 +686,18 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
       <h2>แก้งานสลับเลข</h2>
       <SwapSummary swap={swap} />
       <div className="customer-grid" style={{ marginTop: 12 }}>
+        {/* เจ้าของงาน = ลูกค้าที่ส่งงานมา ไม่ใช่ชื่อเจ้าของรถข้างล่าง (ผู้ใช้ 2026-09-28) */}
+        <label className="field">
+          เจ้าของงาน (ลูกค้าที่ส่งงานมา)
+          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+            <option value="">{swap.customer ? "เลือกลูกค้า" : "ยังไม่ระบุ"}</option>
+            {customerOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           วันที่ยื่น *
           <DateTextInput value={submitDateText} onChange={setSubmitDateText} label="วันที่ยื่น" />
@@ -501,12 +713,12 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
           <input value={form.oldOwnerName} onChange={set("oldOwnerName")} />
         </label>
         <label className="field">
-          เลขเครื่อง *
-          <input value={form.oldEngine} onChange={set("oldEngine")} />
-        </label>
-        <label className="field">
           เลขตัวถัง *
           <input value={form.oldChassis} onChange={set("oldChassis")} />
+        </label>
+        <label className="field">
+          เลขเครื่อง *
+          <input value={form.oldEngine} onChange={set("oldEngine")} />
         </label>
         <label className="field">
           ยี่ห้อ *
@@ -644,7 +856,7 @@ const EMPTY_FORM = {
 
 type RowDialog = { kind: "edit" | "cancel"; swap: PlateSwap } | null;
 
-export function PlateSwapSubmitPage() {
+export function PlateSwapSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: PlateSwapVehicleClass }) {
   const canWrite = useCanWrite();
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
@@ -654,9 +866,13 @@ export function PlateSwapSubmitPage() {
   const [numberSource, setNumberSource] = useState<PlateSwapNumberSource>("NEW_UNUSED");
   const [buyNormalPlate, setBuyNormalPlate] = useState(false);
   const [buyAuctionPlate, setBuyAuctionPlate] = useState(false);
+  const [urgent, setUrgent] = useState(false); // งานด่วน - มีเฉพาะมอเตอร์ไซค์
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
   const [brandNames, setBrandNames] = useState<string[]>([]);
+  // เจ้าของงาน = ลูกค้าที่ส่งงานมา (ผู้ใช้ 2026-09-28) - คนละคนกับชื่อเจ้าของรถเก่าที่กรอกเอง
+  const [customerId, setCustomerId] = useState("");
+  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
 
   const [month, setMonth] = useState(() => todayIso().slice(0, 7));
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
@@ -664,14 +880,13 @@ export function PlateSwapSubmitPage() {
   const [listError, setListError] = useState("");
   const [dialog, setDialog] = useState<RowDialog>(null);
 
-  const fees = calculatePlateSwapCarFees({ numberSource, buyNormalPlate, buyAuctionPlate });
-  const numberItems = PLATE_SWAP_CAR_NUMBER_ITEMS[numberSource];
+  const fees = feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent });
 
   async function load(forMonth: string) {
     setLoading(true);
     setListError("");
     try {
-      setSwaps((await plateSwapApi.list("all", forMonth)).swaps);
+setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swaps);
     } catch (err) {
       setListError(errorText(err, "โหลดรายการไม่สำเร็จ"));
       setSwaps([]);
@@ -683,7 +898,8 @@ export function PlateSwapSubmitPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดรายการใหม่เมื่อเปลี่ยนเดือน
     if (month) load(month);
-  }, [month]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load อ่าน vehicleClass ที่อยู่ใน deps แล้ว
+  }, [month, vehicleClass]);
 
   useEffect(() => {
     // ยี่ห้อรถเก่าเลือกจาก dropdown ยี่ห้อในฐานข้อมูล (ผู้ใช้ 2026-09-22) - ยี่ห้อที่ยังไม่มีให้เพิ่มจากหน้าเพิ่มข้อมูลรถจดใหม่
@@ -691,6 +907,11 @@ export function PlateSwapSubmitPage() {
       .listBrands()
       .then((data) => setBrandNames(data.brands.map((b) => b.name)))
       .catch(() => setBrandNames([]));
+    // เจ้าของงานเลือกจากฐานข้อมูลลูกค้า (ผู้ใช้ 2026-09-28) - ป้ายกำกับเหมือนหน้าเพิ่มข้อมูลรถจดใหม่
+    api
+      .listCustomers()
+      .then((data) => setCustomerOptions(data.customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") }))))
+      .catch(() => setCustomerOptions([]));
   }, []);
 
   function chooseNumberSource(source: PlateSwapNumberSource) {
@@ -707,6 +928,10 @@ export function PlateSwapSubmitPage() {
       setMessage({ text: "กรุณากรอกวันที่ยื่นให้ถูกต้อง", error: true });
       return;
     }
+    if (!customerId) {
+      setMessage({ text: "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)", error: true });
+      return;
+    }
     if (!newVehicle) {
       setMessage({ text: "กรุณาลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ก่อนบันทึก", error: true });
       return;
@@ -716,6 +941,9 @@ export function PlateSwapSubmitPage() {
     try {
       await plateSwapApi.create({
         ...form,
+        vehicleClass,
+        urgent,
+        customerId,
         newVehicleId: newVehicle.id,
         submitDate,
         numberSource,
@@ -757,13 +985,28 @@ export function PlateSwapSubmitPage() {
       <Link href={OLD_NEW_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← รถเก่า กับ รถใหม่
       </Link>
-      <h1>ยื่นงานสลับเลข (รถยนต์)</h1>
+      <h1>ยื่นงานสลับเลข ({CLASS_LABEL[vehicleClass]})</h1>
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
-            <h2 style={{ marginTop: 0 }}>รถเก่า</h2>
-            {/* ลำดับช่องตามที่ผู้ใช้กำหนด 2026-09-23: วันที่ยื่น -> ชื่อเจ้าของรถ -> เลขเครื่อง -> เลขตัวถัง -> ยี่ห้อ -> ทะเบียนเก่า/ใหม่ */}
+            {/* เจ้าของงานอยู่นอกหัวข้อ "รถเก่า" ตั้งใจ (ผู้ใช้ 2026-09-28): เป็นลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ
+                ไม่ใช่เจ้าของรถตามทะเบียน (ช่อง "ชื่อเจ้าของรถ" ข้างล่าง) - กฎเดียวกับรถจดใหม่ที่แยกสองอย่างนี้ออกจากกัน */}
+            <label className="field" style={{ maxWidth: 420 }}>
+              เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+              <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
+                <option value="">เลือกลูกค้า</option>
+                {customerOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <h2 style={{ marginTop: 22 }}>รถเก่า</h2>
+            {/* ลำดับช่องตามที่ผู้ใช้กำหนด: วันที่ยื่น -> ชื่อเจ้าของรถ -> เลขตัวถัง -> เลขเครื่อง -> ยี่ห้อ -> ทะเบียนเก่า/ใหม่
+                (เดิม 2026-09-23 เลขเครื่องมาก่อน ผู้ใช้สลับเป็นเลขตัวถังก่อนเมื่อ 2026-09-28) */}
             <div className="customer-grid">
               <label className="field">
                 วันที่ยื่น *
@@ -774,12 +1017,12 @@ export function PlateSwapSubmitPage() {
                 <input value={form.oldOwnerName} onChange={setField("oldOwnerName")} required />
               </label>
               <label className="field">
-                เลขเครื่อง *
-                <input value={form.oldEngine} onChange={setField("oldEngine")} required />
-              </label>
-              <label className="field">
                 เลขตัวถัง *
                 <input value={form.oldChassis} onChange={setField("oldChassis")} required />
+              </label>
+              <label className="field">
+                เลขเครื่อง *
+                <input value={form.oldEngine} onChange={setField("oldEngine")} required />
               </label>
               <label className="field">
                 ยี่ห้อ *
@@ -854,6 +1097,7 @@ export function PlateSwapSubmitPage() {
               </div>
             ) : picking ? (
               <NewVehiclePicker
+                vehicleClass={vehicleClass}
                 onPick={(v) => {
                   setNewVehicle(v);
                   setPicking(false);
@@ -867,30 +1111,17 @@ export function PlateSwapSubmitPage() {
             )}
 
             <h2 style={{ marginTop: 28 }}>ค่าใช้จ่าย</h2>
-            <div className="inspect-filter" style={{ padding: 0, marginBottom: 14 }}>
-              {(Object.keys(PLATE_SWAP_CAR_NUMBER_ITEMS) as PlateSwapNumberSource[]).map((source) => (
-                <button
-                  key={source}
-                  type="button"
-                  className={`filter-chip${numberSource === source ? " selected" : ""}`}
-                  onClick={() => chooseNumberSource(source)}
-                >
-                  {PLATE_SWAP_CAR_NUMBER_ITEMS[source].title}
-                </button>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 14, marginBottom: 16 }}>
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={buyNormalPlate} onChange={(e) => setBuyNormalPlate(e.target.checked)} />
-                ซื้อ{numberItems.normalPlate.label.replace(/^ค่า/, "")} ({formatBaht(numberItems.normalPlate.amount)} บาท)
-              </label>
-              {numberItems.auctionPlate && (
-                <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input type="checkbox" checked={buyAuctionPlate} onChange={(e) => setBuyAuctionPlate(e.target.checked)} />
-                  ซื้อ{numberItems.auctionPlate.label.replace(/^ค่า/, "")} ({formatBaht(numberItems.auctionPlate.amount)} บาท)
-                </label>
-              )}
-            </div>
+            <FeeOptionFields
+              vehicleClass={vehicleClass}
+              numberSource={numberSource}
+              onNumberSource={chooseNumberSource}
+              buyNormalPlate={buyNormalPlate}
+              onBuyNormalPlate={setBuyNormalPlate}
+              buyAuctionPlate={buyAuctionPlate}
+              onBuyAuctionPlate={setBuyAuctionPlate}
+              urgent={urgent}
+              onUrgent={setUrgent}
+            />
 
             <div className="customer-grid">
               <div>
@@ -994,6 +1225,7 @@ export function PlateSwapSubmitPage() {
                 <thead>
                   <tr>
                     <th>วันที่ยื่น</th>
+                    <th>เจ้าของงาน</th>
                     <th>รถเก่า</th>
                     <th>ทะเบียนเก่า / ใหม่</th>
                     <th>รถใหม่ที่ลิงก์</th>
@@ -1087,6 +1319,9 @@ function SubmittedRow({
   return (
     <tr>
       <td>{isoToDisplayDate(swap.submitDate)}</td>
+      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+        <CustomerCell swap={swap} />
+      </td>
       <td>
         <div className="job">{swap.oldOwnerName}</div>
         <div className="sub">{oldVehicleText(swap)}</div>
@@ -1097,7 +1332,7 @@ function SubmittedRow({
       </td>
       <td style={{ whiteSpace: "normal", minWidth: 200 }}>
         {picking ? (
-          <NewVehiclePicker excludeSwapId={swap.id} onPick={pick} onCancel={() => setPicking(false)} />
+          <NewVehiclePicker excludeSwapId={swap.id} vehicleClass={swap.vehicleClass} onPick={pick} onCancel={() => setPicking(false)} />
         ) : (
           <>
             {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">ยังไม่ลิงก์</span>}
@@ -1155,7 +1390,14 @@ function SubmittedRow({
 
 type ReturnDialog = { kind: "edit" | "cancel" | "undo"; swap: PlateSwap } | null;
 
-export function PlateSwapReturnPage() {
+export function PlateSwapReturnPage({
+  swapKind = "OLD_NEW",
+  vehicleClass = "CAR",
+}: {
+  swapKind?: PlateSwapKind;
+  vehicleClass?: PlateSwapVehicleClass;
+}) {
+  const home = caseHome(vehicleClass, swapKind);
   const canWrite = useCanWrite();
   const [status, setStatus] = useState<Exclude<PlateSwapStatusFilter, "all">>("pending");
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
@@ -1170,7 +1412,7 @@ export function PlateSwapReturnPage() {
     setLoading(true);
     setListError("");
     try {
-      setSwaps((await plateSwapApi.list(forStatus)).swaps);
+      setSwaps((await plateSwapApi.list(forStatus, undefined, swapKind, vehicleClass)).swaps);
     } catch (err) {
       setListError(errorText(err, "โหลดรายการไม่สำเร็จ"));
       setSwaps([]);
@@ -1183,7 +1425,7 @@ export function PlateSwapReturnPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดรายการใหม่เมื่อเปลี่ยนแท็บ
     load(status);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [status, swapKind, vehicleClass]);
 
   const replace = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setSwaps((prev) => prev.filter((s) => s.id !== id));
@@ -1220,12 +1462,12 @@ export function PlateSwapReturnPage() {
 
   return (
     <section className="content">
-      <Link href={OLD_NEW_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← รถเก่า กับ รถใหม่
+      <Link href={home.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+        ← {home.label}
       </Link>
-      <h1>รับเอกสารกลับ (รถยนต์)</h1>
+      <h1>รับใบเสร็จ ({CLASS_LABEL[vehicleClass]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
+        ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
       </p>
 
       <div className="panel">
@@ -1266,10 +1508,12 @@ export function PlateSwapReturnPage() {
                 <thead>
                   <tr>
                     <th>วันที่ยื่น</th>
+                    <th>เจ้าของงาน</th>
                     <th>รถเก่า</th>
                     <th>ทะเบียนเก่า / ใหม่</th>
                     <th>รถใหม่ที่ลิงก์</th>
-                    <th>ใบเสร็จ</th>
+                    <th>รูปใบเสร็จ</th>
+                    <th>ข้อมูลใบเสร็จ</th>
                     <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                     {canWrite && <th />}
                   </tr>
@@ -1383,6 +1627,9 @@ function ReturnRow({
   return (
     <tr>
       <td>{isoToDisplayDate(swap.submitDate)}</td>
+      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+        <CustomerCell swap={swap} />
+      </td>
       <td>
         <div className="job">{swap.oldOwnerName}</div>
         <div className="sub">{oldVehicleText(swap)}</div>
@@ -1490,6 +1737,9 @@ function ReturnRow({
         )}
       </td>
       <td>
+        <ReceiptFieldsCell swap={swap} canWrite={canWrite} onChange={onChange} />
+      </td>
+      <td>
         {swap.returnedDate ? (
           isoToDisplayDate(swap.returnedDate)
         ) : canWrite ? (
@@ -1523,5 +1773,766 @@ function ReturnRow({
         </td>
       )}
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// หน้ารับป้าย / รับเล่ม (ผู้ใช้ 2026-09-28) - แยกจาก "รับเอกสารกลับ" เดิม เหมือนฝั่งรถจดใหม่ (Step 6/7 ปัจจุบัน)
+// ไม่ใช้ AI: แนบรูปทีละคันจากคิว บันทึกรับทันที เฉพาะฝั่งรถเก่าของงานเอง ไม่ผูกกับ returnedDate/กฎใดๆ (แนบได้แม้ยังไม่รับใบเสร็จ)
+// ทรง list เรียบ ไม่ใช้ ReceivingQueuePage เต็มรูปแบบเพราะไม่มี job-sheet ให้จัดกลุ่ม (ต่างจากคิวรับป้าย/รับเล่มรถจดใหม่)
+// ---------------------------------------------------------------------------------------------
+
+type PlateOrBook = "plate" | "book";
+
+const PLATE_OR_BOOK_LABEL: Record<PlateOrBook, string> = { plate: "ป้าย", book: "เล่ม" };
+
+// รูปอยู่หลัง backend ที่ต้องมี Authorization - เหมือน openReceiptImage แต่คีย์ด้วย swap id (ไม่ใช่ photo id)
+async function openPlateSwapPhoto(kind: PlateOrBook, swapId: string) {
+  const win = window.open("", "_blank");
+  try {
+    const url = kind === "plate" ? plateSwapPlatePhotoImageUrl(swapId) : plateSwapBookPhotoImageUrl(swapId);
+    const objectUrl = URL.createObjectURL(await fetchAuthedBlob(url));
+    if (win) win.location.href = objectUrl;
+    else window.open(objectUrl, "_blank");
+  } catch {
+    win?.close();
+    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+  }
+}
+
+function ReceivePlateOrBookRow({
+  kind,
+  swap,
+  canWrite,
+  onMessage,
+  onDone,
+}: {
+  kind: PlateOrBook;
+  swap: PlateSwap;
+  canWrite: boolean;
+  onMessage: (text: string, error?: boolean) => void;
+  onDone: () => void;
+}) {
+  const label = PLATE_OR_BOOK_LABEL[kind];
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
+  const [editDateText, setEditDateText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<"date" | "detach" | null>(null);
+  const receivedDate = kind === "plate" ? swap.plateReceivedDate : swap.bookReceivedDate;
+  const photoId = kind === "plate" ? swap.platePhotoId : swap.bookPhotoId;
+
+  async function attach(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const date = textToIso(dateText);
+    if (!date) {
+      onMessage(`กรุณากรอกวันที่รับ${label}ให้ถูกต้อง`, true);
+      return;
+    }
+    setBusy(true);
+    onMessage("");
+    try {
+      const file = files[0];
+      const image = await compressReceiptImage(file);
+      const fn = kind === "plate" ? plateSwapApi.attachPlatePhoto : plateSwapApi.attachBookPhoto;
+      await fn(swap.id, image, compressedFileName(file), date);
+      onDone();
+    } catch (err) {
+      onMessage(errorText(err, `แนบรูป${label}ไม่สำเร็จ`), true);
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  function openDateDialog() {
+    setEditDateText(receivedDate ? isoToDisplayDate(receivedDate) : isoToDisplayDate(todayIso()));
+    setDialog("date");
+  }
+
+  return (
+    <tr>
+      <td>{isoToDisplayDate(swap.submitDate)}</td>
+      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+        <CustomerCell swap={swap} />
+      </td>
+      <td>
+        <div className="job">{swap.oldOwnerName}</div>
+        <div className="sub">{oldVehicleText(swap)}</div>
+      </td>
+      <td>{oldPlateText(swap)}</td>
+      <td style={{ whiteSpace: "normal" }}>{swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">ยังไม่ลิงก์</span>}</td>
+      <td>
+        {receivedDate ? (
+          <>
+            <div>{isoToDisplayDate(receivedDate)}</div>
+            {photoId && (
+              <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => openPlateSwapPhoto(kind, swap.id)}>
+                📷 ดูรูป
+              </button>
+            )}
+            {canWrite && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={openDateDialog}>
+                  ✎ แก้วันที่
+                </button>
+                <button type="button" className="text-button" style={dangerButton} onClick={() => setDialog("detach")}>
+                  ถอดรูป
+                </button>
+              </div>
+            )}
+          </>
+        ) : canWrite ? (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <DateTextInput value={dateText} onChange={setDateText} label={`วันที่รับ${label}`} />
+            <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => attach(e.target.files)} />
+            <button type="button" className="text-button" style={{ paddingLeft: 0 }} disabled={busy} onClick={() => inputRef.current?.click()}>
+              {busy ? "กำลังอัปโหลด…" : `📷 แนบรูป${label}`}
+            </button>
+          </div>
+        ) : (
+          <span className="muted">รอรับ{label}</span>
+        )}
+      </td>
+
+      {dialog === "date" && (
+        <ReasonDialog
+          title={`แก้วันที่รับ${label}`}
+          confirmLabel="บันทึก"
+          placeholder="เช่น พิมพ์วันผิด"
+          onClose={() => setDialog(null)}
+          onConfirm={async (remark) => {
+            const date = textToIso(editDateText);
+            if (!date) throw new Error("กรุณากรอกวันที่ให้ถูกต้อง");
+            const fn = kind === "plate" ? plateSwapApi.updatePlateReceivedDate : plateSwapApi.updateBookReceivedDate;
+            await fn(swap.id, date, remark);
+            onDone();
+          }}
+        >
+          <SwapSummary swap={swap} />
+          <label className="field" style={{ marginTop: 12 }}>
+            วันที่รับ{label}ใหม่ *
+            <DateTextInput value={editDateText} onChange={setEditDateText} label={`วันที่รับ${label}`} />
+          </label>
+        </ReasonDialog>
+      )}
+      {dialog === "detach" && (
+        <ReasonDialog
+          title={`ถอดรูป${label}ที่แนบผิด`}
+          confirmLabel="ยืนยันถอดรูป"
+          placeholder="เช่น แนบผิดคัน"
+          onClose={() => setDialog(null)}
+          onConfirm={async (remark) => {
+            const fn = kind === "plate" ? plateSwapApi.detachPlatePhoto : plateSwapApi.detachBookPhoto;
+            await fn(swap.id, remark);
+            onDone();
+          }}
+        >
+          <SwapSummary swap={swap} />
+          <p style={{ marginTop: 12 }}>งานนี้จะกลับไปรอรับ{label}อีกครั้ง</p>
+        </ReasonDialog>
+      )}
+    </tr>
+  );
+}
+
+function PlateSwapReceivePlateOrBookPage({
+  kind,
+  swapKind,
+  vehicleClass,
+}: {
+  kind: PlateOrBook;
+  swapKind: PlateSwapKind;
+  vehicleClass: PlateSwapVehicleClass;
+}) {
+  const home = caseHome(vehicleClass, swapKind);
+  const canWrite = useCanWrite();
+  const label = PLATE_OR_BOOK_LABEL[kind];
+  const [status, setStatus] = useState<"pending" | "received">("pending");
+  const [swaps, setSwaps] = useState<PlateSwap[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState("");
+  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+
+  async function load(forStatus: typeof status) {
+    setLoading(true);
+    setListError("");
+    try {
+      const fn = kind === "plate" ? plateSwapApi.plateQueue : plateSwapApi.bookQueue;
+      setSwaps((await fn(forStatus, swapKind, vehicleClass)).swaps);
+    } catch (err) {
+      setListError(errorText(err, "โหลดรายการไม่สำเร็จ"));
+      setSwaps([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดรายการใหม่เมื่อเปลี่ยนแท็บ
+    load(status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, kind, swapKind, vehicleClass]);
+
+  return (
+    <section className="content">
+      <Link href={home.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+        ← {home.label}
+      </Link>
+      <h1>
+        รับ{label} ({CLASS_LABEL[vehicleClass]})
+      </h1>
+      <p className="muted" style={{ marginBottom: 20 }}>
+        แนบรูป{label}ที่ได้รับแล้วบันทึกทันที (เฉพาะฝั่งรถเก่าของงานนี้) - ไม่ต้องรอรับใบเสร็จก่อน
+      </p>
+
+      <div className="panel">
+        <div className="panel-head">
+          <div className="inspect-filter" style={{ padding: 0 }}>
+            <button type="button" className={`filter-chip${status === "pending" ? " selected" : ""}`} onClick={() => setStatus("pending")}>
+              รอรับ{label}
+            </button>
+            <button type="button" className={`filter-chip${status === "received" ? " selected" : ""}`} onClick={() => setStatus("received")}>
+              รับ{label}แล้ว
+            </button>
+          </div>
+        </div>
+        {message.text && (
+          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
+            {message.text}
+          </div>
+        )}
+        {loading ? (
+          <div className="empty-customers">กำลังโหลดรายการ…</div>
+        ) : listError ? (
+          <div className="empty-customers" role="alert">
+            {listError}
+          </div>
+        ) : swaps.length === 0 ? (
+          <div className="empty-customers">{status === "pending" ? `ไม่มีงานที่รอรับ${label}` : `ยังไม่มีงานที่รับ${label}แล้ว`}</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>วันที่ยื่น</th>
+                  <th>เจ้าของงาน</th>
+                  <th>รถเก่า</th>
+                  <th>ทะเบียนเก่า</th>
+                  <th>รถใหม่ที่ลิงก์</th>
+                  <th>{label}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {swaps.map((swap) => (
+                  <ReceivePlateOrBookRow
+                    key={swap.id}
+                    kind={kind}
+                    swap={swap}
+                    canWrite={!!canWrite}
+                    onMessage={(text, error) => setMessage({ text, error })}
+                    onDone={() => load(status)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function PlateSwapReceivePlatePage({
+  swapKind = "OLD_NEW",
+  vehicleClass = "CAR",
+}: {
+  swapKind?: PlateSwapKind;
+  vehicleClass?: PlateSwapVehicleClass;
+}) {
+  return <PlateSwapReceivePlateOrBookPage kind="plate" swapKind={swapKind} vehicleClass={vehicleClass} />;
+}
+
+export function PlateSwapReceiveBookPage({
+  swapKind = "OLD_NEW",
+  vehicleClass = "CAR",
+}: {
+  swapKind?: PlateSwapKind;
+  vehicleClass?: PlateSwapVehicleClass;
+}) {
+  return <PlateSwapReceivePlateOrBookPage kind="book" swapKind={swapKind} vehicleClass={vehicleClass} />;
+}
+
+// ---------------------------------------------------------------------------------------------
+// หน้ายื่นงาน "รถเก่า กับ รถเก่า" (ผู้ใช้ 2026-09-28)
+// กรอก 2 คันในหน้าเดียว แต่ระบบเก็บ "แยกเป็น 2 งาน" คันละแถวที่ผูกกันด้วย pairId
+// ทะเบียนไขว้กันตั้งแต่ตอนยื่น (คันที่ 1 ได้ทะเบียนของคันที่ 2 และกลับกัน) จึงไม่มีช่องกรอกทะเบียนใหม่
+// และไม่ลิงก์ฐานข้อมูลรถจดใหม่เลยเพราะทั้งคู่เป็นรถเก่า - ค่าใช้จ่ายคิดคันละชุด ราคาเท่าเคสรถเก่า-รถใหม่
+// ---------------------------------------------------------------------------------------------
+
+const EMPTY_PAIR_CAR = { oldOwnerName: "", oldEngine: "", oldChassis: "", oldBrand: "", oldPlateCategory: "", oldPlateNumber: "" };
+type PairCar = typeof EMPTY_PAIR_CAR;
+
+function PairCarFields({
+  label,
+  value,
+  brandNames,
+  onChange,
+}: {
+  label: string;
+  value: PairCar;
+  brandNames: string[];
+  onChange: (next: PairCar) => void;
+}) {
+  const set = (key: keyof PairCar) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    onChange({ ...value, [key]: e.target.value });
+  return (
+    <div className="panel" style={{ padding: 18, marginBottom: 0 }}>
+      <h3 style={{ marginTop: 0 }}>{label}</h3>
+      <div style={{ display: "grid", gap: 12 }}>
+        <label className="field">
+          ชื่อเจ้าของรถ *
+          <input value={value.oldOwnerName} onChange={set("oldOwnerName")} required />
+        </label>
+        {/* ผู้ใช้ 2026-09-28: เลขตัวถังมาก่อนเลขเครื่อง (สลับจากลำดับเดิมที่กำหนดไว้ 2026-09-23) */}
+        <label className="field">
+          เลขตัวถัง *
+          <input value={value.oldChassis} onChange={set("oldChassis")} required />
+        </label>
+        <label className="field">
+          เลขเครื่อง *
+          <input value={value.oldEngine} onChange={set("oldEngine")} required />
+        </label>
+        <label className="field">
+          ยี่ห้อ *
+          <select value={value.oldBrand} onChange={set("oldBrand")} required>
+            <option value="">เลือกยี่ห้อ</option>
+            {brandNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="field">
+          ทะเบียนเดิม *
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={value.oldPlateCategory}
+              onChange={set("oldPlateCategory")}
+              maxLength={3}
+              placeholder="หมวด เช่น 4กข"
+              aria-label={`หมวดทะเบียน ${label}`}
+              required
+            />
+            <input
+              value={value.oldPlateNumber}
+              onChange={(e) => onChange({ ...value, oldPlateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+              maxLength={4}
+              inputMode="numeric"
+              placeholder="เลข เช่น 4444"
+              aria-label={`เลขทะเบียน ${label}`}
+              required
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const pairPlateText = (car: PairCar) => (car.oldPlateCategory && car.oldPlateNumber ? `${car.oldPlateCategory} ${car.oldPlateNumber}` : "—");
+
+// ตัวเลือกค่าใช้จ่าย - ใช้ร่วมกันทั้ง 2 เคส ต่างกันตามประเภทรถ (ผู้ใช้ 2026-09-28)
+// รถยนต์: เลือกที่มาของเลข (เลขไม่เคยออก / เลขประมูล) + ป้าย 200 + ป้ายประมูล 1,200
+// มอเตอร์ไซค์: ใช้เลขที่ไม่เคยออกเสมอ (ไม่มีให้เลือก) + ป้าย 100 + งานด่วน 50 ซึ่งรถยนต์ไม่มี
+function FeeOptionFields({
+  vehicleClass,
+  numberSource,
+  onNumberSource,
+  buyNormalPlate,
+  onBuyNormalPlate,
+  buyAuctionPlate,
+  onBuyAuctionPlate,
+  urgent,
+  onUrgent,
+}: {
+  vehicleClass: PlateSwapVehicleClass;
+  numberSource: PlateSwapNumberSource;
+  onNumberSource: (s: PlateSwapNumberSource) => void;
+  buyNormalPlate: boolean;
+  onBuyNormalPlate: (v: boolean) => void;
+  buyAuctionPlate: boolean;
+  onBuyAuctionPlate: (v: boolean) => void;
+  urgent: boolean;
+  onUrgent: (v: boolean) => void;
+}) {
+  const isMoto = vehicleClass === "MOTO";
+  const carItems = PLATE_SWAP_CAR_NUMBER_ITEMS[numberSource];
+  const plateItem = isMoto ? PLATE_SWAP_MOTO_PLATE_ITEM : carItems.normalPlate;
+  return (
+    <>
+      {isMoto ? (
+        <p className="muted" style={{ marginTop: 0, marginBottom: 14 }}>
+          ใช้เลขทะเบียนที่ไม่เคยออกให้รถคันอื่น ({formatBaht(PLATE_SWAP_MOTO_NUMBER_ITEM.amount)} บาท) — มอเตอร์ไซค์ไม่มีตัวเลือกเลขประมูล/ชุดสงวน
+        </p>
+      ) : (
+        <div className="inspect-filter" style={{ padding: 0, marginBottom: 14 }}>
+          {(Object.keys(PLATE_SWAP_CAR_NUMBER_ITEMS) as PlateSwapNumberSource[]).map((source) => (
+            <button
+              key={source}
+              type="button"
+              className={`filter-chip${numberSource === source ? " selected" : ""}`}
+              onClick={() => onNumberSource(source)}
+            >
+              {PLATE_SWAP_CAR_NUMBER_ITEMS[source].title}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 14, marginBottom: 16 }}>
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={buyNormalPlate} onChange={(e) => onBuyNormalPlate(e.target.checked)} />
+          ซื้อ{plateItem.label.replace(/^ค่า/, "")} ({formatBaht(plateItem.amount)} บาท)
+        </label>
+        {!isMoto && carItems.auctionPlate && (
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={buyAuctionPlate} onChange={(e) => onBuyAuctionPlate(e.target.checked)} />
+            ซื้อ{carItems.auctionPlate.label.replace(/^ค่า/, "")} ({formatBaht(carItems.auctionPlate.amount)} บาท)
+          </label>
+        )}
+        {isMoto && (
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={urgent} onChange={(e) => onUrgent(e.target.checked)} />
+            งานด่วน (+{formatBaht(PLATE_SWAP_MOTO_URGENT_ITEM.amount)} บาท)
+          </label>
+        )}
+      </div>
+    </>
+  );
+}
+
+// แถวรายการของเคสคู่ - ไม่มีคอลัมน์ "รถใหม่ที่ลิงก์" เพราะไม่มีการลิงก์ และทะเบียนที่ได้มาจากอีกคันเสมอ
+function OldOldRow({ swap, canWrite, onEdit, onCancel }: { swap: PlateSwap; canWrite: boolean; onEdit: () => void; onCancel: () => void }) {
+  return (
+    <tr>
+      <td>{isoToDisplayDate(swap.submitDate)}</td>
+      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+        <CustomerCell swap={swap} />
+      </td>
+      <td>
+        <div className="job">{swap.oldOwnerName}</div>
+        <div className="sub">{oldVehicleText(swap)}</div>
+      </td>
+      <td>
+        <div>{oldPlateText(swap)}</div>
+        <div className="sub">→ ได้ {newPlateText(swap) || "—"}</div>
+      </td>
+      <td title={swap.billItems.map((i) => `${i.label} ${formatBaht(i.amount)}`).join("\n")}>{formatBaht(Number(swap.billTotal))}</td>
+      <td>{formatBaht(Number(swap.noBillTotal))}</td>
+      <td>{formatBaht(dutyAmountOf(swap.noBillItems))}</td>
+      <td>
+        <strong>{formatBaht(Number(swap.billTotal) + Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))}</strong>
+      </td>
+      <td>
+        {swap.returnedDate ? (
+          <span className="badge portal-badge-done">รับกลับ {isoToDisplayDate(swap.returnedDate)}</span>
+        ) : (
+          <span className="badge">รอรับเอกสารกลับ</span>
+        )}
+      </td>
+      {canWrite && (
+        <td>
+          <RowActions onEdit={onEdit} onCancel={onCancel} />
+        </td>
+      )}
+    </tr>
+  );
+}
+
+export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: PlateSwapVehicleClass }) {
+  const canWrite = useCanWrite();
+  const [carA, setCarA] = useState<PairCar>(EMPTY_PAIR_CAR);
+  const [carB, setCarB] = useState<PairCar>(EMPTY_PAIR_CAR);
+  const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
+  const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
+  const [customerId, setCustomerId] = useState("");
+  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [numberSource, setNumberSource] = useState<PlateSwapNumberSource>("NEW_UNUSED");
+  const [buyNormalPlate, setBuyNormalPlate] = useState(false);
+  const [buyAuctionPlate, setBuyAuctionPlate] = useState(false);
+  const [urgent, setUrgent] = useState(false); // งานด่วน - มีเฉพาะมอเตอร์ไซค์
+  const [brandNames, setBrandNames] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+
+  const [month, setMonth] = useState(() => todayIso().slice(0, 7));
+  const [swaps, setSwaps] = useState<PlateSwap[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState("");
+  const [dialog, setDialog] = useState<RowDialog>(null);
+
+  // ค่าใช้จ่ายคิดคันละชุดด้วยสูตรเดียวกับเคสรถเก่า-รถใหม่ (ผู้ใช้ 2026-09-28: "ราคาเท่ากันให้อิงตามยอดรถเก่าเลย")
+  const fees = feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent });
+  const perCarTotal = fees.billTotal + fees.noBillTotal - dutyAmountOf(fees.noBillItems);
+
+  async function load(forMonth: string) {
+    setLoading(true);
+    setListError("");
+    try {
+      setSwaps((await plateSwapApi.list("all", forMonth, "OLD_OLD", vehicleClass)).swaps);
+    } catch (err) {
+      setListError(errorText(err, "โหลดรายการไม่สำเร็จ"));
+      setSwaps([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดรายการใหม่เมื่อเปลี่ยนเดือน
+    if (month) load(month);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load อ่าน vehicleClass ที่อยู่ใน deps แล้ว
+  }, [month, vehicleClass]);
+
+  useEffect(() => {
+    api
+      .listBrands()
+      .then((data) => setBrandNames(data.brands.map((b) => b.name)))
+      .catch(() => setBrandNames([]));
+    api
+      .listCustomers()
+      .then((data) => setCustomerOptions(data.customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") }))))
+      .catch(() => setCustomerOptions([]));
+  }, []);
+
+  function chooseNumberSource(source: PlateSwapNumberSource) {
+    setNumberSource(source);
+    if (source === "NEW_UNUSED") setBuyAuctionPlate(false);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!submitDate) return setMessage({ text: "กรุณากรอกวันที่ยื่นให้ถูกต้อง", error: true });
+    if (!customerId) return setMessage({ text: "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)", error: true });
+    setSaving(true);
+    setMessage({ text: "กำลังบันทึก…" });
+    try {
+      await plateSwapApi.createPair({ vehicleClass, urgent, customerId, submitDate, numberSource, buyNormalPlate, buyAuctionPlate, carA, carB });
+      setMessage({ text: "บันทึกแล้ว - ระบบแยกเป็น 2 งาน (คันละงาน)" });
+      setCarA(EMPTY_PAIR_CAR);
+      setCarB(EMPTY_PAIR_CAR);
+      if (submitDate.slice(0, 7) === month) await load(month);
+      else setMonth(submitDate.slice(0, 7));
+    } catch (err) {
+      setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const replaceSwap = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+
+  const monthTotals = swaps.reduce(
+    (acc, s) => ({
+      bill: acc.bill + Number(s.billTotal),
+      noBill: acc.noBill + Number(s.noBillTotal),
+      duty: acc.duty + dutyAmountOf(s.noBillItems),
+    }),
+    { bill: 0, noBill: 0, duty: 0 },
+  );
+
+  return (
+    <section className="content">
+      <Link href={caseHome(vehicleClass, "OLD_OLD").href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+        ← รถเก่า กับ รถเก่า
+      </Link>
+      <h1>ยื่นงานสลับเลข · รถเก่า กับ รถเก่า ({CLASS_LABEL[vehicleClass]})</h1>
+      <p className="muted" style={{ marginBottom: 20 }}>
+        กรอกรถทั้ง 2 คันในหน้านี้ ระบบจะบันทึกแยกเป็น 2 งาน (คันละงาน) และสลับทะเบียนให้อัตโนมัติ
+      </p>
+
+      {canWrite && (
+        <div className="panel" style={{ marginBottom: 24 }}>
+          <form className="customer-form" onSubmit={handleSubmit}>
+            <div className="customer-grid">
+              <label className="field">
+                เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+                <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
+                  <option value="">เลือกลูกค้า</option>
+                  {customerOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                วันที่ยื่น *
+                <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
+              </label>
+            </div>
+
+            <div className="customer-grid" style={{ marginTop: 20 }}>
+              <PairCarFields label="คันที่ 1" value={carA} brandNames={brandNames} onChange={setCarA} />
+              <PairCarFields label="คันที่ 2" value={carB} brandNames={brandNames} onChange={setCarB} />
+            </div>
+
+            {/* บอกผลลัพธ์ก่อนบันทึก - กันกรอกสลับข้างแล้วมารู้ตัวหลังบันทึกไปแล้ว */}
+            <div className="customer-message" style={{ marginTop: 18 }}>
+              หลังบันทึก: คันที่ 1 ({pairPlateText(carA)}) จะได้ทะเบียน <strong>{pairPlateText(carB)}</strong> · คันที่ 2 ({pairPlateText(carB)}) จะได้ทะเบียน{" "}
+              <strong>{pairPlateText(carA)}</strong>
+            </div>
+
+            <h2 style={{ marginTop: 28 }}>ค่าใช้จ่าย (คิดคันละชุด)</h2>
+            <FeeOptionFields
+              vehicleClass={vehicleClass}
+              numberSource={numberSource}
+              onNumberSource={chooseNumberSource}
+              buyNormalPlate={buyNormalPlate}
+              onBuyNormalPlate={setBuyNormalPlate}
+              buyAuctionPlate={buyAuctionPlate}
+              onBuyAuctionPlate={setBuyAuctionPlate}
+              urgent={urgent}
+              onUrgent={setUrgent}
+            />
+
+            <div className="customer-grid">
+              <div>
+                <strong>Bill (ใบเสร็จ) ต่อคัน</strong>
+                <table style={{ marginTop: 8 }}>
+                  <tbody>
+                    {fees.billItems.map((item) => (
+                      <tr key={item.label}>
+                        <td style={{ whiteSpace: "normal" }}>{item.label}</td>
+                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>
+                        <strong>รวม Bill / คัน</strong>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <strong>{formatBaht(fees.billTotal)}</strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <strong>No Bill ต่อคัน</strong>
+                <table style={{ marginTop: 8 }}>
+                  <tbody>
+                    {fees.noBillItems.map((item) => (
+                      <tr key={item.label}>
+                        <td>{item.label}</td>
+                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>
+                        <strong>รวม No Bill / คัน</strong>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <strong>{formatBaht(fees.noBillTotal)}</strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p style={{ marginTop: 14 }}>
+              <strong>รวมทั้ง 2 คัน (ไม่รวมค่าอากร): {formatBaht(perCarTotal * 2)} บาท</strong>{" "}
+              <span className="muted">· แยกค่าอากร {formatBaht(dutyAmountOf(fees.noBillItems) * 2)} บาท</span>
+            </p>
+
+            {message.text && (
+              <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 12 }}>
+                {message.text}
+              </div>
+            )}
+            <div style={{ marginTop: 16 }}>
+              <button type="submit" className="primary" disabled={saving}>
+                {saving ? "กำลังบันทึก…" : "บันทึกการยื่น (2 งาน)"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2 style={{ margin: 0 }}>รายการที่ยื่นแล้ว</h2>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+            เดือนที่ยื่น
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </label>
+        </div>
+        {loading ? (
+          <div className="empty-customers">กำลังโหลดรายการ…</div>
+        ) : listError ? (
+          <div className="empty-customers" role="alert">
+            {listError}
+          </div>
+        ) : swaps.length === 0 ? (
+          <div className="empty-customers">ยังไม่มีงานรถเก่า กับ รถเก่าในเดือนนี้</div>
+        ) : (
+          <>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่ยื่น</th>
+                    <th>เจ้าของงาน</th>
+                    <th>รถ</th>
+                    <th>ทะเบียนเดิม / ที่ได้</th>
+                    <th>Bill</th>
+                    <th>No Bill</th>
+                    <th>ค่าอากร</th>
+                    <th>รวม</th>
+                    <th>สถานะ</th>
+                    {canWrite && <th />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {swaps.map((swap) => (
+                    <OldOldRow
+                      key={swap.id}
+                      swap={swap}
+                      canWrite={!!canWrite}
+                      onEdit={() => setDialog({ kind: "edit", swap })}
+                      onCancel={() => setDialog({ kind: "cancel", swap })}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "12px 23px" }}>
+              <strong>
+                รวม {swaps.length} งาน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} · ค่าอากร{" "}
+                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill - monthTotals.duty)} บาท
+              </strong>
+            </div>
+          </>
+        )}
+      </div>
+
+      {dialog?.kind === "edit" && (
+        <EditSwapDialog
+          swap={dialog.swap}
+          onClose={() => setDialog(null)}
+          onSaved={(updated) => {
+            // แก้ทะเบียนของงานคู่ทำให้อีกแถวเปลี่ยนตามที่ backend - โหลดใหม่ทั้งรายการให้ตรงกัน
+            replaceSwap(updated);
+            void load(month);
+          }}
+        />
+      )}
+      {dialog?.kind === "cancel" && (
+        // ยกเลิกงานที่เป็นคู่ = backend ยกเลิกทั้ง 2 งาน จึงโหลดรายการใหม่แทนการตัดแถวเดียว
+        <CancelSwapDialog swap={dialog.swap} onClose={() => setDialog(null)} onCancelled={() => void load(month)} />
+      )}
+    </section>
   );
 }

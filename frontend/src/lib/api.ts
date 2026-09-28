@@ -446,6 +446,11 @@ export interface ReceivedDetachResult {
 export const platePhotoImageUrl = (id: string) => `${API_BASE_URL}/api/plate-photos/${id}/image`;
 export const bookPhotoImageUrl = (id: string) => `${API_BASE_URL}/api/book-photos/${id}/image`;
 
+// รูปป้าย/เล่มของงานสลับเลข (ผู้ใช้ 2026-09-28) - คนละ endpoint กับข้างบน: คีย์ด้วย swap id ไม่ใช่ photo id
+// (สิทธิ์เช็คผ่านแถว PlateSwap เอง) ดู backend/src/plate-swap/
+export const plateSwapPlatePhotoImageUrl = (swapId: string) => `${API_BASE_URL}/api/plate-swaps/${swapId}/plate-photo/image`;
+export const plateSwapBookPhotoImageUrl = (swapId: string) => `${API_BASE_URL}/api/plate-swaps/${swapId}/book-photo/image`;
+
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
 export type ReceivingStep = "plate" | "book" | "delivery";
 

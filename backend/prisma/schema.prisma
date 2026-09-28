@@ -120,6 +120,7 @@ model Customer {
   users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
   accountPeriods  CustomerAccountPeriod[]
   payments        CustomerPayment[]
+  plateSwaps      PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
 }
 
 model Brand {
@@ -654,6 +655,18 @@ model PlateSwap {
   kind         PlateSwapKind @default(OLD_NEW)
   vehicleClass String        @default("CAR") // CAR | MOTO - ตอนนี้รับเฉพาะ CAR (อัตราจักรยานยนต์ยังไม่มี)
 
+  // เจ้าของงาน = ลูกค้าที่ส่งงานนี้มาให้เรา (ผู้ใช้ 2026-09-28: "เวลาจะส่งงานหรือวางบิลจะได้วางถูก")
+  // คนละคนกับ oldOwnerName ซึ่งเป็นเจ้าของรถเก่าตามทะเบียน - ห้ามอนุมานจากกัน (กฎเดียวกับ Vehicle.customerId กับ Vehicle.ownerId)
+  // ยอมให้ว่างในฐานข้อมูลเพราะงานที่บันทึกไว้ก่อน 2026-09-28 ยังไม่มีลูกค้า (ห้ามเดาย้อนหลังให้) แต่งานที่บันทึกใหม่
+  // บังคับกรอกที่ชั้น service - ดู PlateSwapService.resolveCustomerId
+  customerId String?
+
+  // เคส "รถเก่า กับ รถเก่า" (ผู้ใช้ 2026-09-28): กรอก 2 คันในหน้าเดียว แต่ระบบเก็บ "แยกเป็น 2 งาน" คันละแถว
+  // ที่อ้างถึงกันด้วย pairId เดียวกัน - แต่ละงานเดินขั้นรับใบเสร็จ/ป้าย/เล่มของตัวเองแยกกัน และคิดค่าใช้จ่ายคนละชุด
+  // ทะเบียนของคู่ไขว้กัน: newPlate ของงานนี้ = oldPlate ของงานคู่ (ต่างจาก OLD_NEW ที่ยังไม่รู้เลขใหม่ตอนยื่น)
+  // NULL = งาน OLD_NEW ซึ่งไม่มีคู่
+  pairId String?
+
   // รถเก่า (กรอกเอง)
   oldOwnerName     String // ชื่อเจ้าของรถ
   // ผู้ใช้ 2026-09-23: แยกเลขเครื่องกับเลขตัวถังเป็นคนละช่อง และบังคับกรอกทั้งคู่ (ต่างจาก Vehicle ของรถจดใหม่ที่เลขเครื่องไม่บังคับ)
@@ -677,6 +690,9 @@ model PlateSwap {
   numberSource    PlateSwapNumberSource
   buyNormalPlate  Boolean               @default(false) // ค่าแผ่นป้ายทะเบียนรถยนต์ออกใหม่ รับปกติ / ขาว-ดำปกติ 200 บาท
   buyAuctionPlate Boolean               @default(false) // ค่าแผ่นป้ายประมูล 1,200 บาท (เฉพาะ AUCTION_RESERVED)
+  // งานด่วน - มีเฉพาะรถจักรยานยนต์ (ผู้ใช้ 2026-09-28: ด่วนเพิ่ม 50 บาท ใน No Bill ชื่อรายการ "ลงขันด่วนเพิ่ม"
+  // ตามงานจดรถใหม่) ฝั่งรถยนต์ยังไม่มีอัตรางานด่วนของการสลับเลข จึงเป็น false เสมอ
+  urgent          Boolean               @default(false)
   billItems       Json // [{label, amount}]
   noBillItems     Json // [{label, amount}] - ลงขัน 200 บาท
   billTotal       Decimal               @db.Decimal(12, 2)
@@ -684,6 +700,20 @@ model PlateSwap {
 
   // รับเอกสารกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปใบเสร็จผ่าน ReceiptImage.plateSwapId)
   returnedDate DateTime?
+
+  // แยกขั้นรับเอกสารกลับเป็น 3 ขั้น เหมือนฝั่งรถจดใหม่ (ผู้ใช้ 2026-09-28) - "งานเสร็จ" ยังผูกกับ returnedDate อย่างเดียวเหมือนเดิม
+  // ไม่ผูกกับ 3 ช่องนี้เลย: รับป้าย/รับเล่มเป็นแค่ขั้นบันทึกข้อมูลเพิ่มที่ไม่มีกฎ gating ใดๆ (ไม่ต้องรอ returnedDate ก่อนก็ได้)
+  // รับใบเสร็จ: อ่าน OCR จริงจากรูปที่แนบ (เหมือน Step 5) เติมให้เฉพาะตอนช่องยังว่างทั้ง 3 ช่อง แก้เองทีหลังได้เสมอ
+  receiptNo     String? // เลขที่ใบเสร็จ
+  receiptDate   DateTime? // วันที่พิมพ์บนใบเสร็จ
+  receiptAmount Decimal?  @db.Decimal(12, 2) // ยอดเงินตามใบเสร็จ
+
+  // รับป้าย/รับเล่ม (ไม่ใช้ AI เหมือน Step 6/7 ปัจจุบัน) - เฉพาะฝั่งรถเก่าของงานนี้เท่านั้น ไม่แตะรถใหม่ที่ลิงก์ไว้
+  // (รถใหม่มีรับป้าย/รับเล่มของตัวเองอยู่แล้วผ่านหน้างานจดทะเบียนรถใหม่ปกติ) ใช้ตาราง PlatePhoto/BookPhoto เดิมร่วมกับ Vehicle
+  plateReceivedDate DateTime?
+  platePhotoId      String?
+  bookReceivedDate  DateTime?
+  bookPhotoId       String?
 
   // ยกเลิกงาน (soft cancel - ผู้ใช้ 2026-09-27 ห้ามลบแถว): ADMIN/STAFF_CAR ต้องระบุเหตุผล บันทึกประวัติลง AuditLog
   // cancelledAt ไม่ว่าง = ยกเลิกแล้ว ไม่แสดงในรายการ ยอดรวม และภาพรวม และไม่ล็อกการยื่นเอกสารของรถใหม่ที่ผูกไว้
@@ -694,13 +724,20 @@ model PlateSwap {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  customer    Customer?      @relation(fields: [customerId], references: [id])
   newVehicle  Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
   cancelledBy User?          @relation("PlateSwapCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  platePhoto  PlatePhoto?    @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
+  bookPhoto   BookPhoto?     @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
   receipts    ReceiptImage[]
 
+  @@index([customerId])
+  @@index([pairId])
   @@index([newVehicleId])
   @@index([submitDate])
   @@index([returnedDate])
+  @@index([plateReceivedDate])
+  @@index([bookReceivedDate])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------
@@ -785,7 +822,8 @@ model PlatePhoto {
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 
-  vehicles Vehicle[]
+  vehicles   Vehicle[]
+  plateSwaps PlateSwap[] // รูปป้ายของงานสลับเลข (รถเก่า) - ตารางเดียวกับรูปป้ายรถจดใหม่ (ผู้ใช้ 2026-09-28)
 
   @@index([kind, closedAt])
 }
@@ -809,7 +847,8 @@ model BookPhoto {
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 
-  vehicles Vehicle[]
+  vehicles   Vehicle[]
+  plateSwaps PlateSwap[] // รูปเล่มของงานสลับเลข (รถเก่า) - ตารางเดียวกับรูปเล่มรถจดใหม่ (ผู้ใช้ 2026-09-28)
 
   @@index([closedAt])
 }

@@ -182,7 +182,13 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/new-vehicle/receive-plate', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/registration/new-vehicle/receive-book', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   // งานสลับเลข รถเก่า-รถใหม่ (รถยนต์): ยื่น/รับเอกสารกลับ = กลุ่มยื่นรถยนต์ (+ACCOUNTANT อ่าน) - backend: /api/plate-swaps
-  { prefix: '/registration/plate-swap/old-new', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  // (ผู้ใช้ 2026-09-28: แยกรถยนต์/มอเตอร์ไซค์เป็นชั้นบนสุด - ไม่ต้องเพิ่ม rule ให้ /moto เพราะ fallback /registration พอสำหรับหน้าว่าง)
+  { prefix: '/registration/plate-swap/car/old-new', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  // รถเก่า กับ รถเก่า (ผู้ใช้ให้กฎ 2026-09-28) - สิทธิ์ชุดเดียวกับเคสข้างบน ไม่ใช่ fallback /registration ที่กว้างเกินไป
+  { prefix: '/registration/plate-swap/car/old-old', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  // มอเตอร์ไซค์ = งานของ STAFF_MOTO (ผู้ใช้ให้อัตรา 2026-09-28) ล้อกับฝั่งรถยนต์ที่เป็น STAFF_CAR
+  // backend เช็คซ้ำตามประเภทรถของงานจริง (PlateSwapService.assertClassScope) ไม่ได้เชื่อ path อย่างเดียว
+  { prefix: '/registration/plate-swap/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
   // ต่อภาษี: กลุ่มยื่นเอกสาร (รถยนต์/จักรยานยนต์ตามขอบเขตของตัวเอง) + ACCOUNTANT อ่าน - backend: /api/tax-renewals
   { prefix: '/registration/tax-renewal', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },
