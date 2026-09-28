@@ -341,6 +341,8 @@ export const billingApi = {
     request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`),
   setAccount: (customerId: string, data: { account: BillingAccount; effectiveFrom: string; remark: string }) =>
     request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`, json("POST", data)),
+  // ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
+  getRates: (customerId: string) => request<{ rates: ServiceFeeRate[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/rates`),
   replaceRates: (customerId: string, rates: ServiceFeeRateInput[]) =>
     request<{ rates: ServiceFeeRate[] }>(`/api/billing/customers/${customerId}/rates`, json("PUT", { rates })),
   listInvoices: (params: { offset?: number; limit?: number } = {}) =>

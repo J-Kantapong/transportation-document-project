@@ -464,6 +464,10 @@ export function BillingPage() {
       <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
         รายงานส่งงาน / ใบส่งงาน →
       </Link>
+      {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
+      <Link href="/accounting/billing/customers" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
+        ตั้งราคาล่วงหน้าให้ลูกค้า →
+      </Link>
 
       {loading ? (
         <div className="customer-message" role="status" style={{ marginTop: 20 }}>

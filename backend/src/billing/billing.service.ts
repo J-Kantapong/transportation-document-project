@@ -490,6 +490,14 @@ export class BillingService {
     return this.accountPeriods(customerId);
   }
 
+  // ตารางค่าดำเนินการปัจจุบันของลูกค้า - ใช้ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
+  async getRates(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const rows = await this.prisma.serviceFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' } });
+    return rows.map(toRate);
+  }
+
   // บันทึกตารางค่าดำเนินการของลูกค้าทั้งชุด (แทนที่ของเดิม) - ลำดับในรายการ = ลำดับที่ใช้จับคู่
   async replaceRates(customerId: string, dto: { rates?: unknown }) {
     if (!Array.isArray(dto?.rates)) throw bad('rates ต้องเป็นรายการ');

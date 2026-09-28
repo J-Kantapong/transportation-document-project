@@ -33,6 +33,12 @@ export class BillingController {
     return this.billingService.setAccount(id, body ?? {});
   }
 
+  // ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
+  @Get('customers/:id/rates')
+  async getRates(@Param('id') id: string) {
+    return { rates: await this.billingService.getRates(id) };
+  }
+
   @Put('customers/:id/rates')
   async replaceRates(@Param('id') id: string, @Body() body: { rates?: unknown }) {
     return { rates: await this.billingService.replaceRates(id, body) };
