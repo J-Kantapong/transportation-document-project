@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { BillingService, type CreateInvoiceDto, type UpdateInvoiceDto } from './billing.service.js';
+import { BillingService, type CreateCustomInvoiceDto, type CreateInvoiceDto, type UpdateInvoiceDto } from './billing.service.js';
 
 // สิทธิ์: ทั้ง /api/billing = ADMIN + ACCOUNTANT ยกเว้นเปิดงานกลับ (vehicles/:id/reopen) = ADMIN เท่านั้น - ดู access-policy.ts
 @Controller('api/billing')
@@ -33,6 +33,12 @@ export class BillingController {
     return this.billingService.setAccount(id, body ?? {});
   }
 
+  // ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
+  @Get('customers/:id/rates')
+  async getRates(@Param('id') id: string) {
+    return { rates: await this.billingService.getRates(id) };
+  }
+
   @Put('customers/:id/rates')
   async replaceRates(@Param('id') id: string, @Body() body: { rates?: unknown }) {
     return { rates: await this.billingService.replaceRates(id, body) };
@@ -47,6 +53,22 @@ export class BillingController {
   @Post('invoices')
   async createInvoice(@Body() body: CreateInvoiceDto) {
     return { invoice: await this.billingService.createInvoice(body) };
+  }
+
+  // บิลกำหนดเอง (ผู้ใช้ 2026-09-29) - บรรทัดพิมพ์เอง ไม่มีรถ: งานเก่าจากระบบเดิม / ขายสินค้า
+  @Post('custom-invoices')
+  async createCustomInvoice(@Body() body: CreateCustomInvoiceDto) {
+    return { invoice: await this.billingService.createCustomInvoice(body ?? {}) };
+  }
+
+  @Get('next-invoice-no')
+  nextInvoiceNumbers() {
+    return this.billingService.nextInvoiceNumbers();
+  }
+
+  @Get('invoices/:id')
+  async getInvoice(@Param('id') id: string) {
+    return { invoice: await this.billingService.getInvoice(id) };
   }
 
   // แก้บิลที่ยังไม่รับเงิน เลขที่เดิม (ผู้ใช้ 2026-09-27) - ต้องมี remark

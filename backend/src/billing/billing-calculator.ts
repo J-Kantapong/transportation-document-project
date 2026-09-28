@@ -107,6 +107,7 @@ export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: nu
 export interface InvoiceTotals {
   feeTotal: number;
   serviceTotal: number;
+  goodsTotal: number;
   vatRate: number;
   vatAmount: number;
   whtRate: number;
@@ -115,21 +116,29 @@ export interface InvoiceTotals {
   netTotal: number;
 }
 
+// บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29): FEE = ค่าธรรมเนียมราชการ ไม่มี VAT ไม่หัก · SERVICE = ค่าบริการ VAT + หัก · GOODS = ขายสินค้า VAT ไม่หัก
+export const ITEM_KINDS = ['FEE', 'SERVICE', 'GOODS'] as const;
+export type ItemKind = (typeof ITEM_KINDS)[number];
+
 export function computeInvoiceTotals(input: {
   // swapReceiptAmount = ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข เก็บแยกแต่รวมอยู่ในยอดค่าธรรมเนียม (ผู้ใช้ 2026-09-28)
   lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>;
   extras: Array<{ amount: number }>;
+  items?: Array<{ kind: string; amount: number }>;
   terms: BillingTerms;
   issueDate: string;
 }): InvoiceTotals {
-  const feeTotal = round2(input.lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0));
-  const serviceTotal = round2(input.lines.reduce((s, l) => s + l.serviceFee, 0) + input.extras.reduce((s, e) => s + e.amount, 0));
+  const items = input.items ?? [];
+  const itemSum = (kind: ItemKind) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i.amount, 0);
+  const feeTotal = round2(input.lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0) + itemSum('FEE'));
+  const serviceTotal = round2(input.lines.reduce((s, l) => s + l.serviceFee, 0) + input.extras.reduce((s, e) => s + e.amount, 0) + itemSum('SERVICE'));
+  const goodsTotal = round2(itemSum('GOODS'));
   const vatRate = input.terms.vat ? VAT_RATE : 0;
   const whtRate = effectiveWhtRate(input.terms, input.issueDate);
-  const vatAmount = round2((serviceTotal * vatRate) / 100);
+  const vatAmount = round2(((serviceTotal + goodsTotal) * vatRate) / 100);
   const whtAmount = round2((serviceTotal * whtRate) / 100);
-  const grossTotal = round2(feeTotal + serviceTotal + vatAmount);
-  return { feeTotal, serviceTotal, vatRate, vatAmount, whtRate, whtAmount, grossTotal, netTotal: round2(grossTotal - whtAmount) };
+  const grossTotal = round2(feeTotal + serviceTotal + goodsTotal + vatAmount);
+  return { feeTotal, serviceTotal, goodsTotal, vatRate, vatAmount, whtRate, whtAmount, grossTotal, netTotal: round2(grossTotal - whtAmount) };
 }
 
 // เลขที่บิลถัดไปที่เสนอให้ = เพิ่มเลขท้ายของเลขล่าสุด คงจำนวนหลักเดิม (IV2026-120 -> IV2026-121)

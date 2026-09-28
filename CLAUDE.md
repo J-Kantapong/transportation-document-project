@@ -249,6 +249,23 @@ This private repository is the shared development surface for the user, Claude C
   page); the ticked cars and the open "แก้" panel are restored from sessionStorage (`billing-return-v1`). The same check runs earlier: step 5 (รับใบเสร็จ) explains a "ไม่ตรง Bill"
   (maybe ขอใช้), links to the vehicle edit and asks for confirmation before saving; step 4 settings tag ขอใช้ cars. Company-account prices are always on top of the receipt (user); TWE: <300cc 520,
   300-799cc 885, ขอใช้ +100, ด่วน +100 (taken as before VAT).
+- Custom invoices and per-bill WHT (user 2026-09-29): `/accounting/billing/custom` issues a bill with free-typed lines and
+  no vehicles (old jobs moved from the previous system, goods sales such as selling a company car). `InvoiceItem` (kind,
+  description, quantity, unitPrice, amount = quantity x unitPrice computed by the server, cost per unit, sortOrder) with
+  kinds `FEE` (no VAT, no WHT), `SERVICE` (VAT + WHT), `GOODS` (VAT, no WHT); `Invoice.goodsTotal` holds the goods sum,
+  VAT = (service + goods) x rate, WHT = service x rate. `cost` is internal (never printed, null = unknown, always null
+  for FEE); profit = (unitPrice - cost) x quantity per line. The same lines can also go on a vehicle bill (`items` on
+  `POST /api/billing/invoices`; the billing page's confirm dialog and the edit dialog use the shared
+  `components/InvoiceItemsEditor.tsx`, which replaced the old "ค่าใช้จ่ายอื่นๆ" box for new bills; old bills keep their
+  `extras`). On a mixed bill the vehicle fee line and the attachment total count vehicles only, and the attachment notes
+  the other lines. API: `POST /api/billing/custom-invoices` { customerId, invoiceNo, issueDate, jobLabel, items, whtRate? }, `GET
+  /api/billing/next-invoice-no`, `GET /api/billing/invoices/:id`; `PATCH /api/billing/invoices/:id` also takes `items`
+  (full replace) and `whtRate`. The bill's account = the customer's account on the issue date; numbering shares the
+  vehicle bills' series. A bill without vehicles prints one page (no attachment); "แก้ไขบิล" on such a bill opens the
+  custom page with `?edit=<id>`. Every bill (vehicle, custom, and edits) can override the WHT rate
+  (`components/WhtRatePicker.tsx`: ตามลูกค้า / 1% / 3% / ไม่หัก / อัตราอื่น); a rate different from the customer's
+  (or, when editing, the bill's own) must be ticked as checked before saving. Invoices print "ค่าบริการ" instead of
+  "ค่าดำเนินการ" (reprints of old bills too).
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,

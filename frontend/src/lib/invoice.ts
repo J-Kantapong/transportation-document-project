@@ -1,4 +1,4 @@
-import type { BillingTerms, Invoice, InvoiceLine, ServiceFeeRate } from "@/lib/billing-api";
+import type { BillingTerms, Invoice, InvoiceItemKind, InvoiceLine, ServiceFeeRate } from "@/lib/billing-api";
 import { comparePlate } from "@/lib/plate-order";
 
 // คำนวณยอดบิลแบบสดบนหน้าจอ - ต้องให้ผลเท่ากับ backend/src/billing/billing-calculator.ts (backend คำนวณซ้ำและเป็นตัวจริงตอนบันทึก)
@@ -30,21 +30,27 @@ export function effectiveWhtRate(terms: BillingTerms, issueDate: string): number
   return terms.whtRate;
 }
 
+// whtOverride = อัตราหัก ณ ที่จ่ายที่เลือกให้บิลนี้ (ผู้ใช้ 2026-09-29) null = ตามเงื่อนไขลูกค้า
+// items = บรรทัดกำหนดเอง: FEE ไม่มี VAT ไม่หัก · SERVICE VAT + หัก · GOODS VAT ไม่หัก
 export function computeTotals(
   lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>,
   extras: Array<{ amount: number }>,
   terms: BillingTerms,
   issueDate: string,
+  items: Array<{ kind: InvoiceItemKind; amount: number }> = [],
+  whtOverride: number | null = null,
 ) {
+  const itemSum = (kind: InvoiceItemKind) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i.amount, 0);
   // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลขรวมอยู่ในยอดค่าธรรมเนียมด้วย (ผู้ใช้ 2026-09-28)
-  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0));
-  const serviceTotal = round2(lines.reduce((s, l) => s + l.serviceFee, 0) + extras.reduce((s, e) => s + e.amount, 0));
+  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0) + itemSum("FEE"));
+  const serviceTotal = round2(lines.reduce((s, l) => s + l.serviceFee, 0) + extras.reduce((s, e) => s + e.amount, 0) + itemSum("SERVICE"));
+  const goodsTotal = round2(itemSum("GOODS"));
   const vatRate = terms.vat ? VAT_RATE : 0;
-  const whtRate = effectiveWhtRate(terms, issueDate);
-  const vatAmount = round2((serviceTotal * vatRate) / 100);
+  const whtRate = whtOverride ?? effectiveWhtRate(terms, issueDate);
+  const vatAmount = round2(((serviceTotal + goodsTotal) * vatRate) / 100);
   const whtAmount = round2((serviceTotal * whtRate) / 100);
-  const grossTotal = round2(feeTotal + serviceTotal + vatAmount);
-  return { feeTotal, serviceTotal, vatRate, vatAmount, whtRate, whtAmount, grossTotal, netTotal: round2(grossTotal - whtAmount) };
+  const grossTotal = round2(feeTotal + serviceTotal + goodsTotal + vatAmount);
+  return { feeTotal, serviceTotal, goodsTotal, vatRate, vatAmount, whtRate, whtAmount, grossTotal, netTotal: round2(grossTotal - whtAmount) };
 }
 
 export function termsSummary(terms: BillingTerms, today: string): string {
@@ -72,16 +78,20 @@ export interface InvoiceFaceLine {
 
 // บรรทัดบนหน้าบิลตามแบบที่บริษัทใช้อยู่: ค่าธรรมเนียมรวมเป็นบรรทัดเดียว ("ค่าธรรมเนียมจดทะเบียนรถยนต์ LEXUS 6 คัน")
 // ค่าดำเนินการรวมคันที่ข้อความและราคาเท่ากันเป็นบรรทัดเดียว คันที่มีการหักยอด (เช่น ลูกค้าชำระค่าขอใช้เลขเอง) แยกบรรทัดพร้อมทะเบียน
-export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "extras" | "feeTotal">): InvoiceFaceLine[] {
-  if (invoice.lines.length === 0) return [];
+// บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29) พิมพ์ตามลำดับที่กรอก บรรทัดละรายการ ต่อจากบรรทัดของรถ
+export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "extras" | "feeTotal" | "items">): InvoiceFaceLine[] {
+  const itemLines = invoice.items.map((it) => ({ name: it.description, qty: it.quantity, unit: it.unitPrice }));
+  if (invoice.lines.length === 0) return [...itemLines, ...invoice.extras.map((e) => ({ name: e.label, qty: 1, unit: e.amount }))];
   const brands = [...new Set(invoice.lines.map((l) => l.brandName.toUpperCase()))];
   const brandText = brands.length === 1 ? ` ${brands[0]}` : "";
-  const out: InvoiceFaceLine[] = [{ name: `ค่าธรรมเนียม${invoice.jobLabel}${brandText} ${invoice.lines.length} คัน`, qty: 1, unit: invoice.feeTotal }];
+  // ค่าธรรมเนียมของรถ = ยอดค่าธรรมเนียมทั้งบิลหักส่วนที่มาจากบรรทัดกำหนดเอง (บรรทัดพวกนั้นพิมพ์แยกของมันเอง)
+  const itemFees = invoice.items.filter((it) => it.kind === "FEE").reduce((s, it) => s + it.amount, 0);
+  const out: InvoiceFaceLine[] = [{ name: `ค่าธรรมเนียม${invoice.jobLabel}${brandText} ${invoice.lines.length} คัน`, qty: 1, unit: round2(invoice.feeTotal - itemFees) }];
 
   const groups = new Map<string, InvoiceFaceLine & { parts: number }>();
   for (const l of invoice.lines) {
     const suffix = l.deduction > 0 ? ` ${l.plateText || l.chassis}` : l.serviceLabel ? ` ${l.serviceLabel}` : "";
-    const name = `ค่าดำเนินการ${invoice.jobLabel}${suffix}`;
+    const name = `ค่าบริการ${invoice.jobLabel}${suffix}`;
     const key = `${name}|${l.serviceFee}`;
     // จำนวนส่วนในวงเล็บ: "" = 0, "(300-799 cc)" = 1, "(300-799 cc + ขอใช้)" = 2 - คันที่มีหักยอดไว้ท้ายสุด
     const parts = l.deduction > 0 ? 99 : l.serviceLabel ? l.serviceLabel.split(" + ").length : 0;
@@ -92,6 +102,7 @@ export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "
   // ลำดับบรรทัด (ผู้ใช้ 2026-09-28): จดปกติก่อน แล้วค่อยบรรทัดที่มีค่าเพิ่ม (ขอใช้ / ด่วน) - ในกลุ่มเดียวกันราคาน้อยไปมาก
   // เช่น (ต่ำกว่า 300 cc) → (300-799 cc) → (ต่ำกว่า 300 cc + ขอใช้) → (300-799 cc + ขอใช้)
   out.push(...[...groups.values()].sort((a, b) => a.parts - b.parts || a.unit - b.unit).map(({ name, qty, unit }) => ({ name, qty, unit })));
+  out.push(...itemLines);
   for (const e of invoice.extras) out.push({ name: e.label, qty: 1, unit: e.amount });
   return out;
 }

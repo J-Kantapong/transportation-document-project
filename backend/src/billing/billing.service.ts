@@ -13,7 +13,20 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
-import { computeInvoiceTotals, nextInvoiceNo, rateAmountExVat, RATE_KINDS, round2, serviceFeeFromRate, suggestAddOns, suggestRate, type BillingTerms, type RateRow } from './billing-calculator.js';
+import {
+  computeInvoiceTotals,
+  ITEM_KINDS,
+  nextInvoiceNo,
+  rateAmountExVat,
+  RATE_KINDS,
+  round2,
+  serviceFeeFromRate,
+  suggestAddOns,
+  suggestRate,
+  type BillingTerms,
+  type ItemKind,
+  type RateRow,
+} from './billing-calculator.js';
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถเข้าคิวเมื่อพนักงานบันทึกส่งงานแล้ว (Vehicle.deliveredDate) และยังไม่อยู่ในบิลที่ยังใช้อยู่
 // (บิลที่ VOID ไม่นับ - รถกลับเข้าคิว) เลขที่บิลพิมพ์เอง เพราะช่วงแรกยังรันเลขร่วมกับ Google Sheet ของงานประเภทอื่น
@@ -78,7 +91,7 @@ const lineSnapshotOf = (v: SnapshotSource): LineSnapshot => ({
   receiptNo: v.documentSubmissions[0]?.receiptNo ?? null,
   deliveredDate: v.deliveredDate,
 });
-const TOTAL_FIELDS = ['vatRate', 'whtRate', 'feeTotal', 'serviceTotal', 'vatAmount', 'whtAmount', 'netTotal'] as const;
+const TOTAL_FIELDS = ['vatRate', 'whtRate', 'feeTotal', 'serviceTotal', 'goodsTotal', 'vatAmount', 'whtAmount', 'netTotal'] as const;
 
 // เลขที่บิลเดียวกันจาก 2 หน้าจอพร้อมกัน ผ่านการตรวจล่วงหน้าทั้งคู่ -> unique index ของ invoiceNo กันไว้อีกชั้น (Prisma P2002)
 export function isInvoiceNoConflict(err: unknown): boolean {
@@ -136,6 +149,56 @@ function parseExtras(raw: unknown): Extra[] {
     return { label, amount: parseMoney(e.amount, `จำนวนเงินของ "${label}"`) };
   });
 }
+
+// บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29) - amount = quantity x unitPrice คำนวณฝั่ง server เสมอ
+// cost = ต้นทุนต่อหน่วย, FEE ไม่เก็บ (= ยอดเสมอ กำไร 0)
+type Item = { kind: ItemKind; description: string; quantity: number; unitPrice: number; amount: number; cost: number | null; sortOrder: number };
+const MAX_ITEMS = 200;
+const MAX_QUANTITY = 100_000;
+
+function parseItems(raw: unknown): Item[] {
+  if (!Array.isArray(raw)) throw bad('items ต้องเป็นรายการ');
+  if (raw.length > MAX_ITEMS) throw bad(`บิลหนึ่งใบมีบรรทัดได้ไม่เกิน ${MAX_ITEMS} บรรทัด`);
+  return (raw as Array<Record<string, unknown>>).map((it, i) => {
+    const row = `บรรทัดที่ ${i + 1}: `;
+    if (!(ITEM_KINDS as readonly unknown[]).includes(it?.kind)) throw bad(`${row}ประเภทต้องเป็นค่าธรรมเนียม ค่าบริการ หรือขายสินค้า`);
+    const kind = it.kind as ItemKind;
+    const description = optionalText(it.description, `${row}รายละเอียด`);
+    if (!description) throw bad(`${row}ต้องใส่รายละเอียดที่จะพิมพ์บนบิล`);
+    if (description.length > 300) throw bad(`${row}รายละเอียดยาวเกิน 300 ตัวอักษร`);
+    const quantity = it.quantity;
+    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
+      throw bad(`${row}จำนวนต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป`);
+    }
+    const unitPrice = parseMoney(it.unitPrice, `${row}ราคาต่อหน่วย`);
+    if (unitPrice <= 0) throw bad(`${row}ราคาต่อหน่วยต้องมากกว่า 0`);
+    const cost = kind === 'FEE' || it.cost === null || it.cost === undefined || it.cost === '' ? null : parseMoney(it.cost, `${row}ต้นทุนต่อหน่วย`);
+    return { kind, description, quantity, unitPrice, amount: round2(quantity * unitPrice), cost, sortOrder: i };
+  });
+}
+
+type ItemDbRow = { kind: string; description: string; quantity: number; unitPrice: unknown; amount: unknown; cost: unknown; sortOrder: number };
+const itemsOf = (rows: ItemDbRow[]): Item[] =>
+  [...rows]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((r) => ({
+      kind: r.kind as ItemKind,
+      description: r.description,
+      quantity: r.quantity,
+      unitPrice: Number(r.unitPrice),
+      amount: Number(r.amount),
+      cost: num(r.cost),
+      sortOrder: r.sortOrder,
+    }));
+
+const INVOICE_INCLUDE = { lines: true, items: true } as const;
+
+// อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29: 1% / 3% / ตามงาน ต้องปรับได้ทุกบิล) - ไม่ส่ง = ตามเงื่อนไขลูกค้า ณ วันออกบิล
+function parseWhtOverride(raw: unknown): number | null {
+  return raw === undefined || raw === null ? null : parsePercent(raw, 'อัตราหัก ณ ที่จ่าย');
+}
+const withWht = (terms: BillingTerms, whtRate: number | null): BillingTerms =>
+  whtRate === null ? terms : { ...terms, whtRate, whtSpecialRate: null, whtSpecialUntil: null };
 
 const extrasOf = (raw: unknown): Extra[] =>
   (Array.isArray(raw) ? (raw as Array<{ label?: unknown; amount?: unknown }>) : []).map((e) => ({ label: String(e.label ?? ''), amount: Number(e.amount ?? 0) }));
@@ -270,6 +333,18 @@ export interface CreateInvoiceDto {
   jobLabel?: unknown;
   lines?: unknown;
   extras?: unknown;
+  items?: unknown; // บรรทัดกำหนดเองในบิลเดียวกับรถ (ผู้ใช้ 2026-09-29) เช่น งานเก่าของลูกค้ารายเดียวกัน
+  whtRate?: unknown; // ไม่ส่ง = ตามเงื่อนไขลูกค้า
+}
+
+// บิลกำหนดเอง (ผู้ใช้ 2026-09-29): ไม่มีรถ มีแต่บรรทัดที่พิมพ์เอง - งานเก่าจากระบบเดิม / ขายสินค้า
+export interface CreateCustomInvoiceDto {
+  customerId?: unknown;
+  invoiceNo?: unknown;
+  issueDate?: unknown;
+  jobLabel?: unknown;
+  items?: unknown;
+  whtRate?: unknown;
 }
 
 // แก้บิลที่ยังไม่รับเงิน (ผู้ใช้ 2026-09-27) - ช่องที่ไม่ส่งมา = ไม่แก้
@@ -282,6 +357,8 @@ export interface UpdateInvoiceDto {
   // คันที่ให้ดึงข้อมูลรถล่าสุดลงบิล (ทะเบียน เลขที่ใบเสร็จ ยี่ห้อ ประเภทรถ เลขตัวถัง วันที่ส่งงาน) - เช่น แก้ทะเบียนที่ AI อ่านผิดหลังออกบิล
   refreshLineIds?: unknown;
   applyCurrentTerms?: unknown; // true = คิด VAT / หัก ณ ที่จ่ายใหม่ตามเงื่อนไขปัจจุบันของลูกค้า ณ วันออกบิล
+  items?: unknown; // บรรทัดกำหนดเอง ส่งมา = แทนที่ทั้งชุด
+  whtRate?: unknown; // ส่งมา = ใช้อัตรานี้ (มาก่อน applyCurrentTerms)
   expectedUpdatedAt?: unknown; // updatedAt ของบิลตอนเปิดหน้าแก้ - ไม่ตรง = มีคนแก้/เปลี่ยนสถานะไปก่อน (409)
   remark?: unknown;
 }
@@ -490,6 +567,14 @@ export class BillingService {
     return this.accountPeriods(customerId);
   }
 
+  // ตารางค่าดำเนินการปัจจุบันของลูกค้า - ใช้ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
+  async getRates(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const rows = await this.prisma.serviceFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' } });
+    return rows.map(toRate);
+  }
+
   // บันทึกตารางค่าดำเนินการของลูกค้าทั้งชุด (แทนที่ของเดิม) - ลำดับในรายการ = ลำดับที่ใช้จับคู่
   async replaceRates(customerId: string, dto: { rates?: unknown }) {
     if (!Array.isArray(dto?.rates)) throw bad('rates ต้องเป็นรายการ');
@@ -543,6 +628,8 @@ export class BillingService {
     if (new Set(lineInputs.map((l) => l.vehicleId)).size !== lineInputs.length) throw bad('มีรถซ้ำในบิล');
 
     const extras = parseExtras(dto.extras);
+    const items = dto.items === undefined ? [] : parseItems(dto.items);
+    const whtOverride = parseWhtOverride(dto.whtRate);
 
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
@@ -588,7 +675,7 @@ export class BillingService {
           if (accounts.size > 1) throw bad('รถในบิลนี้ส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี');
           const account = [...accounts][0];
           const issueIso = issueDate.toISOString().slice(0, 10);
-          const totals = computeInvoiceTotals({ lines, extras, terms: termsFor(account, toTerms(customer)), issueDate: issueIso });
+          const totals = computeInvoiceTotals({ lines, extras, items, terms: withWht(termsFor(account, toTerms(customer)), whtOverride), issueDate: issueIso });
 
           return tx.invoice.create({
             data: {
@@ -603,13 +690,15 @@ export class BillingService {
               whtRate: totals.whtRate,
               feeTotal: totals.feeTotal,
               serviceTotal: totals.serviceTotal,
+              goodsTotal: totals.goodsTotal,
               vatAmount: totals.vatAmount,
               whtAmount: totals.whtAmount,
               netTotal: totals.netTotal,
               // createMany = คำสั่งเดียว บิลหลายสิบคันไม่ชน timeout ของ transaction
               lines: { createMany: { data: lines } },
+              ...(items.length ? { items: { createMany: { data: items } } } : {}),
             },
-            include: { lines: true },
+            include: INVOICE_INCLUDE,
           });
         },
         { timeout: 20_000 },
@@ -619,6 +708,73 @@ export class BillingService {
       throw err;
     }
     return this.mapInvoice(invoice);
+  }
+
+  // บิลกำหนดเอง (ผู้ใช้ 2026-09-29): งานเก่าที่ย้ายมาจากระบบเดิมซึ่งไม่มีข้อมูลรถในระบบนี้ / ขายสินค้า เช่น ขายรถออกจากบริษัท
+  // บัญชีของบิล = บัญชีของลูกค้า ณ วันออกบิล (ไม่มีวันส่งงานของรถให้อิง) · เลขบิลรันชุดเดียวกับบิลรถของบัญชีนั้น
+  async createCustomInvoice(dto: CreateCustomInvoiceDto) {
+    const invoiceNo = optionalText(dto?.invoiceNo, 'เลขที่บิล');
+    if (!invoiceNo) throw bad('ต้องใส่เลขที่บิล');
+    const issueDate = parseIsoDate(dto.issueDate, 'วันที่ออกบิล');
+    const jobLabel = optionalText(dto.jobLabel, 'ชื่องาน') ?? '';
+    if (typeof dto.customerId !== 'string') throw bad('ต้องระบุลูกค้า');
+    const items = parseItems(dto.items);
+    if (items.length === 0) throw bad('ต้องมีอย่างน้อย 1 บรรทัด');
+    const whtOverride = parseWhtOverride(dto.whtRate);
+
+    const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const issueIso = issueDate.toISOString().slice(0, 10);
+    const account = accountOn(toPeriods(customer.accountPeriods ?? []), issueIso);
+    const totals = computeInvoiceTotals({ lines: [], extras: [], items, terms: withWht(termsFor(account, toTerms(customer)), whtOverride), issueDate: issueIso });
+
+    let invoice;
+    try {
+      invoice = await this.prisma.invoice.create({
+        data: {
+          invoiceNo,
+          issueDate,
+          account,
+          customerId: customer.id,
+          customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
+          jobLabel,
+          extras: [],
+          vatRate: totals.vatRate,
+          whtRate: totals.whtRate,
+          feeTotal: totals.feeTotal,
+          serviceTotal: totals.serviceTotal,
+          goodsTotal: totals.goodsTotal,
+          vatAmount: totals.vatAmount,
+          whtAmount: totals.whtAmount,
+          netTotal: totals.netTotal,
+          items: { createMany: { data: items } },
+        },
+        include: INVOICE_INCLUDE,
+      });
+    } catch (err) {
+      if (isInvoiceNoConflict(err)) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
+      throw err;
+    }
+    return this.mapInvoice(invoice);
+  }
+
+  // เลขบิลถัดไปของแต่ละบัญชี (หน้าบิลกำหนดเองใช้ ไม่ต้องโหลดคิวรถทั้งหมด)
+  async nextInvoiceNumbers() {
+    const [lastInvoice, lastPersonal] = await Promise.all([
+      this.prisma.invoice.findFirst({ where: { account: 'COMPANY' }, orderBy: { createdAt: 'desc' }, select: { invoiceNo: true } }),
+      this.prisma.invoice.findFirst({ where: { account: 'PERSONAL' }, orderBy: { createdAt: 'desc' }, select: { invoiceNo: true } }),
+    ]);
+    return {
+      suggestedInvoiceNo: nextInvoiceNo(lastInvoice?.invoiceNo ?? null),
+      suggestedPersonalInvoiceNo: nextInvoiceNo(lastPersonal?.invoiceNo ?? null),
+      lastInvoiceNo: lastInvoice?.invoiceNo ?? null,
+      lastPersonalInvoiceNo: lastPersonal?.invoiceNo ?? null,
+    };
+  }
+
+  // บิลใบเดียว (หน้าแก้บิลกำหนดเองโหลดมาใส่ฟอร์ม)
+  async getInvoice(id: string) {
+    return this.mapInvoice(await this.invoiceWithLines(id));
   }
 
   // บิลรอรับเงินทุกใบ + ประวัติ (รับเงินแล้ว / ยกเลิก) ใหม่สุดทีละ 200 ใบ (พบ 2026-09-27: เดิมจำกัด 200 ใบรวมทุกสถานะ
@@ -633,13 +789,13 @@ export class BillingService {
     // (รอรับเงิน + ประวัติ) และยอดรอรับเงินไม่ตรงกับรายการ - อ่านอย่างเดียวใน RepeatableRead ไม่มี serialization error
     const { issued, history, outstanding, audits } = await this.prisma.$transaction(
       async (tx) => {
-        const issued = offset === 0 ? await tx.invoice.findMany({ where: { status: 'ISSUED' }, orderBy, include: { lines: true } }) : [];
+        const issued = offset === 0 ? await tx.invoice.findMany({ where: { status: 'ISSUED' }, orderBy, include: INVOICE_INCLUDE }) : [];
         const history = await tx.invoice.findMany({
           where: { status: { not: 'ISSUED' } },
           orderBy,
           skip: offset,
           take: pageSize + 1, // เกินมา 1 ใบ = ยังมีหน้าถัดไป
-          include: { lines: true },
+          include: INVOICE_INCLUDE,
         });
         const outstanding = await tx.invoice.aggregate({ where: { status: 'ISSUED' }, _count: { _all: true }, _sum: { netTotal: true } });
         // จำนวนประวัติแก้/ยกเลิก/ย้อนรับเงินของแต่ละใบ (AuditLog) - หน้าจอแสดงปุ่ม "ประวัติ" เฉพาะใบที่มี
@@ -741,11 +897,8 @@ export class BillingService {
   async updateInvoice(id: string, dto: UpdateInvoiceDto) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้ไขบิล');
     const issueDate = dto.issueDate === undefined ? undefined : parseIsoDate(dto.issueDate, 'วันที่ออกบิล');
-    let jobLabel: string | undefined;
-    if (dto.jobLabel !== undefined) {
-      jobLabel = optionalText(dto.jobLabel, 'ชื่องาน') ?? undefined;
-      if (!jobLabel) throw bad('ต้องใส่ชื่องานที่จะแสดงบนบิล');
-    }
+    // ชื่องานว่างได้เฉพาะบิลที่ไม่มีรถ (บิลกำหนดเอง) - ตรวจใน transaction หลังรู้ว่าบิลเหลือรถหรือไม่
+    const jobLabel = dto.jobLabel === undefined ? undefined : (optionalText(dto.jobLabel, 'ชื่องาน') ?? '');
     const extras = dto.extras === undefined ? undefined : parseExtras(dto.extras);
     if (dto.lines !== undefined && !Array.isArray(dto.lines)) throw bad('lines ต้องเป็นรายการ');
     const updates = new Map<string, LineAmounts>();
@@ -766,11 +919,13 @@ export class BillingService {
     if ([...refreshIds].some((rid) => removeIds.has(rid))) throw bad('รถคันเดียวกันดึงข้อมูลล่าสุดและเอาออกจากบิลพร้อมกันไม่ได้');
     const applyCurrentTerms = dto.applyCurrentTerms === true;
     const expectedUpdatedAt = typeof dto.expectedUpdatedAt === 'string' ? dto.expectedUpdatedAt : null;
+    const nextItemsInput = dto.items === undefined ? undefined : parseItems(dto.items);
+    const whtOverride = parseWhtOverride(dto.whtRate);
 
     await this.prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${id} FOR UPDATE`;
-        const invoice = await tx.invoice.findUnique({ where: { id }, include: { lines: true } });
+        const invoice = await tx.invoice.findUnique({ where: { id }, include: INVOICE_INCLUDE });
         if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
         // เทียบ updatedAt ก่อนสถานะ และสถานะไม่ใช่รอรับเงินก็ตอบ 409 (พบ 2026-09-27: เดิมตอบ 400 หน้ารายการบิลไม่โหลดใหม่
         // บิลที่อีกคนเพิ่งรับเงินยังแสดงรอรับเงินพร้อมปุ่มแก้ไข)
@@ -781,7 +936,12 @@ export class BillingService {
         const byId = new Map(invoice.lines.map((l) => [l.id, l]));
         if ([...updates.keys(), ...removeIds, ...refreshIds].some((lid) => !byId.has(lid))) throw bad('รถบางคันไม่อยู่ในบิลนี้แล้ว กรุณาเปิดหน้าแก้ใหม่');
         const kept = invoice.lines.filter((l) => !removeIds.has(l.id));
-        if (kept.length === 0) throw bad('บิลต้องเหลือรถอย่างน้อย 1 คัน - ถ้าจะเอาออกทั้งหมดให้ยกเลิกบิล');
+        const beforeItems = itemsOf(invoice.items);
+        const nextItems = nextItemsInput ?? beforeItems;
+        if (kept.length === 0 && nextItems.length === 0) {
+          throw bad(invoice.lines.length ? 'บิลต้องเหลือรถอย่างน้อย 1 คัน - ถ้าจะเอาออกทั้งหมดให้ยกเลิกบิล' : 'บิลต้องมีอย่างน้อย 1 บรรทัด - ถ้าจะเอาออกทั้งหมดให้ยกเลิกบิล');
+        }
+        if (kept.length > 0 && (jobLabel ?? invoice.jobLabel) === '') throw bad('ต้องใส่ชื่องานที่จะแสดงบนบิล');
 
         // ข้อมูลรถปัจจุบันของคันที่ขอดึงล่าสุด - อ่านใต้ล็อกบิล ค่าที่เขียนลงบิลกับค่าในประวัติจึงตรงกัน
         const refreshVehicleIds = kept.filter((l) => refreshIds.has(l.id)).map((l) => l.vehicleId);
@@ -836,8 +996,11 @@ export class BillingService {
           if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
           terms = termsFor(invoice.account, toTerms(customer));
         }
+        terms = withWht(terms, whtOverride);
         const nextExtras = extras ?? extrasOf(invoice.extras);
-        const totals = computeInvoiceTotals({ lines: nextLines, extras: nextExtras, terms, issueDate: nextIssueIso });
+        const totals = computeInvoiceTotals({ lines: nextLines, extras: nextExtras, items: nextItems, terms, issueDate: nextIssueIso });
+        const itemsChanged = nextItemsInput !== undefined && JSON.stringify(nextItems) !== JSON.stringify(beforeItems);
+        if (itemsChanged) changes['บรรทัดกำหนดเอง'] = { from: beforeItems, to: nextItems };
         Object.assign(changes, diffChanges(invoice, totals, TOTAL_FIELDS));
         if (Object.keys(changes).length === 0) {
           throw bad(refreshIds.size ? 'ไม่มีข้อมูลที่เปลี่ยน - ข้อมูลรถในบิลตรงกับข้อมูลล่าสุดอยู่แล้ว' : 'ไม่มีข้อมูลที่เปลี่ยน');
@@ -845,6 +1008,10 @@ export class BillingService {
 
         for (const [lineId, data] of lineWrites) await tx.invoiceLine.update({ where: { id: lineId }, data });
         if (removeIds.size) await tx.invoiceLine.deleteMany({ where: { invoiceId: id, id: { in: [...removeIds] } } });
+        if (itemsChanged) {
+          await tx.invoiceItem.deleteMany({ where: { invoiceId: id } });
+          if (nextItems.length) await tx.invoiceItem.createMany({ data: nextItems.map((it) => ({ ...it, invoiceId: id })) });
+        }
         await tx.invoice.update({
           where: { id },
           data: {
@@ -855,6 +1022,7 @@ export class BillingService {
             whtRate: totals.whtRate,
             feeTotal: totals.feeTotal,
             serviceTotal: totals.serviceTotal,
+            goodsTotal: totals.goodsTotal,
             vatAmount: totals.vatAmount,
             whtAmount: totals.whtAmount,
             netTotal: totals.netTotal,
@@ -1049,7 +1217,7 @@ export class BillingService {
   }
 
   private async invoiceWithLines(id: string) {
-    const invoice = await this.prisma.invoice.findUnique({ where: { id }, include: { lines: true } });
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, include: INVOICE_INCLUDE });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     return invoice;
   }
@@ -1066,6 +1234,7 @@ export class BillingService {
     whtRate: unknown;
     feeTotal: unknown;
     serviceTotal: unknown;
+    goodsTotal: unknown;
     vatAmount: unknown;
     whtAmount: unknown;
     netTotal: unknown;
@@ -1075,6 +1244,7 @@ export class BillingService {
     voidReason: string | null;
     account?: string;
     updatedAt?: Date;
+    items: Array<ItemDbRow & { id: string }>;
     lines: Array<{
       id: string;
       vehicleId: string;
@@ -1105,10 +1275,22 @@ export class BillingService {
       whtRate: Number(i.whtRate),
       feeTotal: Number(i.feeTotal),
       serviceTotal: Number(i.serviceTotal),
+      goodsTotal: Number(i.goodsTotal),
       vatAmount: Number(i.vatAmount),
       whtAmount: Number(i.whtAmount),
       netTotal: Number(i.netTotal),
       status: i.status,
+      items: [...i.items]
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((it) => ({
+          id: it.id,
+          kind: it.kind,
+          description: it.description,
+          quantity: it.quantity,
+          unitPrice: Number(it.unitPrice),
+          amount: Number(it.amount),
+          cost: num(it.cost),
+        })),
       paidDate: iso(i.paidDate),
       taxInvoiceNo: i.taxInvoiceNo,
       voidReason: i.voidReason,

@@ -984,7 +984,9 @@ model Invoice {
   serviceTotal     Decimal   @db.Decimal(12, 2) // รวมค่าดำเนินการ + extras (ก่อน VAT)
   vatAmount        Decimal   @db.Decimal(12, 2)
   whtAmount        Decimal   @db.Decimal(12, 2)
-  netTotal         Decimal   @db.Decimal(12, 2) // fee + service + vat - wht = "จำนวนเงินทั้งสิ้น" บนบิล
+  netTotal         Decimal   @db.Decimal(12, 2) // fee + service + goods + vat - wht = "จำนวนเงินทั้งสิ้น" บนบิล
+  // ขายสินค้า (ผู้ใช้ 2026-09-29, เช่น ขายรถออกจากบริษัท) ก่อน VAT - คิด VAT แต่ไม่เป็นฐานหัก ณ ที่จ่าย
+  goodsTotal       Decimal   @default(0) @db.Decimal(12, 2)
   status           String    @default("ISSUED")
   paidDate         DateTime?
   taxInvoiceNo     String? // เลขที่ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ที่ออกตอนรับเงิน
@@ -995,9 +997,30 @@ model Invoice {
 
   customer Customer      @relation(fields: [customerId], references: [id])
   lines    InvoiceLine[]
+  items    InvoiceItem[]
 
   @@index([customerId])
   @@index([status])
+}
+
+// บรรทัดกำหนดเองของบิล (ผู้ใช้ 2026-09-29) ไม่ผูกกับรถ - งานเก่าที่ย้ายมาจากระบบเดิม / ขายสินค้า
+// kind: FEE = ค่าธรรมเนียมราชการ (ไม่มี VAT ไม่หัก ณ ที่จ่าย) · SERVICE = ค่าบริการ (VAT + หัก ณ ที่จ่าย) · GOODS = ขายสินค้า (VAT ไม่หัก)
+// quantity x unitPrice = amount (ยอดรวมก่อน VAT ของบรรทัด เช่น ต่อภาษีรถจักรยานยนต์ 100 x 12 คัน, ผู้ใช้ 2026-09-29)
+// cost = ต้นทุนต่อหน่วย ใช้คิดกำไรภายใน ไม่พิมพ์บนบิล (null = ไม่ทราบ, FEE ต้นทุน = ยอดเสมอจึงไม่เก็บ)
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  kind        String
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  cost        Decimal? @db.Decimal(12, 2)
+  sortOrder   Int      @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
 }
 
 model InvoiceLine {

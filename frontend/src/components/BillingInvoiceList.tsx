@@ -7,6 +7,7 @@ import {
   type BillingTerms,
   type Invoice,
   type InvoiceHistoryEntry,
+  type InvoiceItem,
   type InvoiceLine,
   type InvoiceList,
   type InvoiceLiveLine,
@@ -16,6 +17,9 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisp
 import { DateInput } from "@/components/DateInput";
 import { computeTotals, effectiveWhtRate, formatMoney, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
+import Link from "next/link";
+import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
+import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 
 // บิลที่ออกแล้วของทุกลูกค้า: พิมพ์ซ้ำ, บันทึกรับเงิน (พร้อมเลขที่ใบกำกับภาษี TV ที่ออกจาก Google Sheet), หรือยกเลิกบิล (รถกลับเข้าคิวรอวางบิล)
 // บิลรอรับเงินโหลดครบทุกใบเสมอ ประวัติ (รับเงินแล้ว / ยกเลิก) โหลดทีละ 200 ใบ ใหม่สุดก่อน และยอดรอรับเงินนับฝั่ง server
@@ -222,7 +226,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                   <td>{i.invoiceNo}</td>
                   <td>{isoToDisplayDate(i.issueDate)}</td>
                   <td>{i.customer.name}</td>
-                  <td>{i.lines.length}</td>
+                  <td>{i.lines.length ? i.lines.length : <span className="muted">บิลกำหนดเอง</span>}</td>
                   <td style={{ textAlign: "right" }}>{formatMoney(i.netTotal)}</td>
                   <td>
                     <span className={STATUS[i.status].className}>{STATUS[i.status].text}</span>
@@ -294,17 +298,24 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                             <button className="text-button" onClick={() => open({ id: i.id, kind: "paid" })}>
                               รับเงินแล้ว
                             </button>
-                            <button
-                              className="text-button"
-                              onClick={() => {
-                                setAction(null);
-                                setNotice("");
-                                setStaleError("");
-                                setEditing(i);
-                              }}
-                            >
-                              แก้ไขบิล
-                            </button>
+                            {i.lines.length === 0 ? (
+                              // บิลกำหนดเอง (ไม่มีรถ) แก้ในฟอร์มเดียวกับตอนออกบิล
+                              <Link className="text-button" href={`/accounting/billing/custom?edit=${encodeURIComponent(i.id)}`}>
+                                แก้ไขบิล
+                              </Link>
+                            ) : (
+                              <button
+                                className="text-button"
+                                onClick={() => {
+                                  setAction(null);
+                                  setNotice("");
+                                  setStaleError("");
+                                  setEditing(i);
+                                }}
+                              >
+                                แก้ไขบิล
+                              </button>
+                            )}
                             <button className="text-button" onClick={() => open({ id: i.id, kind: "void" })}>
                               ยกเลิกบิล
                             </button>
@@ -456,6 +467,11 @@ function InvoiceEditDialog({
   const [extras, setExtras] = useState<ExtraRow[]>(() => invoice.extras.map((e) => ({ label: e.label, amountText: formatMoney(e.amount) })));
   const [currentTerms, setCurrentTerms] = useState<BillingTerms | null>(null);
   const [applyCurrent, setApplyCurrent] = useState(false);
+  // เปลี่ยนอัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29) null = คงอัตราเดิมของบิล
+  const [whtValue, setWhtValue] = useState<number | null>(null);
+  const [whtChecked, setWhtChecked] = useState(false);
+  // บรรทัดกำหนดเองของบิล (ผู้ใช้ 2026-09-29) แก้ได้ทั้งชุดเหมือนตอนออกบิล
+  const [itemRows, setItemRows] = useState<ItemRow[]>(() => itemRowsFromItems(invoice.items));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -518,6 +534,8 @@ function InvoiceEditDialog({
     extraValues.map((e) => ({ amount: e.amount ?? 0 })),
     useCurrent && currentTerms ? currentTerms : invoiceTerms,
     issueForTotals,
+    itemRowsToItems(itemRows),
+    whtOverrideOf(whtValue),
   );
 
   function patchRow(id: string, patch: Partial<EditRow>) {
@@ -561,6 +579,15 @@ function InvoiceEditDialog({
     if (removeLineIds.length) edits.removeLineIds = removeLineIds;
     if (refreshLineIds.length) edits.refreshLineIds = refreshLineIds;
     if (useCurrent) edits.applyCurrentTerms = true;
+    const itemError = itemRowsProblem(itemRows);
+    if (itemError) return fail(itemError);
+    const nextItems = itemRowsToItems(itemRows);
+    const itemKey = (items: InvoiceItem[]) => JSON.stringify(items.map((it) => [it.kind, it.description, it.quantity, it.unitPrice, it.cost]));
+    if (itemKey(nextItems) !== itemKey(invoice.items)) edits.items = nextItems;
+    const whtError = whtProblem(invoice.whtRate, whtValue, whtChecked);
+    if (whtError) return fail(whtError);
+    const whtOverride = whtOverrideOf(whtValue);
+    if (whtOverride !== null && whtOverride !== invoice.whtRate) edits.whtRate = whtOverride;
     if (Object.keys(edits).length === 0) return fail("ยังไม่ได้แก้อะไร");
     if (!remark.trim()) return fail("ต้องใส่เหตุผลที่แก้บิล");
     const payload: UpdateInvoiceInput = { ...edits, remark: remark.trim(), expectedUpdatedAt: invoice.updatedAt };
@@ -620,7 +647,7 @@ function InvoiceEditDialog({
             <tr>
               <th>ทะเบียน / เลขตัวถัง</th>
               <th>ค่าใบเสร็จ</th>
-              <th>ค่าดำเนินการ</th>
+              <th>ค่าบริการ</th>
               <th>ยอดหัก</th>
               <th>ข้อความต่อท้ายบนบิล</th>
               <th>เอาออกจากบิล</th>
@@ -743,8 +770,14 @@ function InvoiceEditDialog({
       )}
 
       <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+        <b style={{ fontWeight: 600 }}>บรรทัดอื่นในบิลนี้ (งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น)</b>
+        <InvoiceItemsEditor rows={itemRows} onChange={setItemRows} />
+      </div>
+
+      {/* ช่องแบบเดิม (ก่อน 2026-09-29) แสดงเฉพาะบิลเก่าที่มีอยู่แล้ว บิลใหม่ใช้บรรทัดด้านบน */}
+      {invoice.extras.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <b style={{ fontWeight: 600 }}>ค่าใช้จ่ายอื่นๆ ของบิลนี้</b>
+          <b style={{ fontWeight: 600 }}>ค่าใช้จ่ายอื่นๆ ของบิลนี้ (แบบเดิม)</b>
           <button className="text-button" onClick={() => setExtras((prev) => [...prev, { label: "", amountText: "" }])}>
             + เพิ่มรายการ
           </button>
@@ -773,7 +806,7 @@ function InvoiceEditDialog({
             </button>
           </div>
         ))}
-      </div>
+      </div>}
 
       <div style={{ display: "grid", gap: 6, fontSize: 14, marginTop: 14, maxWidth: 420, marginLeft: "auto" }}>
         <div className="muted" style={{ fontSize: 12 }}>
@@ -785,8 +818,18 @@ function InvoiceEditDialog({
             <span>ใช้เงื่อนไขปัจจุบันของลูกค้าแทน ({termsSummary(currentTerms, issueForTotals)})</span>
           </label>
         )}
+        <WhtRatePicker
+          defaultRate={invoice.whtRate}
+          value={whtValue}
+          onChange={setWhtValue}
+          checked={whtChecked}
+          onCheckedChange={setWhtChecked}
+          defaultLabel="อัตราเดิมของบิล"
+          defaultChip="คงเดิม"
+        />
         <SumLine label="ค่าธรรมเนียม (ตามใบเสร็จ)" value={totals.feeTotal} />
-        <SumLine label="ค่าดำเนินการ" value={totals.serviceTotal} />
+        <SumLine label="ค่าบริการ" value={totals.serviceTotal} />
+        {totals.goodsTotal > 0 && <SumLine label="ค่าสินค้า" value={totals.goodsTotal} />}
         <SumLine label={totals.vatRate ? `VAT ${totals.vatRate}%` : "VAT (ไม่มี)"} value={totals.vatAmount} />
         <SumLine label={totals.whtRate ? `หัก ณ ที่จ่าย ${totals.whtRate}%` : "หัก ณ ที่จ่าย (ไม่มี)"} value={-totals.whtAmount} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: "#edf2ff", color: "#2854d9", borderRadius: 10, padding: "10px 14px", fontWeight: 600 }}>
