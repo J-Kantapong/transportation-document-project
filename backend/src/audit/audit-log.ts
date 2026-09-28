@@ -7,7 +7,16 @@ import { currentUser } from '../auth/request-context.js';
 // เรียก writeAudit() ใน transaction เดียวกับการแก้ ถ้าการแก้ล้มประวัติก็ไม่ถูกเขียน
 // ผู้ทำอ่านจาก request context (currentUser) เหมือน VehicleEditLog.editedById - นอกคำขอ HTTP (script, test) เป็น null
 
-export type AuditEntity = 'Customer' | 'Invoice' | 'TaxRenewal' | 'YamahaRelocation' | 'PlateSwap' | 'User' | 'CustomerPayment';
+export type AuditEntity =
+  | 'Customer'
+  | 'Invoice'
+  | 'TaxRenewal'
+  | 'YamahaRelocation'
+  | 'PlateSwap'
+  | 'User'
+  | 'CustomerPayment'
+  | 'TaxInvoiceSeries'
+  | 'WhtCertificate';
 
 export interface AuditEntry {
   entity: AuditEntity;

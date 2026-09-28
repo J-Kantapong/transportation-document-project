@@ -266,6 +266,28 @@ This private repository is the shared development surface for the user, Claude C
   (`components/WhtRatePicker.tsx`: ตามลูกค้า / 1% / 3% / ไม่หัก / อัตราอื่น); a rate different from the customer's
   (or, when editing, the bill's own) must be ticked as checked before saving. Invoices print "ค่าบริการ" instead of
   "ค่าดำเนินการ" (reprints of old bills too).
+- Tax invoices + 50 ทวิ + credit terms (user 2026-09-28, migration `20260929120000_tax_invoices`, code in
+  `backend/src/billing/tax-invoice.*`, page `/accounting/tax-invoices` + `/wht`): a ใบกำกับภาษี/ใบเสร็จรับเงิน (`TaxInvoice`)
+  is issued when the money comes in, only for COMPANY-account bills with VAT, 1 bill = 1 active TV (partial unique index
+  `TaxInvoice_invoice_active_key`). Number `TV{year}-{3 digits}` from `TaxInvoiceSeries` (row-locked, date = paid date, a
+  date before the year's latest TV is refused); no series row = not enabled yet (old "รับเงินแล้ว" + typed TV no. still
+  works); ADMIN enables it by setting the last Google-Sheet number (`POST /api/billing/tax-invoices/series/set`
+  `{ year, lastNumber, remark }`, only while that year has no system TV). Once enabled, `PATCH .../invoices/:id/paid`
+  refuses COMPANY+VAT bills and `unpay` refuses bills with a system TV. Issue: `POST /api/billing/invoices/:id/tax-invoice`
+  `{ paidDate, whtAmount (actual, may differ from the bill), whtMethod NONE|PAPER|EWHT, buyerNotVatRegistered?,
+  expectedUpdatedAt? }` (preview `GET .../invoices/:id/tax-invoice-preview`); buyer name + address + 13-digit tax ID
+  required (tax ID optional when not VAT registered), snapshot of the live customer. Never edited: cancel
+  (`POST /api/billing/tax-invoices/:id/cancel { remark }`, number kept as CANCELLED, bill back to ISSUED, AuditLog
+  'Invoice') then reissue (new TV refers to it via `replacesId` and takes over its 50 ทวิ); lost original = ใบแทน
+  (`.../:id/replacement { remark }`, same number). Print (`lib/tax-invoice-print.ts`, same CSS as the invoice): original
+  + copy on the day it was issued, copy only afterwards; per-vehicle detail is not reprinted, it refers to the bill's
+  attachment `IV…-A`; one signature box ผู้รับเงิน. `GET /api/billing/tax-invoices?month=YYYY-MM` (incl. cancelled) feeds
+  the list and the sales-tax Excel. 50 ทวิ (`WhtCertificate`): one certificate may cover several TVs of one customer;
+  PAPER needs a file, EWHT a reference; `POST /api/billing/wht-certificates` (multipart `file`, `method`,
+  `certificateNo`, `certificateDate`, `amount`, `note`, `taxInvoiceIds` comma list), cancel frees the hash;
+  `GET /api/billing/wht-pending` (overdue after 30 days, user) + `POST .../wht-pending/remind`. Credit terms:
+  `Customer.billingCreditDays` (terms editor, `creditDays` in `PATCH .../customers/:id/terms`), `Invoice.dueDate` =
+  issue date + days at issue (shifted when the issue date is edited); the invoice list flags overdue / due in 7 days.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,

@@ -21,6 +21,8 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [whtText, setWhtText] = useState(String(terms.whtRate || 3));
   const [specialText, setSpecialText] = useState(terms.whtSpecialRate === null ? "" : String(terms.whtSpecialRate));
   const [untilText, setUntilText] = useState(terms.whtSpecialUntil ? isoToDisplayDate(terms.whtSpecialUntil) : "");
+  // เครดิตเทอม (ผู้ใช้ 2026-09-28) ว่าง = ไม่ตั้ง - ใช้หาวันครบกำหนดของบิลที่ออกหลังจากนี้
+  const [creditText, setCreditText] = useState(terms.creditDays == null ? "" : String(terms.creditDays));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -39,10 +41,12 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
       whtSpecialUntil = displayDateToIso(untilText.replace(/\D/g, "")) || null;
       if (!whtSpecialUntil) return setError("วันสุดท้ายที่ใช้อัตราพิเศษไม่ถูกต้อง");
     }
+    const creditDays = creditText.trim() === "" ? null : Number(creditText);
+    if (creditDays !== null && (!Number.isInteger(creditDays) || creditDays < 0 || creditDays > 365)) return setError("เครดิตเทอมต้องเป็นจำนวนวัน 0-365 (เว้นว่าง = ไม่ตั้ง)");
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, remark: remark.trim() });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -86,6 +90,10 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
           <p style={{ fontSize: 12 }}>ระบบเทียบวันสิ้นสุดกับวันที่ออกบิล พ้นวันนั้นแล้วกลับไปใช้อัตราปกติเอง บิลที่ออกไปแล้วไม่เปลี่ยน</p>
         </>
       )}
+      <label className="field" style={{ maxWidth: 260 }}>
+        เครดิตเทอม (วัน นับจากวันออกบิล)
+        <input type="text" inputMode="numeric" value={creditText} onChange={(e) => setCreditText(e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="เช่น 30 (ว่าง = ไม่ตั้ง)" />
+      </label>
       <label className="field">
         เหตุผลที่แก้ *
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ลูกค้าแจ้งเปลี่ยนอัตราหัก ณ ที่จ่าย" maxLength={500} />

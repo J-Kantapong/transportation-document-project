@@ -110,6 +110,7 @@ model Customer {
   billingWhtRate         Decimal   @default(3) @db.Decimal(5, 2) // % หัก ณ ที่จ่ายอัตราปกติ (0 = ไม่หัก)
   billingWhtSpecialRate  Decimal?  @db.Decimal(5, 2) // % อัตราพิเศษชั่วคราว เช่น 1% ถึงสิ้นปี
   billingWhtSpecialUntil DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
+  billingCreditDays      Int? // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28: มีรอบรับวางบิลแต่ใช้ค่าคร่าวๆ) - null = ไม่ได้ตั้ง
 
   vehicles        Vehicle[]
   requestedCases  Case[]
@@ -121,6 +122,8 @@ model Customer {
   accountPeriods  CustomerAccountPeriod[]
   payments        CustomerPayment[]
   plateSwaps      PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
+  taxInvoices     TaxInvoice[]
+  whtCertificates WhtCertificate[]
 }
 
 model Brand {
@@ -992,15 +995,103 @@ model Invoice {
   taxInvoiceNo     String? // เลขที่ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ที่ออกตอนรับเงิน
   account          String    @default("COMPANY") // COMPANY | PERSONAL - บัญชีของลูกค้า ณ วันส่งงานของรถในบิล (บัญชีบุคคล = ไม่มี VAT, เลขบิลรันแยก)
   voidReason       String?
+  // วันครบกำหนดชำระ = issueDate + เครดิตเทอมของลูกค้า ณ วันออกบิล (ผู้ใช้ 2026-09-28) - null = ลูกค้าไม่ได้ตั้งเครดิตเทอม / บิลก่อนมีคอลัมน์นี้
+  dueDate          DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  customer Customer      @relation(fields: [customerId], references: [id])
-  lines    InvoiceLine[]
-  items    InvoiceItem[]
+  customer    Customer      @relation(fields: [customerId], references: [id])
+  lines       InvoiceLine[]
+  items       InvoiceItem[]
+  taxInvoices TaxInvoice[]
 
   @@index([customerId])
   @@index([status])
+}
+
+// เลขใบกำกับภาษีรายปี (ผู้ใช้ 2026-09-28): TV{ปี ค.ศ.}-{3 หลัก} เช่น TV2026-001 นับใหม่ทุกปี
+// lastNumber = เลขล่าสุดที่ใช้ไปแล้ว - ADMIN ตั้งเลขเริ่มให้ต่อจาก Google Sheet ได้ก่อนออกใบแรกของปีนั้นในระบบ
+// ไม่มีแถวของปีใดเลย = ยังไม่เปิดใช้ใบกำกับในระบบ (บันทึกรับเงินแบบเดิม พิมพ์เลข TV เอง)
+model TaxInvoiceSeries {
+  year       Int      @id
+  lastNumber Int
+  updatedAt  DateTime @updatedAt
+}
+
+// ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ออกตอนรับเงิน เฉพาะบิลบัญชีบริษัทที่มี VAT (ผู้ใช้ 2026-09-28) - บิล 1 ใบมีใบที่ใช้อยู่ได้ 1 ใบ
+// (unique index บางส่วน TaxInvoice_invoice_active_key ใน migration) · ยอดทุกช่องเป็น snapshot ออกแล้วแก้ไม่ได้
+// ผิด = ยกเลิก (status CANCELLED + เหตุผล เลขเดิมไม่ใช้ซ้ำ บิลกลับเป็นรอรับเงิน) แล้วออกใบใหม่ที่อ้าง replacesId
+// ลูกค้าทำต้นฉบับหาย = "ใบแทน" (replacementIssuedAt/Reason) เลขเดิม ไม่ใช่ใบใหม่
+model TaxInvoice {
+  id                    String    @id @default(cuid())
+  taxInvoiceNo          String    @unique
+  year                  Int
+  number                Int
+  invoiceId             String
+  customerId            String
+  issueDate             DateTime // = วันที่รับเงิน
+  customerSnapshot      Json // { name, branch, address, taxId } ข้อมูลลูกค้าปัจจุบัน ณ วันออกใบ
+  buyerNotVatRegistered Boolean   @default(false) // ผู้ซื้อไม่ได้จด VAT - ไม่มีเลขผู้เสียภาษีก็ออกได้
+  vatRate               Decimal   @db.Decimal(5, 2)
+  feeTotal              Decimal   @db.Decimal(12, 2) // ค่าธรรมเนียมกรมฯ ทดรองจ่าย ไม่คิด VAT
+  serviceTotal          Decimal   @db.Decimal(12, 2)
+  goodsTotal            Decimal   @db.Decimal(12, 2)
+  vatAmount             Decimal   @db.Decimal(12, 2)
+  grandTotal            Decimal   @db.Decimal(12, 2) // รวมเงินทั้งสิ้นตามใบกำกับ (ก่อนหัก ณ ที่จ่าย)
+  whtAmount             Decimal   @db.Decimal(12, 2) // ยอดที่ลูกค้าหักจริง (อาจต่างจากบิล เช่น e-WHT 1%)
+  receivedAmount        Decimal   @db.Decimal(12, 2) // grandTotal - whtAmount = เงินเข้าบัญชี
+  whtMethod             String    @default("NONE") // NONE | PAPER (50 ทวิ กระดาษ) | EWHT
+  whtCertificateId      String?
+  whtRemindedAt         DateTime? // ทวง 50 ทวิ ครั้งล่าสุด
+  replacesId            String?   @unique // ใบที่ยกเลิกไปแล้วซึ่งใบนี้ออกแทน
+  replacementIssuedAt   DateTime?
+  replacementReason     String?
+  status                String    @default("ISSUED") // ISSUED | CANCELLED
+  cancelledAt           DateTime?
+  cancelReason          String?
+  cancelledById         String?
+  createdById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  invoice        Invoice         @relation(fields: [invoiceId], references: [id])
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  whtCertificate WhtCertificate? @relation(fields: [whtCertificateId], references: [id], onDelete: SetNull)
+  replaces       TaxInvoice?     @relation("TaxInvoiceReplaces", fields: [replacesId], references: [id])
+  replacedBy     TaxInvoice?     @relation("TaxInvoiceReplaces")
+
+  @@unique([year, number])
+  @@index([invoiceId])
+  @@index([customerId])
+  @@index([issueDate])
+  @@index([whtCertificateId])
+}
+
+// หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่ลูกค้าส่งมา (ผู้ใช้ 2026-09-28): ใบเดียวครอบคลุมใบกำกับได้หลายใบ (บางเจ้าส่งรวม)
+// PAPER = กระดาษ ต้องแนบไฟล์ · EWHT = หักผ่านธนาคาร ต้องมีเลขอ้างอิง ไฟล์ไม่บังคับ · ยกเลิก = ปลดใบกำกับกลับเป็นรอ 50 ทวิ + ล้าง contentHash
+model WhtCertificate {
+  id              String    @id @default(cuid())
+  customerId      String
+  method          String // PAPER | EWHT
+  certificateNo   String? // เลขที่ 50 ทวิ / เลขอ้างอิง e-WHT
+  certificateDate DateTime?
+  amount          Decimal   @db.Decimal(12, 2) // ยอดภาษีที่หักตามหนังสือรับรอง
+  note            String?
+  storageKey      String?   @unique
+  mimeType        String?
+  sizeBytes       Int?
+  originalName    String?
+  contentHash     String?   @unique
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  cancelledAt     DateTime?
+  cancelReason    String?
+  cancelledById   String?
+
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  taxInvoices TaxInvoice[]
+
+  @@index([customerId])
 }
 
 // บรรทัดกำหนดเองของบิล (ผู้ใช้ 2026-09-29) ไม่ผูกกับรถ - งานเก่าที่ย้ายมาจากระบบเดิม / ขายสินค้า

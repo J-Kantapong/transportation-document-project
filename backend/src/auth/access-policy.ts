@@ -32,6 +32,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
   // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
+  // ตั้งเลขเริ่มใบกำกับภาษี (= เปิดใช้ใบกำกับในระบบ) ADMIN เท่านั้น (ผู้ใช้ 2026-09-28)
+  { pattern: /^\/api\/billing\/tax-invoices\/series\/set$/, access: ['ADMIN'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
   // บันทึกการจ่ายของลูกค้า + ตารางล้อ (SPI): พนักงานรถยนต์ดูแลงาน SPI อยู่แล้ว (ผู้ใช้ 2026-09-27) - service กรองเฉพาะรถยนต์ให้ STAFF_CAR
   { pattern: /^\/api\/customer-payments(\/|$)/, access: ['ADMIN', 'ACCOUNTANT', 'STAFF_CAR'] },

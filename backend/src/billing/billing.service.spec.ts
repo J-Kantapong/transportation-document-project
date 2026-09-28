@@ -442,12 +442,16 @@ describe('BillingService.markPaid / voidInvoice', () => {
 
 // ---------- F23: ยกเลิกการรับเงิน (ผู้ใช้ 2026-09-27: ADMIN + ACCOUNTANT พร้อมเหตุผล) ----------
 describe('BillingService.unpayInvoice', () => {
-  function unpayService(status = 'PAID', updatedCount = 1) {
+  function unpayService(status = 'PAID', updatedCount = 1, activeTaxInvoice: { taxInvoiceNo: string } | null = null) {
     const current = invoiceRow('i1', status, '2026-09-21', { paidDate: new Date('2026-09-25T00:00:00.000Z'), taxInvoiceNo: 'TV2026-010' });
     const findUnique = vi.fn().mockImplementation(async ({ include }) => (include ? { ...current, status: 'ISSUED', paidDate: null, taxInvoiceNo: null } : current));
     const updateMany = vi.fn().mockResolvedValue({ count: updatedCount });
     const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
-    const prisma: Record<string, unknown> = { invoice: { findUnique, updateMany }, auditLog: { create: auditCreate } };
+    const prisma: Record<string, unknown> = {
+      invoice: { findUnique, updateMany },
+      auditLog: { create: auditCreate },
+      taxInvoice: { findFirst: vi.fn().mockResolvedValue(activeTaxInvoice) },
+    };
     prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
     return { svc: new BillingService(prisma as unknown as PrismaService), updateMany, auditCreate };
   }
@@ -496,6 +500,15 @@ describe('BillingService.unpayInvoice', () => {
     const { svc, auditCreate } = unpayService('PAID', 0);
     await expect(svc.unpayInvoice('i1', { remark: 'ผิด' })).rejects.toMatchObject({ status: 409 });
     expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('บิลที่มีใบกำกับออกในระบบ ย้อนรับเงินไม่ได้ (เลข TV ห้ามหาย) - ต้องยกเลิกใบกำกับแทน', async () => {
+    const { svc, updateMany } = unpayService('PAID', 1, { taxInvoiceNo: 'TV2026-001' });
+    await expect(svc.unpayInvoice('i1', { remark: 'ผิด' })).rejects.toMatchObject({
+      status: 400,
+      response: { error: 'บิลนี้มีใบกำกับ TV2026-001 ในระบบ - ใช้ "ยกเลิกใบกำกับ" แทน' },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 

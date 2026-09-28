@@ -50,7 +50,7 @@ const attachmentPageCount = (inv: PrintableInvoice) => Math.max(1, Math.ceil(inv
 // บิลกำหนดเองที่ไม่มีรถ (ผู้ใช้ 2026-09-29) ไม่มีเอกสารแนบรายคัน - หน้าบิลหน้าเดียว
 const hasAttachment = (inv: PrintableInvoice) => inv.lines.length > 0;
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 }
 
@@ -125,17 +125,8 @@ ${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื�
   });
 }
 
-export function buildInvoiceHtml(inv: PrintableInvoice): string {
-  return `<!doctype html>
-<html lang="th">
-<head>
-<meta charset="utf-8">
-<title>${isVoid(inv) ? "ยกเลิก - " : ""}${escapeHtml(inv.invoiceNo || "ใบวางบิล")}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
-<style>
-  @page { size: A4 portrait; margin: 12mm 14mm; }
+// CSS ชุดเดียวกันของใบวางบิลและใบกำกับภาษี (lib/tax-invoice-print.ts) - หน้าตาเหมือนกัน (ผู้ใช้ 2026-09-28)
+export const PRINT_CSS = `  @page { size: A4 portrait; margin: 12mm 14mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
   body { font-family: "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif; color: #111; font-size: 10pt; line-height: 1.5; font-variant-numeric: tabular-nums; }
@@ -174,7 +165,19 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
   .grid .sum td { border-top: 1px solid #111; border-bottom: 0; font-weight: 600; padding-top: 1.6mm; }
   .note { margin-top: 2mm; font-size: 8.5pt; }
   @media screen { body { padding: 10mm 12mm; } .page { margin-bottom: 10mm; padding-bottom: 10mm; border-bottom: 1px dashed #bbb; } .page:last-child { border-bottom: 0; } }
-</style>
+`;
+
+export function buildInvoiceHtml(inv: PrintableInvoice): string {
+  return `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>${isVoid(inv) ? "ยกเลิก - " : ""}${escapeHtml(inv.invoiceNo || "ใบวางบิล")}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
+<style>
+${PRINT_CSS}</style>
 </head>
 <body>
 ${invoicePageHtml(inv)}
@@ -185,10 +188,14 @@ ${hasAttachment(inv) ? attachmentPagesHtml(inv).join("\n") : ""}
 
 // พิมพ์ผ่าน iframe ที่ซ่อนไว้ (วิธีเดียวกับใบส่งงาน) - เลือกเครื่องพิมพ์หรือ "บันทึกเป็น PDF" ได้จากหน้าต่างพิมพ์ของเบราว์เซอร์
 export function printInvoice(inv: PrintableInvoice): void {
+  printHtml(buildInvoiceHtml(inv));
+}
+
+export function printHtml(html: string): void {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0";
-  iframe.srcdoc = buildInvoiceHtml(inv);
+  iframe.srcdoc = html;
 
   iframe.onload = async () => {
     const win = iframe.contentWindow;
