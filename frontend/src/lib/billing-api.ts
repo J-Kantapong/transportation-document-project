@@ -4,13 +4,18 @@ import { request } from "@/lib/api";
 // DONE = ส่งเล่มและป้ายครบแล้ว (อยู่ในรายการคันอื่นของใบยื่น / ตอบ 409 ถ้าหน้าที่เปิดค้างไว้บันทึกซ้ำ)
 export type DeliveryKind = "FULL" | "NO_PLATE" | "PLATE_ONLY" | "WAITING_PLATE" | "DONE";
 
+// งานสลับเลขส่งคืนลูกค้าในใบเดียวกับรถจดใหม่ได้ (ผู้ใช้ 2026-09-28) - แถวในคิว/ใบส่งงานจึงมาจาก 2 ที่
+export type DeliverySource = "VEHICLE" | "PLATE_SWAP";
+
 export interface DeliveryRow {
-  id: string; // vehicleId
+  id: string; // vehicleId หรือ plateSwapId แล้วแต่ source
+  source: DeliverySource;
   customerId: string;
   customerName: string;
   chassis: string;
   brandName: string;
   body: string | null;
+  vehicleKind: "car" | "moto"; // แถวงานสลับเลขไม่มี body ให้ดู (ผู้ใช้ 2026-09-28)
   plateCategory: string | null;
   plateNumber: string | null;
   receiptNo: string | null;
@@ -34,10 +39,14 @@ export interface DeliveryRow {
 
 // ใบส่งงาน Delivery: บันทึกส่ง 1 ครั้ง = 1 ใบ บอกแยกรายคันว่ารอบนี้ส่งใบเสร็จ / เล่ม / ป้าย (ไม่มีราคา)
 export interface DeliverySlipItem {
-  vehicleId: string;
+  id: string; // id ของแถว - ใช้ระบุแถวตอนยกเลิก/ติ๊กป้าย (แถวงานสลับเลขไม่มี vehicleId)
+  vehicleId: string | null;
+  plateSwapId: string | null;
+  source: DeliverySource;
   chassis: string;
   brandName: string;
   body: string | null;
+  vehicleKind: "car" | "moto"; // แถวงานสลับเลขไม่มี body ให้ดู (ผู้ใช้ 2026-09-28)
   plateText: string; // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
   receiptNo: string | null;
   receipt: boolean;
@@ -101,7 +110,18 @@ export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
 // BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) / PLATE_REQUEST (ขอใช้เลขทะเบียน,
 // ผู้ใช้ 2026-09-28 Spac EV - คนละเรื่องกับ OTHER_PROVINCE) / TRANSFER_NOTICE (แจ้งย้าย จริง = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ,
 // ผู้ใช้ 2026-09-28 Spac EV) = ค่าเพิ่มที่บวกให้เอง
-export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST" | "TRANSFER_NOTICE";
+// PLATE_SWAP (ผู้ใช้ 2026-09-28 Spac EV) = รถคันนี้เป็น "รถใหม่" ของงานสลับเลข คิดเพิ่มจากค่าจดทะเบียนปกติ
+export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST" | "TRANSFER_NOTICE" | "PLATE_SWAP";
+
+// งานสลับเลขที่ติดมากับรถคันนี้ (ผู้ใช้ 2026-09-28) - ค่าใบเสร็จกรมฯ ของรถเก่าเก็บแยกจากใบเสร็จของรถใหม่
+export interface BillingPlateSwap {
+  id: string;
+  oldChassis: string;
+  oldPlateText: string;
+  receiptNo: string | null;
+  receiptAmount: number | null; // ว่าง = ยังไม่ได้กรอกยอดใบเสร็จของงานสลับเลข -> ติ๊กวางบิลไม่ได้
+  receiptEstimate: number | null; // ยอด Bill ที่ระบบคิดไว้ตอนทำงานสลับเลข - ไม่ตรง = เตือนให้ตรวจ
+}
 
 export interface ServiceFeeRate {
   id: string;
@@ -145,6 +165,7 @@ export interface BillingVehicle {
   urgent: boolean; // การยื่นล่าสุดเป็นงานด่วน
   otherProvince: boolean; // ขอใช้ = จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ
   transferNotice: boolean; // แจ้งย้าย = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ (ต่างจาก otherProvince)
+  plateSwap: BillingPlateSwap | null; // รถคันนี้เป็นรถใหม่ของงานสลับเลข (null = ไม่ใช่)
   // จับคู่อัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนที่ระบบติ๊กให้
   suggestedAddOnIds: string[];
 }
@@ -176,6 +197,10 @@ export interface InvoiceLine {
   serviceLabel: string | null;
   deduction: number;
   deductionNote: string | null;
+  // งานสลับเลขของรถคันนี้ + ค่าใบเสร็จกรมฯ ของรถเก่า (ผู้ใช้ 2026-09-28) - บรรทัดเก่าเป็น null ทั้งคู่
+  // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount
+  plateSwapId: string | null;
+  swapReceiptAmount: number | null;
 }
 
 export interface Invoice {
@@ -271,7 +296,17 @@ export interface CreateInvoiceInput {
   invoiceNo: string;
   issueDate: string;
   jobLabel: string;
-  lines: Array<{ vehicleId: string; receiptAmount: number; serviceFee: number; serviceLabel: string | null; deduction: number; deductionNote: string | null }>;
+  // plateSwapId + swapReceiptAmount = งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28) ต้องส่งมาคู่กันหรือไม่ส่งเลย
+  lines: Array<{
+    vehicleId: string;
+    receiptAmount: number;
+    serviceFee: number;
+    serviceLabel: string | null;
+    deduction: number;
+    deductionNote: string | null;
+    plateSwapId?: string | null;
+    swapReceiptAmount?: number | null;
+  }>;
   extras: Array<{ label: string; amount: number }>;
 }
 
@@ -289,7 +324,8 @@ export const billingApi = {
   // แก้ / ยกเลิกใบส่งงานที่คีย์ผิด (ต้องมีเหตุผล) - ADMIN / STAFF_CAR / STAFF_MOTO ตามประเภทรถ
   updateDeliverySlip: (id: string, data: { recipient: string; date: string; remark: string }) =>
     request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}`, json("PATCH", data)),
-  cancelDeliverySlip: (id: string, data: { vehicleIds: string[]; remark: string }) =>
+  // ระบุแถวด้วย id ของแถว - แถวงานสลับเลขไม่มี vehicleId ให้ใช้ (ผู้ใช้ 2026-09-28)
+  cancelDeliverySlip: (id: string, data: { itemIds: string[]; remark: string }) =>
     request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(id)}/cancel`, json("POST", data)),
 
   // เลขบิลรันแยกตามบัญชี - suggestedPersonalInvoiceNo ว่าง = ยังไม่เคยออกบิลบัญชีบุคคล

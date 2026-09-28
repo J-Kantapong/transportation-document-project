@@ -25,7 +25,8 @@ type Kind = "car" | "moto";
 
 const KIND_LABEL: Record<Kind, string> = { car: "รถยนต์", moto: "จักรยานยนต์" };
 const plateText = (r: DeliveryRow) => (r.plateCategory && r.plateNumber ? `${r.plateCategory} ${r.plateNumber}` : "—");
-const groupLabel = (r: DeliveryRow) => jobSheetGroup(r.body, r.urgent).label;
+// งานสลับเลขไม่มีใบยื่นแบบรถจดใหม่ - จัดกลุ่มเป็นการ์ด "สลับเลข" ของตัวเอง (ผู้ใช้ 2026-09-28)
+const groupLabel = (r: DeliveryRow) => (r.source === "PLATE_SWAP" ? "สลับเลข" : jobSheetGroup(r.body, r.urgent).label);
 const kindOf = (r: DeliveryRow): Kind => (isMotorcycleBody(r.body) ? "moto" : "car");
 // ใบยื่น = วันที่ยื่น + กลุ่ม + รหัสลูกค้า (ชื่อใช้แสดงอย่างเดียว - ผู้ใช้ 2026-09-27 ทุกหน้าแบ่งใบยื่นด้วยรหัสลูกค้า)
 // กลุ่มแยกรถยนต์/จักรยานยนต์อยู่แล้ว การ์ดหนึ่งจึงเป็นรถประเภทเดียว
@@ -287,7 +288,7 @@ export function DeliveryPage() {
     setMessage({ text: "กำลังบันทึก…" });
     try {
       // ส่งชนิดงานที่ป๊อปอัปแสดง - รถเปลี่ยนสถานะไปแล้ว (เพิ่งรับป้าย / มีคนส่งไปก่อน) backend ไม่บันทึกทั้งชุด
-      const items = rows.map((r) => ({ vehicleId: r.id, kind: r.kind }));
+      const items = rows.map((r) => ({ source: r.source, id: r.id, kind: r.kind }));
       const result = await api.submitDelivery({ items, date: dateIso, recipient, note });
       const parts = [
         result.delivered ? `ส่งงาน ${result.delivered} คัน ส่งต่อให้บัญชีรอวางบิล` : "",

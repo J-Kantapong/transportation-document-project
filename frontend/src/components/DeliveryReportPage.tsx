@@ -35,9 +35,11 @@ const CANCELLED_ROW = { color: "#9aa3b5", textDecoration: "line-through" } as co
 
 // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN ทุกใบ, STAFF_CAR ใบรถยนต์, STAFF_MOTO ใบจักรยานยนต์ - DELIVERY ดูอย่างเดียว
 // backend ตรวจซ้ำอีกชั้น (access-policy.ts + DeliveryService.assertItemInScope)
-function inScope(body: string | null, scope: VehicleScope | null): boolean {
+// แถวงานสลับเลขไม่มี body - ดู vehicleKind ที่ backend ส่งมาให้ ไม่งั้นงานมอเตอร์ไซค์จะถูกตีเป็นรถยนต์ (ผู้ใช้ 2026-09-28)
+function inScope(row: { body: string | null; vehicleKind?: "car" | "moto" | null }, scope: VehicleScope | null): boolean {
   if (!scope || scope === "NONE") return false;
-  return scope === "ALL" || (scope === "MOTO") === isMotorcycleBody(body);
+  const moto = row.vehicleKind ? row.vehicleKind === "moto" : isMotorcycleBody(row.body);
+  return scope === "ALL" || (scope === "MOTO") === moto;
 }
 
 // ยกเลิก: backend ตรวจขอบเขตเฉพาะคันที่เลือก (DeliveryService.cancelSlip) -> ปุ่มขึ้นเมื่อมีคันที่ยังไม่ยกเลิกในขอบเขตการแก้
@@ -46,7 +48,7 @@ function inScope(body: string | null, scope: VehicleScope | null): boolean {
 // และ [].every = true -> ใบที่ยกเลิกครบทุกคันที่เห็นแล้วยังมีปุ่ม)
 function canCancelSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
   if (slip.cancelledAt) return false;
-  return slip.items.some((i) => !i.cancelledAt && inScope(i.body, scope));
+  return slip.items.some((i) => !i.cancelledAt && inScope(i, scope));
 }
 
 // แก้ผู้รับ/วันที่: ใช้ร่วมกันทั้งใบ backend ต้องการให้ทุกคันที่ยังไม่ยกเลิกอยู่ในขอบเขต รวมคันที่บัญชีนี้มองไม่เห็นด้วย
@@ -54,7 +56,7 @@ function canCancelSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean 
 function canEditSlip(slip: DeliverySlip, scope: VehicleScope | null): boolean {
   if (slip.cancelledAt || hiddenItemsOf(slip) > 0) return false;
   const live = slip.items.filter((i) => !i.cancelledAt);
-  return live.length > 0 && live.every((i) => inScope(i.body, scope));
+  return live.length > 0 && live.every((i) => inScope(i, scope));
 }
 
 export function DeliveryReportPage() {
@@ -214,9 +216,10 @@ export function DeliveryReportPage() {
   const liveItems = liveSlips.flatMap((s) => s.items);
   const counts = countItems(liveItems);
   // คัน = นับรถไม่ซ้ำ: ส่งเล่มใบหนึ่งแล้วส่งป้ายตามอีกใบในช่วงเดียวกัน = 1 คัน (พบ 2026-09-27: เดิมนับ 2)
-  const vehicleCount = new Set(liveItems.map((i) => i.vehicleId)).size;
+  // นับด้วยที่มา + id ของงาน ไม่ใช่ id ของแถว - แถวงานสลับเลขไม่มี vehicleId (ผู้ใช้ 2026-09-28)
+  const vehicleCount = new Set(liveItems.map((i) => `${i.source}:${i.plateSwapId ?? i.vehicleId ?? i.id}`)).size;
   const report: DeliveryReportInput = { ...range, customerName: activeCustomer?.name ?? null, slips: liveSlips, platePending, customerLabels, truncated };
-  const canAddPlate = (r: DeliveryRow) => r.kind === "PLATE_ONLY" && !!r.bookSlip && inScope(r.body, editScope);
+  const canAddPlate = (r: DeliveryRow) => r.kind === "PLATE_ONLY" && !!r.bookSlip && inScope(r, editScope);
 
   return (
     <section className="content">
@@ -394,7 +397,7 @@ export function DeliveryReportPage() {
                           {s.items.map((i) => {
                             const later = i.plateSentLater;
                             return (
-                              <tr key={`${s.id}-${i.vehicleId}`} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
+                              <tr key={i.id} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
                                 <td>{i.plateText || "—"}</td>
                                 <td>{i.chassis}</td>
                                 <td>{i.brandName}</td>
@@ -469,7 +472,7 @@ export function DeliveryReportPage() {
                           {/* ป้ายมาแล้ว: ส่งป้ายตามที่หน้า Delivery หรือถ้าป้ายไปพร้อมเล่มจริงแต่แนบรูปช้า ติ๊กในใบเดิม (ผู้ใช้ 2026-09-27) */}
                           {r.kind === "PLATE_ONLY" && (
                             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                              {inScope(r.body, deliverScope) && (
+                              {inScope(r, deliverScope) && (
                                 <Link href={focusHref(DELIVERY_PAGE, r.chassis)} className="text-button">
                                   บันทึกส่งป้าย →
                                 </Link>
@@ -502,7 +505,7 @@ export function DeliveryReportPage() {
       {dialog?.kind === "cancel" && (
         <DeliverySlipCancelDialog
           slip={dialog.slip}
-          editable={(i) => inScope(i.body, editScope)}
+          editable={(i) => inScope(i, editScope)}
           onClose={() => setDialog(null)}
           onCancelled={(updated) => replaceSlip(updated, `ยกเลิกการส่งใน ${slipNoText(updated.slipNo)} แล้ว - รถกลับเข้าคิว Delivery ให้บันทึกส่งใหม่`)}
           onRefused={reloadQuietly}
@@ -512,6 +515,7 @@ export function DeliveryReportPage() {
         <DeliveryAddPlateDialog
           vehicle={{
             id: plateDialog.id,
+            source: plateDialog.source,
             chassis: plateDialog.chassis,
             plateText: plateDialog.plateCategory && plateDialog.plateNumber ? `${plateDialog.plateCategory} ${plateDialog.plateNumber}` : "",
             customerName: labelOf(plateDialog.customerId, plateDialog.customerName),

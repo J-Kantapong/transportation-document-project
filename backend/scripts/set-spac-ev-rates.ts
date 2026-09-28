@@ -17,6 +17,9 @@ const rows = [
   { label: 'ค่าเพิ่ม: ขอใช้ (จดจังหวัดอื่น)', vehicleKind: 'ANY', amount: 75, vatInclusive: true, kind: 'OTHER_PROVINCE', sortOrder: 1 },
   { label: 'ค่าเพิ่ม: ขอใช้เลขทะเบียน', vehicleKind: 'ANY', amount: 105, vatInclusive: true, kind: 'PLATE_REQUEST', sortOrder: 2 },
   { label: 'ค่าเพิ่ม: แจ้งย้าย', vehicleKind: 'ANY', amount: 195, vatInclusive: true, kind: 'TRANSFER_NOTICE', sortOrder: 3 },
+  // สลับเลข: ผู้ใช้ให้มาเป็นยอดก่อน VAT 1,607.47 = 1,720 รวม VAT (เก็บแบบเดียวกับแถวอื่นของลูกค้ารายนี้) เฉพาะรถยนต์
+  // ค่าใบเสร็จกรมฯ ของทั้งรถเก่าและรถใหม่เก็บเพิ่มตามจริง ราคานี้เป็นค่าบริการล้วน (ผู้ใช้ 2026-09-28)
+  { label: 'ค่าเพิ่ม: สลับเลข', vehicleKind: 'CAR', amount: 1720, vatInclusive: true, kind: 'PLATE_SWAP', sortOrder: 4 },
 ];
 
 await prisma.$transaction([

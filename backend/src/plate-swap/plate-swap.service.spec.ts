@@ -874,6 +874,27 @@ describe('PlateSwapService.attachPlatePhoto / attachBookPhoto', () => {
     expect(prisma.platePhoto.create).not.toHaveBeenCalled();
   });
 
+  // รับใบเสร็จกับรับป้าย/รับเล่มเป็นคนละขั้นกันแล้ว (ผู้ใช้ 2026-09-28) - ทำพร้อมกันต้องไม่เด้งให้โหลดใหม่
+  it('มีคนยืนยันรับใบเสร็จแทรกกลางระหว่างแนบรูป - แนบผ่าน ไม่ 409', async () => {
+    const plate = service(swapRow({ returnedDate: null }));
+    plate.prisma.plateSwap.findFirst.mockResolvedValueOnce({
+      returnedDate: new Date('2026-09-23T00:00:00.000Z'),
+      newPlateCategory: '1กก',
+      newPlateNumber: '9999',
+      _count: { receipts: 1 },
+    });
+    await expect(plate.svc.attachPlatePhoto('s1', file, '2026-09-21')).resolves.toBeTruthy();
+
+    const book = service(swapRow({ returnedDate: null }));
+    book.prisma.plateSwap.findFirst.mockResolvedValueOnce({
+      returnedDate: new Date('2026-09-23T00:00:00.000Z'),
+      newPlateCategory: '1กก',
+      newPlateNumber: '9999',
+      _count: { receipts: 1 },
+    });
+    await expect(book.svc.attachBookPhoto('s1', file, '2026-09-21')).resolves.toBeTruthy();
+  });
+
   it('แนบป้ายซ้ำสองครั้ง (แข่งกัน) - ครั้งที่สองได้ "รับป้ายไปแล้ว"', async () => {
     const { svc } = service(swapRow({ platePhotoId: 'existing-photo' }));
     await expect(svc.attachPlatePhoto('s1', file, '2026-09-21')).rejects.toMatchObject({ response: { error: 'งานนี้รับป้ายไปแล้ว' } });

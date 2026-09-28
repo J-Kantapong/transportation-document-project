@@ -105,27 +105,27 @@ describe('rate kinds (TWE: <300cc 520, 300-799cc 885, ขอใช้ +100, ด�
   });
 
   it('adds the ขอใช้ (other-province) add-on for other-province cars and the urgent add-on for urgent submissions', () => {
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
-    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false }).map((r) => r.id)).toEqual(['plate', 'urgent']);
-    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false })).toEqual([]); // motorcycle-only add-ons
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false, plateSwap: false })).toEqual([]);
+    expect(suggestAddOns(rates, { isMoto: true, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false, plateSwap: false }).map((r) => r.id)).toEqual(['plate', 'urgent']);
+    expect(suggestAddOns(rates, { isMoto: false, otherProvince: true, urgent: true, requestedPlateNumber: false, transferNotice: false, plateSwap: false })).toEqual([]); // motorcycle-only add-ons
   });
 
   it('adds the ขอใช้เลข (plate number request) add-on when the vehicle requested a plate number (Spac EV)', () => {
     const withPlateRow = [...rates, row({ id: 'plateReq', kind: 'PLATE_REQUEST', amount: 98.13, sortOrder: 4 })];
-    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: true, transferNotice: false }).map((r) => r.id)).toEqual(['plateReq']);
-    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: true, transferNotice: false, plateSwap: false }).map((r) => r.id)).toEqual(['plateReq']);
+    expect(suggestAddOns(withPlateRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false, plateSwap: false })).toEqual([]);
   });
 
   it('adds the แจ้งย้าย add-on only when the vehicle actually goes through แจ้งย้าย, separately from ขอใช้ (Spac EV)', () => {
     const withTransferRow = [...rates, row({ id: 'transfer', kind: 'TRANSFER_NOTICE', amount: 182.24, sortOrder: 5 })];
     expect(
-      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: true }).map((r) => r.id),
+      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: true, plateSwap: false }).map((r) => r.id),
     ).toEqual(['transfer']);
     // otherProvince (จดจังหวัดอื่นจากเจ้าของรถ) และ transferNotice (จดต่างจังหวัดจากกรุงเทพฯ) เป็นเงื่อนไขคนละอย่าง ไม่ผูกกัน
     expect(
-      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: true, urgent: false, requestedPlateNumber: false, transferNotice: false }).map((r) => r.id),
+      suggestAddOns(withTransferRow, { isMoto: true, otherProvince: true, urgent: false, requestedPlateNumber: false, transferNotice: false, plateSwap: false }).map((r) => r.id),
     ).toEqual(['plate']);
-    expect(suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false })).toEqual([]);
+    expect(suggestAddOns(withTransferRow, { isMoto: true, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false, plateSwap: false })).toEqual([]);
   });
 });
 
@@ -158,5 +158,47 @@ describe('suggestRate with chassisPrefix (MC Superbike: ML=885, JH=2685, both 30
   it('matches case-insensitively and ignores rows whose prefix does not match', () => {
     expect(suggestRate(rates, { isMoto: true, cc: 200, chassis: 'mlhpc123' })?.id).toBe('ml');
     expect(suggestRate(rates, { isMoto: true, cc: 200, chassis: 'ZZZ12345' })).toBeNull();
+  });
+});
+
+// วางบิลงานสลับเลข (ผู้ใช้ 2026-09-28, Spac EV: "สลับเลข" 1,720 รวม VAT เฉพาะรถยนต์ คิดเพิ่มจากค่าจดทะเบียนปกติ)
+describe('ค่าเพิ่มงานสลับเลข', () => {
+  const swapRate = { id: 'swap', label: 'ค่าเพิ่ม: สลับเลข', vehicleKind: 'CAR', ccMin: null, ccMax: null, chassisPrefix: null, amount: 1720, vatInclusive: true, includesReceipt: false, kind: 'PLATE_SWAP', sortOrder: 5 };
+  const plain = { isMoto: false, otherProvince: false, urgent: false, requestedPlateNumber: false, transferNotice: false, plateSwap: false };
+
+  it('เสนอให้เฉพาะรถที่เป็นรถใหม่ของงานสลับเลข', () => {
+    expect(suggestAddOns([swapRate], { ...plain, plateSwap: true }).map((r) => r.id)).toEqual(['swap']);
+    expect(suggestAddOns([swapRate], plain)).toEqual([]);
+  });
+
+  it('ไม่เสนอให้รถจักรยานยนต์ (อัตรานี้เฉพาะรถยนต์)', () => {
+    expect(suggestAddOns([swapRate], { ...plain, isMoto: true, plateSwap: true })).toEqual([]);
+  });
+
+  it('1,720 รวม VAT = ค่าดำเนินการ 1,607.48 ก่อน VAT', () => {
+    expect(rateAmountExVat(swapRate)).toBe(1607.48);
+  });
+
+  it('ค่าใบเสร็จของรถเก่ารวมอยู่ในยอดค่าธรรมเนียม ไม่โดน VAT', () => {
+    const totals = computeInvoiceTotals({
+      lines: [{ receiptAmount: 1000, serviceFee: 1607.48, swapReceiptAmount: 250 }],
+      extras: [],
+      terms: { vat: true, whtRate: 0, whtSpecialRate: null, whtSpecialUntil: null },
+      issueDate: '2026-09-28',
+    });
+    expect(totals.feeTotal).toBe(1250);
+    expect(totals.serviceTotal).toBe(1607.48);
+    expect(totals.vatAmount).toBe(112.52);
+    expect(totals.grossTotal).toBe(2970);
+  });
+
+  it('บรรทัดเก่าที่ไม่มีงานสลับเลข คิดเหมือนเดิม', () => {
+    const totals = computeInvoiceTotals({
+      lines: [{ receiptAmount: 1000, serviceFee: 100 }],
+      extras: [],
+      terms: { vat: false, whtRate: 0, whtSpecialRate: null, whtSpecialUntil: null },
+      issueDate: '2026-09-28',
+    });
+    expect(totals.feeTotal).toBe(1000);
   });
 });

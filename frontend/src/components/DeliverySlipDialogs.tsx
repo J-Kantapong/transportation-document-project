@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { billingApi, slipNoText, type DeliverySlip, type DeliverySlipItem } from "@/lib/billing-api";
+import { billingApi, slipNoText, type DeliverySlip, type DeliverySlipItem, type DeliverySource } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 
@@ -131,7 +131,8 @@ export function DeliverySlipCancelDialog({
   // วางบิลแล้วล็อกเฉพาะรายการส่งเล่ม - ใบส่งป้ายตามทีหลังยกเลิกได้ (ผู้ใช้ 2026-09-27)
   const locked = (i: DeliverySlipItem) => i.book && (!!i.invoiceNo || i.billingClosed);
   const mine = items.filter(editable);
-  const [picked, setPicked] = useState(() => new Set(mine.filter((i) => !locked(i)).map((i) => i.vehicleId)));
+  // เลือกด้วย id ของแถว - แถวงานสลับเลขไม่มี vehicleId (ผู้ใช้ 2026-09-28)
+  const [picked, setPicked] = useState(() => new Set(mine.filter((i) => !locked(i)).map((i) => i.id)));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -140,11 +141,11 @@ export function DeliverySlipCancelDialog({
   const allBilled = !noneMine && mine.every(locked);
   const blocked = noneMine || allBilled;
 
-  function toggle(vehicleId: string) {
+  function toggle(itemId: string) {
     setPicked((prev) => {
       const next = new Set(prev);
-      if (next.has(vehicleId)) next.delete(vehicleId);
-      else next.add(vehicleId);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
       return next;
     });
   }
@@ -155,7 +156,7 @@ export function DeliverySlipCancelDialog({
     if (!remark.trim()) return setError("ต้องใส่เหตุผลที่ยกเลิก");
     setSaving(true);
     try {
-      const saved = await billingApi.cancelDeliverySlip(slip.id, { vehicleIds: [...picked], remark: remark.trim() });
+      const saved = await billingApi.cancelDeliverySlip(slip.id, { itemIds: [...picked], remark: remark.trim() });
       onCancelled(saved);
       dialogRef.current?.close();
     } catch (err) {
@@ -191,8 +192,8 @@ export function DeliverySlipCancelDialog({
             {items.map((i) => {
               const other = !editable(i);
               return (
-                <label key={i.vehicleId} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input type="checkbox" checked={picked.has(i.vehicleId)} disabled={other || locked(i)} onChange={() => toggle(i.vehicleId)} />
+                <label key={i.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={picked.has(i.id)} disabled={other || locked(i)} onChange={() => toggle(i.id)} />
                   <span>
                     {i.plateText || "—"} · {i.chassis}
                     {i.book ? "" : " (ใบส่งป้าย)"}
@@ -244,7 +245,7 @@ export function DeliveryAddPlateDialog({
   onSaved,
   onRefused,
 }: {
-  vehicle: { id: string; chassis: string; plateText: string; customerName: string };
+  vehicle: { id: string; source: DeliverySource; chassis: string; plateText: string; customerName: string };
   slip: { id: string; slipNo: number; date: string };
   onClose: () => void;
   onSaved: (slip: DeliverySlip) => void;
@@ -260,7 +261,8 @@ export function DeliveryAddPlateDialog({
     setError("");
     setSaving(true);
     try {
-      const saved = await api.addPlateToDeliverySlip(slip.id, { vehicleId: vehicle.id, remark: remark.trim() || undefined });
+      // backend หาแถวในใบจาก source + id ให้เอง (หน้านี้ถือแค่แถวในคิว ไม่ได้ถือรายการในใบ)
+      const saved = await api.addPlateToDeliverySlip(slip.id, { source: vehicle.source, id: vehicle.id, remark: remark.trim() || undefined });
       onSaved(saved);
       dialogRef.current?.close();
     } catch (err) {
