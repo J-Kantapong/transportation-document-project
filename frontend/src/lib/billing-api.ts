@@ -104,7 +104,99 @@ export interface BillingTerms {
   whtRate: number;
   whtSpecialRate: number | null;
   whtSpecialUntil: string | null; // ISO
+  // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28) - null = ไม่ได้ตั้ง · ไม่ใช้คิดยอด ใช้หาวันครบกำหนดชำระ
+  creditDays?: number | null;
 }
+
+// ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ออกตอนรับเงิน (ผู้ใช้ 2026-09-28) - ดู backend/src/billing/tax-invoice.service.ts
+export type WhtMethod = "NONE" | "PAPER" | "EWHT";
+export const WHT_METHOD_LABEL: Record<WhtMethod, string> = { NONE: "ไม่หัก", PAPER: "50 ทวิ กระดาษ", EWHT: "e-WHT" };
+
+export interface TaxInvoice {
+  id: string;
+  taxInvoiceNo: string;
+  invoiceId: string;
+  invoiceNo: string;
+  invoiceIssueDate: string;
+  customerId: string;
+  customer: { name: string; branch: string | null; address: string | null; taxId: string | null };
+  buyerNotVatRegistered: boolean;
+  issueDate: string; // = วันที่รับเงิน
+  createdAt: string;
+  vatRate: number;
+  feeTotal: number;
+  serviceTotal: number;
+  goodsTotal: number;
+  vatAmount: number;
+  grandTotal: number; // ก่อนหัก ณ ที่จ่าย
+  whtAmount: number; // ที่ลูกค้าหักจริง
+  receivedAmount: number;
+  whtMethod: WhtMethod;
+  whtCertificate: { id: string; method: WhtMethod; certificateNo: string | null; certificateDate: string | null; amount: number; hasFile: boolean } | null;
+  whtRemindedAt: string | null;
+  replacesNo: string | null; // ออกแทนใบที่ยกเลิก
+  replacedByNo: string | null;
+  replacementIssuedAt: string | null; // ใบแทน (ต้นฉบับหาย)
+  replacementReason: string | null;
+  status: "ISSUED" | "CANCELLED";
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  // สำหรับพิมพ์บรรทัดหน้าใบ (ชุดเดียวกับหน้าใบวางบิล)
+  jobLabel: string;
+  extras: Array<{ label: string; amount: number }>;
+  whtRate: number;
+  lines: InvoiceLine[];
+  items: InvoiceItem[];
+  lineCount: number;
+}
+
+export interface TaxInvoiceSeries {
+  enabled: boolean;
+  series: Array<{ year: number; lastNumber: number; nextNo: string; issuedInSystem: number }>;
+}
+
+export interface TaxInvoicePreview {
+  enabled: boolean;
+  buyer: { name: string; branch: string | null; address: string | null; taxId: string | null };
+  missing: string[];
+  missingIfNotRegistered: string[];
+  nextNo: string | null;
+  lastIssued: { taxInvoiceNo: string; issueDate: string } | null;
+  replaces: { id: string; taxInvoiceNo: string; cancelReason: string | null; whtCertificateId: string | null } | null;
+}
+
+export interface WhtPendingRow {
+  id: string;
+  taxInvoiceNo: string;
+  invoiceNo: string;
+  issueDate: string;
+  customerId: string;
+  customerName: string;
+  whtAmount: number;
+  whtMethod: WhtMethod;
+  remindedAt: string | null;
+  daysWaiting: number;
+}
+
+export interface WhtCertificate {
+  id: string;
+  customerId: string;
+  customerName: string;
+  method: WhtMethod;
+  certificateNo: string | null;
+  certificateDate: string | null;
+  amount: number;
+  note: string | null;
+  hasFile: boolean;
+  originalName: string | null;
+  createdAt: string;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  taxInvoices: Array<{ id: string; taxInvoiceNo: string; whtAmount: number }>;
+  taxInvoiceWhtTotal: number;
+}
+
+export const whtCertificateFilePath = (id: string) => `/api/billing/wht-certificates/${encodeURIComponent(id)}/file`;
 
 export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
 // BASE = ราคาหลัก 1 แถวต่อคัน, OTHER_PROVINCE (ขอใช้ = จดจังหวัดอื่น) / URGENT (ด่วน) / PLATE_REQUEST (ขอใช้เลขทะเบียน,
@@ -238,6 +330,8 @@ export interface Invoice {
   paidDate: string | null;
   taxInvoiceNo: string | null;
   voidReason: string | null;
+  dueDate?: string | null; // วันครบกำหนดชำระ (ผู้ใช้ 2026-09-28) - null = ลูกค้าไม่ได้ตั้งเครดิตเทอมตอนออกบิล
+  taxInvoice?: { id: string; taxInvoiceNo: string } | null; // ใบกำกับในระบบที่ยังใช้อยู่
   account?: BillingAccount; // บัญชีบุคคล = หัวบิลชื่อบุคคล + บัญชีรับเงินบุคคล ไม่มี VAT (บิลเก่าก่อน 2026-09-27 = บัญชีบริษัท)
   // หน้าแก้บิลส่งกลับเป็น expectedUpdatedAt - มีคนแก้/รับเงิน/ยกเลิกไปก่อน backend ตอบ 409 (ผู้ใช้ 2026-09-27)
   updatedAt: string | null;
@@ -404,4 +498,45 @@ export const billingApi = {
     request<{ vehicle: ClosedBillingVehicle }>(`/api/billing/vehicles/${encodeURIComponent(vehicleId)}/close`, json("POST", { note })),
   reopenVehicleBilling: (vehicleId: string, remark: string) =>
     request<{ id: string; reopened: boolean }>(`/api/billing/vehicles/${encodeURIComponent(vehicleId)}/reopen`, json("POST", { remark })),
+
+  // ---------- ใบกำกับภาษี + 50 ทวิ (ผู้ใช้ 2026-09-28) ----------
+  taxInvoiceSeries: () => request<TaxInvoiceSeries>("/api/billing/tax-invoices/series"),
+  setTaxInvoiceSeries: (data: { year: number; lastNumber: number; remark: string }) =>
+    request<TaxInvoiceSeries>("/api/billing/tax-invoices/series/set", json("POST", data)),
+  taxInvoices: (month: string) => request<{ month: string; taxInvoices: TaxInvoice[] }>(`/api/billing/tax-invoices?month=${encodeURIComponent(month)}`),
+  taxInvoice: (id: string) => request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}`),
+  taxInvoicePreview: (invoiceId: string) => request<TaxInvoicePreview>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice-preview`),
+  issueTaxInvoice: (
+    invoiceId: string,
+    data: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean; expectedUpdatedAt: string | null },
+  ) => request<{ taxInvoice: TaxInvoice }>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice`, json("POST", data)),
+  cancelTaxInvoice: (id: string, remark: string) =>
+    request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}/cancel`, json("POST", { remark })),
+  replacementTaxInvoice: (id: string, remark: string) =>
+    request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}/replacement`, json("POST", { remark })),
+  whtPending: () => request<{ overdueDays: number; pending: WhtPendingRow[] }>("/api/billing/wht-pending"),
+  whtRemind: (taxInvoiceIds: string[]) => request<{ updated: number }>("/api/billing/wht-pending/remind", json("POST", { taxInvoiceIds })),
+  whtCertificates: (customerId?: string) =>
+    request<{ certificates: WhtCertificate[] }>(`/api/billing/wht-certificates${customerId ? `?customerId=${encodeURIComponent(customerId)}` : ""}`),
+  createWhtCertificate: (data: {
+    method: "PAPER" | "EWHT";
+    certificateNo: string;
+    certificateDate: string;
+    amount: number;
+    note: string;
+    taxInvoiceIds: string[];
+    file: File | null;
+  }) => {
+    const form = new FormData();
+    form.append("method", data.method);
+    form.append("certificateNo", data.certificateNo);
+    form.append("certificateDate", data.certificateDate);
+    form.append("amount", String(data.amount));
+    form.append("note", data.note);
+    form.append("taxInvoiceIds", data.taxInvoiceIds.join(","));
+    if (data.file) form.append("file", data.file, data.file.name);
+    return request<{ id: string }>("/api/billing/wht-certificates", { method: "POST", body: form });
+  },
+  cancelWhtCertificate: (id: string, remark: string) =>
+    request<{ ok: boolean }>(`/api/billing/wht-certificates/${encodeURIComponent(id)}/cancel`, json("POST", { remark })),
 };

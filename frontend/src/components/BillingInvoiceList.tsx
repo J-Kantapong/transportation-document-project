@@ -20,6 +20,20 @@ import { printInvoice } from "@/lib/invoice-print";
 import Link from "next/link";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
 import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
+import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
+import { canPrintOriginal, printTaxInvoice } from "@/lib/tax-invoice-print";
+
+// ใบกำกับภาษีในระบบ (ผู้ใช้ 2026-09-28): บิลบัญชีบริษัทที่มี VAT รับเงินพร้อมออกใบกำกับ เมื่อ ADMIN เปิดใช้แล้ว (ตั้งเลขเริ่ม)
+const needsTaxInvoice = (i: Invoice) => i.account !== "PERSONAL" && i.vatRate > 0;
+
+// เครดิตเทอม: บิลรอรับเงินที่เลยวันครบกำหนด = แดง, ครบใน 7 วัน = เหลือง
+function dueBadge(i: Invoice, today: string) {
+  if (i.status !== "ISSUED" || !i.dueDate) return null;
+  const days = Math.round((Date.parse(`${i.dueDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  if (days < 0) return <span className="badge" style={{ background: "#fde8e8", color: "#b43434" }}>เกินกำหนด {-days} วัน</span>;
+  if (days <= 7) return <span className="badge warn">ครบกำหนดใน {days} วัน</span>;
+  return null;
+}
 
 // บิลที่ออกแล้วของทุกลูกค้า: พิมพ์ซ้ำ, บันทึกรับเงิน (พร้อมเลขที่ใบกำกับภาษี TV ที่ออกจาก Google Sheet), หรือยกเลิกบิล (รถกลับเข้าคิวรอวางบิล)
 // บิลรอรับเงินโหลดครบทุกใบเสมอ ประวัติ (รับเงินแล้ว / ยกเลิก) โหลดทีละ 200 ใบ ใหม่สุดก่อน และยอดรอรับเงินนับฝั่ง server
@@ -73,6 +87,27 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
   const [staleError, setStaleError] = useState("");
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [historyOf, setHistoryOf] = useState<Invoice | null>(null);
+  const [taxInvoiceEnabled, setTaxInvoiceEnabled] = useState(false);
+  const [issuing, setIssuing] = useState<Invoice | null>(null);
+  const [tvRemark, setTvRemark] = useState<{ kind: "cancel" | "replacement"; invoice: Invoice } | null>(null);
+
+  useEffect(() => {
+    billingApi
+      .taxInvoiceSeries()
+      .then((s) => setTaxInvoiceEnabled(s.enabled))
+      .catch(() => undefined);
+  }, [reloadKey]);
+
+  // พิมพ์ใบกำกับของบิล: วันเดียวกับที่ออก = ต้นฉบับ + สำเนา (เผื่อกระดาษติด) หลังจากนั้น = สำเนาเท่านั้น
+  async function printTaxInvoiceOf(invoice: Invoice) {
+    if (!invoice.taxInvoice) return;
+    try {
+      const { taxInvoice } = await billingApi.taxInvoice(invoice.taxInvoice.id);
+      printTaxInvoice(taxInvoice, canPrintOriginal(taxInvoice, todayIso()) ? "original" : "copy");
+    } catch (err) {
+      setStaleError(errorText(err, "โหลดใบกำกับไม่สำเร็จ"));
+    }
+  }
 
   async function reload() {
     try {
@@ -224,7 +259,11 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
               {visible.map((i) => (
                 <tr key={i.id} style={i.status === "VOID" ? { color: "#8a94a6" } : undefined}>
                   <td>{i.invoiceNo}</td>
-                  <td>{isoToDisplayDate(i.issueDate)}</td>
+                  <td>
+                    {isoToDisplayDate(i.issueDate)}
+                    {i.dueDate && i.status === "ISSUED" && <div className="muted">ครบกำหนด {isoToDisplayDate(i.dueDate)}</div>}
+                    {dueBadge(i, todayIso())}
+                  </td>
                   <td>{i.customer.name}</td>
                   <td>{i.lines.length ? i.lines.length : <span className="muted">บิลกำหนดเอง</span>}</td>
                   <td style={{ textAlign: "right" }}>{formatMoney(i.netTotal)}</td>
@@ -295,9 +334,24 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                         </button>
                         {i.status === "ISSUED" && (
                           <>
-                            <button className="text-button" onClick={() => open({ id: i.id, kind: "paid" })}>
-                              รับเงินแล้ว
-                            </button>
+                            {taxInvoiceEnabled && needsTaxInvoice(i) ? (
+                              <button
+                                className="text-button"
+                                style={{ fontWeight: 600 }}
+                                onClick={() => {
+                                  setAction(null);
+                                  setNotice("");
+                                  setStaleError("");
+                                  setIssuing(i);
+                                }}
+                              >
+                                รับเงิน + ออกใบกำกับ
+                              </button>
+                            ) : (
+                              <button className="text-button" onClick={() => open({ id: i.id, kind: "paid" })}>
+                                รับเงินแล้ว
+                              </button>
+                            )}
                             {i.lines.length === 0 ? (
                               // บิลกำหนดเอง (ไม่มีรถ) แก้ในฟอร์มเดียวกับตอนออกบิล
                               <Link className="text-button" href={`/accounting/billing/custom?edit=${encodeURIComponent(i.id)}`}>
@@ -321,7 +375,21 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                             </button>
                           </>
                         )}
-                        {i.status === "PAID" && (
+                        {/* ใบกำกับในระบบ: เลขห้ามหาย - ยกเลิกใบกำกับ (มีเหตุผล) แทนยกเลิกการรับเงิน */}
+                        {i.status === "PAID" && i.taxInvoice && (
+                          <>
+                            <button className="text-button" onClick={() => printTaxInvoiceOf(i)}>
+                              พิมพ์ใบกำกับ
+                            </button>
+                            <button className="text-button" onClick={() => setTvRemark({ kind: "replacement", invoice: i })}>
+                              ออกใบแทน
+                            </button>
+                            <button className="text-button danger" onClick={() => setTvRemark({ kind: "cancel", invoice: i })}>
+                              ยกเลิกใบกำกับ
+                            </button>
+                          </>
+                        )}
+                        {i.status === "PAID" && !i.taxInvoice && (
                           <button className="text-button" onClick={() => open({ id: i.id, kind: "unpay" })}>
                             ยกเลิกการรับเงิน
                           </button>
@@ -369,6 +437,29 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
         />
       )}
       {historyOf && <InvoiceHistoryDialog invoice={historyOf} onClose={() => setHistoryOf(null)} />}
+      {issuing && (
+        <TaxInvoiceIssueDialog
+          invoice={issuing}
+          onClose={() => setIssuing(null)}
+          onIssued={(_tv, text) => {
+            setNotice(text);
+            reload();
+          }}
+          onRefused={() => reload()}
+        />
+      )}
+      {tvRemark?.invoice.taxInvoice && (
+        <TaxInvoiceRemarkDialog
+          kind={tvRemark.kind}
+          taxInvoice={{ ...tvRemark.invoice.taxInvoice, invoiceNo: tvRemark.invoice.invoiceNo }}
+          onClose={() => setTvRemark(null)}
+          onDone={(_tv, text) => {
+            setNotice(text);
+            if (tvRemark.kind === "cancel" && filter === "PAID") setFilter("ISSUED");
+            reload();
+          }}
+        />
+      )}
     </section>
   );
 }

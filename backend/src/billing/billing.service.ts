@@ -191,7 +191,12 @@ const itemsOf = (rows: ItemDbRow[]): Item[] =>
       sortOrder: r.sortOrder,
     }));
 
-const INVOICE_INCLUDE = { lines: true, items: true } as const;
+// taxInvoices = ใบกำกับภาษีในระบบที่ยังใช้อยู่ (ผู้ใช้ 2026-09-28) - มีได้ใบเดียวต่อบิล
+const INVOICE_INCLUDE = { lines: true, items: true, taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true } } } as const;
+
+// วันครบกำหนดชำระ = วันออกบิล + เครดิตเทอมของลูกค้า (ผู้ใช้ 2026-09-28) - ไม่ได้ตั้งเครดิตเทอม = ไม่มีวันครบกำหนด
+const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
+const dueDateOf = (issueDate: Date, creditDays: number | null | undefined) => (creditDays == null ? null : addDays(issueDate, creditDays));
 
 // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29: 1% / 3% / ตามงาน ต้องปรับได้ทุกบิล) - ไม่ส่ง = ตามเงื่อนไขลูกค้า ณ วันออกบิล
 function parseWhtOverride(raw: unknown): number | null {
@@ -227,6 +232,8 @@ type CustomerTermsRow = { billingVat: boolean; billingWhtRate: unknown; billingW
 function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
+// เงื่อนไขที่ส่งให้หน้าจอ = เงื่อนไขคิดยอด + เครดิตเทอม (ไม่ใช้คิดยอดบิล จึงไม่อยู่ใน BillingTerms)
+const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null }) => ({ ...toTerms(c), creditDays: c.billingCreditDays });
 
 type RateDbRow = {
   id: string;
@@ -410,7 +417,7 @@ export class BillingService {
           address: c.address,
           taxId: c.taxId,
           account: accountOn(periods, today),
-          terms: toTerms(c),
+          terms: termsWithCredit(c),
           rates,
           vehicles: c.vehicles.map((v) => {
             const sub = v.documentSubmissions[0];
@@ -476,12 +483,12 @@ export class BillingService {
   async getTerms(customerId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
-    return toTerms(customer);
+    return termsWithCredit(customer);
   }
 
   // เงื่อนไขวางบิลเป็นข้อมูลลูกค้า -> ต้องมีเหตุผลและเก็บค่าก่อน/หลังลง AuditLog เหมือนหน้าแก้ไขลูกค้า (ผู้ใช้ 2026-09-27, F25)
   // ประวัติแสดงรวมกับการแก้ข้อมูลลูกค้าในหน้าลูกค้า (entity Customer) · บิลที่ออกไปแล้วไม่เปลี่ยน
-  async updateTerms(customerId: string, dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; remark?: unknown }) {
+  async updateTerms(customerId: string, dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; remark?: unknown }) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้เงื่อนไขวางบิล');
     if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
     if (typeof dto?.vat !== 'boolean') throw bad('ต้องระบุว่ามี VAT หรือไม่');
@@ -490,7 +497,13 @@ export class BillingService {
     const whtSpecialRate = hasSpecial ? parsePercent(dto.whtSpecialRate, 'อัตราหัก ณ ที่จ่ายพิเศษ') : null;
     if (hasSpecial && !dto.whtSpecialUntil) throw bad('อัตราพิเศษต้องระบุวันสุดท้ายที่ใช้');
     const whtSpecialUntil = hasSpecial ? parseIsoDate(dto.whtSpecialUntil, 'วันสุดท้ายของอัตราพิเศษ') : null;
-    const data = { billingVat: dto.vat, billingWhtRate: whtRate, billingWhtSpecialRate: whtSpecialRate, billingWhtSpecialUntil: whtSpecialUntil };
+    const data: Prisma.CustomerUpdateInput = { billingVat: dto.vat, billingWhtRate: whtRate, billingWhtSpecialRate: whtSpecialRate, billingWhtSpecialUntil: whtSpecialUntil };
+    // เครดิตเทอม (ผู้ใช้ 2026-09-28): ไม่ส่ง = คงเดิม, null = ไม่ตั้ง, 0-365 วัน
+    if (dto.creditDays !== undefined) {
+      const c = dto.creditDays;
+      if (c !== null && (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c > 365)) throw bad('เครดิตเทอมต้องเป็นจำนวนวันเต็ม 0 ถึง 365');
+      data.billingCreditDays = c;
+    }
 
     return this.prisma.$transaction(async (tx) => {
       // ล็อกแถวก่อนอ่านค่าเดิม เหมือน CustomersService.update: แก้พร้อมกัน 2 หน้าจอ ประวัติต้องมีค่า "ก่อนแก้" ที่ถูกต้อง
@@ -501,7 +514,7 @@ export class BillingService {
       if (!Object.keys(changes).length) throw bad('เงื่อนไขวางบิลเหมือนเดิม - ไม่มีอะไรต้องแก้');
       const updated = await tx.customer.update({ where: { id: customerId }, data });
       await writeAudit(tx, { entity: 'Customer', entityId: customerId, action: 'update-terms', remark, changes });
-      return toTerms(updated);
+      return termsWithCredit(updated);
     });
   }
 
@@ -681,6 +694,7 @@ export class BillingService {
             data: {
               invoiceNo,
               issueDate,
+              dueDate: dueDateOf(issueDate, customer.billingCreditDays),
               account,
               customerId: customer.id,
               customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
@@ -734,6 +748,7 @@ export class BillingService {
         data: {
           invoiceNo,
           issueDate,
+          dueDate: dueDateOf(issueDate, customer.billingCreditDays),
           account,
           customerId: customer.id,
           customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
@@ -829,9 +844,13 @@ export class BillingService {
   async markPaid(id: string, dto: { paidDate?: unknown; taxInvoiceNo?: unknown }) {
     const paidDate = parseIsoDate(dto?.paidDate, 'วันที่รับเงิน');
     const taxInvoiceNo = optionalText(dto.taxInvoiceNo, 'เลขที่ใบกำกับภาษี');
-    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, issueDate: true } });
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, issueDate: true, account: true, vatRate: true } });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'ISSUED') throw conflict('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
+    // เปิดใช้ใบกำกับในระบบแล้ว (ผู้ใช้ 2026-09-28): บิลบัญชีบริษัทที่มี VAT ต้องรับเงินพร้อมออกใบกำกับ - กันเลข TV จาก Google Sheet ชนกับเลขในระบบ
+    if (invoice.account === 'COMPANY' && Number(invoice.vatRate) > 0 && (await this.prisma.taxInvoiceSeries.count()) > 0) {
+      throw bad('บิลนี้ต้องใช้ "รับเงิน + ออกใบกำกับ" (เปิดใช้ใบกำกับภาษีในระบบแล้ว)');
+    }
     const paidIso = paidDate.toISOString().slice(0, 10);
     const issuedIso = invoice.issueDate.toISOString().slice(0, 10);
     if (paidIso < issuedIso) throw bad(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${dmy(issuedIso)})`);
@@ -865,6 +884,9 @@ export class BillingService {
     const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, paidDate: true, taxInvoiceNo: true } });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'PAID') throw conflict('ยกเลิกการรับเงินได้เฉพาะบิลที่รับเงินแล้ว');
+    // ใบกำกับที่ออกในระบบแล้วห้ามล้างเลขทิ้ง (เลขต้องไม่หาย) - ต้องยกเลิกใบกำกับพร้อมเหตุผลแทน ซึ่งย้อนบิลกลับเป็นรอรับเงินให้เอง
+    const activeTv = await this.prisma.taxInvoice.findFirst({ where: { invoiceId: id, status: 'ISSUED' }, select: { taxInvoiceNo: true } });
+    if (activeTv) throw bad(`บิลนี้มีใบกำกับ ${activeTv.taxInvoiceNo} ในระบบ - ใช้ "ยกเลิกใบกำกับ" แทน`);
     await this.prisma.$transaction(async (tx) => {
       // เงื่อนไขรวมวันที่/เลข TV ที่อ่านมา: ประวัติต้องตรงกับค่าที่ถูกล้างจริง
       const { count } = await tx.invoice.updateMany({
@@ -1016,6 +1038,8 @@ export class BillingService {
           where: { id },
           data: {
             issueDate: nextIssue,
+            // เลื่อนวันออกบิล = เลื่อนวันครบกำหนดตามจำนวนวันเดิม
+            dueDate: invoice.dueDate ? addDays(invoice.dueDate, (nextIssue.getTime() - invoice.issueDate.getTime()) / 86_400_000) : null,
             jobLabel: jobLabel ?? invoice.jobLabel,
             extras: nextExtras,
             vatRate: totals.vatRate,
@@ -1243,7 +1267,9 @@ export class BillingService {
     taxInvoiceNo: string | null;
     voidReason: string | null;
     account?: string;
+    dueDate?: Date | null;
     updatedAt?: Date;
+    taxInvoices?: Array<{ id: string; taxInvoiceNo: string }>;
     items: Array<ItemDbRow & { id: string }>;
     lines: Array<{
       id: string;
@@ -1295,6 +1321,9 @@ export class BillingService {
       taxInvoiceNo: i.taxInvoiceNo,
       voidReason: i.voidReason,
       account: i.account,
+      dueDate: iso(i.dueDate ?? null),
+      // ใบกำกับภาษีในระบบที่ยังใช้อยู่ของบิลนี้ (null = ยังไม่ออก / ออกจาก Google Sheet ซึ่งเห็นแค่เลขใน taxInvoiceNo)
+      taxInvoice: i.taxInvoices?.[0] ?? null,
       // หน้าแก้บิลส่งกลับมาเทียบ (expectedUpdatedAt) - รับเงิน/ยกเลิก/แก้ ทำให้ค่านี้เปลี่ยน
       updatedAt: i.updatedAt?.toISOString() ?? null,
       // จำนวนประวัติใน AuditLog - ส่งเฉพาะรายการบิล (listInvoices) หน้าจอโหลดรายการใหม่หลังทุกการกระทำอยู่แล้ว
