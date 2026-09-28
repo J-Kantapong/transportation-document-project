@@ -115,88 +115,53 @@ export function TaxInvoicesPage() {
         ) : rows.length === 0 ? (
           <div className="empty-customers">ไม่มีใบกำกับในเดือนนี้</div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>เลขที่</th>
-                  <th>วันที่</th>
-                  <th>ลูกค้า</th>
-                  <th className="r">มูลค่า</th>
-                  <th className="r">VAT</th>
-                  <th className="r">รวม</th>
-                  <th>หัก ณ ที่จ่าย</th>
-                  <th>สถานะ</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const cancelled = r.status === "CANCELLED";
-                  return (
-                    <tr key={r.id} style={cancelled ? { color: "#8a94a6" } : undefined}>
-                      <td>
-                        {r.taxInvoiceNo}
-                        <div className="muted">บิล {r.invoiceNo}</div>
-                      </td>
-                      <td>{isoToDisplayDate(r.issueDate)}</td>
-                      <td>
-                        {r.customer.name}
-                        {r.replacesNo && <div className="muted">แทน {r.replacesNo}</div>}
-                      </td>
-                      <td style={{ textAlign: "right" }}>{formatMoney(r.serviceTotal + r.goodsTotal)}</td>
-                      <td style={{ textAlign: "right" }}>{formatMoney(r.vatAmount)}</td>
-                      <td style={{ textAlign: "right" }}>{formatMoney(r.grandTotal)}</td>
-                      <td>
-                        {r.whtAmount > 0 ? (
-                          <>
-                            {formatMoney(r.whtAmount)}
-                            <div>
-                              {r.whtCertificate ? (
-                                <span className="badge done">{WHT_METHOD_LABEL[r.whtCertificate.method]} ✓</span>
-                              ) : cancelled ? null : (
-                                <span className="badge warn">รอ 50 ทวิ</span>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>
-                        {cancelled ? (
-                          <>
-                            <span className="badge">ยกเลิก</span>
-                            <div className="muted">{r.cancelReason}</div>
-                            {r.replacedByNo && <div className="muted">ออกใหม่ {r.replacedByNo}</div>}
-                          </>
-                        ) : (
-                          <>
-                            <span className="badge done">ปกติ</span>
-                            {r.replacementIssuedAt && <div className="muted">ออกใบแทน {isoToDisplayDate(r.replacementIssuedAt.slice(0, 10))}</div>}
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        <button className="text-button" onClick={() => printTaxInvoice(r, canPrintOriginal(r, todayIso()) ? "original" : "copy")}>
-                          {canPrintOriginal(r, todayIso()) ? "พิมพ์" : "พิมพ์สำเนา"}
+          // รายการแบบแถวสั้นไม่มีตารางกว้าง (ผู้ใช้ไม่ชอบเลื่อนข้าง) - แถวละ 3 บรรทัด: เลข/วันที่/ลูกค้า, ยอด, ปุ่ม
+          <div style={{ display: "grid" }}>
+            {rows.map((r) => {
+              const cancelled = r.status === "CANCELLED";
+              return (
+                <div key={r.id} style={{ padding: "10px 23px", borderTop: "1px solid #f0f2f6", color: cancelled ? "#8a94a6" : undefined }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                    <span>
+                      <b>{r.taxInvoiceNo}</b> · {isoToDisplayDate(r.issueDate)} · {r.customer.name}
+                    </span>
+                    {cancelled ? <span className="badge">ยกเลิก</span> : <span className="badge done">ปกติ</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 13 }}>
+                    บิล {r.invoiceNo} · มูลค่า {formatMoney(r.serviceTotal + r.goodsTotal)} · VAT {formatMoney(r.vatAmount)} · รวม {formatMoney(r.grandTotal)}
+                    {r.whtAmount > 0 && <> · หัก ณ ที่จ่าย {formatMoney(r.whtAmount)} </>}
+                    {r.whtAmount > 0 &&
+                      (r.whtCertificate ? (
+                        <span className="badge done">{WHT_METHOD_LABEL[r.whtCertificate.method]} ✓</span>
+                      ) : cancelled ? null : (
+                        <span className="badge warn">รอ 50 ทวิ</span>
+                      ))}
+                  </div>
+                  {(r.replacesNo || cancelled || r.replacementIssuedAt) && (
+                    <div className="muted" style={{ fontSize: 13 }}>
+                      {r.replacesNo && <>ออกแทน {r.replacesNo} </>}
+                      {cancelled && <>ยกเลิก: {r.cancelReason}{r.replacedByNo ? ` · ออกใหม่ ${r.replacedByNo}` : ""} </>}
+                      {r.replacementIssuedAt && <>ออกใบแทน {isoToDisplayDate(r.replacementIssuedAt.slice(0, 10))}</>}
+                    </div>
+                  )}
+                  <div>
+                    <button className="text-button" onClick={() => printTaxInvoice(r, canPrintOriginal(r, todayIso()) ? "original" : "copy")}>
+                      {canPrintOriginal(r, todayIso()) ? "พิมพ์" : "พิมพ์สำเนา"}
+                    </button>
+                    {!cancelled && (
+                      <>
+                        <button className="text-button" onClick={() => setRemark({ kind: "replacement", tv: r })}>
+                          ออกใบแทน
                         </button>
-                        {!cancelled && (
-                          <>
-                            <button className="text-button" onClick={() => setRemark({ kind: "replacement", tv: r })}>
-                              ออกใบแทน
-                            </button>
-                            <button className="text-button danger" onClick={() => setRemark({ kind: "cancel", tv: r })}>
-                              ยกเลิก
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <button className="text-button danger" onClick={() => setRemark({ kind: "cancel", tv: r })}>
+                          ยกเลิก
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
