@@ -63,7 +63,7 @@ function invoicePageHtml(inv: PrintableInvoice): string {
 <div class="foot"><div><span class="k">เงื่อนไขการชำระเงิน :</span><br>${paymentLinesOf(inv).map(escapeHtml).join("<br>")}<br>
 <span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</span></div>
 <div class="tot"><div><span>ค่าธรรมเนียม</span><span>${formatMoney(inv.feeTotal)}</span></div>
-<div><span>ค่าดำเนินการ</span><span>${formatMoney(inv.serviceTotal)}</span></div>
+<div><span>ค่าบริการ</span><span>${formatMoney(inv.serviceTotal)}</span></div>
 ${inv.vatRate > 0 ? `<div><span>ภาษีมูลค่าเพิ่ม ${inv.vatRate}%</span><span>${formatMoney(inv.vatAmount)}</span></div>` : ""}
 ${inv.whtRate > 0 ? `<div><span>ภาษีหัก ณ ที่จ่าย ${inv.whtRate}%</span><span>${formatMoney(inv.whtAmount)}</span></div>` : ""}
 <div class="g"><span>จำนวนเงินทั้งสิ้น</span><span>${formatMoney(inv.netTotal)}</span></div></div></div>
@@ -100,7 +100,7 @@ ${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื�
     return `<section class="page att">${voidMarkHtml(inv)}<div class="atthead"><div><b>เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))}</b> <span class="k">(ของใบวางบิล ${escapeHtml(inv.invoiceNo || "—")})</span> · ${escapeHtml(customerTitle(inv.customer))}${isVoid(inv) ? ` · ${voidNoteHtml(inv)}` : ""}<br>
 <span class="k">${escapeHtml(inv.jobLabel)} ${lines.length} คัน · วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div><div class="k">หน้า ${p + 1}/${pageCount}</div></div>
 <table class="grid"><colgroup><col style="width:5%"><col style="width:10%"><col style="width:21%"><col style="width:11%"><col style="width:13%"><col style="width:10%"><col style="width:11%"><col style="width:8%"><col style="width:11%"></colgroup>
-<thead><tr><th>#</th><th>ยี่ห้อ</th><th>เลขตัวรถ</th><th>ทะเบียน</th><th>เลขที่ใบเสร็จ</th><th class="r">ใบเสร็จ</th><th class="r">ค่าดำเนินการ</th><th class="r">VAT ${inv.vatRate}%</th><th class="r">รวม</th></tr></thead>
+<thead><tr><th>#</th><th>ยี่ห้อ</th><th>เลขตัวรถ</th><th>ทะเบียน</th><th>เลขที่ใบเสร็จ</th><th class="r">ใบเสร็จ</th><th class="r">ค่าบริการ</th><th class="r">VAT ${inv.vatRate}%</th><th class="r">รวม</th></tr></thead>
 <tbody>${rows}${totalRow}</tbody></table>${notes}</section>`;
   });
 }

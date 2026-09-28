@@ -81,7 +81,7 @@ export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "
   const groups = new Map<string, InvoiceFaceLine & { parts: number }>();
   for (const l of invoice.lines) {
     const suffix = l.deduction > 0 ? ` ${l.plateText || l.chassis}` : l.serviceLabel ? ` ${l.serviceLabel}` : "";
-    const name = `ค่าดำเนินการ${invoice.jobLabel}${suffix}`;
+    const name = `ค่าบริการ${invoice.jobLabel}${suffix}`;
     const key = `${name}|${l.serviceFee}`;
     // จำนวนส่วนในวงเล็บ: "" = 0, "(300-799 cc)" = 1, "(300-799 cc + ขอใช้)" = 2 - คันที่มีหักยอดไว้ท้ายสุด
     const parts = l.deduction > 0 ? 99 : l.serviceLabel ? l.serviceLabel.split(" + ").length : 0;
