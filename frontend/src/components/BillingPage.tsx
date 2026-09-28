@@ -270,10 +270,22 @@ export function BillingPage() {
     return `ใบเสร็จ ${formatMoney(receipt)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(v.receiptEstimate)} (ต่าง ${diff > 0 ? "+" : ""}${formatMoney(diff)})${hint}`;
   };
 
+  // งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28): เก็บค่าใบเสร็จกรมฯ ของรถเก่าเพิ่มอีกยอด ยังไม่กรอก = วางบิลไม่ได้
+  const swapProblemOf = (v: BillingVehicle): string | null => {
+    if (!v.plateSwap) return null;
+    if (v.plateSwap.receiptAmount === null) return `งานสลับเลข (รถเก่า ${v.plateSwap.oldChassis}) ยังไม่มียอดใบเสร็จ - ไปกรอกที่หน้ารับใบเสร็จของงานสลับเลขก่อน`;
+    const est = v.plateSwap.receiptEstimate;
+    if (est === null || est === v.plateSwap.receiptAmount || rows[v.id]?.receiptChecked) return null;
+    const diff = round2(v.plateSwap.receiptAmount - est);
+    return `ใบเสร็จงานสลับเลข ${formatMoney(v.plateSwap.receiptAmount)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(est)} (ต่าง ${diff > 0 ? "+" : ""}${formatMoney(diff)})`;
+  };
+
   const problemOf = (v: BillingVehicle): string | null => {
     const row = rows[v.id];
     if (!row) return null;
     if (money(row.receiptText) === null) return "ไม่มียอดใบเสร็จ - กด แก้ แล้วใส่ค่าใบเสร็จ";
+    const swapProblem = swapProblemOf(v);
+    if (swapProblem) return swapProblem;
     const mismatch = receiptMismatchOf(v);
     if (mismatch) return `${mismatch} - กด แก้ ตรวจกับใบเสร็จจริง`;
     if (serviceFeeOf(v) !== null) return null;
@@ -297,6 +309,9 @@ export function BillingPage() {
     serviceFee: serviceFeeOf(v),
     serviceLabel: rows[v.id].label.trim() || labelOf(v) || null,
     deduction: rows[v.id].deduct ? PLATE_REQUEST_DEDUCTION : 0,
+    // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข - เก็บแยกในบรรทัดเดียวกัน (ผู้ใช้ 2026-09-28)
+    plateSwapId: v.plateSwap?.id ?? null,
+    swapReceiptAmount: v.plateSwap?.receiptAmount ?? null,
   }));
   // สรุปคันที่เลือกตามราคาที่ใช้ เช่น "ต่ำกว่า 300 cc + ขอใช้ = 620.00 · 3 คัน" - เห็นคันที่ราคาแปลกได้ทันที
   const priceBreakdown = [
@@ -314,7 +329,7 @@ export function BillingPage() {
   const draftExtras = extras.map((e) => ({ label: e.label.trim(), amount: money(e.amountText) }));
   const totals = customer
     ? computeTotals(
-        draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0 })),
+        draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0, swapReceiptAmount: l.swapReceiptAmount })),
         draftExtras.map((e) => ({ amount: e.amount ?? 0 })),
         account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
@@ -351,6 +366,8 @@ export function BillingPage() {
             serviceLabel: l.serviceLabel,
             deduction: l.deduction,
             deductionNote: l.deduction ? PLATE_REQUEST_NOTE : null,
+            plateSwapId: l.plateSwapId,
+            swapReceiptAmount: l.swapReceiptAmount,
           })),
         }
       : null;
@@ -414,6 +431,8 @@ export function BillingPage() {
           serviceLabel: l.serviceLabel,
           deduction: l.deduction,
           deductionNote: l.deduction ? PLATE_REQUEST_NOTE : null,
+          plateSwapId: l.plateSwapId,
+          swapReceiptAmount: l.swapReceiptAmount,
         })),
         extras: draftExtras.map((e) => ({ label: e.label, amount: e.amount! })),
       });
@@ -675,6 +694,35 @@ export function BillingPage() {
                                   <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
                                   ตรวจกับใบเสร็จจริงแล้ว ยอดถูกต้อง (และติ๊ก/เอาติ๊ก &quot;ขอใช้&quot; ให้ตรงใบเสร็จแล้ว)
                                 </label>
+                              </div>
+                            )}
+                            {v.plateSwap && (
+                              <div
+                                style={{
+                                  gridColumn: "1 / -1",
+                                  padding: "8px 12px",
+                                  borderRadius: 8,
+                                  background: swapProblemOf(v) ? "#fff4e5" : "#eef3ff",
+                                  color: swapProblemOf(v) ? "#8a4b00" : "#243b6b",
+                                }}
+                              >
+                                <b>งานสลับเลข</b> · รถเก่า {v.plateSwap.oldChassis}
+                                {v.plateSwap.oldPlateText ? ` (${v.plateSwap.oldPlateText})` : ""}
+                                {v.plateSwap.receiptNo ? ` · ใบเสร็จ ${v.plateSwap.receiptNo}` : ""}
+                                <div style={{ marginTop: 4 }}>
+                                  {v.plateSwap.receiptAmount === null
+                                    ? "ยังไม่มียอดใบเสร็จของงานสลับเลข - ต้องไปกรอกที่หน้ารับใบเสร็จของงานสลับเลขก่อนจึงจะวางบิลได้"
+                                    : `คิดค่าใบเสร็จของรถเก่าเพิ่มอีก ${formatMoney(v.plateSwap.receiptAmount)} (รวมอยู่ในยอดค่าธรรมเนียมของบิล)`}
+                                </div>
+                                {swapProblemOf(v) && v.plateSwap.receiptAmount !== null && (
+                                  <div style={{ marginTop: 4 }}>{swapProblemOf(v)}</div>
+                                )}
+                                {swapProblemOf(v) && v.plateSwap.receiptAmount !== null && (
+                                  <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                                    <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
+                                    ตรวจกับใบเสร็จจริงแล้ว ยอดถูกต้อง
+                                  </label>
+                                )}
                               </div>
                             )}
                             <label className="field">

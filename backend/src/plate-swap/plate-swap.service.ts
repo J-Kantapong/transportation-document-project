@@ -731,13 +731,16 @@ export class PlateSwapService {
   // ล็อกแถวงาน (FOR UPDATE) แล้วอ่านสถานะล่าสุดใน transaction เดียวกับการเขียน (พบ 2026-09-27: เดิมตรวจสถานะรับกลับ/จำนวนรูป
   // นอก transaction - รับกลับพร้อมกับลบรูปสุดท้าย หรือลบสองรูปพร้อมกัน ทำให้งานที่รับกลับแล้วเหลือ 0 รูป และแนบรูปเข้างานที่เพิ่ง
   // รับกลับได้โดยไม่มีเหตุผล) - สถานะรับกลับไม่ตรงกับตอนตรวจ (มีคนรับกลับ/ยกเลิกรับกลับ/ยกเลิกงานไปก่อน) = 409 ให้โหลดใหม่
-  private async lockSwap(tx: Tx, id: string, expectedReturnedDate: Date | null) {
+  // 'skip' = งานนั้นไม่เกี่ยวกับใบเสร็จ (แนบรูปป้าย/เล่ม) - ตั้งแต่แยกรับเอกสารกลับเป็น 3 ขั้น (ผู้ใช้ 2026-09-28)
+  // รับใบเสร็จกับรับป้าย/รับเล่มเป็นคนละงานกัน ทำพร้อมกันได้ ไม่ต้องเด้ง 409 ให้โหลดใหม่
+  private async lockSwap(tx: Tx, id: string, expectedReturnedDate: Date | null | 'skip') {
     await tx.$queryRaw`SELECT "id" FROM "PlateSwap" WHERE "id" = ${id} FOR UPDATE`;
     const live = await tx.plateSwap.findFirst({
       where: { id, cancelledAt: null },
       select: { returnedDate: true, newPlateCategory: true, newPlateNumber: true, _count: { select: { receipts: true } } },
     });
-    if (!live || !sameTime(live.returnedDate, expectedReturnedDate)) throw new ConflictException({ error: STALE_ERROR });
+    if (!live) throw new ConflictException({ error: STALE_ERROR });
+    if (expectedReturnedDate !== 'skip' && !sameTime(live.returnedDate, expectedReturnedDate)) throw new ConflictException({ error: STALE_ERROR });
     return live;
   }
 
@@ -883,14 +886,16 @@ export class PlateSwapService {
       numberSource,
       buyNormalPlate,
       buyAuctionPlate,
-      urgent,
       returnedDate,
+      // งานเก่าที่บันทึกก่อนมีคอลัมน์นี้อ่านได้เป็น undefined - ใส่ลง next เฉพาะตอนค่าเปลี่ยนจริง
+      // ไม่งั้น diffChanges เห็น undefined -> false เป็น "การเปลี่ยนแปลง" ทำให้แก้ชื่อเฉยๆ ก็คิดค่าใช้จ่ายใหม่
+      ...(urgent === (existing.urgent ?? false) ? {} : { urgent }),
     };
     const feesChanged =
       numberSource !== existing.numberSource ||
       buyNormalPlate !== existing.buyNormalPlate ||
       buyAuctionPlate !== existing.buyAuctionPlate ||
-      urgent !== existing.urgent;
+      urgent !== (existing.urgent ?? false);
     const fees = feesChanged ? feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent }) : null;
     const feeData = fees
       ? {
@@ -1153,7 +1158,7 @@ export class PlateSwapService {
     await this.storage.put(storageKey, file.buffer, type.mimeType);
     try {
       await this.prisma.$transaction(async (tx) => {
-        await this.lockSwap(tx, id, existing.returnedDate);
+        await this.lockSwap(tx, id, 'skip');
         const photo = await tx.platePhoto.create({
           data: {
             storageKey,
@@ -1196,7 +1201,7 @@ export class PlateSwapService {
     await this.storage.put(storageKey, file.buffer, type.mimeType);
     try {
       await this.prisma.$transaction(async (tx) => {
-        await this.lockSwap(tx, id, existing.returnedDate);
+        await this.lockSwap(tx, id, 'skip');
         const photo = await tx.bookPhoto.create({
           data: {
             storageKey,

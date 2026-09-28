@@ -1,5 +1,5 @@
 import { getToken, redirectToLogin } from './auth';
-import type { DeliveryKind, DeliveryRow, DeliverySlip } from './billing-api';
+import type { DeliveryKind, DeliveryRow, DeliverySlip, DeliverySource } from './billing-api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
@@ -221,6 +221,7 @@ export interface VehicleSearchRow {
   date: string;
   kind: 'car' | 'moto';
   customerName: string;
+  ownerName: string | null;
   brandName: string;
   chassis: string;
   engine: string | null;
@@ -1150,14 +1151,18 @@ export const api = {
     request<{ id: string }>(`/api/tax-renewals/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),
 
   // Delivery: ส่งชนิดงานที่ผู้ใช้เห็นในป๊อปอัปยืนยันไปด้วย - สถานะรถเปลี่ยนไปแล้ว backend ไม่บันทึก (409) ให้โหลดใหม่ (พบ 2026-09-27)
-  // vehicleIds ส่งคู่ไปด้วยให้ backend รุ่นก่อนยังรับได้ระหว่างอัปเดต
-  submitDelivery: (data: { items: Array<{ vehicleId: string; kind: DeliveryKind }>; date: string; recipient: string; note: string }) =>
+  submitDelivery: (data: {
+    items: Array<{ source: DeliverySource; id: string; kind: DeliveryKind }>;
+    date: string;
+    recipient: string;
+    note: string;
+  }) =>
     request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>('/api/delivery', {
       method: 'POST',
-      body: JSON.stringify({ ...data, vehicleIds: data.items.map((i) => i.vehicleId) }),
+      body: JSON.stringify(data),
     }),
   // ป้ายไปพร้อมเล่มแล้ว (ผู้ใช้ 2026-09-27): ติ๊กป้ายในใบส่งเล่มเดิม วันที่ส่งป้าย = วันที่ในใบ - ADMIN / STAFF_CAR / STAFF_MOTO
-  addPlateToDeliverySlip: (slipId: string, data: { vehicleId: string; remark?: string }) =>
+  addPlateToDeliverySlip: (slipId: string, data: { source: DeliverySource; id: string; remark?: string }) =>
     request<DeliverySlip>(`/api/delivery/slips/${encodeURIComponent(slipId)}/add-plate`, { method: 'POST', body: JSON.stringify(data) }),
   // รายงานส่งงาน: ป้ายค้างส่ง ขอบเขตการอ่านเดียวกับใบส่งงาน (คิวหน้า Delivery จำกัดเฉพาะคันที่ติ๊กส่งได้ - พบ 2026-09-27)
   deliveryPlatePending: () => request<{ vehicles: DeliveryRow[] }>('/api/delivery/plate-pending'),

@@ -44,13 +44,13 @@ export class DeliveryController {
   }
 
   @Post('slips/:id/cancel')
-  cancelSlip(@Param('id') id: string, @Body() body: { vehicleIds?: unknown; remark?: unknown }) {
+  cancelSlip(@Param('id') id: string, @Body() body: { itemIds?: unknown; vehicleIds?: unknown; remark?: unknown }) {
     return this.deliveryService.cancelSlip(id, body);
   }
 
   // ป้ายไปพร้อมเล่มแล้ว (ผู้ใช้ 2026-09-27): ติ๊กป้ายในใบส่งเล่มเดิม - สิทธิ์เดียวกับแก้/ยกเลิกใบ, remark ไม่บังคับ
   @Post('slips/:id/add-plate')
-  addPlate(@Param('id') id: string, @Body() body: { vehicleId?: unknown; remark?: unknown }) {
+  addPlate(@Param('id') id: string, @Body() body: { itemId?: unknown; source?: unknown; id?: unknown; vehicleId?: unknown; remark?: unknown }) {
     return this.deliveryService.addPlate(id, body);
   }
 

@@ -36,10 +36,11 @@ function service(found: unknown[], count?: number) {
     count: count ?? (typeof args.where.id === 'string' ? 1 : args.where.id.in.length),
   }));
   const create = vi.fn().mockResolvedValue({ id: 's1', slipNo: 7 });
-  const tx = { vehicle: { updateMany }, deliverySlip: { create } };
+  // งานสลับเลขใช้ตาราง PlateSwap - ไม่มีงานสลับเลขในเทสต์ชุดนี้ จึงตอบ 0 แถว/ลิสต์ว่างพอ
+  const tx = { vehicle: { updateMany }, plateSwap: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) }, deliverySlip: { create } };
   const $transaction = vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
   const findMany = vi.fn().mockResolvedValue(found);
-  const prisma = { vehicle: { findMany }, $transaction } as unknown as PrismaService;
+  const prisma = { vehicle: { findMany }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) }, $transaction } as unknown as PrismaService;
   return { svc: new DeliveryService(prisma), updateMany, create, $transaction, findMany };
 }
 
@@ -267,7 +268,11 @@ describe('DeliveryService.slips (รายงานส่งงาน)', () => {
   function setup(slips: unknown[], later: unknown[] = []) {
     const slipFindMany = vi.fn().mockResolvedValue(slips);
     const itemFindMany = vi.fn().mockResolvedValue(later);
-    const prisma = { deliverySlip: { findMany: slipFindMany }, deliverySlipItem: { findMany: itemFindMany } } as unknown as PrismaService;
+    const prisma = {
+      deliverySlip: { findMany: slipFindMany },
+      deliverySlipItem: { findMany: itemFindMany },
+      plateSwap: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
     return { svc: new DeliveryService(prisma), slipFindMany, itemFindMany };
   }
 
@@ -284,7 +289,12 @@ describe('DeliveryService.slips (รายงานส่งงาน)', () => {
   it('STAFF_CAR: นับเพดานเฉพาะใบที่มีรถยนต์ (กรองใน query)', async () => {
     const { svc, slipFindMany } = setup([slipRow(1)]);
     await asUser(['STAFF_CAR'], () => svc.slips({}));
-    expect(slipFindMany.mock.calls[0][0].where.items).toEqual({ some: { AND: [{ OR: [{ body: null }, { NOT: { body: { startsWith: 'รย.12-' } } }] }] } });
+    // ตั้งแต่ 2026-09-28 แถวมี vehicleKind ของตัวเอง (งานสลับเลขไม่มี body) - แถวเก่าที่ยังไม่มีค่าให้ตกไปดู body เหมือนเดิม
+    expect(slipFindMany.mock.calls[0][0].where.items).toEqual({
+      some: {
+        OR: [{ vehicleKind: 'car' }, { vehicleKind: null, AND: [{ OR: [{ body: null }, { NOT: { body: { startsWith: 'รย.12-' } } }] }] }],
+      },
+    });
     const all = setup([slipRow(1)]);
     await asUser(['DELIVERY'], () => all.svc.slips({}));
     expect(all.slipFindMany.mock.calls[0][0].where.items).toBeUndefined();
@@ -294,10 +304,16 @@ describe('DeliveryService.slips (รายงานส่งงาน)', () => {
   it('ใบส่งเล่มที่ป้ายส่งตามไปในใบอื่น: บอกเลขที่และวันที่ของใบส่งป้าย', async () => {
     const { svc, itemFindMany } = setup(
       [slipRow(10, [slipItemRow({ plate: false }), slipItemRow({ id: 'i2', vehicleId: 'v2', chassis: 'CH2', plate: false })])],
-      [{ vehicleId: 'v1', slip: { slipNo: 18, date: new Date('2026-09-25T00:00:00.000Z') } }],
+      [{ vehicleId: 'v1', plateSwapId: null, slip: { slipNo: 18, date: new Date('2026-09-25T00:00:00.000Z') } }],
     );
     const result = await svc.slips({});
-    expect(itemFindMany.mock.calls[0][0].where).toEqual({ vehicleId: { in: ['v1', 'v2'] }, book: false, plate: true, cancelledAt: null });
+    // ค้นทั้งแถวรถจดใหม่และแถวงานสลับเลข (ผู้ใช้ 2026-09-28) - ชุดนี้ไม่มีงานสลับเลข จึงเหลือเงื่อนไขเดียว
+    expect(itemFindMany.mock.calls[0][0].where).toEqual({
+      OR: [{ vehicleId: { in: ['v1', 'v2'] } }],
+      book: false,
+      plate: true,
+      cancelledAt: null,
+    });
     const byId = Object.fromEntries(result.slips[0].items.map((i) => [i.vehicleId, i.plateSentLater]));
     expect(byId).toEqual({ v1: { slipNo: 18, date: '2026-09-25' }, v2: null });
   });
@@ -339,7 +355,7 @@ describe('DeliveryService.queue', () => {
         deliverySlipItems: [{ slip: { id: 's5', slipNo: 5, date: new Date('2026-09-19T00:00:00.000Z') } }],
       }),
     ]);
-    const svc = new DeliveryService({ vehicle: { findMany } } as unknown as PrismaService);
+    const svc = new DeliveryService({ vehicle: { findMany }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService);
     const rows = await svc.queue();
     expect(findMany.mock.calls[0][0].where.deletedAt).toBeNull();
     expect(rows[0]).toMatchObject({ kind: 'PLATE_ONLY', bookSlip: { id: 's5', slipNo: 5, date: '2026-09-19' } });
@@ -351,7 +367,7 @@ describe('DeliveryService.queue', () => {
       vehicle({ customer: { id: 'c9', name: 'คุณเอ', company: 'บจก. เอ', branch: 'สาขาบางนา' } }),
       vehicle({ id: 'v2', customer: { id: 'c1', name: 'ลูกค้า', company: null } }),
     ]);
-    const svc = new DeliveryService({ vehicle: { findMany } } as unknown as PrismaService);
+    const svc = new DeliveryService({ vehicle: { findMany }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService);
     const rows = await svc.queue();
     expect(findMany.mock.calls[0][0].include.customer.select).toMatchObject({ id: true, name: true, company: true, branch: true });
     expect(rows[0]).toMatchObject({
@@ -371,7 +387,7 @@ describe('DeliveryService.platePending (ป้ายค้างส่งใน�
     const findMany = vi.fn().mockResolvedValue([
       vehicle({ deliveredDate: new Date('2026-09-19T00:00:00.000Z'), plateReceivedDate: null }),
     ]);
-    return { svc: new DeliveryService({ vehicle: { findMany } } as unknown as PrismaService), findMany };
+    return { svc: new DeliveryService({ vehicle: { findMany }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService), findMany };
   };
 
   it('เฉพาะคันที่ส่งเล่มแล้วแต่ป้ายยังไม่ได้ส่ง และไม่แสดงรถที่ถูกลบ', async () => {
@@ -398,6 +414,58 @@ describe('DeliveryService.platePending (ป้ายค้างส่งใน�
     const { svc, findMany } = setup();
     await asUser(['STAFF_CAR'], () => svc.platePending());
     expect(findMany.mock.calls[0][0].where).toMatchObject(CAR_ONLY);
+  });
+
+  // งานสลับเลขก็ส่งเล่มก่อนแล้วส่งป้ายตามทีหลังได้ (ผู้ใช้ 2026-09-28) - ต้องอยู่ในรายการป้ายค้างส่งเดียวกัน
+  it('รวมงานสลับเลขที่ส่งเล่มแล้วแต่ป้ายยังค้าง และคิดขอบเขตจาก vehicleClass', async () => {
+    const swapFindMany = vi.fn().mockResolvedValue([
+      {
+        id: 'ps1',
+        customerId: 'c1',
+        vehicleClass: 'MOTO',
+        oldChassis: 'SWAPCHASSIS1',
+        oldBrand: 'Honda',
+        oldOwnerName: 'สมชาย',
+        newPlateCategory: '9กก',
+        newPlateNumber: '1234',
+        receiptNo: '69/1',
+        submitDate: new Date('2026-09-20T00:00:00.000Z'),
+        returnedDate: new Date('2026-09-22T00:00:00.000Z'),
+        bookReceivedDate: new Date('2026-09-23T00:00:00.000Z'),
+        plateReceivedDate: null,
+        deliveredDate: new Date('2026-09-24T00:00:00.000Z'),
+        plateDeliveredDate: null,
+        deliveryNote: null,
+        deliveryRecipient: 'คุณนก',
+        customer: { id: 'c1', name: 'ลูกค้า ก', company: 'บริษัท ก', branch: null },
+        deliverySlipItems: [{ slip: { id: 's9', slipNo: 9, date: new Date('2026-09-24T00:00:00.000Z') } }],
+      },
+    ]);
+    const svc = new DeliveryService({
+      vehicle: { findMany: vi.fn().mockResolvedValue([]) },
+      plateSwap: { findMany: swapFindMany },
+    } as unknown as PrismaService);
+    const rows = await svc.platePending();
+    expect(swapFindMany.mock.calls[0][0].where).toEqual({ cancelledAt: null, deliveredDate: { not: null }, plateDeliveredDate: null });
+    // ปุ่ม "ป้ายไปพร้อมเล่มแล้ว" ต้องรู้ว่าเล่มไปในใบไหน และหน้าเว็บต้องเห็นว่าเป็นจักรยานยนต์
+    expect(rows[0]).toMatchObject({
+      id: 'ps1',
+      source: 'PLATE_SWAP',
+      kind: 'WAITING_PLATE',
+      vehicleKind: 'moto',
+      deliveredDate: '2026-09-24',
+      bookSlip: { id: 's9', slipNo: 9, date: '2026-09-24' },
+    });
+  });
+
+  it('STAFF_MOTO: งานสลับเลขในรายการป้ายค้างส่งกรองด้วย vehicleClass', async () => {
+    const swapFindMany = vi.fn().mockResolvedValue([]);
+    const svc = new DeliveryService({
+      vehicle: { findMany: vi.fn().mockResolvedValue([]) },
+      plateSwap: { findMany: swapFindMany },
+    } as unknown as PrismaService);
+    await asUser(['STAFF_MOTO'], () => svc.platePending());
+    expect(swapFindMany.mock.calls[0][0].where).toMatchObject({ vehicleClass: 'MOTO' });
   });
 });
 
@@ -452,15 +520,19 @@ describe('DeliveryService แก้ / ยกเลิกใบส่งงาน
     const logCreate = vi.fn().mockResolvedValue({});
     const tx = {
       vehicle: { update: vehicleUpdate, updateMany: vehicleUpdate },
+      // งานสลับเลขเขียนที่ตาราง PlateSwap และเก็บประวัติลง AuditLog (VehicleEditLog บังคับผูกกับ Vehicle)
+      plateSwap: { update: vi.fn().mockResolvedValue({}), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       deliverySlipItem: { updateMany: itemUpdate },
       deliverySlip: { update: slipUpdate },
       vehicleEditLog: { create: logCreate },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
     const $transaction = vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
     const prisma = {
       deliverySlip: { findUnique: vi.fn().mockResolvedValue(slip) },
       deliverySlipItem: { findMany: vi.fn().mockResolvedValue(laterPlate) },
       vehicle: { findMany: vi.fn().mockResolvedValue(vehicles) },
+      plateSwap: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
       $transaction,
     } as unknown as PrismaService;
     return { svc: new DeliveryService(prisma), vehicleUpdate, itemUpdate, slipUpdate, logCreate, $transaction };
@@ -738,5 +810,163 @@ describe('DeliveryService.addPlate (ป้ายไปพร้อมเล่�
     const { svc, $transaction } = setup(bookItem(), waiting);
     await expect(asUser(['STAFF_MOTO', 'DELIVERY'], () => svc.addPlate('s1', { vehicleId: 'v1' }))).rejects.toMatchObject({ status: 403 });
     expect($transaction).not.toHaveBeenCalled();
+  });
+});
+
+
+// งานสลับเลขส่งคืนลูกค้าในใบเดียวกับรถจดใหม่ได้ (ผู้ใช้ 2026-09-28: "สลับเลขลืม Delivery")
+describe('DeliveryService - งานสลับเลข', () => {
+  const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const swapRow = (o: Record<string, unknown> = {}) => ({
+    id: 'ps1',
+    customerId: 'c1',
+    vehicleClass: 'CAR',
+    oldChassis: 'SWAPCHASSIS1',
+    oldBrand: 'Toyota',
+    oldOwnerName: 'สมชาย',
+    newPlateCategory: '9กก',
+    newPlateNumber: '1234',
+    receiptNo: '69/1',
+    submitDate: day('2026-09-20'),
+    returnedDate: day('2026-09-22'),
+    bookReceivedDate: day('2026-09-23'),
+    plateReceivedDate: day('2026-09-23'),
+    deliveredDate: null,
+    plateDeliveredDate: null,
+    deliveryNote: null,
+    deliveryRecipient: null,
+    customer: { id: 'c1', name: 'ลูกค้า ก', company: 'บริษัท ก', branch: null },
+    deliverySlipItems: [],
+    ...o,
+  });
+
+  function setup(vehicles: unknown[], swaps: unknown[]) {
+    const vehicleUpdateMany = vi.fn().mockImplementation(async (a: { where: { id: string | { in: string[] } } }) => ({
+      count: typeof a.where.id === 'string' ? 1 : a.where.id.in.length,
+    }));
+    const swapUpdateMany = vi.fn().mockImplementation(async (a: { where: { id: string | { in: string[] } } }) => ({
+      count: typeof a.where.id === 'string' ? 1 : a.where.id.in.length,
+    }));
+    const create = vi.fn().mockResolvedValue({ id: 's1', slipNo: 9 });
+    const tx = { vehicle: { updateMany: vehicleUpdateMany }, plateSwap: { updateMany: swapUpdateMany }, deliverySlip: { create } };
+    const prisma = {
+      vehicle: { findMany: vi.fn().mockResolvedValue(vehicles) },
+      plateSwap: { findMany: vi.fn().mockResolvedValue(swaps) },
+      $transaction: vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+    } as unknown as PrismaService;
+    return { svc: new DeliveryService(prisma), vehicleUpdateMany, swapUpdateMany, create };
+  }
+
+  const submitSwap = (extra: Record<string, unknown> = {}) => ({
+    items: [{ source: 'PLATE_SWAP', id: 'ps1', kind: 'FULL' }],
+    date: '2026-09-24',
+    recipient: 'คุณนก',
+    note: '',
+    ...extra,
+  });
+
+  it('ส่งงานสลับเลข: เขียนที่ตาราง PlateSwap และใบส่งงานผูกด้วย plateSwapId', async () => {
+    const { svc, swapUpdateMany, vehicleUpdateMany, create } = setup([], [swapRow()]);
+    const res = await asUser(['STAFF_CAR'], () => svc.submit(submitSwap()));
+    expect(swapUpdateMany.mock.calls[0][0].data).toMatchObject({ deliveredDate: day('2026-09-24'), deliveryRecipient: 'คุณนก' });
+    expect(vehicleUpdateMany).not.toHaveBeenCalled();
+    const item = create.mock.calls[0][0].data.items.create[0];
+    expect(item).toMatchObject({
+      vehicleId: null,
+      plateSwapId: 'ps1',
+      book: true,
+      plate: true,
+      receipt: false,
+      chassis: 'SWAPCHASSIS1',
+      // ทะเบียนบนใบ = เลขใหม่ที่รถเก่าได้รับ และชื่อเจ้าของเก็บ snapshot ไว้ (ไม่มี VehicleOwner ให้อ่านสด)
+      plateText: '9กก 1234',
+      ownerName: 'สมชาย',
+      vehicleKind: 'car',
+    });
+    expect(res.delivered).toBe(1);
+  });
+
+  it('ยังไม่ได้ใบเสร็จ (returnedDate ว่าง) = ส่งไม่ได้', async () => {
+    const { svc } = setup([], [swapRow({ returnedDate: null })]);
+    await expect(asUser(['STAFF_CAR'], () => svc.submit(submitSwap()))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('ยังไม่รับเล่ม = ส่งไม่ได้', async () => {
+    const { svc } = setup([], [swapRow({ bookReceivedDate: null })]);
+    await expect(asUser(['STAFF_CAR'], () => svc.submit(submitSwap()))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('ยังไม่รับป้าย = ส่งเล่มก่อนได้ (ป้ายตามทีหลัง)', async () => {
+    const { svc, create } = setup([], [swapRow({ plateReceivedDate: null })]);
+    const res = await asUser(['STAFF_CAR'], () =>
+      svc.submit(submitSwap({ items: [{ source: 'PLATE_SWAP', id: 'ps1', kind: 'NO_PLATE' }] })),
+    );
+    expect(create.mock.calls[0][0].data.items.create[0]).toMatchObject({ book: true, plate: false });
+    expect(res.platePending).toBe(1);
+  });
+
+  it('STAFF_MOTO ส่งงานสลับเลขรถยนต์ไม่ได้', async () => {
+    const { svc } = setup([], [swapRow()]);
+    await expect(asUser(['STAFF_MOTO'], () => svc.submit(submitSwap()))).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('งานสลับเลขมอเตอร์ไซค์บันทึก vehicleKind = moto (ขอบเขตสิทธิ์ใช้ค่านี้ ไม่ใช่ body)', async () => {
+    const { svc, create } = setup([], [swapRow({ vehicleClass: 'MOTO' })]);
+    await asUser(['STAFF_MOTO'], () => svc.submit(submitSwap()));
+    expect(create.mock.calls[0][0].data.items.create[0].vehicleKind).toBe('moto');
+  });
+
+  it('รถยนต์จดใหม่กับงานสลับเลขรถยนต์อยู่ใบเดียวกันได้ (ลูกค้าเดียวกัน)', async () => {
+    const v = {
+      id: 'v1',
+      chassis: 'CH1',
+      body: 'รย.1-เก๋ง 2 ตอน',
+      plateCategory: '8ขง',
+      plateNumber: '363',
+      plateReceivedDate: day('2026-09-23'),
+      deliveredDate: null,
+      plateDeliveredDate: null,
+      deliveryRecipient: null,
+      deliveryNote: null,
+      bookReceivedDate: day('2026-09-23'),
+      customer: { id: 'c1', name: 'ลูกค้า ก', company: 'บริษัท ก', branch: null },
+      brand: { name: 'Toyota' },
+      documentSubmissions: [{ status: 'RECEIPT_RECEIVED', receiptNo: '69/2', submitDate: day('2026-09-20'), urgent: false, createdAt: day('2026-09-20') }],
+      invoiceLines: [],
+      deliverySlipItems: [],
+    };
+    const { svc, create, vehicleUpdateMany, swapUpdateMany } = setup([v], [swapRow()]);
+    await asUser(['STAFF_CAR'], () =>
+      svc.submit(
+        submitSwap({
+          items: [
+            { source: 'VEHICLE', id: 'v1', kind: 'FULL' },
+            { source: 'PLATE_SWAP', id: 'ps1', kind: 'FULL' },
+          ],
+        }),
+      ),
+    );
+    expect(vehicleUpdateMany).toHaveBeenCalled();
+    expect(swapUpdateMany).toHaveBeenCalled();
+    expect(create.mock.calls[0][0].data.items.create).toHaveLength(2);
+  });
+
+  it('คนละลูกค้าอยู่ใบเดียวกันไม่ได้ แม้คนละที่มา', async () => {
+    const { svc } = setup([], [swapRow({ customerId: 'c2', customer: { id: 'c2', name: 'ลูกค้า ข', company: null, branch: null } })]);
+    const other = swapRow({ id: 'ps2', oldChassis: 'SWAPCHASSIS2' });
+    const two = setup([], [swapRow({ customerId: 'c2', customer: { id: 'c2', name: 'ลูกค้า ข', company: null, branch: null } }), other]);
+    await expect(
+      asUser(['STAFF_CAR'], () =>
+        two.svc.submit(
+          submitSwap({
+            items: [
+              { source: 'PLATE_SWAP', id: 'ps1', kind: 'FULL' },
+              { source: 'PLATE_SWAP', id: 'ps2', kind: 'FULL' },
+            ],
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(svc).toBeTruthy();
   });
 });

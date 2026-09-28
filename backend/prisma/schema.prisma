@@ -701,6 +701,15 @@ model PlateSwap {
   // รับเอกสารกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปใบเสร็จผ่าน ReceiptImage.plateSwapId)
   returnedDate DateTime?
 
+  // ส่งงานคืนลูกค้า (ผู้ใช้ 2026-09-28: "สลับเลขลืม Delivery") - ชุดเดียวกับ Vehicle เพื่อให้กฎ
+  // "ส่งเล่มก่อน ป้ายตามทีหลัง" ทำงานเหมือนกัน: deliveredDate = ส่งเล่มแล้ว / plateDeliveredDate ว่างทั้งที่
+  // deliveredDate ไม่ว่าง = ป้ายค้างส่ง เข้าคิว Delivery อีกครั้งเป็นงานส่งป้ายอย่างเดียว
+  // เข้าคิวได้เมื่อได้ใบเสร็จ (returnedDate) + รับเล่มแล้ว (bookReceivedDate) - ใบเสร็จไม่ส่งไปกับงาน (ไปกับใบวางบิล)
+  deliveredDate      DateTime?
+  deliveryRecipient  String?
+  deliveryNote       String?
+  plateDeliveredDate DateTime?
+
   // แยกขั้นรับเอกสารกลับเป็น 3 ขั้น เหมือนฝั่งรถจดใหม่ (ผู้ใช้ 2026-09-28) - "งานเสร็จ" ยังผูกกับ returnedDate อย่างเดียวเหมือนเดิม
   // ไม่ผูกกับ 3 ช่องนี้เลย: รับป้าย/รับเล่มเป็นแค่ขั้นบันทึกข้อมูลเพิ่มที่ไม่มีกฎ gating ใดๆ (ไม่ต้องรอ returnedDate ก่อนก็ได้)
   // รับใบเสร็จ: อ่าน OCR จริงจากรูปที่แนบ (เหมือน Step 5) เติมให้เฉพาะตอนช่องยังว่างทั้ง 3 ช่อง แก้เองทีหลังได้เสมอ
@@ -730,6 +739,10 @@ model PlateSwap {
   platePhoto  PlatePhoto?    @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
   bookPhoto   BookPhoto?     @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
   receipts    ReceiptImage[]
+  // รายการในใบส่งงาน - ใบเดียวกับรถจดใหม่ได้ (ผู้ใช้ 2026-09-28)
+  deliverySlipItems DeliverySlipItem[]
+  // บรรทัดในบิลที่เก็บค่าใบเสร็จกรมฯ ของรถเก่างานนี้ (ผู้ใช้ 2026-09-28) - งานหนึ่งขึ้นบิลได้ครั้งเดียว
+  invoiceLines      InvoiceLine[]
 
   @@index([customerId])
   @@index([pairId])
@@ -915,9 +928,14 @@ model DeliverySlip {
 }
 
 model DeliverySlipItem {
-  id            String    @id @default(cuid())
-  slipId        String
-  vehicleId     String
+  id     String @id @default(cuid())
+  slipId String
+  // แถวหนึ่งเป็นได้อย่างใดอย่างหนึ่งเท่านั้น: รถจดใหม่ (vehicleId) หรืองานสลับเลข (plateSwapId)
+  // ผู้ใช้ 2026-09-28: ลูกค้าเดียวกันมารับทีเดียว เซ็นใบเดียวจบ จึงผสมสองอย่างในใบเดียวกันได้
+  // vehicleId ผ่อนเป็น nullable เพราะรถเก่าของงานสลับเลขไม่ได้อยู่ในตาราง Vehicle (กรอกเอง)
+  // Prisma บังคับ XOR ไม่ได้ จึงบังคับที่ชั้น service (DeliveryService.parseDeliveryItems)
+  vehicleId     String?
+  plateSwapId   String?
   receipt       Boolean // ส่งใบเสร็จรอบนี้ - เฉพาะใบก่อน 2026-09-26 ใบใหม่เป็น false เสมอ (ใบเสร็จไปกับใบวางบิล)
   book          Boolean // ส่งเล่มทะเบียนรอบนี้
   plate         Boolean // ส่งป้ายรอบนี้
@@ -925,6 +943,11 @@ model DeliverySlipItem {
   chassis       String
   brandName     String
   body          String?
+  // car | moto - ขอบเขตสิทธิ์ทุกจุดเดิมตัดสินจาก body ซึ่งงานสลับเลขไม่มี ถ้าปล่อยว่าง vehicleKindOf จะตีเป็นรถยนต์
+  // ทำให้งานสลับเลขมอเตอร์ไซค์หลุดไปอยู่ในขอบเขต STAFF_CAR (ผู้ใช้ 2026-09-28) - NULL = แถวก่อนวันนี้ ให้ดู body แทน
+  vehicleKind   String?
+  // ชื่อเจ้าของสำหรับแถวสลับเลข (รถจดใหม่ยังอ่านสดจาก VehicleOwner เหมือนเดิม ไม่เปลี่ยนพฤติกรรมที่ใช้อยู่)
+  ownerName     String?
   plateText     String // "8ขง 363" หรือ "" ถ้ายังไม่มีทะเบียน
   receiptNo     String?
   // ยกเลิกรายคัน (ผู้ใช้ 2026-09-26): คีย์ผิดคัน -> รถกลับเข้าคิว Delivery ส่วนรายการนี้เก็บไว้พร้อมเหตุผล
@@ -933,11 +956,13 @@ model DeliverySlipItem {
   cancelledById String?
 
   slip        DeliverySlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
-  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id])
+  vehicle     Vehicle?     @relation(fields: [vehicleId], references: [id])
+  plateSwap   PlateSwap?   @relation(fields: [plateSwapId], references: [id])
   cancelledBy User?        @relation("DeliverySlipItemCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   @@index([slipId])
   @@index([vehicleId])
+  @@index([plateSwapId])
 }
 
 // ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
@@ -991,11 +1016,19 @@ model InvoiceLine {
   deduction     Decimal  @default(0) @db.Decimal(12, 2) // ยอดที่หักออกจากค่าดำเนินการแล้ว เช่น 500 เมื่อลูกค้าชำระค่าขอใช้เลขเอง
   deductionNote String?
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  // งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28): รถใหม่ที่รับเลขจากรถเก่าต้องเก็บค่าใบเสร็จกรมฯ ของรถเก่าด้วย
+  // เก็บแยกจาก receiptAmount (ไม่รวมเป็นยอดเดียว - ผู้ใช้เลือก "แยกเก็บ") เพื่อให้ย้อนตรวจได้ว่ามาจากงานไหน ยอดเท่าไร
+  // ยอดค่าธรรมเนียมบนบิล = receiptAmount + swapReceiptAmount (คิดใน computeInvoiceTotals)
+  plateSwapId       String?
+  swapReceiptAmount Decimal? @db.Decimal(12, 2)
+
+  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle    @relation(fields: [vehicleId], references: [id])
+  plateSwap PlateSwap? @relation(fields: [plateSwapId], references: [id])
 
   @@index([invoiceId])
   @@index([vehicleId])
+  @@index([plateSwapId])
 }
 
 // --- ต่อภาษี (annual tax renewal) ------------------------------------------------

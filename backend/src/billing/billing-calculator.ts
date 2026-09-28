@@ -43,14 +43,16 @@ export interface RateRow {
 // - คนละเรื่องกับช่องหักยอด "ลูกค้าชำระค่าขอใช้เลขเอง" (PLATE_REQUEST_DEDUCTION ในหน้าจอ) ซึ่งหักยอดที่คิดไปแล้ว ไม่ใช่การเสนอราคา
 // TRANSFER_NOTICE (ผู้ใช้ 2026-09-28, Spac EV: "แจ้งย้าย" +182.24) = เฉพาะรถที่ Step 2 เข้าเงื่อนไข "แจ้งย้าย" จริง
 // (registrationProvince ไม่ใช่กรุงเทพมหานคร ดู getTransferStatus ใน vehicles.service.ts) - ไม่ใช่ทุกคันและไม่ใช่ otherProvince
-export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT', 'PLATE_REQUEST', 'TRANSFER_NOTICE'] as const;
+// PLATE_SWAP (ผู้ใช้ 2026-09-28, Spac EV: "สลับเลข" 1,720 รวม VAT เฉพาะรถยนต์) = รถคันนี้เป็น "รถใหม่" ของงานสลับเลข
+// คิดเพิ่มจากค่าจดทะเบียนปกติ ส่วนค่าใบเสร็จกรมฯ ของรถเก่าเก็บแยกอีกยอด (InvoiceLine.swapReceiptAmount)
+export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT', 'PLATE_REQUEST', 'TRANSFER_NOTICE', 'PLATE_SWAP'] as const;
 
 // ค่าเพิ่มที่ใช้กับรถคันนี้: แถว OTHER_PROVINCE เมื่อเป็นรถขอใช้ (จดจังหวัดอื่น เช่น กรุงเทพฯ - ใบเสร็จมีค่าธรรมเนียมอื่นๆ 20 + ค่าคำขอ 10
 // แทน 5, ผู้ใช้ 2026-09-28: ไม่ใช่ขอใช้เลขทะเบียน), URGENT เมื่อยื่นด่วน, PLATE_REQUEST เมื่อยื่นแบบขอใช้เลขทะเบียน (ชนิดรถต้องตรงหรือ ANY),
 // TRANSFER_NOTICE เมื่อรถทำ "แจ้งย้าย" จริง (transferNotice)
 export function suggestAddOns(
   rates: RateRow[],
-  vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean; requestedPlateNumber: boolean; transferNotice: boolean },
+  vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean; requestedPlateNumber: boolean; transferNotice: boolean; plateSwap: boolean },
 ): RateRow[] {
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
   return [...rates]
@@ -61,7 +63,8 @@ export function suggestAddOns(
         (r.kind === 'OTHER_PROVINCE' && vehicle.otherProvince) ||
         (r.kind === 'URGENT' && vehicle.urgent) ||
         (r.kind === 'PLATE_REQUEST' && vehicle.requestedPlateNumber) ||
-        (r.kind === 'TRANSFER_NOTICE' && vehicle.transferNotice),
+        (r.kind === 'TRANSFER_NOTICE' && vehicle.transferNotice) ||
+        (r.kind === 'PLATE_SWAP' && vehicle.plateSwap),
     );
 }
 
@@ -113,12 +116,13 @@ export interface InvoiceTotals {
 }
 
 export function computeInvoiceTotals(input: {
-  lines: Array<{ receiptAmount: number; serviceFee: number }>;
+  // swapReceiptAmount = ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข เก็บแยกแต่รวมอยู่ในยอดค่าธรรมเนียม (ผู้ใช้ 2026-09-28)
+  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>;
   extras: Array<{ amount: number }>;
   terms: BillingTerms;
   issueDate: string;
 }): InvoiceTotals {
-  const feeTotal = round2(input.lines.reduce((s, l) => s + l.receiptAmount, 0));
+  const feeTotal = round2(input.lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0));
   const serviceTotal = round2(input.lines.reduce((s, l) => s + l.serviceFee, 0) + input.extras.reduce((s, e) => s + e.amount, 0));
   const vatRate = input.terms.vat ? VAT_RATE : 0;
   const whtRate = effectiveWhtRate(input.terms, input.issueDate);

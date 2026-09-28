@@ -31,12 +31,13 @@ export function effectiveWhtRate(terms: BillingTerms, issueDate: string): number
 }
 
 export function computeTotals(
-  lines: Array<{ receiptAmount: number; serviceFee: number }>,
+  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>,
   extras: Array<{ amount: number }>,
   terms: BillingTerms,
   issueDate: string,
 ) {
-  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount, 0));
+  // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลขรวมอยู่ในยอดค่าธรรมเนียมด้วย (ผู้ใช้ 2026-09-28)
+  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0));
   const serviceTotal = round2(lines.reduce((s, l) => s + l.serviceFee, 0) + extras.reduce((s, e) => s + e.amount, 0));
   const vatRate = terms.vat ? VAT_RATE : 0;
   const whtRate = effectiveWhtRate(terms, issueDate);

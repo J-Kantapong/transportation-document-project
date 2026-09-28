@@ -35,7 +35,7 @@ function vehicle(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function service(vehicles: unknown[], existingInvoice: unknown = null) {
+function service(vehicles: unknown[], existingInvoice: unknown = null, swaps: unknown[] = []) {
   const create = vi.fn().mockImplementation(async ({ data }) => ({
     id: 'i1',
     status: 'ISSUED',
@@ -47,15 +47,17 @@ function service(vehicles: unknown[], existingInvoice: unknown = null) {
   }));
   const queryRaw = vi.fn().mockResolvedValue([]);
   const findVehicles = vi.fn().mockResolvedValue(vehicles);
+  const findSwaps = vi.fn().mockResolvedValue(swaps);
   const prisma = {
     customer: { findUnique: vi.fn().mockResolvedValue(customer) },
     invoice: { findUnique: vi.fn().mockResolvedValue(existingInvoice), create },
     vehicle: { findMany: findVehicles },
+    plateSwap: { findMany: findSwaps },
     $queryRaw: queryRaw,
     // interactive transaction: ใช้ mock ตัวเดียวกันแทน tx
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
   } as unknown as PrismaService;
-  return { svc: new BillingService(prisma), create, queryRaw, findVehicles };
+  return { svc: new BillingService(prisma), create, queryRaw, findVehicles, findSwaps };
 }
 
 const dto = (o: Record<string, unknown> = {}) => ({
@@ -131,7 +133,7 @@ describe('BillingService.queue', () => {
   // ผู้ใช้ 2026-09-27: คิวรอวางบิลไม่รวมรถที่ปิดงาน - วางบิลนอกระบบ (และรถที่ถูกลบ)
   it('ไม่รวมรถที่ปิดงาน - วางบิลนอกระบบ', async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService;
+    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService;
     await new BillingService(prisma).queue();
     const args = findMany.mock.calls[0][0];
     const waiting = { deletedAt: null, billingClosedAt: null, deliveredDate: { not: null } };
@@ -146,7 +148,7 @@ describe('BillingService.queue', () => {
       vehicle({ id: `v${n}`, cc: null, deliveryRecipient: null, plateDeliveredDate: null, documentSubmissions: sub(opt) }),
     );
     const findMany = vi.fn().mockResolvedValue([{ ...customer, serviceFeeRates: [], vehicles }]);
-    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService;
+    const prisma = { customer: { findMany }, invoice: { findFirst: vi.fn().mockResolvedValue(null) }, plateSwap: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService;
     const res = await new BillingService(prisma).queue();
     expect(res.customers[0].vehicles.map((v) => v.requestedPlateNumber)).toEqual([true, true, false, false, false]);
   });
@@ -819,5 +821,54 @@ describe('BillingService.updateTerms', () => {
 
     const missing = termsService(null);
     await expect(missing.svc.updateTerms('c9', { vat: false, whtRate: 0, remark: 'r' })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+// วางบิลงานสลับเลข (ผู้ใช้ 2026-09-28): ค่าใบเสร็จกรมฯ ของรถเก่าเก็บแยกในบรรทัดเดียวกับรถใหม่
+describe('BillingService.createInvoice - งานสลับเลข', () => {
+  const swapLine = (o: Record<string, unknown> = {}) => ({
+    lines: [{ vehicleId: 'v1', receiptAmount: 1000, serviceFee: 1607.48, plateSwapId: 'ps1', swapReceiptAmount: 250, ...o }],
+    extras: [],
+  });
+  const swapRow = (o: Record<string, unknown> = {}) => ({ id: 'ps1', newVehicleId: 'v1', invoiceLines: [], ...o });
+
+  it('เก็บงานสลับเลขและค่าใบเสร็จของรถเก่าไว้ในบรรทัด และรวมเข้ายอดค่าธรรมเนียม', async () => {
+    const { svc } = service([vehicle()], undefined, [swapRow()]);
+    const invoice = await svc.createInvoice(dto(swapLine()));
+    expect(invoice.lines[0]).toMatchObject({ plateSwapId: 'ps1', swapReceiptAmount: 250 });
+    expect(invoice.feeTotal).toBe(1250); // 1,000 ของรถใหม่ + 250 ของรถเก่า
+    expect(invoice.serviceTotal).toBe(1607.48);
+  });
+
+  it('งานสลับเลขที่อยู่ในบิลอื่นแล้ว วางบิลซ้ำไม่ได้', async () => {
+    const { svc, create } = service([vehicle()], undefined, [swapRow({ invoiceLines: [{ invoice: { invoiceNo: 'IV2026-100' } }] })]);
+    await expect(svc.createInvoice(dto(swapLine()))).rejects.toMatchObject({ response: { error: expect.stringContaining('IV2026-100') } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('งานสลับเลขที่ไม่ใช่ของรถคันนี้ (หรือถูกยกเลิกไปแล้ว) วางบิลไม่ได้', async () => {
+    const other = service([vehicle()], undefined, [swapRow({ newVehicleId: 'v9' })]);
+    await expect(other.svc.createInvoice(dto(swapLine()))).rejects.toMatchObject({ response: { error: expect.stringContaining('ไม่ถูกต้อง') } });
+    const gone = service([vehicle()], undefined, []);
+    await expect(gone.svc.createInvoice(dto(swapLine()))).rejects.toMatchObject({ response: { error: expect.stringContaining('ไม่ถูกต้อง') } });
+  });
+
+  it('ล็อกแถวงานสลับเลขก่อนอ่าน (กันวางบิลงานเดียวกันพร้อมกัน 2 หน้าจอ)', async () => {
+    const { svc, queryRaw } = service([vehicle()], undefined, [swapRow()]);
+    await svc.createInvoice(dto(swapLine()));
+    const swapLock = queryRaw.mock.calls.find((c) => c[0].join('?').includes('PlateSwap'));
+    expect(swapLock).toBeTruthy();
+    expect(swapLock![0].join('?')).toContain('FOR UPDATE');
+    expect(swapLock![1]).toEqual(['ps1']);
+  });
+
+  it('ส่งยอดมาโดยไม่บอกว่าเป็นงานไหน (หรือกลับกัน) = ปฏิเสธ', async () => {
+    const { svc } = service([vehicle()], undefined, [swapRow()]);
+    await expect(svc.createInvoice(dto(swapLine({ plateSwapId: undefined })))).rejects.toMatchObject({
+      response: { error: expect.stringContaining('ต้องมาคู่กับงานสลับเลข') },
+    });
+    await expect(svc.createInvoice(dto(swapLine({ swapReceiptAmount: undefined })))).rejects.toMatchObject({
+      response: { error: expect.stringContaining('ต้องมาคู่กับงานสลับเลข') },
+    });
   });
 });

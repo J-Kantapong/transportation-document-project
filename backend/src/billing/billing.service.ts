@@ -36,7 +36,26 @@ const nameOf = (u: { name: string; displayName: string | null } | null) => (u ? 
 const plateOf = (v: { plateCategory: string | null; plateNumber: string | null }) => (v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '');
 
 type Extra = { label: string; amount: number };
-type LineAmounts = { receiptAmount: number; serviceFee: number; serviceLabel: string | null; deduction: number; deductionNote: string | null };
+// งานสลับเลขที่ติดมากับรถคันหนึ่งในคิววางบิล (ผู้ใช้ 2026-09-28)
+type PlateSwapBillingRow = {
+  id: string;
+  oldChassis: string;
+  oldPlateText: string;
+  receiptNo: string | null;
+  receiptAmount: number | null; // ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ -> หน้าวางบิลไม่ให้ติ๊ก
+  receiptEstimate: number | null;
+};
+
+type LineAmounts = {
+  receiptAmount: number;
+  serviceFee: number;
+  serviceLabel: string | null;
+  deduction: number;
+  deductionNote: string | null;
+  // งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28) - ทั้งคู่มีหรือไม่มีพร้อมกันเสมอ
+  plateSwapId: string | null;
+  swapReceiptAmount: number | null;
+};
 const LINE_FIELDS = ['receiptAmount', 'serviceFee', 'serviceLabel', 'deduction', 'deductionNote'] as const;
 
 // ข้อมูลรถที่บิลเก็บไว้ (snapshot) - ใช้ทั้งตอนออกบิลและตอน "ใช้ข้อมูลรถล่าสุด" ในหน้าแก้บิล (ผู้ใช้ 2026-09-27, F53a)
@@ -95,12 +114,18 @@ function optionalText(raw: unknown, label: string): string | null {
 // ยอดรายคันของบิล (ใช้ทั้งออกบิลและแก้บิล) - serviceFee = ค่าดำเนินการหลังหัก deduction แล้ว / ไม่มียอดหัก = ไม่เก็บเหตุผลที่หัก
 function parseLineAmounts(l: Record<string, unknown>): LineAmounts {
   const deduction = l.deduction === undefined || l.deduction === null ? 0 : parseMoney(l.deduction, 'ยอดหัก');
+  // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข - ต้องมาคู่กับ id ของงานเสมอ เพื่อให้ย้อนตรวจได้ว่ายอดนี้มาจากงานไหน
+  const plateSwapId = optionalText(l.plateSwapId, 'งานสลับเลข');
+  const swapReceiptAmount = l.swapReceiptAmount === undefined || l.swapReceiptAmount === null ? null : parseMoney(l.swapReceiptAmount, 'ค่าใบเสร็จงานสลับเลข');
+  if (!plateSwapId !== (swapReceiptAmount === null)) throw bad('ค่าใบเสร็จของงานสลับเลขต้องมาคู่กับงานสลับเลข');
   return {
     receiptAmount: parseMoney(l.receiptAmount, 'ค่าใบเสร็จ'),
     serviceFee: parseMoney(l.serviceFee, 'ค่าดำเนินการ'),
     serviceLabel: optionalText(l.serviceLabel, 'หมายเหตุรายการ'),
     deduction,
     deductionNote: deduction > 0 ? optionalText(l.deductionNote, 'เหตุผลที่หัก') : null,
+    plateSwapId,
+    swapReceiptAmount,
   };
 }
 
@@ -115,12 +140,23 @@ function parseExtras(raw: unknown): Extra[] {
 const extrasOf = (raw: unknown): Extra[] =>
   (Array.isArray(raw) ? (raw as Array<{ label?: unknown; amount?: unknown }>) : []).map((e) => ({ label: String(e.label ?? ''), amount: Number(e.amount ?? 0) }));
 
-const lineAmountsOf = (l: { receiptAmount: unknown; serviceFee: unknown; serviceLabel: string | null; deduction: unknown; deductionNote: string | null }): LineAmounts => ({
+const lineAmountsOf = (l: {
+  receiptAmount: unknown;
+  serviceFee: unknown;
+  serviceLabel: string | null;
+  deduction: unknown;
+  deductionNote: string | null;
+  plateSwapId?: string | null;
+  swapReceiptAmount?: unknown;
+}): LineAmounts => ({
   receiptAmount: Number(l.receiptAmount),
   serviceFee: Number(l.serviceFee),
   serviceLabel: l.serviceLabel,
   deduction: Number(l.deduction),
   deductionNote: l.deductionNote,
+  // บรรทัดที่ออกก่อนมีงานสลับเลขในบิลเป็น null ทั้งคู่ คิดเหมือนเดิมทุกประการ
+  plateSwapId: l.plateSwapId ?? null,
+  swapReceiptAmount: l.swapReceiptAmount === null || l.swapReceiptAmount === undefined ? null : Number(l.swapReceiptAmount),
 });
 
 type CustomerTermsRow = { billingVat: boolean; billingWhtRate: unknown; billingWhtSpecialRate: unknown; billingWhtSpecialUntil: Date | null };
@@ -278,6 +314,7 @@ export class BillingService {
 
     const today = bangkokToday();
     const feeRules = await this.loadFeeRules();
+    const swapByVehicle = await this.plateSwapsOf(customers.flatMap((c) => c.vehicles.map((v) => v.id)));
     return {
       // เลขบิลรันแยกตามบัญชี - บัญชีบุคคลยังไม่เคยออก = ว่าง ให้พิมพ์เลขแรกเอง
       suggestedInvoiceNo: nextInvoiceNo(lastInvoice?.invoiceNo ?? null),
@@ -313,7 +350,10 @@ export class BillingService {
             // แจ้งย้าย = Step 2 เข้าเงื่อนไข "แจ้งย้าย" จริง (จดต่างจังหวัด ไม่ใช่กรุงเทพฯ) เหมือน getTransferStatus ใน vehicles.service.ts
             // คนละเงื่อนไขกับ otherProvince (จดจังหวัดอื่นจากจังหวัดเจ้าของรถ) - ผู้ใช้ 2026-09-28, Spac EV
             const transferNotice = !!v.registrationProvince && v.registrationProvince !== 'กรุงเทพมหานคร';
-            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber, transferNotice });
+            // รถคันนี้เป็น "รถใหม่" ของงานสลับเลข (ผู้ใช้ 2026-09-28) - คิดค่าสลับเลขเพิ่มจากค่าจดทะเบียนปกติ
+            // และเก็บค่าใบเสร็จกรมฯ ของรถเก่าอีกยอดหนึ่ง (แยกจากใบเสร็จของคันนี้ เพื่อให้ย้อนตรวจได้)
+            const swap = swapByVehicle.get(v.id) ?? null;
+            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber, transferNotice, plateSwap: !!swap });
             const base = rate ? serviceFeeFromRate(rate, receiptAmount ?? estimate) : null;
             return {
               id: v.id,
@@ -341,6 +381,8 @@ export class BillingService {
               urgent,
               otherProvince,
               transferNotice,
+              // งานสลับเลขของรถคันนี้ - swapReceiptAmount ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ หน้าจอจะไม่ให้ติ๊กวางบิล
+              plateSwap: swap,
               // จับคู่ราคาอัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ราคาหลักตามชนิดรถ/CC + ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนตามการยื่นล่าสุด
               // หน้าจอเปลี่ยนแถวราคา / ติ๊กค่าเพิ่มเองได้ แล้วคิดค่าดำเนินการใหม่ฝั่งหน้าจอ (บิลเก็บเป็นยอด ไม่ผูกกับแถวราคา)
               suggestedRateId: rate?.id ?? null,
@@ -455,7 +497,7 @@ export class BillingService {
       const label = optionalText(r?.label, 'ชื่อรายการ');
       if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
       const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
-      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST หรือ TRANSFER_NOTICE`);
+      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST, TRANSFER_NOTICE หรือ PLATE_SWAP`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
       if (!vehicleKind) throw bad(`แถวที่ ${i + 1}: ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);
@@ -520,6 +562,11 @@ export class BillingService {
             include: { ...QUEUE_VEHICLE_INCLUDE, invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } },
           });
           const byId = new Map(vehicles.map((v) => [v.id, v]));
+          // งานสลับเลขที่จะขึ้นบิลรอบนี้ - อ่านในทรานแซกชันเดียวกันเพื่อกันวางบิลซ้ำจากสองเครื่องพร้อมกัน
+          const swaps = await this.billableSwaps(
+            tx,
+            lineInputs.map((l) => l.plateSwapId).filter((id): id is string => !!id),
+          );
           const lines = lineInputs.map((l) => {
             const v = byId.get(l.vehicleId);
             if (!v) throw bad('ไม่พบข้อมูลรถบางคันในบิล');
@@ -528,6 +575,11 @@ export class BillingService {
             if (v.invoiceLines.length > 0) throw bad(`รถ ${v.chassis} อยู่ในบิล ${v.invoiceLines[0].invoice.invoiceNo} แล้ว`);
             // ปิดงาน - วางบิลนอกระบบแล้ว (ผู้ใช้ 2026-09-27): ลงบิลซ้ำในระบบไม่ได้ ต้องให้ ADMIN เปิดกลับก่อน
             if (v.billingClosedAt) throw bad(`รถ ${v.chassis} ปิดงาน (วางบิลนอกระบบ) ไปแล้ว`);
+            if (l.plateSwapId) {
+              const swap = swaps.get(l.plateSwapId);
+              if (!swap || swap.newVehicleId !== v.id) throw bad(`งานสลับเลขของรถ ${v.chassis} ไม่ถูกต้อง กรุณาโหลดรายการใหม่`);
+              if (swap.invoiceNo) throw bad(`งานสลับเลขของรถ ${v.chassis} อยู่ในบิล ${swap.invoiceNo} แล้ว`);
+            }
             return { ...l, ...lineSnapshotOf(v), deliveredDate: v.deliveredDate };
           });
 
@@ -746,10 +798,16 @@ export class BillingService {
           const before = lineAmountsOf(l);
           const after = updates.get(l.id);
           if (after) {
+            // งานสลับเลขที่ผูกไว้ตอนออกบิลและค่าใบเสร็จของรถเก่า แก้ที่หน้าแก้บิลไม่ได้ (ผู้ใช้ 2026-09-28) - คงค่าเดิมเสมอ
+            // ผิดต้องยกเลิกบิลแล้วออกใหม่ เพราะยอดนี้ผูกกับงานสลับเลขซึ่งต้องกันวางบิลซ้ำ
+            after.plateSwapId = before.plateSwapId;
+            after.swapReceiptAmount = before.swapReceiptAmount;
             const diff = diffChanges(before, after, LINE_FIELDS);
             if (Object.keys(diff).length) {
               for (const [field, change] of Object.entries(diff)) changes[`${lineLabel(l)} · ${field}`] = change;
-              lineWrites.set(l.id, { ...after });
+              // ไม่เขียนสองช่องของงานสลับเลขซ้ำ - ค่าเท่าเดิมเสมอ (บรรทัดเก่าก่อนมีฟีเจอร์นี้จะได้ไม่ถูกแตะ)
+              const { plateSwapId: _swapId, swapReceiptAmount: _swapAmount, ...writable } = after;
+              lineWrites.set(l.id, writable);
             }
           }
           if (refreshIds.has(l.id)) {
@@ -935,6 +993,42 @@ export class BillingService {
     }));
   }
 
+  // งานสลับเลขของรถที่อยู่ในคิววางบิล (ผู้ใช้ 2026-09-28) - อ่านแยกจาก query รถ เหมือน Vehicle.plateSwap ที่อื่น
+  // เอาเฉพาะงานที่ยังไม่ถูกยกเลิกและยังไม่เคยขึ้นบิล · billTotal = ยอด Bill ที่ระบบคิดไว้ ใช้เตือนเมื่อใบเสร็จไม่ตรง
+  private async plateSwapsOf(vehicleIds: string[]) {
+    if (vehicleIds.length === 0) return new Map<string, PlateSwapBillingRow>();
+    const swaps = await this.prisma.plateSwap.findMany({
+      where: { newVehicleId: { in: vehicleIds }, cancelledAt: null, invoiceLines: { none: NOT_VOID } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, newVehicleId: true, oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, receiptNo: true, receiptAmount: true, billTotal: true },
+    });
+    const byVehicle = new Map<string, PlateSwapBillingRow>();
+    for (const s of swaps) {
+      if (!s.newVehicleId || byVehicle.has(s.newVehicleId)) continue;
+      byVehicle.set(s.newVehicleId, {
+        id: s.id,
+        oldChassis: s.oldChassis,
+        oldPlateText: [s.oldPlateCategory, s.oldPlateNumber].filter(Boolean).join(' '),
+        receiptNo: s.receiptNo,
+        receiptAmount: num(s.receiptAmount),
+        // ยอด Bill ตอนคิดค่าใช้จ่ายของงานสลับเลข - หน้าวางบิลเทียบกับใบเสร็จจริงเหมือนรถจดใหม่
+        receiptEstimate: num(s.billTotal),
+      });
+    }
+    return byVehicle;
+  }
+
+  // อ่านงานสลับเลขที่กำลังจะขึ้นบิลในทรานแซกชันเดียวกับการสร้างบิล - กันสองเครื่องวางบิลงานเดียวกันพร้อมกัน
+  private async billableSwaps(tx: Prisma.TransactionClient, ids: string[]) {
+    if (ids.length === 0) return new Map<string, { newVehicleId: string | null; invoiceNo: string | null }>();
+    await tx.$queryRaw`SELECT "id" FROM "PlateSwap" WHERE "id" = ANY(${ids}::text[]) ORDER BY "id" FOR UPDATE`;
+    const rows = await tx.plateSwap.findMany({
+      where: { id: { in: ids }, cancelledAt: null },
+      select: { id: true, newVehicleId: true, invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } } },
+    });
+    return new Map(rows.map((r) => [r.id, { newVehicleId: r.newVehicleId, invoiceNo: r.invoiceLines[0]?.invoice.invoiceNo ?? null }]));
+  }
+
   // ตารางอัตราค่าธรรมเนียมขั้นยื่นเอกสาร (ชุดเดียวกับ DocumentSubmissionService.loadRuleSet) - โหลดไม่ได้ = null (ใช้ยอดตอนยื่น)
   private async loadFeeRules(): Promise<DocumentFeeRuleSet | null> {
     try {
@@ -995,6 +1089,8 @@ export class BillingService {
       serviceLabel: string | null;
       deduction: unknown;
       deductionNote: string | null;
+      plateSwapId: string | null;
+      swapReceiptAmount: unknown;
     }>;
   }, historyCount?: number) {
     return {
@@ -1035,6 +1131,8 @@ export class BillingService {
         serviceLabel: l.serviceLabel,
         deduction: Number(l.deduction),
         deductionNote: l.deductionNote,
+        plateSwapId: l.plateSwapId,
+        swapReceiptAmount: l.swapReceiptAmount === null ? null : Number(l.swapReceiptAmount),
       })),
     };
   }
