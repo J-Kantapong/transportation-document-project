@@ -75,11 +75,26 @@ const SLIP_INCLUDE = {
           billingClosedAt: true,
           // ชื่อเจ้าของบนใบส่งงาน (ผู้ใช้ 2026-09-26) - อ่านสดจาก VehicleOwner
           owner: { select: { name: true, hirerName: true } },
+          // ลำดับในใบยื่น (เวลาบันทึกยื่นล่าสุด) - ใบส่งงานเรียงตามนี้ให้ตรงกับใบยื่นที่พิมพ์ (ผู้ใช้ 2026-09-30)
+          documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { createdAt: true } },
         },
       },
     },
   },
 } as const;
+
+// ทะเบียนแบบเรียงในห้องรับป้าย: หมวดก่อน แล้วเลขทะเบียนเทียบเป็นตัวเลข (1กก 2 ก่อน 1กก 10) - ไม่มีทะเบียนไว้ท้าย
+function comparePlateText(a: string, b: string): number {
+  if (!a || !b) return a ? -1 : b ? 1 : 0;
+  const split = (t: string) => {
+    const i = t.lastIndexOf(' ');
+    return { cat: i < 0 ? t : t.slice(0, i), num: Number(i < 0 ? 0 : t.slice(i + 1)) || 0 };
+  };
+  const pa = split(a);
+  const pb = split(b);
+  const prefix = (c: string) => Number(/^\d*/.exec(c)![0] || 0);
+  return prefix(pa.cat) - prefix(pb.cat) || (pa.cat < pb.cat ? -1 : pa.cat > pb.cat ? 1 : 0) || pa.num - pb.num;
+}
 
 // ชื่อเจ้าของบนใบส่งงาน: ติดไฟแนนซ์ = ชื่อผู้ครอบครอง (ไม่ใส่ชื่อไฟแนนซ์ - ผู้ใช้ 2026-09-26) ไม่ติด = ผู้ถือกรรมสิทธิ์
 const ownerNameOf = (o: { name: string | null; hirerName: string | null } | null) => o?.hirerName || o?.name || null;
@@ -910,6 +925,7 @@ export class DeliveryService {
         invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
         billingClosedAt: Date | null;
         owner: { name: string | null; hirerName: string | null } | null;
+        documentSubmissions: Array<{ createdAt: Date }>;
       } | null;
     }>;
   }, later = new Map<string, { slipNo: number; date: string }>()) {
@@ -930,7 +946,13 @@ export class DeliveryService {
       hiddenItems: s.items.filter((i) => !i.cancelledAt && !itemInScope(i)).length,
       items: s.items
         .filter((i) => itemInScope(i))
-        .sort((a, b) => a.plateText.localeCompare(b.plateText, 'th') || a.chassis.localeCompare(b.chassis))
+        .sort(
+          (a, b) =>
+            (a.vehicle?.documentSubmissions[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) -
+              (b.vehicle?.documentSubmissions[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) ||
+            comparePlateText(a.plateText, b.plateText) ||
+            a.chassis.localeCompare(b.chassis),
+        )
         .map((i) => ({
           id: i.id,
           vehicleId: i.vehicleId,

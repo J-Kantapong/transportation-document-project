@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Header, Get, Param, Patch, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IMAGE_CACHE_CONTROL } from '../receipts/image-cache.js';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { PlatePhotosService } from './plate-photos.service.js';
 
@@ -27,6 +28,7 @@ export class PlatePhotosController {
   }
 
   @Get(':id/image')
+  @Header('Cache-Control', IMAGE_CACHE_CONTROL)
   async image(@Param('id') id: string) {
     const { data, mimeType } = await this.platePhotosService.getImage(id);
     return new StreamableFile(data, { type: mimeType, disposition: 'inline' });

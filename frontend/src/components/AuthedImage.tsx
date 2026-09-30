@@ -1,11 +1,49 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAuthedBlob } from "@/lib/api";
 
 // รูปใบเสร็จ/ป้าย/เล่ม อยู่หลัง backend endpoint ที่ต้องมี Authorization header (ดู auth.guard.ts)
 // <img src="..."> ส่ง header เองไม่ได้ - เคยชี้ตรงไปที่ endpoint แล้วขึ้น 401 (รูปพัง) จึงต้องโหลดเป็น blob เองก่อน
 // fetchAuthedBlob พาไปหน้าล็อกอินเองเมื่อ token หมดอายุ (401) - ที่นี่แสดงแค่ว่าโหลดไม่สำเร็จ
+//
+// รูปขึ้นช้า (ผู้ใช้ 2026-09-30): หน้ารับใบเสร็จเคยยิงรูปเต็มเป็นร้อยรูปพร้อมกันตอนเปิดหน้า ทุกรูปผ่าน backend (Render ฟรี)
+// - โหลดเฉพาะรูปที่เลื่อนมาใกล้จอ (IntersectionObserver)
+// - โหลดพร้อมกันไม่เกิน MAX_CONCURRENT รูป รูปที่เหลือต่อคิว
+// - จำ blob ไว้ในหน่วยความจำ (src ทุกตัวเป็น URL ตาม id ของรูป ไฟล์ไม่เปลี่ยน) - ตารางโหลดใหม่/เปลี่ยนหน้าแล้วกลับมาไม่ต้องโหลดซ้ำ
+//   backend ส่ง Cache-Control ด้วย เปิดหน้าใหม่ก็ยังได้จาก cache ของเบราว์เซอร์
+const MAX_CONCURRENT = 6;
+const MAX_CACHED = 300;
+const blobCache = new Map<string, Promise<Blob>>();
+let active = 0;
+const waiting: (() => void)[] = [];
+
+async function withSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
+  active++;
+  try {
+    return await task();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
+function loadBlob(src: string): Promise<Blob> {
+  const cached = blobCache.get(src);
+  if (cached) {
+    // ใช้ล่าสุดไว้ท้าย Map - ตัดตัวที่ไม่ได้ใช้นานที่สุดออกก่อน
+    blobCache.delete(src);
+    blobCache.set(src, cached);
+    return cached;
+  }
+  const promise = withSlot(() => fetchAuthedBlob(src));
+  blobCache.set(src, promise);
+  promise.catch(() => blobCache.delete(src)); // โหลดไม่สำเร็จไม่จำ - รอบหน้าลองใหม่
+  while (blobCache.size > MAX_CACHED) blobCache.delete(blobCache.keys().next().value!);
+  return promise;
+}
+
 export function AuthedImage({
   src,
   alt,
@@ -19,8 +57,32 @@ export function AuthedImage({
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const placeholderRef = useRef<HTMLDivElement>(null);
+
+  // เริ่มโหลดเมื่อรูปเข้ามาใกล้จอ (เผื่อไว้ 300px) - เห็นแล้วไม่ต้องดูต่อ
+  useEffect(() => {
+    if (visible) return;
+    const el = placeholderRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible, objectUrl, failed]);
 
   useEffect(() => {
+    if (!visible) return;
     let url: string | null = null;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- เปลี่ยน src ต้องเคลียร์รูป/error เก่าก่อนโหลดรูปใหม่
@@ -28,7 +90,7 @@ export function AuthedImage({
     setFailed(false);
     (async () => {
       try {
-        const blob = await fetchAuthedBlob(src);
+        const blob = await loadBlob(src);
         if (cancelled) return;
         url = URL.createObjectURL(blob);
         setObjectUrl(url);
@@ -40,7 +102,7 @@ export function AuthedImage({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [src]);
+  }, [src, visible]);
 
   if (failed) {
     return (
@@ -49,7 +111,7 @@ export function AuthedImage({
       </div>
     );
   }
-  if (!objectUrl) return <div style={{ ...style, background: "#f1f3f8" }} />;
+  if (!objectUrl) return <div ref={placeholderRef} style={{ ...style, background: "#f1f3f8" }} />;
   return (
     <a href={objectUrl} target="_blank" rel="noreferrer" title={linkTitle}>
       {/* eslint-disable-next-line @next/next/no-img-element -- รูปโหลดเป็น blob เอง (ต้องแนบ Authorization) ไม่ผ่าน next/image */}

@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Header, Delete, Get, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IMAGE_CACHE_CONTROL } from './image-cache.js';
 import { MAX_RECEIPT_BYTES, ReceiptsService, type UploadedReceiptFile } from './receipts.service.js';
 
 @Controller('api/receipts')
@@ -26,6 +27,7 @@ export class ReceiptsController {
   }
 
   @Get(':id/image')
+  @Header('Cache-Control', IMAGE_CACHE_CONTROL)
   async image(@Param('id') id: string) {
     const { data, mimeType } = await this.receiptsService.getImage(id);
     return new StreamableFile(data, { type: mimeType, disposition: 'inline' });
