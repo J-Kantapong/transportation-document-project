@@ -16,6 +16,7 @@ import { canEditEntrySteps, getCachedUser, getToken } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { DateInput } from "@/components/DateInput";
+import { downloadYamahaAttachmentsPdf } from "@/lib/yamaha-attachments-pdf";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -153,6 +154,8 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [reportFiles, setReportFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
   const [formMessage, setFormMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
   const [month, setMonth] = useState(() => currentMonthIso());
@@ -225,6 +228,28 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   function removeFile(set: React.Dispatch<React.SetStateAction<File[]>>, index: number) {
     setFormMessage({ text: "" });
     set((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // Export รูปใบเสร็จ + Report ของเดือนที่เลือกเป็น PDF เรียงวันที่เก่าสุด -> ใหม่สุด (ผู้ใช้ 2026-09-30)
+  async function exportPdf() {
+    setExporting(true);
+    setListError("");
+    try {
+      const result = await downloadYamahaAttachmentsPdf(
+        entries,
+        `yamaha-${size === "SMALL" ? "small" : "large"}-${month}.pdf`,
+        (done, total) => setExportProgress(`กำลังสร้าง PDF ${done}/${total} หน้า…`),
+      );
+      const notes: string[] = [];
+      if (!result.pages) notes.push("ไม่มีรูปให้ export (มีแต่ไฟล์ PDF)");
+      if (result.skippedPdfs.length) notes.push(`ข้ามไฟล์ที่เป็น PDF ${result.skippedPdfs.length} ไฟล์ (รวมเข้า PDF ไม่ได้): ${result.skippedPdfs.join(", ")}`);
+      if (notes.length) window.alert(notes.join("\n"));
+    } catch {
+      window.alert("สร้าง PDF ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setExporting(false);
+      setExportProgress("");
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -340,10 +365,15 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
       <div className="panel">
         <div className="panel-head">
           <h2>รายการที่เพิ่มใหม่</h2>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-            เดือน
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <button type="button" style={attachButtonStyle} disabled={exporting || loading || !entries.length} onClick={exportPdf}>
+              {exporting ? exportProgress || "กำลังสร้าง PDF…" : "⬇ Export รูปใบเสร็จ + Report (PDF)"}
+            </button>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+              เดือน
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+            </label>
+          </div>
         </div>
 
         {loading ? (
