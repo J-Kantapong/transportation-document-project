@@ -132,7 +132,8 @@ const FIT_SCRIPT = `<script>
 })();
 </script>`;
 
-function slipHtml(slip: DeliverySlip): string {
+// blankRecipient (PDF, ผู้ใช้ 2026-09-30): ไม่พิมพ์ชื่อผู้รับงานล่วงหน้า ให้ผู้รับเขียนชื่อเอง
+function slipHtml(slip: DeliverySlip, blankRecipient = false): string {
   const c = countItems(slip.items);
   const platePending = slip.items.filter((i) => !i.plate).length;
   const hidden = hiddenItemsOf(slip);
@@ -175,7 +176,7 @@ ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(s
 <p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
 ${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
 ${hidden ? `<p class="note">* ฉบับพิมพ์ซ้ำนี้แสดงเฉพาะ ${c.vehicles} คัน - ใบนี้มีรถอีกประเภทรวมอยู่ ${hidden} คัน (ใบเต็ม ${c.vehicles + hidden} คัน)</p>` : ""}
-<div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", slip.recipient)}</div>
+<div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", blankRecipient ? null : slip.recipient)}</div>
 </div>
 </section>`;
 }
@@ -231,9 +232,9 @@ const SLIP_STYLE = `
   .signbox .date { font-size: 9pt; }
 `;
 
-export function buildDeliverySlipHtml(slips: DeliverySlip[]): string {
+export function buildDeliverySlipHtml(slips: DeliverySlip[], blankRecipient = false): string {
   const title = slips.length === 1 ? `ใบส่งงาน ${slipNoText(slips[0].slipNo)}` : "ใบส่งงาน";
-  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map(slipHtml).join("\n") + FIT_SCRIPT);
+  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map((s) => slipHtml(s, blankRecipient)).join("\n") + FIT_SCRIPT);
 }
 
 export function printDeliverySlips(slips: DeliverySlip[]): void {
@@ -306,7 +307,7 @@ export function printDeliveryReport(r: DeliveryReportInput): void {
 
 // ดาวน์โหลดเป็นไฟล์ PDF โดยตรง - ขอบกระดาษเท่ากับ @page ของแต่ละแบบ (ดู pdf-export.ts)
 export function downloadDeliverySlipPdf(slip: DeliverySlip): Promise<void> {
-  return downloadHtmlAsPdf(buildDeliverySlipHtml([slip]), `ใบส่งงาน-${slipNoText(slip.slipNo)}.pdf`, { orientation: "portrait", marginMm: 12 });
+  return downloadHtmlAsPdf(buildDeliverySlipHtml([slip], true), `ใบส่งงาน-${slipNoText(slip.slipNo)}.pdf`, { orientation: "portrait", marginMm: 12 });
 }
 
 export function downloadDeliveryReportPdf(r: DeliveryReportInput): Promise<void> {
