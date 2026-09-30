@@ -56,6 +56,16 @@ describe('YamahaRelocationService.create', () => {
     expect(res.entry.report?.mimeType).toBe('application/pdf');
   });
 
+  it('แนบใบเสร็จ/Report ได้หลายไฟล์ และไฟล์เดียวกันซ้ำในคำขอเดียว = ปฏิเสธ', async () => {
+    const jpeg2 = { buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x01]), size: 5, originalname: 'receipt2.jpg' };
+    const { svc, storage } = build();
+    const res = await svc.create(dto, { receipt: [jpeg, jpeg2], report: [pdf] });
+    expect(storage.put).toHaveBeenCalledTimes(3);
+    expect(res.entry.receipts).toHaveLength(2);
+    expect(res.entry.reports).toHaveLength(1);
+    await expect(svc.create(dto, { receipt: [jpeg, jpeg], report: [pdf] })).rejects.toMatchObject({ status: 409 });
+  });
+
   it('ไม่มีใบเสร็จ = ปฏิเสธ ไม่อัปโหลดอะไรเลย', async () => {
     const { svc, storage } = build();
     await expect(svc.create(dto, { report: [pdf] })).rejects.toMatchObject({ response: { error: 'กรุณาแนบไฟล์ใบเสร็จ' } });

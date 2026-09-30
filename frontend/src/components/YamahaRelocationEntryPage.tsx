@@ -29,6 +29,7 @@ function parseCount(text: string): number {
 // ไฟล์แนบที่ต้องมีทุกรายการ (ผู้ใช้ 2026-09-22): ใบเสร็จ 1 ไฟล์ + Report 1 ไฟล์ เสมอ
 const ACCEPT = "image/*,application/pdf";
 const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_FILES_PER_KIND = 10; // เท่ากับ backend (yamaha-relocation.controller.ts)
 
 // ปุ่มแนบไฟล์ (โครงเดียวกับ .filter-chip แต่เป็นสี่เหลี่ยม - ไม่มี class ปุ่มรองใน globals.css)
 const attachButtonStyle: React.CSSProperties = {
@@ -71,31 +72,40 @@ async function openAuthedFile(url: string, fileName: string) {
   }
 }
 
-function AttachmentLink({ attachment }: { attachment: YamahaRelocationAttachment | null }) {
-  if (!attachment) return <span className="muted">ไม่มีไฟล์</span>;
-  const isPdf = attachment.mimeType === "application/pdf";
-  const fileName = attachment.originalName || `${attachment.kind.toLowerCase()}.${isPdf ? "pdf" : "jpg"}`;
+// ไฟล์แนบของรายการ: แสดงลิงก์ต่อไฟล์ (แนบได้หลายไฟล์ - 2026-09-30) ถ้ามีไฟล์เดียวใช้คำว่า "เปิดไฟล์" เหมือนเดิม
+function AttachmentLinks({ attachments }: { attachments: YamahaRelocationAttachment[] }) {
+  if (!attachments.length) return <span className="muted">ไม่มีไฟล์</span>;
   return (
-    <button
-      type="button"
-      className="text-button"
-      title={attachment.originalName ?? undefined}
-      onClick={() => openAuthedFile(yamahaRelocationAttachmentUrl(attachment.id), fileName)}
-    >
-      {isPdf ? "📄" : "🖼️"} เปิดไฟล์
-    </button>
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "2px 12px" }}>
+      {attachments.map((attachment, i) => {
+        const isPdf = attachment.mimeType === "application/pdf";
+        const fileName = attachment.originalName || `${attachment.kind.toLowerCase()}.${isPdf ? "pdf" : "jpg"}`;
+        return (
+          <button
+            key={attachment.id}
+            type="button"
+            className="text-button"
+            title={attachment.originalName ?? undefined}
+            onClick={() => openAuthedFile(yamahaRelocationAttachmentUrl(attachment.id), fileName)}
+          >
+            {isPdf ? "📄" : "🖼️"} {attachments.length > 1 ? `เปิดไฟล์ ${i + 1}` : "เปิดไฟล์"}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 
 interface FileFieldProps {
   label: string;
-  file: File | null;
+  files: File[];
   disabled: boolean;
-  onChange: (file: File | null) => void;
+  onAdd: (files: File[]) => void;
+  onRemove: (index: number) => void;
 }
 
-// ปุ่มแนบไฟล์ 1 ช่อง: ถ่ายรูป/เลือกไฟล์ (รูปหรือ PDF) แสดงชื่อไฟล์ที่เลือกแล้วและปุ่มเอาออก
-function FileField({ label, file, disabled, onChange }: FileFieldProps) {
+// ปุ่มแนบไฟล์ 1 ช่อง: ถ่ายรูป/เลือกไฟล์ (รูปหรือ PDF) เลือกได้หลายไฟล์ เพิ่มทีหลังได้ แสดงชื่อไฟล์ที่เลือกแล้วและปุ่มเอาออกทีละไฟล์
+function FileField({ label, files, disabled, onAdd, onRemove }: FileFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="field">
@@ -104,29 +114,29 @@ function FileField({ label, file, disabled, onChange }: FileFieldProps) {
         ref={inputRef}
         type="file"
         accept={ACCEPT}
+        multiple
         hidden
         onChange={(e) => {
-          onChange(e.target.files?.[0] ?? null);
+          onAdd(Array.from(e.target.files ?? []));
           e.target.value = ""; // ให้เลือกไฟล์เดิมซ้ำได้หลังกดเอาออก
         }}
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <button type="button" style={attachButtonStyle} disabled={disabled} onClick={() => inputRef.current?.click()}>
-          📎 {joinLabel(file ? "เปลี่ยน" : "แนบ", label)}
+        <button type="button" style={attachButtonStyle} disabled={disabled || files.length >= MAX_FILES_PER_KIND} onClick={() => inputRef.current?.click()}>
+          📎 {joinLabel(files.length ? "เพิ่ม" : "แนบ", label)}
         </button>
-        {file ? (
-          <>
-            <span style={{ fontSize: 13, color: "#34415a", wordBreak: "break-all" }}>
-              {file.name} <span className="muted">({formatBytes(file.size)})</span>
-            </span>
-            <button type="button" className="text-button" disabled={disabled} onClick={() => onChange(null)}>
-              เอาออก
-            </button>
-          </>
-        ) : (
-          <span className="muted">รูปหรือ PDF ไม่เกิน 8MB</span>
-        )}
+        {!files.length && <span className="muted">รูปหรือ PDF ไม่เกิน 8MB (แนบได้หลายไฟล์)</span>}
       </div>
+      {files.map((file, i) => (
+        <div key={`${file.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "#34415a", wordBreak: "break-all" }}>
+            {i + 1}. {file.name} <span className="muted">({formatBytes(file.size)})</span>
+          </span>
+          <button type="button" className="text-button" disabled={disabled} onClick={() => onRemove(i)}>
+            เอาออก
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -140,8 +150,8 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const dateIso = useMemo(() => displayDateToIso(dateText.replace(/\D/g, "")), [dateText]);
   const [countText, setCountText] = useState("");
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [reportFile, setReportFile] = useState<File | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [reportFiles, setReportFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [formMessage, setFormMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
@@ -194,18 +204,27 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
 
   // เลือก/เอาไฟล์ออกแล้วล้างข้อความเตือนเก่า (เช่น "กรุณาแนบไฟล์ใบเสร็จ") ที่ไม่ตรงกับสถานะแล้ว
   // ไฟล์เป็นรูป (ไม่ใช่ PDF) -> ย่อก่อนเก็บ เหมือนช่องแนบรูปอื่นๆ ในระบบ (ไม่มีการอ่านด้วย AI ตรงนี้ ย่อได้เต็มที่)
-  async function pickFile(set: (file: File | null) => void, file: File | null) {
+  async function addFiles(set: React.Dispatch<React.SetStateAction<File[]>>, picked: File[]) {
     setFormMessage({ text: "" });
-    if (!file || !file.type.startsWith("image/")) {
-      set(file);
-      return;
+    const prepared: File[] = [];
+    for (const file of picked) {
+      if (!file.type.startsWith("image/")) {
+        prepared.push(file);
+        continue;
+      }
+      try {
+        const blob = await compressReceiptImage(file);
+        prepared.push(new File([blob], compressedFileName(file), { type: "image/jpeg" }));
+      } catch {
+        prepared.push(file); // ย่อไม่สำเร็จ (ไฟล์เปิดไม่ได้) - ใช้ไฟล์เดิม ให้ backend/ผู้ใช้เห็น error ตอนบันทึกแทน
+      }
     }
-    try {
-      const blob = await compressReceiptImage(file);
-      set(new File([blob], compressedFileName(file), { type: "image/jpeg" }));
-    } catch {
-      set(file); // ย่อไม่สำเร็จ (ไฟล์เปิดไม่ได้) - ใช้ไฟล์เดิม ให้ backend/ผู้ใช้เห็น error ตอนบันทึกแทน
-    }
+    set((prev) => [...prev, ...prepared].slice(0, MAX_FILES_PER_KIND));
+  }
+
+  function removeFile(set: React.Dispatch<React.SetStateAction<File[]>>, index: number) {
+    setFormMessage({ text: "" });
+    set((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -218,15 +237,15 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
       setFormMessage({ text: "กรุณาระบุจำนวนคันอย่างน้อย 1 คัน", error: true });
       return;
     }
-    if (!receiptFile) {
+    if (!receiptFiles.length) {
       setFormMessage({ text: "กรุณาแนบไฟล์ใบเสร็จ", error: true });
       return;
     }
-    if (!reportFile) {
+    if (!reportFiles.length) {
       setFormMessage({ text: "กรุณาแนบไฟล์ Report", error: true });
       return;
     }
-    const tooBig = [receiptFile, reportFile].find((f) => f.size > MAX_BYTES);
+    const tooBig = [...receiptFiles, ...reportFiles].find((f) => f.size > MAX_BYTES);
     if (tooBig) {
       setFormMessage({ text: `ไฟล์ ${tooBig.name} ใหญ่เกิน 8MB`, error: true });
       return;
@@ -235,11 +254,11 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
     setSaving(true);
     setFormMessage({ text: "กำลังอัปโหลดไฟล์และบันทึก…" });
     try {
-      await api.createYamahaRelocation({ date: dateIso, size, count, receipt: receiptFile, report: reportFile });
+      await api.createYamahaRelocation({ date: dateIso, size, count, receipts: receiptFiles, reports: reportFiles });
       setFormMessage({ text: "บันทึกแล้ว" });
       setCountText("");
-      setReceiptFile(null);
-      setReportFile(null);
+      setReceiptFiles([]);
+      setReportFiles([]);
       if (dateIso.slice(0, 7) === month) {
         await load(month);
       }
@@ -264,14 +283,14 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
           </div>
           <form className="customer-form" onSubmit={handleSubmit}>
             <div className="customer-grid">
-              <label className="field">
-                วันที่ *
+              <div className="field">
+                <span>วันที่ *</span>
                 <DateInput
                   value={dateText}
                   onChange={(value) => handleDateTextChange(value)}
                   required
                 />
-              </label>
+              </div>
               <label className="field">
                 จำนวนคัน *
                 <input
@@ -288,8 +307,20 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
               ทุกรายการต้องแนบไฟล์ 2 อย่างเสมอ: 1) ใบเสร็จ 2) Report
             </p>
             <div className="customer-grid">
-              <FileField label="ใบเสร็จ" file={receiptFile} disabled={saving} onChange={(f) => pickFile(setReceiptFile, f)} />
-              <FileField label="Report" file={reportFile} disabled={saving} onChange={(f) => pickFile(setReportFile, f)} />
+              <FileField
+                label="ใบเสร็จ"
+                files={receiptFiles}
+                disabled={saving}
+                onAdd={(f) => addFiles(setReceiptFiles, f)}
+                onRemove={(i) => removeFile(setReceiptFiles, i)}
+              />
+              <FileField
+                label="Report"
+                files={reportFiles}
+                disabled={saving}
+                onAdd={(f) => addFiles(setReportFiles, f)}
+                onRemove={(i) => removeFile(setReportFiles, i)}
+              />
             </div>
             <div className="form-actions">
               <button className="primary" type="submit" disabled={saving}>
@@ -341,10 +372,10 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
                     <td>{isoToDisplayDate(entry.date) || entry.date}</td>
                     <td>{entry.count}</td>
                     <td>
-                      <AttachmentLink attachment={entry.receipt} />
+                      <AttachmentLinks attachments={entry.receipts} />
                     </td>
                     <td>
-                      <AttachmentLink attachment={entry.report} />
+                      <AttachmentLinks attachments={entry.reports} />
                     </td>
                     {canEdit && (
                       <td>
@@ -477,14 +508,14 @@ function EntryDialog({
       </p>
       {kind === "edit" ? (
         <div className="customer-grid" style={{ marginTop: 12 }}>
-          <label className="field">
-            วันที่ *
+          <div className="field">
+            <span>วันที่ *</span>
             <DateInput
               value={dateText}
               onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
               required
             />
-          </label>
+          </div>
           <label className="field">
             จำนวนคัน *
             <input type="number" min={1} step={1} value={countText} onChange={(e) => setCountText(e.target.value)} required />

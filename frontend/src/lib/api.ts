@@ -625,6 +625,8 @@ export interface YamahaRelocationEntry {
   createdAt: string;
   receipt: YamahaRelocationAttachment | null; // null เฉพาะรายการเก่าที่บันทึกก่อนมีไฟล์แนบ
   report: YamahaRelocationAttachment | null;
+  receipts: YamahaRelocationAttachment[]; // แนบได้หลายไฟล์ต่อชนิด (2026-09-30)
+  reports: YamahaRelocationAttachment[];
 }
 
 export const yamahaRelocationAttachmentUrl = (id: string) => `${API_BASE_URL}/api/yamaha-relocation/attachments/${id}/file`;
@@ -1109,13 +1111,13 @@ export const api = {
       `/api/yamaha-relocation?size=${size}&month=${month}`,
     ),
   // multipart: date, size, count + ไฟล์ receipt (ใบเสร็จ) และ report (Report) - backend บังคับทั้ง 2 ไฟล์
-  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number; receipt: File; report: File }) => {
+  createYamahaRelocation: (data: { date: string; size: YamahaRelocationSize; count: number; receipts: File[]; reports: File[] }) => {
     const form = new FormData();
     form.append('date', data.date);
     form.append('size', data.size);
     form.append('count', String(data.count));
-    form.append('receipt', data.receipt, data.receipt.name);
-    form.append('report', data.report, data.report.name);
+    for (const f of data.receipts) form.append('receipt', f, f.name);
+    for (const f of data.reports) form.append('report', f, f.name);
     return request<{ entry: YamahaRelocationEntry }>('/api/yamaha-relocation', { method: 'POST', body: form });
   },
   // แก้/ยกเลิกรายการที่บันทึกผิด (ADMIN/STAFF_ENTRY, remark บังคับ - ผู้ใช้ 2026-09-27) ยกเลิกแล้วไฟล์เดิมแนบใหม่ได้
