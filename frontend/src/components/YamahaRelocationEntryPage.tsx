@@ -156,6 +156,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
+  const [compactPdf, setCompactPdf] = useState(true); // ย่อไฟล์เป็นค่าเริ่มต้น (ผู้ใช้ 2026-09-30)
   const [formMessage, setFormMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
   const [month, setMonth] = useState(() => currentMonthIso());
@@ -222,7 +223,17 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
         prepared.push(file); // ย่อไม่สำเร็จ (ไฟล์เปิดไม่ได้) - ใช้ไฟล์เดิม ให้ backend/ผู้ใช้เห็น error ตอนบันทึกแทน
       }
     }
-    set((prev) => [...prev, ...prepared].slice(0, MAX_FILES_PER_KIND));
+    // กล้องมือถือตั้งชื่อรูปเหมือนกันทุกรูป (เช่น image.jpg) - ทำชื่อให้ไม่ซ้ำก่อนเก็บ/ส่ง (ผู้ใช้ 2026-09-30)
+    set((prev) => {
+      const used = new Set(prev.map((f) => f.name));
+      const renamed = prepared.map((file) => {
+        let name = file.name;
+        for (let n = 2; used.has(name); n++) name = file.name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+        used.add(name);
+        return name === file.name ? file : new File([file], name, { type: file.type });
+      });
+      return [...prev, ...renamed].slice(0, MAX_FILES_PER_KIND);
+    });
   }
 
   function removeFile(set: React.Dispatch<React.SetStateAction<File[]>>, index: number) {
@@ -239,6 +250,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
         entries,
         `yamaha-${size === "SMALL" ? "small" : "large"}-${month}.pdf`,
         (done, total) => setExportProgress(`กำลังสร้าง PDF ${done}/${total} หน้า…`),
+        compactPdf ? "compact" : "normal",
       );
       const notes: string[] = [];
       if (!result.pages) notes.push("ไม่มีรูปให้ export (มีแต่ไฟล์ PDF)");
@@ -369,6 +381,10 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
             <button type="button" style={attachButtonStyle} disabled={exporting || loading || !entries.length} onClick={exportPdf}>
               {exporting ? exportProgress || "กำลังสร้าง PDF…" : "⬇ Export รูปใบเสร็จ + Report (PDF)"}
             </button>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
+              <input type="checkbox" checked={compactPdf} disabled={exporting} onChange={(e) => setCompactPdf(e.target.checked)} />
+              ย่อไฟล์ (เล็กลง)
+            </label>
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
               เดือน
               <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
