@@ -6,10 +6,12 @@ import { isoToDisplayDate } from "@/lib/date";
 // หัวหน้า (วันที่ / จำนวนคัน / ชนิดไฟล์) วาดลง canvas พร้อมรูป เพราะ jsPDF ไม่มีฟอนต์ไทย
 // ไฟล์ PDF ที่แนบไว้รวมเข้าไม่ได้ (ไม่มีตัวรวม PDF) - ข้ามแล้วส่งรายชื่อกลับให้หน้าเว็บแจ้งผู้ใช้
 
-const PAGE_W = 1240; // A4 ที่ 150 dpi
-const PAGE_H = 1754;
-const MARGIN = 60;
-const HEADER_H = 110;
+// ปกติ = A4 ที่ 150 dpi; ย่อ = 100 dpi + JPEG คุณภาพต่ำลง (ผู้ใช้ 2026-09-30)
+const QUALITY = {
+  normal: { width: 1240, height: 1754, jpeg: 0.85, maxScale: 1.5 },
+  compact: { width: 827, height: 1170, jpeg: 0.6, maxScale: 1 },
+} as const;
+export type PdfQuality = keyof typeof QUALITY;
 const FONT = '"Noto Sans Thai", "Noto Sans Thai Looped", Tahoma, sans-serif';
 
 export interface AttachmentPdfResult {
@@ -46,7 +48,11 @@ function buildJobs(entries: YamahaRelocationEntry[]): { jobs: PageJob[]; skipped
   return { jobs, skippedPdfs };
 }
 
-async function renderPage(job: PageJob): Promise<string> {
+async function renderPage(job: PageJob, quality: PdfQuality): Promise<string> {
+  const { width: PAGE_W, height: PAGE_H, jpeg, maxScale } = QUALITY[quality];
+  const k = PAGE_W / 1240; // ขนาดตัวอักษร/ระยะขอบคิดเทียบหน้า 1240px
+  const MARGIN = Math.round(60 * k);
+  const HEADER_H = Math.round(110 * k);
   const bitmap = await createImageBitmap(await fetchAuthedBlob(job.url));
   const canvas = document.createElement("canvas");
   canvas.width = PAGE_W;
@@ -57,26 +63,27 @@ async function renderPage(job: PageJob): Promise<string> {
   ctx.fillRect(0, 0, PAGE_W, PAGE_H);
   ctx.fillStyle = "#18243c";
   ctx.textBaseline = "top";
-  ctx.font = `bold 40px ${FONT}`;
+  ctx.font = `bold ${Math.round(40 * k)}px ${FONT}`;
   ctx.fillText(job.title, MARGIN, MARGIN);
-  ctx.font = `32px ${FONT}`;
+  ctx.font = `${Math.round(32 * k)}px ${FONT}`;
   ctx.fillStyle = "#576781";
-  ctx.fillText(job.subtitle, MARGIN, MARGIN + 54);
+  ctx.fillText(job.subtitle, MARGIN, MARGIN + Math.round(54 * k));
 
   const boxW = PAGE_W - MARGIN * 2;
   const boxH = PAGE_H - MARGIN * 2 - HEADER_H;
-  const scale = Math.min(boxW / bitmap.width, boxH / bitmap.height, 1.5);
+  const scale = Math.min(boxW / bitmap.width, boxH / bitmap.height, maxScale);
   const w = bitmap.width * scale;
   const h = bitmap.height * scale;
   ctx.drawImage(bitmap, MARGIN + (boxW - w) / 2, MARGIN + HEADER_H, w, h);
   bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.85);
+  return canvas.toDataURL("image/jpeg", jpeg);
 }
 
 export async function downloadYamahaAttachmentsPdf(
   entries: YamahaRelocationEntry[],
   fileName: string,
   onProgress?: (done: number, total: number) => void,
+  quality: PdfQuality = "normal",
 ): Promise<AttachmentPdfResult> {
   const { jobs, skippedPdfs } = buildJobs(entries);
   if (!jobs.length) return { pages: 0, skippedPdfs };
@@ -84,7 +91,7 @@ export async function downloadYamahaAttachmentsPdf(
   const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
   for (let i = 0; i < jobs.length; i++) {
     onProgress?.(i, jobs.length);
-    const dataUrl = await renderPage(jobs[i]);
+    const dataUrl = await renderPage(jobs[i], quality);
     if (i > 0) pdf.addPage();
     pdf.addImage(dataUrl, "JPEG", 0, 0, 210, 297);
   }
