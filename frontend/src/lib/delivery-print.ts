@@ -7,7 +7,7 @@ import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 
 // ใบส่งงาน Delivery (ให้ผู้รับเซ็น) และรายงานส่งงานย้อนหลัง - ผู้ใช้ 2026-09-25: บอกแยกรายคันว่าส่งใบเสร็จ / เล่ม / ป้าย
 // ห้ามมีราคา (พนักงานส่งของไม่เห็นราคา)
-// ผู้ใช้ 2026-09-30: ใบส่งงานมีช่องใบเสร็จอีกครั้ง (ส่งพร้อมเล่ม) แสดงเป็นวงกลมเหมือนเล่ม / ป้าย
+// ผู้ใช้ 2026-09-30: ใบส่งงานมีช่องใบเสร็จอีกครั้ง (ส่งพร้อมเล่ม) หัวคอลัมน์ใช้คำว่า "วงกลม" แทน แสดงเป็นวงกลมเหมือนเล่ม / ป้าย
 // ช่องใบส่งงานตามผู้ใช้ 2026-09-26: ลำดับ, เลขตัวถัง, เลขทะเบียน, ยี่ห้อ, ชื่อเจ้าของ (+ ติ๊กเล่ม / ป้าย)
 // ส่งแล้ว = วงกลมทึบ (ผู้ใช้ 2026-09-26 ขอเปลี่ยนจากติ๊ก)
 const TICK = "●";
@@ -168,7 +168,7 @@ ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(s
 </div>
 <table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:22mm"><col style="width:25mm"><col><col style="width:14mm"><col style="width:10mm"><col style="width:10mm"></colgroup>
 <thead><tr><th class="c">ลำดับ</th><th>เลขตัวถัง</th><th>เลขทะเบียน</th><th>ยี่ห้อ</th><th>ชื่อเจ้าของ</th>
-<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<th class="c">วงกลม</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows}
 <tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.receipt}</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody>
 <tfoot><tr class="edge"><td colspan="8"></td></tr></tfoot></table>
@@ -281,11 +281,11 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
     .join("");
   const body = `<h1>รายงานส่งงาน</h1>
 <p>วันที่ส่ง ${esc(range)} · ลูกค้า ${esc(r.customerName ?? "ทั้งหมด")}<br>
-${r.slips.length} ใบ · ${c.vehicles} รายการ · ใบเสร็จ ${c.receipt} · เล่ม ${c.book} · ป้าย ${c.plate}
+${r.slips.length} ใบ · ${c.vehicles} รายการ · วงกลม ${c.receipt} · เล่ม ${c.book} · ป้าย ${c.plate}
 ${r.truncated ? "<br><b>* ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ รายงานนี้มีเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงเพื่อให้ครบ</b>" : ""}
 ${hidden ? `<br>* ใบเก่าที่รวมรถยนต์กับจักรยานยนต์ แสดงเฉพาะคันในขอบเขตบัญชีนี้ (ไม่แสดงอีก ${hidden} คัน)` : ""}</p>
 <table class="grid"><thead><tr><th>วันที่ส่ง</th><th>เลขที่ใบ</th><th>ลูกค้า</th><th>ผู้รับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th>
-<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<th class="c">วงกลม</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows || '<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
 <h2>ป้ายค้างส่ง (${r.platePending.length} คัน)</h2>
 ${

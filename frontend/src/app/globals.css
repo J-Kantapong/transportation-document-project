@@ -425,7 +425,7 @@ tr.row-selected td{background:#f3f6ff}
 .date-input-button:hover:not(:disabled){background:#edf2ff;color:#2854d9;border-color:#c9d6fb}
 .date-input-button:disabled{opacity:.5;cursor:default}
 .date-input-button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.date-input-native{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}
+.date-input-native,.field .date-input>.date-input-native{position:absolute;left:0;bottom:0;width:1px;height:1px;min-height:0;opacity:0;pointer-events:none;border:0;padding:0}
 /* แถบตัวกรองที่มีช่องวันที่ + ปุ่มปฏิทิน: เรียงแบบขึ้นบรรทัดใหม่ได้ ช่องวันที่ไม่ถูกบีบจนตัวเลขขาด */
 .vehicle-search-filter,.vehicle-list-filter{display:flex;flex-wrap:wrap;align-items:flex-end}
 .vehicle-search-filter>.field,.vehicle-list-filter>.field{flex:1 1 180px;min-width:0}

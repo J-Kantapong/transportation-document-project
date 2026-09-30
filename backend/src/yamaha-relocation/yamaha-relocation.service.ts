@@ -115,6 +115,11 @@ function serializeEntry(entry: {
     const a = entry.attachments.find((x) => x.kind === kind);
     return a ? serializeAttachment(a) : null;
   };
+  const allOfKind = (kind: YamahaRelocationAttachmentKind) =>
+    entry.attachments
+      .filter((x) => x.kind === kind)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map(serializeAttachment);
   return {
     id: entry.id,
     date: entry.date.toISOString().slice(0, 10),
@@ -123,8 +128,11 @@ function serializeEntry(entry: {
     billFee: String(entry.billFee),
     noBillFee: String(entry.noBillFee),
     createdAt: entry.createdAt.toISOString(),
-    receipt: byKind(YamahaRelocationAttachmentKind.RECEIPT), // null เฉพาะรายการเก่าที่บันทึกก่อนมีไฟล์แนบ
+    receipt: byKind(YamahaRelocationAttachmentKind.RECEIPT), // null เฉพาะรายการเก่าที่บันทึกก่อนมีไฟล์แนบ (ไฟล์แรก)
     report: byKind(YamahaRelocationAttachmentKind.REPORT),
+    // แนบได้หลายไฟล์ต่อชนิด (ผู้ใช้ 2026-09-30) - เรียงตามลำดับที่แนบ
+    receipts: allOfKind(YamahaRelocationAttachmentKind.RECEIPT),
+    reports: allOfKind(YamahaRelocationAttachmentKind.REPORT),
   };
 }
 
@@ -135,15 +143,16 @@ export class YamahaRelocationService {
     @Inject(RECEIPT_STORAGE) private readonly storage: ReceiptStorage,
   ) {}
 
-  // ตรวจไฟล์แนบ 1 ชนิด: ต้องมี 1 ไฟล์, ไม่เกิน 8MB, เป็นรูปหรือ PDF จริง
-  private checkFile(kind: YamahaRelocationAttachmentKind, files: UploadedReceiptFile[] | undefined) {
+  // ตรวจไฟล์แนบ 1 ชนิด: ต้องมีอย่างน้อย 1 ไฟล์ (แนบได้หลายไฟล์), ไม่เกิน 8MB ต่อไฟล์, เป็นรูปหรือ PDF จริง
+  private checkFiles(kind: YamahaRelocationAttachmentKind, files: UploadedReceiptFile[] | undefined) {
     const label = ATTACHMENT_LABEL[kind];
-    const file = files?.[0];
-    if (!file || file.size === 0) throw new BadRequestException({ error: `กรุณาแนบ${label}` });
-    if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: `${label}ใหญ่เกิน 8MB` });
-    const type = detectAttachmentType(file.buffer);
-    if (!type) throw new BadRequestException({ error: `${label}ต้องเป็นรูป JPEG, PNG, WebP หรือ PDF` });
-    return { kind, file, type };
+    if (!files?.length || files.some((f) => f.size === 0)) throw new BadRequestException({ error: `กรุณาแนบ${label}` });
+    return files.map((file) => {
+      if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: `${label}ใหญ่เกิน 8MB` });
+      const type = detectAttachmentType(file.buffer);
+      if (!type) throw new BadRequestException({ error: `${label}ต้องเป็นรูป JPEG, PNG, WebP หรือ PDF` });
+      return { kind, file, type };
+    });
   }
 
   async create(dto: CreateYamahaRelocationEntryDto, files: YamahaRelocationFiles | undefined) {
@@ -161,16 +170,24 @@ export class YamahaRelocationService {
     }
     // ทั้ง 2 ไฟล์ต้องผ่านการตรวจก่อนจึงอัปโหลด - ไม่ให้เหลือไฟล์ค้างใน storage เมื่อคำขอถูกปฏิเสธ
     const checked = [
-      this.checkFile(YamahaRelocationAttachmentKind.RECEIPT, files?.receipt),
-      this.checkFile(YamahaRelocationAttachmentKind.REPORT, files?.report),
+      ...this.checkFiles(YamahaRelocationAttachmentKind.RECEIPT, files?.receipt),
+      ...this.checkFiles(YamahaRelocationAttachmentKind.REPORT, files?.report),
     ];
 
-    // กันไฟล์ซ้ำ: ใบเสร็จกับ Report ต้องคนละไฟล์ และทั้งคู่ต้องไม่เคยแนบกับรายการไหนมาก่อน
+    // กันไฟล์ซ้ำ: ทุกไฟล์ในคำขอนี้ต้องคนละไฟล์ (ทั้งในชนิดเดียวกันและข้ามชนิด) และต้องไม่เคยแนบกับรายการไหนมาก่อน
     const hashes = checked.map((c) => contentHashOf(c.file.buffer));
-    if (hashes[0] === hashes[1]) throw duplicateUpload('ไฟล์ใบเสร็จกับไฟล์ Report เป็นไฟล์เดียวกัน');
+    const firstOf = (i: number) => hashes.indexOf(hashes[i]);
+    const repeated = hashes.findIndex((_, i) => firstOf(i) !== i);
+    if (repeated >= 0) {
+      const other = checked[firstOf(repeated)];
+      throw duplicateUpload(
+        other.kind === checked[repeated].kind
+          ? `${ATTACHMENT_LABEL[other.kind]}ถูกเลือกซ้ำ (ไฟล์เดียวกัน)`
+          : 'ไฟล์ใบเสร็จกับไฟล์ Report เป็นไฟล์เดียวกัน',
+      );
+    }
     const dupes = await this.prisma.yamahaRelocationAttachment.findMany({ where: { contentHash: { in: hashes } }, select: { contentHash: true } });
-    const dupe = checked.find((_, i) => dupes.some((d) => d.contentHash === hashes[i]));
-    if (dupe) {
+    const dupe = checked.find((_, i) => dupes.some((d) => d.contentHash === hashes[i]));    if (dupe) {
       const label = ATTACHMENT_LABEL[dupe.kind];
       throw duplicateUpload(`${label}${/[A-Za-z]$/.test(label) ? ' ' : ''}นี้อัพโหลดไปแล้ว`); // "ไฟล์ Report นี้..." เว้นวรรคหลังคำอังกฤษ
     }

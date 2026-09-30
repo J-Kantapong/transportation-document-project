@@ -5,6 +5,9 @@ import type { CreateYamahaRelocationEntryDto } from './dto/create-yamaha-relocat
 import type { UpdateYamahaRelocationEntryDto } from './dto/update-yamaha-relocation-entry.dto.js';
 import { YamahaRelocationService, type YamahaRelocationFiles } from './yamaha-relocation.service.js';
 
+// แนบได้หลายไฟล์ต่อชนิด (ผู้ใช้ 2026-09-30) - จำกัดจำนวนไว้กันคำขอใหญ่เกินไป (frontend ใช้ค่าเดียวกัน)
+const MAX_FILES_PER_KIND = 10;
+
 @Controller('api/yamaha-relocation')
 export class YamahaRelocationController {
   constructor(private readonly yamahaRelocationService: YamahaRelocationService) {}
@@ -19,10 +22,10 @@ export class YamahaRelocationController {
   @UseInterceptors(
     FileFieldsInterceptor(
       [
-        { name: 'receipt', maxCount: 1 },
-        { name: 'report', maxCount: 1 },
+        { name: 'receipt', maxCount: MAX_FILES_PER_KIND },
+        { name: 'report', maxCount: MAX_FILES_PER_KIND },
       ],
-      { limits: { fileSize: MAX_RECEIPT_BYTES, files: 2 } },
+      { limits: { fileSize: MAX_RECEIPT_BYTES, files: MAX_FILES_PER_KIND * 2 } },
     ),
   )
   create(@Body() body: CreateYamahaRelocationEntryDto, @UploadedFiles() files: YamahaRelocationFiles | undefined) {
