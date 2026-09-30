@@ -7,7 +7,7 @@ import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 
 // ใบส่งงาน Delivery (ให้ผู้รับเซ็น) และรายงานส่งงานย้อนหลัง - ผู้ใช้ 2026-09-25: บอกแยกรายคันว่าส่งใบเสร็จ / เล่ม / ป้าย
 // ห้ามมีราคา (พนักงานส่งของไม่เห็นราคา)
-// ผู้ใช้ 2026-09-26: ใบเสร็จส่งไปพร้อมใบวางบิล ไม่ได้ไปกับใบส่งงาน -> ไม่มีช่องใบเสร็จ
+// ผู้ใช้ 2026-09-30: ใบส่งงานมีช่องใบเสร็จอีกครั้ง (ส่งพร้อมเล่ม) แสดงเป็นวงกลมเหมือนเล่ม / ป้าย
 // ช่องใบส่งงานตามผู้ใช้ 2026-09-26: ลำดับ, เลขตัวถัง, เลขทะเบียน, ยี่ห้อ, ชื่อเจ้าของ (+ ติ๊กเล่ม / ป้าย)
 // ส่งแล้ว = วงกลมทึบ (ผู้ใช้ 2026-09-26 ขอเปลี่ยนจากติ๊ก)
 const TICK = "●";
@@ -17,6 +17,7 @@ const tick = (sent: boolean) => (sent ? TICK : "");
 
 export interface DeliveryCounts {
   vehicles: number;
+  receipt: number;
   book: number;
   plate: number;
 }
@@ -56,6 +57,7 @@ export function deliveryCustomerLabels(customers: Iterable<DeliveryCustomer>): M
 export function countItems(items: DeliverySlipItem[]): DeliveryCounts {
   return {
     vehicles: items.length,
+    receipt: items.filter((i) => i.receipt).length,
     book: items.filter((i) => i.book).length,
     plate: items.filter((i) => i.plate).length,
   };
@@ -130,7 +132,8 @@ const FIT_SCRIPT = `<script>
 })();
 </script>`;
 
-function slipHtml(slip: DeliverySlip): string {
+// blankRecipient (PDF, ผู้ใช้ 2026-09-30): ไม่พิมพ์ชื่อผู้รับงานล่วงหน้า ให้ผู้รับเขียนชื่อเอง
+function slipHtml(slip: DeliverySlip, blankRecipient = false): string {
   const c = countItems(slip.items);
   const platePending = slip.items.filter((i) => !i.plate).length;
   const hidden = hiddenItemsOf(slip);
@@ -139,7 +142,7 @@ function slipHtml(slip: DeliverySlip): string {
   const rows = slip.items
     .map(
       (i, n) => `<tr><td class="c no">${n + 1}</td>${fitCell(i.chassis)}${fitCell(i.plateText || "—")}${fitCell(i.brandName)}
-${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
+${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.receipt)}</td><td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
     )
     .join("");
   const co = DELIVERY_HEADER;
@@ -163,17 +166,17 @@ ${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.book)}</td><td class="
 ${customer.address ? `<div>${esc(customer.address)}</div>` : ""}${customer.phone ? `<div>โทร ${esc(customer.phone)}</div>` : ""}
 ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(slip.note)}</div>` : ""}</div>
 </div>
-<table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:22mm"><col style="width:25mm"><col><col style="width:10mm"><col style="width:10mm"></colgroup>
+<table class="grid rows"><colgroup><col style="width:12mm"><col style="width:43mm"><col style="width:22mm"><col style="width:25mm"><col><col style="width:14mm"><col style="width:10mm"><col style="width:10mm"></colgroup>
 <thead><tr><th class="c">ลำดับ</th><th>เลขตัวถัง</th><th>เลขทะเบียน</th><th>ยี่ห้อ</th><th>ชื่อเจ้าของ</th>
-<th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
 <tbody>${rows}
-<tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody>
-<tfoot><tr class="edge"><td colspan="7"></td></tr></tfoot></table>
+<tr class="total"><td colspan="5">รวม ${c.vehicles} คัน</td><td class="c">${c.receipt}</td><td class="c">${c.book}</td><td class="c">${c.plate}</td></tr></tbody>
+<tfoot><tr class="edge"><td colspan="8"></td></tr></tfoot></table>
 <div class="tail">
 <p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
 ${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
 ${hidden ? `<p class="note">* ฉบับพิมพ์ซ้ำนี้แสดงเฉพาะ ${c.vehicles} คัน - ใบนี้มีรถอีกประเภทรวมอยู่ ${hidden} คัน (ใบเต็ม ${c.vehicles + hidden} คัน)</p>` : ""}
-<div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", slip.recipient)}</div>
+<div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", blankRecipient ? null : slip.recipient)}</div>
 </div>
 </section>`;
 }
@@ -229,9 +232,9 @@ const SLIP_STYLE = `
   .signbox .date { font-size: 9pt; }
 `;
 
-export function buildDeliverySlipHtml(slips: DeliverySlip[]): string {
+export function buildDeliverySlipHtml(slips: DeliverySlip[], blankRecipient = false): string {
   const title = slips.length === 1 ? `ใบส่งงาน ${slipNoText(slips[0].slipNo)}` : "ใบส่งงาน";
-  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map(slipHtml).join("\n") + FIT_SCRIPT);
+  return htmlDocument(title, "size: A4 portrait; margin: 12mm;", SLIP_STYLE, slips.map((s) => slipHtml(s, blankRecipient)).join("\n") + FIT_SCRIPT);
 }
 
 export function printDeliverySlips(slips: DeliverySlip[]): void {
@@ -266,7 +269,7 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
       s.items.map(
         (i, n) => `<tr${n === 0 ? ' class="first"' : ""}><td>${n === 0 ? esc(isoToDisplayDate(s.date)) : ""}</td><td>${n === 0 ? esc(slipNoText(s.slipNo)) : ""}</td>
 <td>${n === 0 ? esc(r.customerLabels?.get(s.customer.id) ?? s.customer.displayName) : ""}</td><td>${n === 0 ? esc(s.recipient) : ""}</td><td>${esc(i.plateText) || "—"}</td><td>${esc(i.chassis)}</td>
-<td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
+<td class="tick">${tick(i.receipt)}</td><td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
       ),
     )
     .join("");
@@ -278,12 +281,12 @@ export function buildDeliveryReportHtml(r: DeliveryReportInput): string {
     .join("");
   const body = `<h1>รายงานส่งงาน</h1>
 <p>วันที่ส่ง ${esc(range)} · ลูกค้า ${esc(r.customerName ?? "ทั้งหมด")}<br>
-${r.slips.length} ใบ · ${c.vehicles} รายการ · เล่ม ${c.book} · ป้าย ${c.plate}
+${r.slips.length} ใบ · ${c.vehicles} รายการ · ใบเสร็จ ${c.receipt} · เล่ม ${c.book} · ป้าย ${c.plate}
 ${r.truncated ? "<br><b>* ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ รายงานนี้มีเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงเพื่อให้ครบ</b>" : ""}
 ${hidden ? `<br>* ใบเก่าที่รวมรถยนต์กับจักรยานยนต์ แสดงเฉพาะคันในขอบเขตบัญชีนี้ (ไม่แสดงอีก ${hidden} คัน)` : ""}</p>
 <table class="grid"><thead><tr><th>วันที่ส่ง</th><th>เลขที่ใบ</th><th>ลูกค้า</th><th>ผู้รับ</th><th>ทะเบียน</th><th>เลขตัวถัง</th>
-<th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
+<th class="c">ใบเสร็จ</th><th class="c">เล่ม</th><th class="c">ป้าย</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
 <h2>ป้ายค้างส่ง (${r.platePending.length} คัน)</h2>
 ${
   r.platePending.length
@@ -304,7 +307,7 @@ export function printDeliveryReport(r: DeliveryReportInput): void {
 
 // ดาวน์โหลดเป็นไฟล์ PDF โดยตรง - ขอบกระดาษเท่ากับ @page ของแต่ละแบบ (ดู pdf-export.ts)
 export function downloadDeliverySlipPdf(slip: DeliverySlip): Promise<void> {
-  return downloadHtmlAsPdf(buildDeliverySlipHtml([slip]), `ใบส่งงาน-${slipNoText(slip.slipNo)}.pdf`, { orientation: "portrait", marginMm: 12 });
+  return downloadHtmlAsPdf(buildDeliverySlipHtml([slip], true), `ใบส่งงาน-${slipNoText(slip.slipNo)}.pdf`, { orientation: "portrait", marginMm: 12 });
 }
 
 export function downloadDeliveryReportPdf(r: DeliveryReportInput): Promise<void> {

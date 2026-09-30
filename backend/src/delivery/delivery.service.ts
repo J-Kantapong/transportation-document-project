@@ -511,8 +511,9 @@ export class DeliveryService {
                   // แถวหนึ่งผูกกับที่มาเดียว - อีกช่องเป็น null (บังคับ XOR ที่นี่ Prisma เช็คให้ไม่ได้)
                   vehicleId: i.source === 'VEHICLE' ? i.id : null,
                   plateSwapId: i.source === 'PLATE_SWAP' ? i.id : null,
-                  // ใบเสร็จส่งไปพร้อมใบวางบิล ไม่ได้ไปกับใบส่งงาน (ผู้ใช้ 2026-09-26) - ใบเก่าก่อนนี้ยังเป็น true
-                  receipt: false,
+                  // ผู้ใช้ 2026-09-30: ใบส่งงานบอกว่าส่งใบเสร็จไปด้วย (แสดงเป็นวงกลม) - ส่งพร้อมเล่มครั้งแรก
+                  // ใบส่งป้ายตามทีหลังไม่มีใบเสร็จ ใบระหว่าง 2026-09-26 ถึง 2026-09-30 ยังเป็น false
+                  receipt: kind !== 'PLATE_ONLY',
                   book: kind !== 'PLATE_ONLY',
                   plate: kind !== 'NO_PLATE',
                   chassis: i.chassis,
