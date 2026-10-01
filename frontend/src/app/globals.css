@@ -462,3 +462,9 @@ tr.row-selected td{background:#f3f6ff}
 .delivery-bar .field input[type="text"]{width:180px;max-width:100%}
 .delivery-bar-summary{display:flex;flex-direction:column;gap:2px;margin-right:auto;min-width:140px}
 @media (max-width:640px){.delivery-bar .field,.delivery-bar .field input[type="text"],.delivery-bar button.primary{width:100%}}
+
+/* ฟอร์มช่องเล็ก (หน้าออกใบเสนอราคา, ผู้ใช้ 2026-10-01): ช่องกรอกเตี้ยและตัวอักษรเล็กลง - บรรทัดรายการใช้ --item-h / --item-px */
+.compact-form{--item-h:36px;--item-px:10px}
+.compact-form .field{gap:5px;font-size:13px}
+.compact-form .field input,.compact-form .field select,.compact-form .field textarea{min-height:36px;padding:6px 10px;font-size:14px}
+.compact-form .field textarea{min-height:56px}

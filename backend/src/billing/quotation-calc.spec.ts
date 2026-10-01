@@ -34,13 +34,18 @@ describe('yamaha monthly quote', () => {
     expect(yamahaServiceRate('SMALL', '2028-01')).toBe(22);
     expect(yamahaServiceRate('LARGE', '2028-06')).toBe(50);
   });
-  it('builds one line per size with vehicles plus the monthly fee', () => {
-    const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 0 });
-    expect(items.map((i) => [i.quantity, i.unitPrice])).toEqual([
-      [512, 20],
-      [1, 9000],
+  it('builds a fee and a service line per size, with the monthly fee between small and large', () => {
+    const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 40 });
+    expect(items.map((i) => [i.kind, i.description, i.quantity, i.unitPrice])).toEqual([
+      ['FEE', 'ค่าธรรมเนียมแจ้งจำหน่ายรถจักรยานยนต์ เดือน 10/2026', 512, 5],
+      ['SERVICE', 'ค่าดำเนินการแจ้งจำหน่ายรถจักรยานยนต์ เดือน 10/2026', 512, 20],
+      ['SERVICE', 'ค่าดำเนินการจัดการเอกสารบัญชีรถจักรยานยนต์ยามาฮ่า เดือน 10/2026', 1, 9000],
+      ['FEE', 'ค่าธรรมเนียมแจ้งจำหน่ายรถจักรยานยนต์(ใหญ่) เดือน 10/2026', 40, 5],
+      ['SERVICE', 'ค่าดำเนินการแจ้งจำหน่ายรถจักรยานยนต์(ใหญ่) เดือน 10/2026', 40, 50],
     ]);
-    expect(items[0].description).toContain('(รถเล็ก) เดือน 10/2026');
+  });
+  it('leaves out a size with no vehicles', () => {
+    expect(yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 0 }).map((i) => i.quantity)).toEqual([512, 512, 1]);
   });
   it('validates the month format', () => {
     expect(isMonth('2026-10')).toBe(true);
