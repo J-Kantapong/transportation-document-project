@@ -9,6 +9,7 @@ import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '..
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { calculateYamahaRelocationFees } from './yamaha-relocation-fee.js';
 import { CreateYamahaRelocationEntryDto } from './dto/create-yamaha-relocation-entry.dto.js';
+import { assertYamahaMonthNotQuoted } from '../billing/quotation-lock.js';
 import type { UpdateYamahaRelocationEntryDto } from './dto/update-yamaha-relocation-entry.dto.js';
 
 // แก้/ยกเลิกรายการที่บันทึกผิด (ผู้ใช้ 2026-09-27): ADMIN / STAFF_ENTRY (access-policy.ts กฎขั้น 1-3) ต้องระบุเหตุผลเสมอ
@@ -206,6 +207,9 @@ export class YamahaRelocationService {
       buffer: c.file.buffer,
     }));
 
+    // เดือนที่ออกใบเสนอราคาไปแล้วถูกล็อก (ผู้ใช้ 2026-10-01) - ตรวจก่อนเก็บไฟล์
+    await assertYamahaMonthNotQuoted(this.prisma, [new Date(`${dateRaw}T00:00:00.000Z`)]);
+
     const stored: string[] = [];
     try {
       for (const u of uploads) {
@@ -311,6 +315,7 @@ export class YamahaRelocationService {
     const next = { date, size, count, ...calculateYamahaRelocationFees(size, count) };
     const changes = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
+    await assertYamahaMonthNotQuoted(this.prisma, [existing.date, date]);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       // ตารางนี้ไม่มี updatedAt - กันแก้ทับกันด้วยค่าที่ฟอร์มโหลดมา (อีกคนแก้/ยกเลิกไปก่อน = ไม่เจอแถว)
@@ -329,6 +334,7 @@ export class YamahaRelocationService {
   async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกรายการแจ้งย้าย');
     const existing = await this.findActive(id);
+    await assertYamahaMonthNotQuoted(this.prisma, [existing.date]);
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.yamahaRelocationEntry.updateMany({
         where: { id, cancelledAt: null },

@@ -371,6 +371,29 @@ export function BillingCustomInvoicePage() {
           </label>
         </div>
 
+        {/* ลูกค้าที่ต้องเสนอราคาก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลจากใบเสนอราคาที่อนุมัติแล้วเท่านั้น */}
+        {!editing && terms?.requiresQuotation && (
+          <div
+            className="customer-message"
+            role="alert"
+            style={{
+              background: "#fff6e7",
+              color: "#8a6412",
+              borderRadius: 10,
+              padding: "10px 14px",
+            }}
+          >
+            ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล -
+            ออกใบวางบิลจากหน้าใบเสนอราคา{" "}
+            <Link
+              href="/accounting/quotations?stage=APPROVED"
+              className="text-button"
+            >
+              ไปหน้าใบเสนอราคา →
+            </Link>
+          </div>
+        )}
+
         <InvoiceItemsEditor
           rows={rows}
           onChange={(next) => (setRows(next), setConfirming(false))}

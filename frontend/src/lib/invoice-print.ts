@@ -25,7 +25,7 @@ export type PrintableInvoice = Pick<
   | "lines"
   | "items"
 > &
-  Partial<Pick<Invoice, "status" | "voidReason" | "account">>;
+  Partial<Pick<Invoice, "status" | "voidReason" | "account" | "quotationNo" | "poNumber">>;
 
 const isPersonal = (inv: PrintableInvoice) => inv.account === "PERSONAL";
 
@@ -61,9 +61,13 @@ const voidMarkHtml = (inv: PrintableInvoice) => (isVoid(inv) ? `<div class="void
 const voidNoteHtml = (inv: PrintableInvoice) =>
   isVoid(inv) ? `<span class="void-note">บิลนี้ยกเลิกแล้ว${inv.voidReason ? ` – ${escapeHtml(inv.voidReason)}` : ""}</span>` : "";
 
+// บิลที่ออกจากใบเสนอราคา (ผู้ใช้ 2026-10-01): อ้างเลขใบเสนอราคาและเลข PO ของลูกค้าใต้วันที่ออก
+const referenceHtml = (inv: PrintableInvoice) =>
+  `${inv.quotationNo ? `<br>อ้างอิงใบเสนอราคา ${escapeHtml(inv.quotationNo)}` : ""}${inv.poNumber ? `<br>PO ${escapeHtml(inv.poNumber)}` : ""}`;
+
 function headHtml(inv: PrintableInvoice, docTitle: string): string {
   return `<div class="co">${issuerHtml(inv)}
-<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>${hasAttachment(inv) ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))} (${attachmentPageCount(inv)} หน้า)<br>` : ""}วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}</span></div></div>
+<div class="doc">${escapeHtml(docTitle)}<br><span class="k small">เลขที่ ${escapeHtml(inv.invoiceNo || "—")}<br>${hasAttachment(inv) ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo(inv))} (${attachmentPageCount(inv)} หน้า)<br>` : ""}วันที่ออก ${escapeHtml(isoToThaiDate(inv.issueDate))}${referenceHtml(inv)}</span></div></div>
 ${isVoid(inv) ? `<div style="margin-top:3mm">${voidNoteHtml(inv)}</div>` : ""}
 <div class="meta"><span class="k">ชื่อลูกค้า</span><br><b>${escapeHtml(customerTitle(inv.customer))}</b><br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(inv.customer.taxId || "—")}<br>${escapeHtml(inv.customer.address || "")}</span></div>`;

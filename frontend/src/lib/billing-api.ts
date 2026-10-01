@@ -106,6 +106,8 @@ export interface BillingTerms {
   whtSpecialUntil: string | null; // ISO
   // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28) - null = ไม่ได้ตั้ง · ไม่ใช้คิดยอด ใช้หาวันครบกำหนดชำระ
   creditDays?: number | null;
+  // ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น
+  requiresQuotation?: boolean;
 }
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ออกตอนรับเงิน (ผู้ใช้ 2026-09-28) - ดู backend/src/billing/tax-invoice.service.ts
@@ -333,6 +335,10 @@ export interface Invoice {
   voidReason: string | null;
   dueDate?: string | null; // วันครบกำหนดชำระ (ผู้ใช้ 2026-09-28) - null = ลูกค้าไม่ได้ตั้งเครดิตเทอมตอนออกบิล
   taxInvoice?: { id: string; taxInvoiceNo: string } | null; // ใบกำกับในระบบที่ยังใช้อยู่
+  // บิลที่ออกจากใบเสนอราคา (ผู้ใช้ 2026-10-01) - พิมพ์อ้างอิงเลข QT / PO บนบิล
+  quotationId?: string | null;
+  quotationNo?: string | null;
+  poNumber?: string | null;
   account?: BillingAccount; // บัญชีบุคคล = หัวบิลชื่อบุคคล + บัญชีรับเงินบุคคล ไม่มี VAT (บิลเก่าก่อน 2026-09-27 = บัญชีบริษัท)
   // หน้าแก้บิลส่งกลับเป็น expectedUpdatedAt - มีคนแก้/รับเงิน/ยกเลิกไปก่อน backend ตอบ 409 (ผู้ใช้ 2026-09-27)
   updatedAt: string | null;

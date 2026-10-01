@@ -62,6 +62,7 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
   if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
+  if (within(pathname, "/accounting/quotations")) return [{ label: "งานบัญชี" }, { label: "ใบเสนอราคา", href: "/accounting/quotations" }];
   if (within(pathname, "/accounting/tax-invoices")) return [{ label: "งานบัญชี" }, { label: "ใบกำกับภาษี", href: "/accounting/tax-invoices" }];
   if (within(pathname, "/accounting/customer-payments")) return [{ label: "งานบัญชี" }, { label: "การจ่ายของลูกค้า", href: "/accounting/customer-payments" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
@@ -233,6 +234,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {has("ADMIN", "ACCOUNTANT", "STAFF_CAR") && (
               <>
                 <div className="label">งานบัญชี</div>
+                {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/quotations" icon="stack" label="ใบเสนอราคา" pathname={pathname} onClick={close} />}
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/billing" icon="stack" label="วางบิล" pathname={pathname} onClick={close} />}
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/tax-invoices" icon="stack" label="ใบกำกับภาษี / 50 ทวิ" pathname={pathname} onClick={close} />}
                 <NavLink href="/accounting/customer-payments" icon="stack" label="การจ่ายของลูกค้า" pathname={pathname} onClick={close} />

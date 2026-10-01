@@ -23,6 +23,8 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [untilText, setUntilText] = useState(terms.whtSpecialUntil ? isoToDisplayDate(terms.whtSpecialUntil) : "");
   // เครดิตเทอม (ผู้ใช้ 2026-09-28) ว่าง = ไม่ตั้ง - ใช้หาวันครบกำหนดของบิลที่ออกหลังจากนี้
   const [creditText, setCreditText] = useState(terms.creditDays == null ? "" : String(terms.creditDays));
+  // ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM)
+  const [requiresQuotation, setRequiresQuotation] = useState(terms.requiresQuotation ?? false);
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -46,7 +48,7 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, remark: remark.trim() });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -93,6 +95,10 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
       <label className="field" style={{ maxWidth: 260 }}>
         เครดิตเทอม (วัน นับจากวันออกบิล)
         <input type="text" inputMode="numeric" value={creditText} onChange={(e) => setCreditText(e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="เช่น 30 (ว่าง = ไม่ตั้ง)" />
+      </label>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+        <input type="checkbox" checked={requiresQuotation} onChange={(e) => setRequiresQuotation(e.target.checked)} />
+        ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น)
       </label>
       <label className="field">
         เหตุผลที่แก้ *

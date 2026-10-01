@@ -28,7 +28,7 @@ function build(createImpl?: () => Promise<unknown>, existingHashes: string[] = [
   const findMany = vi.fn(async (args: { where: { contentHash: { in: string[] } } }) =>
     args.where.contentHash.in.filter((h) => existingHashes.includes(h)).map((contentHash) => ({ contentHash })),
   );
-  const prisma = { yamahaRelocationEntry: { create }, yamahaRelocationAttachment: { findMany } } as unknown as PrismaService;
+  const prisma = { yamahaRelocationEntry: { create }, yamahaRelocationAttachment: { findMany }, quotation: { findFirst: vi.fn(async () => null) } } as unknown as PrismaService;
   return { svc: new YamahaRelocationService(prisma, storage as unknown as ReceiptStorage), create, storage };
 }
 
@@ -168,6 +168,7 @@ describe('YamahaRelocationService - แก้ / ยกเลิกรายก�
       },
       yamahaRelocationAttachment: { updateMany: vi.fn(async () => ({ count: 2 })) },
       auditLog: { create: vi.fn(async () => ({ id: 'audit1' })) },
+      quotation: { findFirst: vi.fn(async (): Promise<{ quotationNo: string; yamahaMonth: string } | null> => null) },
     };
     prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     const storage = { put: vi.fn(), get: vi.fn(), delete: vi.fn() };

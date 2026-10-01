@@ -288,6 +288,34 @@ This private repository is the shared development surface for the user, Claude C
   `GET /api/billing/wht-pending` (overdue after 30 days, user) + `POST .../wht-pending/remind`. Credit terms:
   `Customer.billingCreditDays` (terms editor, `creditDays` in `PATCH .../customers/:id/terms`), `Invoice.dueDate` =
   issue date + days at issue (shifted when the issue date is edited); the invoice list flags overdue / due in 7 days.
+- Quotations (ใบเสนอราคา, user 2026-10-01, migration `20261001090000_quotations`, code in
+  `backend/src/billing/quotation.*`, pages `/accounting/quotations` (list), `/new` (`?edit=<id>` = edit a draft),
+  `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
+  the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
+  per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
+  `ISSUED` -> `APPROVED` | `REJECTED`, plus `CANCELLED` and `SUPERSEDED`; the screen groups by `stage` (`stageOf`:
+  WAITING / EXPIRED by `validUntil`, DONE once billed or applied as rates). Number `QT{year}-{3 digits}` from
+  `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; an issued
+  quotation is never edited: "ทำฉบับแก้ไข" makes a draft (`replacesId`) that takes the same number + `-R1` when issued
+  and supersedes the old one. Validity defaults to 30 days. A customer not in the system yet can be typed in
+  (`customerId` null) and linked later (`link-customer`), required before billing / applying rates. Approval needs the
+  date plus a PO number or a file (PDF/image, stored under `quotations/`, hash-checked). After approval: `JOB` ->
+  "ออกใบวางบิลจากใบนี้" creates a custom invoice with the lines copied unchanged (`Invoice.quotationId/quotationNo/poNumber`,
+  printed on the bill; one live bill per quotation via partial unique index `Invoice_quotation_active_key`; voiding the
+  bill lets it be billed again); `RATE` -> "ตั้งเป็นราคาลูกค้า" replaces the customer's `ServiceFeeRate` table (old rows
+  go to the customer's AuditLog). `Customer.billingRequiresQuotation` (checkbox in the terms editor,
+  `requiresQuotation` in the terms API): such a customer can only be billed from an approved quotation
+  (`QUOTATION_REQUIRED_ERROR` in `createInvoice` / `createCustomInvoice`), so vehicle bills are blocked for them.
+  Yamaha: "ดึงยอดของเดือนนี้มาใส่" fills the lines from the month's relocation counts (`yamahaQuoteItems`: small 20/21/22
+  by work month, large 50, + 9,000 monthly fee) and stores `yamahaMonth` + `yamahaCounts`; issuing re-checks the counts
+  and allows one live quotation per month, and while one is ISSUED/APPROVED the month's `YamahaRelocationEntry` rows
+  cannot be added, edited or cancelled (`assertYamahaMonthNotQuoted`; fix = cancel the quotation first). API under
+  `/api/billing/quotations` (ADMIN + ACCOUNTANT): `GET ?stage&q&offset` -> { quotations, hasMore, counts }, `GET
+  /yamaha-month?month=`, `GET /ready?customerId=`, `POST`, `GET/PATCH/DELETE /:id` (PATCH/DELETE drafts only), `POST
+  /:id/issue`, `/approve` (multipart `approvedDate`, `poNumber`, `file`), `/unapprove`, `/reject`, `/cancel` (these three
+  need `remark`), `/revise`, `/link-customer`, `/invoice` { invoiceNo, issueDate }, `/apply-rates`, `GET /:id/po-file`,
+  `GET /:id/history` (AuditLog entity `Quotation`). Print: `frontend/src/lib/quotation-print.ts` (same CSS as the
+  invoice; total before WHT, WHT as a note; draft / cancelled watermark).
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,
