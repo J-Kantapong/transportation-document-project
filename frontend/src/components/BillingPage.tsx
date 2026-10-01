@@ -53,7 +53,7 @@ const plateText = (v: BillingVehicle) => (v.plateCategory && v.plateNumber ? `${
 // คอลัมน์ของรายการรถรอวางบิล (หัวตาราง + ทุกแถวใช้ชุดเดียวกัน) - แคบพอไม่ต้องเลื่อนซ้ายขวา
 const ROW_GRID: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "20px minmax(150px,1.8fr) minmax(64px,1fr) minmax(40px,0.5fr) minmax(64px,0.9fr) minmax(84px,1.2fr) 28px",
+  gridTemplateColumns: "20px minmax(150px,1.8fr) minmax(64px,1fr) minmax(40px,0.5fr) minmax(56px,0.7fr) minmax(64px,0.9fr) minmax(84px,1.2fr) 28px",
   gap: 10,
   alignItems: "center",
 };
@@ -598,6 +598,7 @@ export function BillingPage() {
                     <span>เลขตัวถัง</span>
                     <span>ทะเบียน</span>
                     <span>cc</span>
+                    <span>น้ำหนัก (กก.)</span>
                     <span style={{ textAlign: "right" }}>ราคาใบเสร็จ</span>
                     <span style={{ textAlign: "right" }}>ค่าบริการ</span>
                     <span />
@@ -635,6 +636,7 @@ export function BillingPage() {
                           </span>
                           <span>{plateText(v) || "—"}</span>
                           <span>{v.cc === null ? "—" : v.cc}</span>
+                          <span>{v.weight === null ? "—" : v.weight.toLocaleString("en-US")}</span>
                           <span style={{ textAlign: "right" }}>{receipt === null ? "—" : formatMoney(receipt)}</span>
                           <span style={{ textAlign: "right" }}>
                             {/* ป้ายขอใช้/ด่วนอยู่หน้าตัวเลข */}
@@ -857,6 +859,7 @@ export function BillingPage() {
             <div style={{ ...ROW_GRID, padding: "12px 23px", fontSize: 13, borderTop: "2px solid #e3e8f2", background: "#f8f9fc", fontWeight: 600 }}>
               <span />
               <span>รวมที่เลือก {selected.length} คัน</span>
+              <span />
               <span />
               <span />
               <span style={{ textAlign: "right" }}>{formatMoney(totals?.feeTotal ?? 0)}</span>

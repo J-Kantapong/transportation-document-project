@@ -203,7 +203,7 @@ export type RateVehicleKind = "CAR" | "MOTO" | "ANY";
 // ผู้ใช้ 2026-09-28 Spac EV - คนละเรื่องกับ OTHER_PROVINCE) / TRANSFER_NOTICE (แจ้งย้าย จริง = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ,
 // ผู้ใช้ 2026-09-28 Spac EV) = ค่าเพิ่มที่บวกให้เอง
 // PLATE_SWAP (ผู้ใช้ 2026-09-28 Spac EV) = รถคันนี้เป็น "รถใหม่" ของงานสลับเลข คิดเพิ่มจากค่าจดทะเบียนปกติ
-export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST" | "TRANSFER_NOTICE" | "PLATE_SWAP";
+export type RateKind = "BASE" | "OTHER_PROVINCE" | "URGENT" | "PLATE_REQUEST" | "TRANSFER_NOTICE" | "PLATE_SWAP" | "PLATE_SWAP_GIVEN";
 
 // งานสลับเลขที่ติดมากับรถคันนี้ (ผู้ใช้ 2026-09-28) - ค่าใบเสร็จกรมฯ ของรถเก่าเก็บแยกจากใบเสร็จของรถใหม่
 export interface BillingPlateSwap {
@@ -240,6 +240,7 @@ export interface BillingVehicle {
   body: string | null;
   isMoto: boolean;
   cc: number | null;
+  weight: number | null;
   plateCategory: string | null;
   plateNumber: string | null;
   deliveredDate: string;

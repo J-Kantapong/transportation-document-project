@@ -200,6 +200,13 @@ describe('ค่าเพิ่มงานสลับเลข', () => {
     expect(suggestAddOns([swapRate], { ...plain, isMoto: true, plateSwap: true })).toEqual([]);
   });
 
+  it('ลูกค้าจ่ายค่าสลับเลขเอง (ใบยื่นแบบมีคนทำมาให้) = เสนอ PLATE_SWAP_GIVEN 540 รวม VAT = 504.67 ก่อน VAT ไม่ใช่ 1,720', () => {
+    const givenRate = { ...swapRate, id: 'given', amount: 540, kind: 'PLATE_SWAP_GIVEN', sortOrder: 6 };
+    expect(suggestAddOns([swapRate, givenRate], { ...plain, plateSwapGiven: true }).map((r) => r.id)).toEqual(['given']);
+    expect(suggestAddOns([swapRate, givenRate], plain)).toEqual([]);
+    expect(rateAmountExVat(givenRate)).toBe(504.67);
+  });
+
   it('1,720 รวม VAT = ค่าดำเนินการ 1,607.48 ก่อน VAT', () => {
     expect(rateAmountExVat(swapRate)).toBe(1607.48);
   });
