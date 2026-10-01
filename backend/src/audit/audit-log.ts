@@ -16,7 +16,8 @@ export type AuditEntity =
   | 'User'
   | 'CustomerPayment'
   | 'TaxInvoiceSeries'
-  | 'WhtCertificate';
+  | 'WhtCertificate'
+  | 'Quotation';
 
 export interface AuditEntry {
   entity: AuditEntity;

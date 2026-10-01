@@ -889,7 +889,7 @@ describe('BillingService.updateTerms', () => {
   it('บันทึกเงื่อนไขใหม่ ล็อกแถวลูกค้าก่อนอ่าน และเก็บเฉพาะช่องที่เปลี่ยนลงประวัติลูกค้า', async () => {
     const { svc, queryRaw, findUnique, update, auditCreate } = termsService();
     const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: ' หมดโปรอัตราพิเศษ ' }));
-    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null });
+    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false });
     expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
     expect(update).toHaveBeenCalledWith({

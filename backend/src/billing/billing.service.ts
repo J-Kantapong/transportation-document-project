@@ -102,24 +102,24 @@ export function isInvoiceNoConflict(err: unknown): boolean {
   return meta === undefined || JSON.stringify(meta).includes('invoiceNo');
 }
 
-function parseIsoDate(raw: unknown, label: string): Date {
+export function parseIsoDate(raw: unknown, label: string): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
     throw bad(`${label}ต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง`);
   }
   return new Date(`${raw}T00:00:00.000Z`);
 }
 
-function parseMoney(raw: unknown, label: string): number {
+export function parseMoney(raw: unknown, label: string): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 99_999_999) throw bad(`${label}ต้องเป็นจำนวนเงินตั้งแต่ 0 ขึ้นไป`);
   return round2(raw);
 }
 
-function parsePercent(raw: unknown, label: string): number {
+export function parsePercent(raw: unknown, label: string): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 100) throw bad(`${label}ต้องอยู่ระหว่าง 0 ถึง 100`);
   return round2(raw);
 }
 
-function optionalText(raw: unknown, label: string): string | null {
+export function optionalText(raw: unknown, label: string): string | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw !== 'string') throw bad(`${label}ต้องเป็นข้อความ`);
   return raw.trim() || null;
@@ -153,11 +153,11 @@ function parseExtras(raw: unknown): Extra[] {
 
 // บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29) - amount = quantity x unitPrice คำนวณฝั่ง server เสมอ
 // cost = ต้นทุนต่อหน่วย, FEE ไม่เก็บ (= ยอดเสมอ กำไร 0)
-type Item = { kind: ItemKind; description: string; quantity: number; unitPrice: number; amount: number; cost: number | null; sortOrder: number };
+export type Item = { kind: ItemKind; description: string; quantity: number; unitPrice: number; amount: number; cost: number | null; sortOrder: number };
 const MAX_ITEMS = 200;
 const MAX_QUANTITY = 100_000;
 
-function parseItems(raw: unknown): Item[] {
+export function parseItems(raw: unknown): Item[] {
   if (!Array.isArray(raw)) throw bad('items ต้องเป็นรายการ');
   if (raw.length > MAX_ITEMS) throw bad(`บิลหนึ่งใบมีบรรทัดได้ไม่เกิน ${MAX_ITEMS} บรรทัด`);
   return (raw as Array<Record<string, unknown>>).map((it, i) => {
@@ -200,10 +200,10 @@ const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_
 const dueDateOf = (issueDate: Date, creditDays: number | null | undefined) => (creditDays == null ? null : addDays(issueDate, creditDays));
 
 // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29: 1% / 3% / ตามงาน ต้องปรับได้ทุกบิล) - ไม่ส่ง = ตามเงื่อนไขลูกค้า ณ วันออกบิล
-function parseWhtOverride(raw: unknown): number | null {
+export function parseWhtOverride(raw: unknown): number | null {
   return raw === undefined || raw === null ? null : parsePercent(raw, 'อัตราหัก ณ ที่จ่าย');
 }
-const withWht = (terms: BillingTerms, whtRate: number | null): BillingTerms =>
+export const withWht = (terms: BillingTerms, whtRate: number | null): BillingTerms =>
   whtRate === null ? terms : { ...terms, whtRate, whtSpecialRate: null, whtSpecialUntil: null };
 
 const extrasOf = (raw: unknown): Extra[] =>
@@ -230,11 +230,26 @@ const lineAmountsOf = (l: {
 
 type CustomerTermsRow = { billingVat: boolean; billingWhtRate: unknown; billingWhtSpecialRate: unknown; billingWhtSpecialUntil: Date | null };
 
-function toTerms(c: CustomerTermsRow): BillingTerms {
+export function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
 // เงื่อนไขที่ส่งให้หน้าจอ = เงื่อนไขคิดยอด + เครดิตเทอม (ไม่ใช้คิดยอดบิล จึงไม่อยู่ใน BillingTerms)
-const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null }) => ({ ...toTerms(c), creditDays: c.billingCreditDays });
+const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean }) => ({
+  ...toTerms(c),
+  creditDays: c.billingCreditDays,
+  requiresQuotation: c.billingRequiresQuotation ?? false,
+});
+
+// ลูกค้าที่ตั้ง "ต้องมีใบเสนอราคาก่อนวางบิล" (ผู้ใช้ 2026-10-01, YM) ออกบิลได้จากใบเสนอราคาที่อนุมัติแล้วเท่านั้น
+export const QUOTATION_REQUIRED_ERROR = 'ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกใบวางบิลจากหน้าใบเสนอราคา';
+
+// บิลที่ออกจากใบเสนอราคา: รายการคัดลอกจากใบเสนอราคา เลข QT / PO พิมพ์บนบิล · link รันใน transaction เดียวกับการสร้างบิล
+export interface QuotationInvoiceRef {
+  quotationId: string;
+  quotationNo: string;
+  poNumber: string | null;
+  link: (tx: Prisma.TransactionClient) => Promise<void>;
+}
 
 type RateDbRow = {
   id: string;
@@ -250,11 +265,11 @@ type RateDbRow = {
   sortOrder: number;
 };
 
-const toPeriods = (rows: Array<{ account: string; effectiveFrom: Date }>): AccountPeriod[] =>
+export const toPeriods = (rows: Array<{ account: string; effectiveFrom: Date }>): AccountPeriod[] =>
   rows.map((p) => ({ account: p.account, effectiveFrom: iso(p.effectiveFrom)! }));
 
 // บิลบัญชีบุคคลไม่มี VAT เสมอ (ผู้ใช้ 2026-09-27) ไม่ว่าเงื่อนไข VAT ของลูกค้าจะตั้งไว้อย่างไร - หัก ณ ที่จ่ายยังตามลูกค้า (SPI หัก, YMAC ไม่หัก)
-const termsFor = (account: string, terms: BillingTerms): BillingTerms => (account === 'PERSONAL' ? { ...terms, vat: false } : terms);
+export const termsFor = (account: string, terms: BillingTerms): BillingTerms => (account === 'PERSONAL' ? { ...terms, vat: false } : terms);
 
 const feeRows = (rows: Array<{ key: string; amount: unknown }>) => rows.map((r) => ({ key: r.key, amount: r.amount === null ? null : Number(r.amount) }));
 
@@ -490,7 +505,10 @@ export class BillingService {
 
   // เงื่อนไขวางบิลเป็นข้อมูลลูกค้า -> ต้องมีเหตุผลและเก็บค่าก่อน/หลังลง AuditLog เหมือนหน้าแก้ไขลูกค้า (ผู้ใช้ 2026-09-27, F25)
   // ประวัติแสดงรวมกับการแก้ข้อมูลลูกค้าในหน้าลูกค้า (entity Customer) · บิลที่ออกไปแล้วไม่เปลี่ยน
-  async updateTerms(customerId: string, dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; remark?: unknown }) {
+  async updateTerms(
+    customerId: string,
+    dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; requiresQuotation?: unknown; remark?: unknown },
+  ) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้เงื่อนไขวางบิล');
     if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
     if (typeof dto?.vat !== 'boolean') throw bad('ต้องระบุว่ามี VAT หรือไม่');
@@ -505,6 +523,11 @@ export class BillingService {
       const c = dto.creditDays;
       if (c !== null && (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c > 365)) throw bad('เครดิตเทอมต้องเป็นจำนวนวันเต็ม 0 ถึง 365');
       data.billingCreditDays = c;
+    }
+    // ต้องมีใบเสนอราคาก่อนวางบิล (ผู้ใช้ 2026-10-01): ไม่ส่ง = คงเดิม
+    if (dto.requiresQuotation !== undefined) {
+      if (typeof dto.requiresQuotation !== 'boolean') throw bad('ต้องระบุว่าต้องมีใบเสนอราคาก่อนวางบิลหรือไม่');
+      data.billingRequiresQuotation = dto.requiresQuotation;
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -648,6 +671,7 @@ export class BillingService {
 
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    if (customer.billingRequiresQuotation) throw bad(QUOTATION_REQUIRED_ERROR);
     const periods = toPeriods(customer.accountPeriods ?? []);
     if (await this.prisma.invoice.findUnique({ where: { invoiceNo }, select: { id: true } })) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
 
@@ -728,7 +752,7 @@ export class BillingService {
 
   // บิลกำหนดเอง (ผู้ใช้ 2026-09-29): งานเก่าที่ย้ายมาจากระบบเดิมซึ่งไม่มีข้อมูลรถในระบบนี้ / ขายสินค้า เช่น ขายรถออกจากบริษัท
   // บัญชีของบิล = บัญชีของลูกค้า ณ วันออกบิล (ไม่มีวันส่งงานของรถให้อิง) · เลขบิลรันชุดเดียวกับบิลรถของบัญชีนั้น
-  async createCustomInvoice(dto: CreateCustomInvoiceDto) {
+  async createCustomInvoice(dto: CreateCustomInvoiceDto, quotation?: QuotationInvoiceRef) {
     const invoiceNo = optionalText(dto?.invoiceNo, 'เลขที่บิล');
     if (!invoiceNo) throw bad('ต้องใส่เลขที่บิล');
     const issueDate = parseIsoDate(dto.issueDate, 'วันที่ออกบิล');
@@ -740,13 +764,13 @@ export class BillingService {
 
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    if (customer.billingRequiresQuotation && !quotation) throw bad(QUOTATION_REQUIRED_ERROR);
     const issueIso = issueDate.toISOString().slice(0, 10);
     const account = accountOn(toPeriods(customer.accountPeriods ?? []), issueIso);
     const totals = computeInvoiceTotals({ lines: [], extras: [], items, terms: withWht(termsFor(account, toTerms(customer)), whtOverride), issueDate: issueIso });
 
-    let invoice;
-    try {
-      invoice = await this.prisma.invoice.create({
+    const create = (db: Pick<Prisma.TransactionClient, 'invoice'>) =>
+      db.invoice.create({
         data: {
           invoiceNo,
           issueDate,
@@ -755,6 +779,7 @@ export class BillingService {
           customerId: customer.id,
           customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
           jobLabel,
+          ...(quotation ? { quotationId: quotation.quotationId, quotationNo: quotation.quotationNo, poNumber: quotation.poNumber } : {}),
           extras: [],
           vatRate: totals.vatRate,
           whtRate: totals.whtRate,
@@ -768,6 +793,16 @@ export class BillingService {
         },
         include: INVOICE_INCLUDE,
       });
+
+    let invoice;
+    try {
+      // ออกจากใบเสนอราคา: ตรวจ/ผูกใบเสนอราคาใน transaction เดียวกับการสร้างบิล (link ล็อกแถวใบเสนอราคาก่อน)
+      invoice = quotation
+        ? await this.prisma.$transaction(async (tx) => {
+            await quotation.link(tx);
+            return create(tx);
+          })
+        : await create(this.prisma);
     } catch (err) {
       if (isInvoiceNoConflict(err)) throw bad(`เลขที่บิล ${invoiceNo} ถูกใช้ไปแล้ว`);
       throw err;
@@ -1270,6 +1305,9 @@ export class BillingService {
     voidReason: string | null;
     account?: string;
     dueDate?: Date | null;
+    quotationId?: string | null;
+    quotationNo?: string | null;
+    poNumber?: string | null;
     updatedAt?: Date;
     taxInvoices?: Array<{ id: string; taxInvoiceNo: string }>;
     items: Array<ItemDbRow & { id: string }>;
@@ -1324,6 +1362,10 @@ export class BillingService {
       voidReason: i.voidReason,
       account: i.account,
       dueDate: iso(i.dueDate ?? null),
+      // บิลที่ออกจากใบเสนอราคา (ผู้ใช้ 2026-10-01) - พิมพ์อ้างอิงบนบิล
+      quotationId: i.quotationId ?? null,
+      quotationNo: i.quotationNo ?? null,
+      poNumber: i.poNumber ?? null,
       // ใบกำกับภาษีในระบบที่ยังใช้อยู่ของบิลนี้ (null = ยังไม่ออก / ออกจาก Google Sheet ซึ่งเห็นแค่เลขใน taxInvoiceNo)
       taxInvoice: i.taxInvoices?.[0] ?? null,
       // หน้าแก้บิลส่งกลับมาเทียบ (expectedUpdatedAt) - รับเงิน/ยกเลิก/แก้ ทำให้ค่านี้เปลี่ยน
