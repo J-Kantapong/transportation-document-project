@@ -116,14 +116,15 @@ const PLACEHOLDER: Record<InvoiceItemKind, string> = {
 
 const small = { fontSize: 12 } as const;
 // ทุกช่องหน้าตาเดียวกับช่องกรอกอื่นของระบบ (.field input ใน globals.css) สูงเท่ากัน และช่องตัวเลขกว้างเท่ากัน
-const CONTROL_HEIGHT = 46;
+// หน้าที่อยากได้ช่องเล็กลง (ใบเสนอราคา, ผู้ใช้ 2026-10-01) ตั้ง --item-h / --item-px ที่กล่องครอบ - ไม่ตั้ง = ขนาดเดิม
+const CONTROL_HEIGHT = "var(--item-h, 46px)";
 const INPUT = {
   height: CONTROL_HEIGHT,
   boxSizing: "border-box",
   border: "1px solid #dce2ec",
   borderRadius: 8,
   background: "white",
-  padding: "0 13px",
+  padding: "0 var(--item-px, 13px)",
   color: "#18243c",
   font: "inherit",
 } as const;

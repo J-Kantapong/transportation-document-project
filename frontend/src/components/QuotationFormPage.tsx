@@ -317,7 +317,7 @@ export function QuotationFormPage() {
         ← กลับไปรายการใบเสนอราคา
       </Link>
 
-      <section className="panel" style={{ marginTop: 16, padding: "18px 23px", overflow: "visible", display: "grid", gap: 14 }}>
+      <section className="panel compact-form" style={{ marginTop: 16, padding: "16px 20px", overflow: "visible", display: "grid", gap: 12, fontSize: 14 }}>
         <div className="inspect-filter" style={{ padding: 0 }} role="group" aria-label="แบบใบเสนอราคา">
           {(["JOB", "RATE"] as const).map((k) => (
             <button key={k} type="button" className={`filter-chip${kind === k ? " selected" : ""}`} disabled={!!editing && kind !== k} onClick={() => setKind(k)}>
@@ -468,7 +468,7 @@ function Sum({ label, value }: { label: string; value: number }) {
   );
 }
 
-const INPUT = { height: 46, boxSizing: "border-box", border: "1px solid #dce2ec", borderRadius: 8, background: "white", padding: "0 13px", color: "#18243c", font: "inherit", minWidth: 0 } as const;
+const INPUT = { height: "var(--item-h, 46px)", boxSizing: "border-box", border: "1px solid #dce2ec", borderRadius: 8, background: "white", padding: "0 var(--item-px, 13px)", color: "#18243c", font: "inherit", minWidth: 0 } as const;
 const FIELD = { display: "grid", gap: 4, minWidth: 0 } as const;
 const small = { fontSize: 12 } as const;
 
@@ -480,7 +480,7 @@ function RateRowsEditor({ rows, onChange }: { rows: RateRow[]; onChange: (rows: 
       {rows.map((r, i) => {
         const n = i + 1;
         return (
-          <div key={i} style={{ border: "1px solid #e3e8f2", borderRadius: 10, padding: "10px 12px", display: "grid", gap: 8, fontSize: 14 }}>
+          <div key={i} style={{ border: "1px solid #e3e8f2", borderRadius: 10, padding: "8px 10px", display: "grid", gap: 6, fontSize: 13 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span className="muted" style={small}>
                 {n}.
