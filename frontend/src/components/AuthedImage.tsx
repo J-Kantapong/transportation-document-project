@@ -58,6 +58,7 @@ export function AuthedImage({
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
   const placeholderRef = useRef<HTMLDivElement>(null);
 
   // เริ่มโหลดเมื่อรูปเข้ามาใกล้จอ (เผื่อไว้ 300px) - เห็นแล้วไม่ต้องดูต่อ
@@ -80,6 +81,14 @@ export function AuthedImage({
     observer.observe(el);
     return () => observer.disconnect();
   }, [visible, objectUrl, failed]);
+
+  // กด Esc ปิดรูปที่ขยายอยู่
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoomed(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomed]);
 
   useEffect(() => {
     if (!visible) return;
@@ -112,10 +121,43 @@ export function AuthedImage({
     );
   }
   if (!objectUrl) return <div ref={placeholderRef} style={{ ...style, background: "#f1f3f8" }} />;
+  // กดแล้วเปิดรูปเต็มทับหน้าเดิม (เดิมเปิดแท็บใหม่ด้วย target=_blank - หน้าต่างในแอป/บางเบราว์เซอร์บล็อก กดแล้วไม่เกิดอะไร)
+  // ctrl/⌘/กลางเมาส์ยังเปิดแท็บใหม่ได้ตามปกติ
   return (
-    <a href={objectUrl} target="_blank" rel="noreferrer" title={linkTitle}>
-      {/* eslint-disable-next-line @next/next/no-img-element -- รูปโหลดเป็น blob เอง (ต้องแนบ Authorization) ไม่ผ่าน next/image */}
-      <img src={objectUrl} alt={alt} style={style} />
-    </a>
+    <>
+      <a
+        href={objectUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={linkTitle}
+        onClick={(e) => {
+          if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+          e.preventDefault();
+          setZoomed(true);
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- รูปโหลดเป็น blob เอง (ต้องแนบ Authorization) ไม่ผ่าน next/image */}
+        <img src={objectUrl} alt={alt} style={style} />
+      </a>
+      {zoomed && (
+        <div
+          role="dialog"
+          aria-label={alt}
+          onClick={() => setZoomed(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, cursor: "zoom-out" }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- ดูข้างบน */}
+          <img src={objectUrl} alt={alt} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", background: "#fff" }} />
+          <button
+            type="button"
+            aria-label="ปิดรูป"
+            onClick={() => setZoomed(false)}
+            style={{ position: "absolute", top: 12, right: 16, fontSize: 28, lineHeight: 1, color: "#fff", background: "transparent", border: 0, cursor: "pointer" }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </>
   );
 }
