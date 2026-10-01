@@ -330,6 +330,7 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                       <option value="PLATE_REQUEST">ค่าเพิ่ม: ขอใช้เลขทะเบียน</option>
                       <option value="TRANSFER_NOTICE">ค่าเพิ่ม: แจ้งย้าย</option>
                       <option value="PLATE_SWAP">ค่าเพิ่ม: สลับเลข</option>
+                      <option value="PLATE_SWAP_GIVEN">ค่าเพิ่ม: สลับเลข (ลูกค้าจ่ายเอง)</option>
                     </select>
                   </td>
                   <td>

@@ -4,6 +4,7 @@ import { currentUser } from '../auth/request-context.js';
 import {
   computeDocumentFees,
   isMotorcycle,
+  isSwapPlateOption,
   requestsPlateNumber,
   type DocumentFeeRuleSet,
   type NewPlateOption,
@@ -437,7 +438,7 @@ export class BillingService {
             // รถคันนี้เป็น "รถใหม่" ของงานสลับเลข (ผู้ใช้ 2026-09-28) - คิดค่าสลับเลขเพิ่มจากค่าจดทะเบียนปกติ
             // และเก็บค่าใบเสร็จกรมฯ ของรถเก่าอีกยอดหนึ่ง (แยกจากใบเสร็จของคันนี้ เพื่อให้ย้อนตรวจได้)
             const swap = swapByVehicle.get(v.id) ?? null;
-            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber, transferNotice, plateSwap: !!swap });
+            const addOns = suggestAddOns(rates, { isMoto, otherProvince, urgent, requestedPlateNumber, transferNotice, plateSwap: !!swap, plateSwapGiven: isSwapPlateOption(sub?.plateNumberOption) });
             const base = rate ? serviceFeeFromRate(rate, receiptAmount ?? estimate) : null;
             return {
               id: v.id,
@@ -446,6 +447,7 @@ export class BillingService {
               body: v.body,
               isMoto,
               cc,
+              weight: num(v.weight),
               plateCategory: v.plateCategory,
               plateNumber: v.plateNumber,
               deliveredDate: iso(v.deliveredDate),
@@ -595,7 +597,7 @@ export class BillingService {
       const label = optionalText(r?.label, 'ชื่อรายการ');
       if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
       const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
-      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST, TRANSFER_NOTICE หรือ PLATE_SWAP`);
+      if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST, TRANSFER_NOTICE, PLATE_SWAP หรือ PLATE_SWAP_GIVEN`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
       if (!vehicleKind) throw bad(`แถวที่ ${i + 1}: ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const ccMin = r.ccMin === null || r.ccMin === undefined ? null : parseMoney(r.ccMin, `แถวที่ ${i + 1}: CC ตั้งแต่`);

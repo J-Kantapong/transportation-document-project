@@ -45,14 +45,16 @@ export interface RateRow {
 // (registrationProvince ไม่ใช่กรุงเทพมหานคร ดู getTransferStatus ใน vehicles.service.ts) - ไม่ใช่ทุกคันและไม่ใช่ otherProvince
 // PLATE_SWAP (ผู้ใช้ 2026-09-28, Spac EV: "สลับเลข" 1,720 รวม VAT เฉพาะรถยนต์) = รถคันนี้เป็น "รถใหม่" ของงานสลับเลข
 // คิดเพิ่มจากค่าจดทะเบียนปกติ ส่วนค่าใบเสร็จกรมฯ ของรถเก่าเก็บแยกอีกยอด (InvoiceLine.swapReceiptAmount)
-export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT', 'PLATE_REQUEST', 'TRANSFER_NOTICE', 'PLATE_SWAP'] as const;
+// PLATE_SWAP_GIVEN (ผู้ใช้ 2026-09-30, Spac EV: ลูกค้าจ่ายค่าสลับเลขเอง 504.67 ก่อน VAT) = ใบยื่นล่าสุดเป็น "มีคนทำสลับเลขมาให้"
+// (SWAP_NORMAL / SWAP_AUCTION) - ค่าเพิ่มนี้แทนค่าสลับเลขเต็ม (PLATE_SWAP) จึงไม่ติ๊กคู่กันในรถคันเดียว
+export const RATE_KINDS = ['BASE', 'OTHER_PROVINCE', 'URGENT', 'PLATE_REQUEST', 'TRANSFER_NOTICE', 'PLATE_SWAP', 'PLATE_SWAP_GIVEN'] as const;
 
 // ค่าเพิ่มที่ใช้กับรถคันนี้: แถว OTHER_PROVINCE เมื่อเป็นรถขอใช้ (จดจังหวัดอื่น เช่น กรุงเทพฯ - ใบเสร็จมีค่าธรรมเนียมอื่นๆ 20 + ค่าคำขอ 10
 // แทน 5, ผู้ใช้ 2026-09-28: ไม่ใช่ขอใช้เลขทะเบียน), URGENT เมื่อยื่นด่วน, PLATE_REQUEST เมื่อยื่นแบบขอใช้เลขทะเบียน (ชนิดรถต้องตรงหรือ ANY),
 // TRANSFER_NOTICE เมื่อรถทำ "แจ้งย้าย" จริง (transferNotice)
 export function suggestAddOns(
   rates: RateRow[],
-  vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean; requestedPlateNumber: boolean; transferNotice: boolean; plateSwap: boolean },
+  vehicle: { isMoto: boolean; otherProvince: boolean; urgent: boolean; requestedPlateNumber: boolean; transferNotice: boolean; plateSwap: boolean; plateSwapGiven?: boolean },
 ): RateRow[] {
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
   return [...rates]
@@ -64,7 +66,8 @@ export function suggestAddOns(
         (r.kind === 'URGENT' && vehicle.urgent) ||
         (r.kind === 'PLATE_REQUEST' && vehicle.requestedPlateNumber) ||
         (r.kind === 'TRANSFER_NOTICE' && vehicle.transferNotice) ||
-        (r.kind === 'PLATE_SWAP' && vehicle.plateSwap),
+        (r.kind === 'PLATE_SWAP' && vehicle.plateSwap) ||
+        (r.kind === 'PLATE_SWAP_GIVEN' && !!vehicle.plateSwapGiven),
     );
 }
 
