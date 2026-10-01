@@ -7,6 +7,7 @@ import { isoToDisplayDate } from "@/lib/date";
 import { usePathname, useSearchParams } from "next/navigation";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import { PageTabs } from "@/components/PageTabs";
+import { SubmissionBulkCancelDialog } from "@/components/SubmissionBulkCancelDialog";
 import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
 import { compareSubmittedOrder, dutyOfItems, savedTotalExcludingDuty, swapPlateLabel, useReadScope } from "@/components/submit-flow/shared";
 import type { JobSheetKind } from "@/lib/job-sheet-print";
@@ -53,6 +54,9 @@ export function GroupTable({
   onPrint,
   onCancel,
   canCancel,
+  selected,
+  onToggle,
+  onBulkCancel,
 }: {
   title: string;
   rows: DocumentSubmission[];
@@ -60,7 +64,14 @@ export function GroupTable({
   onPrint?: () => void;
   onCancel?: (record: DocumentSubmission) => void;
   canCancel?: (record: DocumentSubmission) => boolean; // ไม่ส่ง = ทุกแถวที่รอใบเสร็จ
+  // เลือกหลายคันแล้วยกเลิกรวม (ไม่ส่ง = ไม่มีช่องติ๊ก)
+  selected?: Set<string>;
+  onToggle?: (ids: string[], on: boolean) => void;
+  onBulkCancel?: (rows: DocumentSubmission[]) => void;
 }) {
+  const cancellable = (r: DocumentSubmission) => r.status === "PENDING" && (canCancel?.(r) ?? true);
+  const selectable = onCancel && selected && onToggle ? rows.filter(cancellable) : [];
+  const picked = selectable.filter((r) => selected?.has(r.id));
   const total = rows.reduce((sum, r) => sum + savedTotalExcludingDuty(r), 0);
   const duty = rows.reduce((sum, r) => sum + dutyOfItems(r.noBillItems), 0);
   const taxMissing = rows.filter((r) => r.taxAmount === null).length;
@@ -70,11 +81,33 @@ export function GroupTable({
         <h2>
           {title} <span className="muted">· {rows.length} คัน</span>
         </h2>
-        {onPrint && (
-          <button type="button" className="text-button" disabled={rows.length === 0} onClick={onPrint}>
-            ปริ้นใบส่งงาน
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          {selectable.length > 0 && (
+            <>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onToggle?.(selectable.map((r) => r.id), picked.length !== selectable.length)}
+              >
+                {picked.length === selectable.length ? "ไม่เลือกทั้งหมด" : `เลือกทั้งหมด (${selectable.length})`}
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                style={{ color: "#c2410c" }}
+                disabled={picked.length === 0}
+                onClick={() => onBulkCancel?.(picked)}
+              >
+                ยกเลิกที่เลือก{picked.length > 0 ? ` (${picked.length})` : ""}
+              </button>
+            </>
+          )}
+          {onPrint && (
+            <button type="button" className="text-button" disabled={rows.length === 0} onClick={onPrint}>
+              ปริ้นใบส่งงาน
+            </button>
+          )}
+        </div>
       </div>
       {rows.length === 0 ? (
         <div className="empty-customers">ไม่มีรายการ</div>
@@ -83,6 +116,7 @@ export function GroupTable({
           <table>
             <thead>
               <tr>
+                {selectable.length > 0 && <th aria-label="เลือก" />}
                 <th>#</th>
                 <th>เลขตัวถัง</th>
                 <th>ประเภทรถ</th>
@@ -98,6 +132,18 @@ export function GroupTable({
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id}>
+                  {selectable.length > 0 && (
+                    <td>
+                      {cancellable(r) && (
+                        <input
+                          type="checkbox"
+                          aria-label={`เลือก ${r.vehicle.chassis}`}
+                          checked={selected?.has(r.id) ?? false}
+                          onChange={(e) => onToggle?.([r.id], e.target.checked)}
+                        />
+                      )}
+                    </td>
+                  )}
                   <td>{i + 1}</td>
                   <td>{r.vehicle.chassis}</td>
                   <td>{r.vehicle.body || "—"}</td>
@@ -123,7 +169,7 @@ export function GroupTable({
                   {onCancel && (
                     <td>
                       {/* ยกเลิกได้เฉพาะที่ยังรอใบเสร็จ ในประเภทรถที่บัญชีนี้บันทึกได้ - backend เช็กซ้ำ */}
-                      {r.status === "PENDING" && (canCancel?.(r) ?? true) && (
+                      {cancellable(r) && (
                         <button type="button" className="text-button" style={{ color: "#c2410c" }} onClick={() => onCancel(r)}>
                           ยกเลิก
                         </button>
@@ -230,6 +276,17 @@ export function SubmittedRecordsView({
   // รายการที่กำลังจะยกเลิก (เปิด SubmissionCancelDialog)
   const [cancelling, setCancelling] = useState<DocumentSubmission | null>(null);
   const onCancel = canCancel ? setCancelling : undefined;
+  // เลือกยกเลิกรวม: เก็บเป็น id (ข้ามกลุ่ม/แท็บได้) ล้างเมื่อเปลี่ยนวันที่ ส่วนรายการที่หายไปจากตารางถูกกรองทิ้งตอนใช้
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkCancelling, setBulkCancelling] = useState<{ title: string; rows: DocumentSubmission[] } | null>(null);
+  const toggle = (ids: string[], on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) (on ? next.add(id) : next.delete(id));
+      return next;
+    });
+  const bulkProps = (title: string) =>
+    onCancel ? { selected, onToggle: toggle, onBulkCancel: (rows: DocumentSubmission[]) => setBulkCancelling({ title, rows }) } : {};
   const [ownerChoice, setOwnerChoice] = useState("");
   // ใบส่งงานที่กำลังจะพิมพ์ (เปิด dialog) - แบบรถยนต์/มอเตอร์ไซค์ตามตัวอย่างที่ผู้ใช้ให้มา
   const [printGroup, setPrintGroup] = useState<{
@@ -288,7 +345,14 @@ export function SubmittedRecordsView({
         <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label className="field" style={{ minWidth: 220 }}>
             วันที่ยื่นเอกสาร
-            <select value={date} onChange={(e) => onDateChange(e.target.value)} disabled={dates.length === 0}>
+            <select
+              value={date}
+              onChange={(e) => {
+                setSelected(new Set());
+                onDateChange(e.target.value);
+              }}
+              disabled={dates.length === 0}
+            >
               {dates.length === 0 && <option value="">—</option>}
               {dates.map((d) => (
                 <option key={d.date} value={d.date}>
@@ -360,6 +424,7 @@ export function SubmittedRecordsView({
                   showUrgent={g.showUrgent}
                   onCancel={onCancel}
                   canCancel={canCancel}
+                  {...bulkProps(g.title)}
                   onPrint={() => setPrintGroup({ kind: "car", urgent: g.urgent, title: g.title, rows: g.rows, note: g.note })}
                 />
               ))}
@@ -379,6 +444,7 @@ export function SubmittedRecordsView({
                   showUrgent={false}
                   onCancel={onCancel}
                   canCancel={canCancel}
+                  {...bulkProps(g.title)}
                   onPrint={() => setPrintGroup({ kind: "moto", urgent: g.urgent, title: g.title, rows: g.rows, note: "" })}
                 />
               ))}
@@ -387,7 +453,7 @@ export function SubmittedRecordsView({
           )}
           {activeTab === "unknown" && (
             <>
-              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent onCancel={onCancel} canCancel={canCancel} />
+              <GroupTable title="ไม่ระบุประเภทรถ" rows={byFamily.unknown} showUrgent onCancel={onCancel} canCancel={canCancel} {...bulkProps("ไม่ระบุประเภทรถ")} />
               <FailedTable rows={failedByTab.unknown} />
             </>
           )}
@@ -399,6 +465,19 @@ export function SubmittedRecordsView({
           record={cancelling}
           onClose={() => setCancelling(null)}
           onCancelled={(id) => onRecordRemoved?.(id)}
+          onStale={onRetry}
+        />
+      )}
+      {bulkCancelling && (
+        <SubmissionBulkCancelDialog
+          key={bulkCancelling.rows.map((r) => r.id).join()}
+          title={bulkCancelling.title}
+          records={bulkCancelling.rows}
+          onClose={() => setBulkCancelling(null)}
+          onCancelled={(id) => {
+            toggle([id], false);
+            onRecordRemoved?.(id);
+          }}
           onStale={onRetry}
         />
       )}
