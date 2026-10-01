@@ -82,6 +82,7 @@ export function DeliveryPage() {
   const [dateText, setDateText] = useState(isoToDisplayDate(todayIso()));
   const [recipient, setRecipient] = useState("");
   const [note, setNote] = useState("");
+  const [recentOpen, setRecentOpen] = useState(true); // พับ/ขยายตาราง "ส่งแล้วล่าสุด" (ยาวมาก)
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
@@ -552,10 +553,15 @@ export function DeliveryPage() {
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-head">
           <h2>ส่งแล้วล่าสุด ({recentRows.length})</h2>
+          {recentRows.length > 0 && (
+            <button type="button" className="text-button" aria-expanded={recentOpen} onClick={() => setRecentOpen((open) => !open)}>
+              {recentOpen ? "▾ ซ่อนข้อมูลรถ" : "▸ แสดงข้อมูลรถ"}
+            </button>
+          )}
         </div>
         {recentRows.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการที่ส่งแล้ว</div>
-        ) : (
+        ) : !recentOpen ? null : (
           <div className="table-wrap">
             <table>
               <thead>

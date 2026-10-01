@@ -814,7 +814,7 @@ model YamahaRelocationAttachment {
 
   entry YamahaRelocationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
-  @@unique([entryId, kind])
+  @@index([entryId, kind]) // แนบได้หลายไฟล์ต่อชนิด (ผู้ใช้ 2026-09-30) - เดิม unique ทำให้บันทึก 2 ไฟล์ขึ้นไปไม่ได้
 }
 
 // --- รูปป้ายทะเบียน (หน้ารับป้ายทะเบียน Step 6) ------------------------------------

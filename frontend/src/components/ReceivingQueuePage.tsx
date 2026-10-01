@@ -225,6 +225,8 @@ export function ReceivingQueuePage({
   const [sortMode, setSortMode] = useState<"submit" | "plate">("submit");
   // ใบยื่น (ชุดงาน) ที่ติ๊กไว้จะปริ้น - key = sheetKeyOf(...)
   const [selectedSheets, setSelectedSheets] = useState<Set<string>>(new Set());
+  // แถวที่กำลังมีไฟล์ถูกลากมาวางจากคอมพิวเตอร์ (ไฮไลต์ช่องแนบรูป)
+  const [dragRowId, setDragRowId] = useState<string | null>(null);
   const toggle = (set: (fn: (prev: Set<string>) => Set<string>) => void, key: string) =>
     set((prev) => {
       const next = new Set(prev);
@@ -463,7 +465,27 @@ export function ReceivingQueuePage({
                 </div>
               )}
             </td>
-            <td>
+            <td
+              // ลากรูปจากคอมพิวเตอร์มาวางที่ช่องนี้ = แนบให้รถคันนี้ (เหมือนกดปุ่มแล้วเลือกไฟล์) - รับทีละรูป
+              onDragOver={(e) => {
+                if (row.saving || !e.dataTransfer.types.includes("Files")) return;
+                e.preventDefault();
+                setDragRowId(r.id);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragRowId((id) => (id === r.id ? null : id));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragRowId(null);
+                if (row.saving) return;
+                const files = [...e.dataTransfer.files];
+                if (files.length !== 1) return patchRow(r.id, { message: { text: "วางทีละ 1 รูปต่อ 1 คัน", error: true } });
+                if (!files[0].type.startsWith("image/")) return patchRow(r.id, { message: { text: "ไฟล์ที่วางไม่ใช่รูปภาพ", error: true } });
+                handleAttach(r, files[0]);
+              }}
+              style={dragRowId === r.id ? { outline: "2px dashed #2b55d6", outlineOffset: -4, background: "#eef3ff" } : undefined}
+            >
               {/* มือถือ: เลือกได้ทั้งถ่ายจากกล้องและรูปในเครื่อง - เลือกแล้วอัปโหลดและบันทึกรับทันที */}
               <label
                 className="primary"
@@ -482,6 +504,9 @@ export function ReceivingQueuePage({
                   }}
                 />
               </label>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                หรือลากรูปจากคอมมาวางที่นี่
+              </div>
               {message}
             </td>
           </>
