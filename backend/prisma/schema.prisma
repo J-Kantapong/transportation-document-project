@@ -84,6 +84,7 @@ model User {
   cancelledTaxRenews TaxRenewal[]            @relation("TaxRenewalCancels")
   cancelledYamaha    YamahaRelocationEntry[] @relation("YamahaRelocationCancels")
   cancelledSwaps     PlateSwap[]             @relation("PlateSwapCancels")
+  cancelledUseCancellations VehicleUseCancellation[] @relation("VehicleUseCancellationCancels")
   billingClosures    Vehicle[]               @relation("VehicleBillingClosures")
   accountPeriods     CustomerAccountPeriod[] @relation("CustomerAccountPeriods")
   paymentsCreated    CustomerPayment[]       @relation("CustomerPaymentsCreated")
@@ -124,6 +125,7 @@ model Customer {
   accountPeriods  CustomerAccountPeriod[]
   payments        CustomerPayment[]
   plateSwaps      PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
+  vehicleUseCancellations VehicleUseCancellation[] // งานยกเลิกการใช้รถที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   taxInvoices     TaxInvoice[]
   whtCertificates WhtCertificate[]
   quotations      Quotation[]
@@ -632,12 +634,16 @@ model ReceiptImage {
 
   // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง
   plateSwapId String?
+  // หรือของงานยกเลิกการใช้รถ (ผู้ใช้ 2026-10-02) - ทั้งสองช่องว่างพร้อมกัน = ใบเสร็จรถจดใหม่ที่ยังไม่จับคู่
+  vehicleUseCancellationId String?
 
-  submission DocumentSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
-  plateSwap  PlateSwap?          @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
+  submission             DocumentSubmission?     @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  plateSwap              PlateSwap?              @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
+  vehicleUseCancellation VehicleUseCancellation? @relation(fields: [vehicleUseCancellationId], references: [id], onDelete: Cascade)
 
   @@index([submissionId])
   @@index([plateSwapId])
+  @@index([vehicleUseCancellationId])
 }
 
 // --- การสลับเลข (Plate swap) ------------------------------------------------------
@@ -757,6 +763,55 @@ model PlateSwap {
   @@index([returnedDate])
   @@index([plateReceivedDate])
   @@index([bookReceivedDate])
+}
+
+// --- ยกเลิกการใช้รถ (Vehicle use cancellation) ---------------------------------------
+// ผู้ใช้ 2026-10-02: งานในหมวด "อื่นๆ" - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
+// รถไม่อยู่ในฐานข้อมูลรถจดใหม่ จึงกรอกเอง หนึ่งแถว = ยกเลิกการใช้รถ 1 คัน
+// ค่าใช้จ่ายตายตัว Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก บาทต่อคัน (ผู้ใช้ 2026-10-02) ขั้นตอน: ยื่น (submitDate) -> รับใบเสร็จกลับ
+// (returnedDate + รูปใบเสร็จอย่างน้อย 1 รูป) แบบเดียวกับการสลับเลข - ยังไม่มีรับป้าย/เล่ม/ส่งงาน/วางบิล (ผู้ใช้ไม่ได้สั่ง)
+// หมายเหตุชื่อ: cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap) ไม่ใช่การยกเลิกการใช้รถ
+model VehicleUseCancellation {
+  id           String @id @default(cuid())
+  vehicleClass String @default("CAR") // CAR | MOTO
+
+  // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับ ownerName ซึ่งเป็นเจ้าของรถตามทะเบียน) - บังคับกรอกที่ชั้น service
+  customerId String?
+
+  ownerName     String // ชื่อเจ้าของรถ
+  engine        String // เลขเครื่อง
+  chassis       String // เลขตัวถัง
+  brand         String // ยี่ห้อ (ชื่อตามตาราง Brand)
+  plateCategory String // หมวดทะเบียน
+  plateNumber   String // เลขทะเบียน
+
+  submitDate DateTime // วันที่ยื่น
+
+  billTotal   Decimal @default(0) @db.Decimal(12, 2) // ค่าใช้จ่าย Bill - ตายตัว 25 บาท snapshot ตอนยื่น
+  noBillTotal Decimal @default(0) @db.Decimal(12, 2) // ค่าใช้จ่าย No Bill - ตายตัว 100 บาท (ไม่รวมค่าอากร, snapshot ตอนยื่น)
+  dutyAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าอากร 10 บาท แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม (snapshot ตอนยื่น)
+
+  // รับใบเสร็จกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปผ่าน ReceiptImage.vehicleUseCancellationId)
+  returnedDate  DateTime?
+  receiptNo     String?
+  receiptDate   DateTime?
+  receiptAmount Decimal?  @db.Decimal(12, 2)
+
+  // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการและยอดรวม
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer    Customer?      @relation(fields: [customerId], references: [id])
+  cancelledBy User?          @relation("VehicleUseCancellationCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  receipts    ReceiptImage[]
+
+  @@index([customerId])
+  @@index([submitDate])
+  @@index([returnedDate])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------

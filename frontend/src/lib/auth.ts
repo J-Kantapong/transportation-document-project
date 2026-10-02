@@ -189,6 +189,11 @@ const PAGE_RULES: PageRule[] = [
   // มอเตอร์ไซค์ = งานของ STAFF_MOTO (ผู้ใช้ให้อัตรา 2026-09-28) ล้อกับฝั่งรถยนต์ที่เป็น STAFF_CAR
   // backend เช็คซ้ำตามประเภทรถของงานจริง (PlateSwapService.assertClassScope) ไม่ได้เชื่อ path อย่างเดียว
   { prefix: '/registration/plate-swap/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
+  // ยกเลิกการใช้รถ (หมวดอื่นๆ, ผู้ใช้ 2026-10-02): รถยนต์ = STAFF_CAR / มอเตอร์ไซค์ = STAFF_MOTO (+ACCOUNTANT อ่าน) ล้อกับงานสลับเลข
+  // backend เช็คซ้ำตามประเภทรถของงานจริง (VehicleUseCancellationService.assertClassScope) - backend: /api/vehicle-use-cancellations
+  { prefix: '/registration/other/cancel-use/car', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  { prefix: '/registration/other/cancel-use/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
+  { prefix: '/registration/other/cancel-use', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   // ต่อภาษี: กลุ่มยื่นเอกสาร (รถยนต์/จักรยานยนต์ตามขอบเขตของตัวเอง) + ACCOUNTANT อ่าน - backend: /api/tax-renewals
   { prefix: '/registration/tax-renewal', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },

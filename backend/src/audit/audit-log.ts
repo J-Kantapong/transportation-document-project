@@ -13,6 +13,7 @@ export type AuditEntity =
   | 'TaxRenewal'
   | 'YamahaRelocation'
   | 'PlateSwap'
+  | 'VehicleUseCancellation'
   | 'User'
   | 'CustomerPayment'
   | 'TaxInvoiceSeries'

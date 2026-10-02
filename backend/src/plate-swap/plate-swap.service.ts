@@ -163,18 +163,18 @@ export interface UpdatePlateSwapDto {
 }
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
-const toUtcDate = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
-const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+export const toUtcDate = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+export const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 // วันที่ ค.ศ. YYYY-MM-DD ที่มีอยู่จริง (2026-02-31 ไม่ผ่าน) - null = ไม่ถูกต้อง
-function parseIsoDate(value: unknown): Date | null {
+export function parseIsoDate(value: unknown): Date | null {
   const raw = typeof value === 'string' ? value.trim() : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
   const date = toUtcDate(raw);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === raw ? date : null;
 }
 
-function requiredText(value: unknown, label: string, max = 200): string {
+export function requiredText(value: unknown, label: string, max = 200): string {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) throw new BadRequestException({ error: `กรุณากรอก${label}` });
   if (text.length > max) throw new BadRequestException({ error: `${label}ยาวเกิน ${max} ตัวอักษร` });
@@ -182,7 +182,7 @@ function requiredText(value: unknown, label: string, max = 200): string {
 }
 
 // ช่องที่ยังไม่รู้ตอนยื่นได้ (เลขทะเบียนใหม่) - ว่างเก็บเป็น null ไม่ใช่สตริงว่าง
-function optionalText(value: unknown, label: string, max = 200): string | null {
+export function optionalText(value: unknown, label: string, max = 200): string | null {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) return null;
   if (text.length > max) throw new BadRequestException({ error: `${label}ยาวเกิน ${max} ตัวอักษร` });
@@ -190,7 +190,7 @@ function optionalText(value: unknown, label: string, max = 200): string | null {
 }
 
 // วันที่ในใบเสร็จ (รับใบเสร็จ) - ไม่ส่งมา/ว่าง = ไม่รู้ (null) ส่งมาแล้วต้องเป็นวันที่จริง
-function optionalIsoDateField(value: unknown, label: string): Date | null {
+export function optionalIsoDateField(value: unknown, label: string): Date | null {
   if (value === undefined || value === null || value === '') return null;
   const date = parseIsoDate(value);
   if (!date) throw new BadRequestException({ error: `${label}ไม่ถูกต้อง (ค.ศ. YYYY-MM-DD)` });
@@ -210,13 +210,13 @@ export function dateInRange(date: Date, submitDate: Date): boolean {
   return date >= submitDate && isoDate(date)! <= bangkokToday();
 }
 
-function assertDateInRange(label: string, date: Date, submitDate: Date): void {
+export function assertDateInRange(label: string, date: Date, submitDate: Date): void {
   if (date < submitDate) throw new BadRequestException({ error: `${label}ต้องไม่ก่อนวันที่ยื่น` });
   if (isoDate(date)! > bangkokToday()) throw new BadRequestException({ error: `${label}ต้องไม่เกินวันนี้` });
 }
 
 // ยอดเงินในใบเสร็จ - เก็บทศนิยม 2 ตำแหน่ง ไม่ส่งมา/ว่าง = ไม่รู้ (null)
-function optionalAmount(value: unknown, label: string): number | null {
+export function optionalAmount(value: unknown, label: string): number | null {
   if (value === undefined || value === null || value === '') return null;
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num) || num < 0) throw new BadRequestException({ error: `${label}ไม่ถูกต้อง` });
@@ -466,14 +466,14 @@ function staleIfMissing(err: unknown): never {
 }
 
 // updatedAt ที่ฟอร์มโหลดมา (ISO) - ไม่ส่ง = null / ส่งมาแต่อ่านเป็นวันเวลาไม่ได้ = 400
-function parseExpectedUpdatedAt(raw: unknown): Date | null {
+export function parseExpectedUpdatedAt(raw: unknown): Date | null {
   if (raw === undefined || raw === null || raw === '') return null;
   const date = typeof raw === 'string' ? new Date(raw) : new Date(Number.NaN);
   if (Number.isNaN(date.getTime())) throw new BadRequestException({ error: 'expectedUpdatedAt ต้องเป็นวันเวลา ISO' });
   return date;
 }
 
-const sameTime = (a: Date | null | undefined, b: Date | null | undefined) => (a?.getTime() ?? null) === (b?.getTime() ?? null);
+export const sameTime = (a: Date | null | undefined, b: Date | null | undefined) => (a?.getTime() ?? null) === (b?.getTime() ?? null);
 
 const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับเอกสารกลับ';
 const LAST_RECEIPT_ERROR = 'งานที่รับเอกสารกลับแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';

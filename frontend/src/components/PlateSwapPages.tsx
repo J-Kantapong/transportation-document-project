@@ -61,7 +61,7 @@ const feesFor = (
   o: { numberSource: PlateSwapNumberSource; buyNormalPlate: boolean; buyAuctionPlate: boolean; urgent: boolean },
 ) => (vehicleClass === "MOTO" ? calculatePlateSwapMotoFees({ buyNormalPlate: o.buyNormalPlate, urgent: o.urgent }) : calculatePlateSwapCarFees(o));
 
-const errorText = (err: unknown, fallback: string) => (err instanceof ApiError || err instanceof Error ? err.message : fallback);
+export const errorText = (err: unknown, fallback: string) => (err instanceof ApiError || err instanceof Error ? err.message : fallback);
 
 // ค้นรถใหม่ระหว่างพิมพ์ (ผู้ใช้ 2026-09-28) - หน่วงเท่าหน้าค้นหารถ และเริ่มค้นตั้งแต่ 2 ตัวอักษร
 // (1 ตัวอักษรได้รถเกือบทั้งฐานซึ่งไม่ช่วยอะไร แต่ตั้งไว้ต่ำเพราะจุดประสงค์คือไม่ต้องพิมพ์เลขตัวถังให้ครบ)
@@ -81,7 +81,7 @@ function useCanWrite(): boolean | null {
 
 // รูปอยู่หลัง backend ที่ต้องมี Authorization - โหลดเป็น blob แล้วเปิดในแท็บใหม่ (เปิดแท็บก่อน await กัน popup ถูกบล็อก)
 // 401 (token หมดอายุ) fetchAuthedBlob พาไปหน้าล็อกอินเองและล้าง session แล้ว - ไม่ต้องเตือน "เปิดไม่สำเร็จ" ซ้ำ (พบ 2026-09-27)
-async function openReceiptImage(id: string) {
+export async function openReceiptImage(id: string) {
   const win = window.open("", "_blank");
   try {
     const objectUrl = URL.createObjectURL(await fetchAuthedBlob(receiptImageUrl(id)));
@@ -93,7 +93,7 @@ async function openReceiptImage(id: string) {
   }
 }
 
-function DateTextInput({ value, onChange, label }: { value: string; onChange: (text: string) => void; label?: string }) {
+export function DateTextInput({ value, onChange, label }: { value: string; onChange: (text: string) => void; label?: string }) {
   return (
     <DateInput
       aria-label={label}
@@ -104,7 +104,7 @@ function DateTextInput({ value, onChange, label }: { value: string; onChange: (t
   );
 }
 
-const textToIso = (text: string) => displayDateToIso(text.replace(/\D/g, ""));
+export const textToIso = (text: string) => displayDateToIso(text.replace(/\D/g, ""));
 
 const plateText = (v: PlateSwapNewVehicle) => [v.plateCategory, v.plateNumber].filter(Boolean).join(" ");
 
@@ -126,7 +126,7 @@ function CustomerCell({ swap }: { swap: PlateSwap }) {
   );
 }
 
-const dangerButton: React.CSSProperties = { color: "#b43434" };
+export const dangerButton: React.CSSProperties = { color: "#b43434" };
 const warnBox: React.CSSProperties = {
   margin: "0 23px 14px",
   padding: "12px 14px",
@@ -139,7 +139,7 @@ const warnBox: React.CSSProperties = {
 
 // ป๊อปอัปถามเหตุผล (บังคับ) ก่อนแก้/ยกเลิก - ใช้ซ้ำทั้งยกเลิกงาน ยกเลิกรับกลับ และเปลี่ยนคันหลังรับกลับ
 // onConfirm โยน error ได้ ข้อความขึ้นในป๊อปอัปและยังไม่ปิด
-function ReasonDialog({
+export function ReasonDialog({
   title,
   children,
   confirmLabel,

@@ -316,6 +316,19 @@ This private repository is the shared development surface for the user, Claude C
   need `remark`), `/revise`, `/link-customer`, `/invoice` { invoiceNo, issueDate }, `/apply-rates`, `GET /:id/po-file`,
   `GET /:id/history` (AuditLog entity `Quotation`). Print: `frontend/src/lib/quotation-print.ts` (same CSS as the
   invoice; total before WHT, WHT as a note; draft / cancelled watermark).
+- Vehicle use cancellation (ยกเลิกการใช้รถ, user 2026-10-02, migration `20261002100000_vehicle_use_cancellation`, code in
+  `backend/src/vehicle-use-cancellation/`, pages `/registration/other/cancel-use/{car,moto}/{submit,return}`): first subtask of
+  "อื่นๆ". One `VehicleUseCancellation` row per vehicle, filled like a plate swap without the new plate (job owner =
+  `customerId`, owner name, engine, chassis, brand from `Brand`, plate หมวด + เลข, submit date). Fixed fees chosen by the
+  user, snapshotted at submit and never taken from the client: Bill 25, No Bill 100, ค่าอากร 10 kept apart (not inside No
+  Bill, not in the total, unlike plate swap); constants in `vehicle-use-cancellation-fee.ts` (copied in
+  `frontend/src/lib/vehicle-use-cancel-fee.ts`). Second step = receive receipt like plate swap: `ReceiptImage.vehicleUseCancellationId`,
+  OCR fills receiptNo/date/amount, at least one photo + return date (not after today) to confirm. Edit/cancel/undo-return/
+  receipt changes after return need a remark and go to `AuditLog` entity `VehicleUseCancellation`; cancel is soft
+  (`cancelledAt`). API `/api/vehicle-use-cancellations` (`GET ?status&month&vehicleClass`, `POST`, `PATCH /:id`, `PATCH /:id/return`,
+  `POST /:id/undo-return`, `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR`
+  (cars) / `STAFF_MOTO` (motorcycles) write, `ACCOUNTANT` read. Not built (user did not ask): receive plate/book, Delivery,
+  billing, executive overview.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,
