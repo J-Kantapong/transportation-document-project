@@ -51,8 +51,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/vehicles\/[^/]+\/restore$/, access: ['ADMIN'] },
   { pattern: /^\/api\/vehicles\/[^/]+$/, method: 'DELETE', access: ['ADMIN'] },
   // ขั้น 4-8: ยื่นเอกสาร / ภาษี / ใบเสร็จ / ป้าย / เล่ม / คิวรับของ + งานสลับเลข (ยื่น/รับเอกสารกลับ - กลุ่มเดียวกัน, รถยนต์ = STAFF_CAR)
-  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|plate-copies|tax-renewals)(\/|$)/, method: 'GET', access: SUBMIT_READ },
-  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|plate-copies|tax-renewals)(\/|$)/, access: SUBMIT },
+  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, method: 'GET', access: SUBMIT_READ },
+  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|document-submission|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|lookup-by-chassis|document-submission|receiving)(\/|$)/, access: SUBMIT },
   // route ต่อคันของขั้น 4 เหลือแค่ GET :id/tax-calculations (:id/document-submission, :id/tax-input, :id/receiving/:step ถูกถอดแล้ว - พบ 2026-09-27)
