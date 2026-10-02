@@ -345,6 +345,29 @@ This private repository is the shared development surface for the user, Claude C
   `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`, `GET /plate-queue?status`,
   `POST /:id/plate-photo` (multipart `file`, `date`), `PATCH /:id/plate-photo/date`, `POST /:id/plate-photo/detach`,
   `GET /:id/plate-photo/image`). Not built (user did not ask): Delivery, billing, executive overview, motorcycles.
+- Vehicle transfer (งานโอน, user 2026-10-02, migration `20261002180000_vehicle_transfer`, code in `backend/src/vehicle-transfer/`, pages
+  `/registration/transfer/{owner,inspection}/{submit,inspect,return}`): replaces the empty placeholder and supersedes the older
+  "reuse Vehicle + job intake pool" plan. Built like vehicle use cancellation (own table `VehicleTransfer`, vehicle keyed in by hand: job
+  owner, chassis, engine, brand, plate หมวด + เลข, submit date) but cars and motorcycles share one page (`vehicleClass` is a form field,
+  prices differ) and every job has `transferorName` (ผู้ถือกรรมสิทธิ์ผู้โอน) + `transfereeName` (ผู้รับโอน). `transferType`: `OWNER` (โอนตามผู้ถือกรรมสิทธิ์,
+  no inspection: ยื่น -> รับใบเสร็จ) or `INSPECTION` (โอนตรวจรถ: ยื่น -> ส่งตรวจ -> ผลตรวจ -> รับใบเสร็จ). The inspection is its own columns
+  (`inspectionSentDate`, `inspectionResult` PASS|FAIL, `inspectionResultDate`), NOT the new-registration inspection queue (user: "ไม่ได้รวมไปกับการตรวจแบบที่ 1");
+  receipts can be attached and returned only after PASS, a FAIL is cleared with `inspection-undo` (mandatory remark) and re-recorded.
+  Fees (user 2026-10-02, `vehicle-transfer-fee.ts`, copied in `frontend/src/lib/vehicle-transfer-fee.ts`): same for both types.
+  Motorcycles: The form picks โอนปกติ / โอนขอใช้ (`useRequest`) + งานด่วน (`urgent`) + ค่าปรับ (`fineAmount`, typed by the clerk, applies to both when
+  more than 15 days after the receipt / tax invoice was issued). Bill: normal = คำขอ 5 + โอนทะเบียนรถ 100; ขอใช้ = คำขอ 10 + โอนทะเบียนรถ 100 + ค่าธรรมเนียมอื่นๆ 20;
+  fine added. No Bill: ลงขัน 60 + ลงขันด่วนเพิ่ม 50. ค่าอากร (normal 20 / ขอใช้ 40, automatic from the chosen type; changed from 10/30 on 2026-10-02) is kept apart like
+  vehicle use cancellation (user 2026-10-02: "แยกค่าอากรออกมา"): NOT inside `noBillTotal`, NOT in the total, stored in `dutyAmount` and shown on its own line. The backend computes and
+  snapshots `billTotal` / `noBillTotal` / `dutyAmount` itself (client totals ignored for MOTO); an edit that does not touch class / ขอใช้ / ด่วน / fine keeps
+  the old snapshot. Cars: No Bill = ลงขัน 100 (+ ลงขันด่วนเพิ่ม 100 when `urgent`), no duty (user gave only No Bill; the label "ลงขัน" is Claude's choice);
+  Bill has no rate yet so the clerk types `billTotal` (required, 0 allowed); ขอใช้ and fine are refused for cars. Client No Bill amounts are ignored for both classes.
+  Edits to any amount need a remark (AuditLog).
+  Receipts use `ReceiptImage.vehicleTransferId` (OCR + hash check like the other jobs, old receipts guards skip them). Edit / cancel /
+  undo-return / receipt changes after return need a remark and go to `AuditLog` entity `VehicleTransfer`; cancel is soft. API
+  `/api/vehicle-transfers` (`GET ?status=all|pending|returned|to-send|to-result|inspected&month&transferType&vehicleClass`, `POST`, `PATCH /:id`,
+  `PATCH /:id/inspection-sent`, `PATCH /:id/inspection-result`, `POST /:id/inspection-undo`, `PATCH /:id/return`, `POST /:id/undo-return`,
+  `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR` (cars) / `STAFF_MOTO` (motorcycles)
+  write, `ACCOUNTANT` read. Not built (user did not ask): vehicle photos for the inspection, receive plate/book, Delivery, billing, executive overview.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,

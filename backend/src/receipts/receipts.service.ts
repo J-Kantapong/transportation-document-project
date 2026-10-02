@@ -280,7 +280,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       });
       if (saved) return { by: 'receiptNo', receiptNo, chassis: saved.vehicle.chassis, receivedDate: isoDate(saved.receiptReceivedDate) };
       const image = await this.prisma.receiptImage.findFirst({
-        where: { ...notSelf, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
+        where: { ...notSelf, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, vehicleTransferId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
         select: { extraction: true, submission: { select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } } } },
       });
       if (image) {
@@ -416,6 +416,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         plateSwapId: true,
         vehicleUseCancellationId: true,
         plateCopyId: true,
+        vehicleTransferId: true,
         submission: { select: { status: true, vehicle: { select: { body: true } } } },
       },
     });
@@ -423,6 +424,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
     if (existing.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข จับคู่กับรถไม่ได้' });
     if (existing.vehicleUseCancellationId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานยกเลิกการใช้รถ จับคู่กับรถไม่ได้' });
     if (existing.plateCopyId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานคัดแผ่นป้ายทะเบียน จับคู่กับรถไม่ได้' });
+    if (existing.vehicleTransferId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานโอน จับคู่กับรถไม่ได้' });
     if (existing.submission) {
       assertVehicleInScope(existing.submission.vehicle.body);
       if (existing.submission.status === 'RECEIPT_RECEIVED') {
@@ -450,7 +452,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       if (target === 'FAILED') throw new BadRequestException({ error: FAILED_ATTACH_ERROR });
       // เขียนเฉพาะเมื่อรูปยังอยู่ที่เดิม และรายการเดิมยังไม่ได้รับใบเสร็จ (ระหว่างนี้ถูกลบ/ย้ายไปแล้ว = ไม่ทับ)
       const { count } = await tx.receiptImage.updateMany({
-        where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, submissionId: source, ...(source ? { submission: { status: { not: 'RECEIPT_RECEIVED' } } } : {}) },
+        where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, ...(source ? { submission: { status: { not: 'RECEIPT_RECEIVED' } } } : {}) },
         data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}) },
       });
       if (count === 0) throw new ConflictException({ error: 'รูปนี้ถูกจับคู่หรือลบไปแล้ว - โหลดหน้าใหม่' });
@@ -472,6 +474,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         plateSwapId: true,
         vehicleUseCancellationId: true,
         plateCopyId: true,
+        vehicleTransferId: true,
         submission: { select: { status: true, vehicle: { select: { body: true } } } },
       },
     });
@@ -490,6 +493,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
     if (receipt.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข ลบจากหน้างานสลับเลข' });
     if (receipt.vehicleUseCancellationId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานยกเลิกการใช้รถ ลบจากหน้างานยกเลิกการใช้รถ' });
     if (receipt.plateCopyId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานคัดแผ่นป้ายทะเบียน ลบจากหน้างานคัดแผ่นป้ายทะเบียน' });
+    if (receipt.vehicleTransferId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานโอน ลบจากหน้างานโอน' });
     // ลบเฉพาะเมื่อรูปยังอยู่ที่เดิม และรายการยังไม่ได้รับใบเสร็จ (ระหว่างนี้อีกเครื่องจับคู่/บันทึกไปแล้ว = ไม่ลบ)
     // รูปของรายการ: ล็อกแถวรายการก่อน ให้การบันทึก "ได้ใบเสร็จ" ที่ทำพร้อมกันรอ แล้วเห็นว่ารูปหายไปแล้ว (submission-lock.ts)
     const source = receipt.submissionId;
@@ -497,10 +501,10 @@ export class ReceiptsService implements OnApplicationBootstrap {
       ? await this.prisma.$transaction(async (tx) => {
           await lockSubmissions(tx, [source]);
           return tx.receiptImage.deleteMany({
-            where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, submissionId: source, submission: { status: { not: 'RECEIPT_RECEIVED' } } },
+            where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, submission: { status: { not: 'RECEIPT_RECEIVED' } } },
           });
         })
-      : await this.prisma.receiptImage.deleteMany({ where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, submissionId: null } });
+      : await this.prisma.receiptImage.deleteMany({ where: { id, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, vehicleTransferId: null, submissionId: null } });
     if (count === 0) throw new ConflictException({ error: 'รูปนี้ถูกจับคู่หรือเปลี่ยนสถานะไปแล้ว - โหลดหน้าใหม่' });
     await this.storage.delete(receipt.storageKey).catch(() => undefined);
     return { id };

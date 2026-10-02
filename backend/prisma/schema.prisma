@@ -86,6 +86,7 @@ model User {
   cancelledSwaps     PlateSwap[]             @relation("PlateSwapCancels")
   cancelledUseCancellations VehicleUseCancellation[] @relation("VehicleUseCancellationCancels")
   cancelledPlateCopies PlateCopy[] @relation("PlateCopyCancels")
+  cancelledTransfers VehicleTransfer[] @relation("VehicleTransferCancels")
   billingClosures    Vehicle[]               @relation("VehicleBillingClosures")
   accountPeriods     CustomerAccountPeriod[] @relation("CustomerAccountPeriods")
   paymentsCreated    CustomerPayment[]       @relation("CustomerPaymentsCreated")
@@ -128,6 +129,7 @@ model Customer {
   plateSwaps      PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
   vehicleUseCancellations VehicleUseCancellation[] // งานยกเลิกการใช้รถที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   plateCopies PlateCopy[] // งานคัดแผ่นป้ายทะเบียนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
+  vehicleTransfers VehicleTransfer[] // งานโอนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   taxInvoices     TaxInvoice[]
   whtCertificates WhtCertificate[]
   quotations      Quotation[]
@@ -640,16 +642,20 @@ model ReceiptImage {
   vehicleUseCancellationId String?
   // หรือของงานคัดแผ่นป้ายทะเบียน (ผู้ใช้ 2026-10-02)
   plateCopyId String?
+  // หรือของงานโอน (ผู้ใช้ 2026-10-02)
+  vehicleTransferId String?
 
   submission             DocumentSubmission?     @relation(fields: [submissionId], references: [id], onDelete: SetNull)
   plateSwap              PlateSwap?              @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
   vehicleUseCancellation VehicleUseCancellation? @relation(fields: [vehicleUseCancellationId], references: [id], onDelete: Cascade)
   plateCopy PlateCopy? @relation(fields: [plateCopyId], references: [id], onDelete: Cascade)
+  vehicleTransfer VehicleTransfer? @relation(fields: [vehicleTransferId], references: [id], onDelete: Cascade)
 
   @@index([submissionId])
   @@index([plateSwapId])
   @@index([vehicleUseCancellationId])
   @@index([plateCopyId])
+  @@index([vehicleTransferId])
 }
 
 // --- การสลับเลข (Plate swap) ------------------------------------------------------
@@ -873,6 +879,70 @@ model PlateCopy {
   @@index([submitDate])
   @@index([returnedDate])
   @@index([plateReceivedDate])
+}
+
+// --- งานโอน (Vehicle transfer) -----------------------------------------------------------
+// ผู้ใช้ 2026-10-02: งานหลัก "งานโอน" ทำหน้าตาเหมือนยกเลิกการใช้รถ (กรอกข้อมูลรถเอง ไม่ผูกกับตาราง Vehicle) รถยนต์ + มอเตอร์ไซค์รวมกัน
+// มี Bill / No Bill ตอนยื่น (ผู้ใช้ 2026-10-02) - มอเตอร์ไซค์มีอัตราแล้ว รถยนต์ยังไม่มี (กรอกเอง) มี 2 แบบ:
+//   OWNER      = โอนตามผู้ถือกรรมสิทธิ์ (ไม่มีตรวจรถ): ยื่น -> รับใบเสร็จกลับ
+//   INSPECTION = โอนตรวจรถ: ยื่น -> ส่งตรวจ -> ผลตรวจ (ผ่านเท่านั้นถึงรับใบเสร็จได้) -> รับใบเสร็จกลับ
+// การตรวจรถของงานนี้แยกจากคิวตรวจรถของรถจดใหม่ (ผู้ใช้ 2026-10-02: "ไม่ได้รวมไปกับการตรวจแบบที่ 1")
+// ทุกงานระบุผู้ถือกรรมสิทธิ์ผู้โอน (transferorName) และผู้รับโอน (transfereeName)
+// cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap)
+model VehicleTransfer {
+  id           String @id @default(cuid())
+  transferType String // OWNER | INSPECTION
+  vehicleClass String @default("CAR") // CAR | MOTO
+
+  // เจ้าของงาน = ลูกค้าที่ส่งงานมา - บังคับกรอกที่ชั้น service
+  customerId String?
+
+  transferorName String // ผู้ถือกรรมสิทธิ์ผู้โอน
+  transfereeName String // ผู้รับโอน
+  engine         String // เลขเครื่อง
+  chassis        String // เลขตัวถัง
+  brand          String // ยี่ห้อ (ชื่อตามตาราง Brand)
+  plateCategory  String // หมวดทะเบียน
+  plateNumber    String // เลขทะเบียน
+
+  submitDate DateTime // วันที่ยื่น
+
+  // ค่าใช้จ่าย (snapshot ตอนยื่น): มอเตอร์ไซค์ = backend คิดจากอัตราของผู้ใช้ (vehicle-transfer-fee.ts) ตามประเภท โอนปกติ/โอนขอใช้ + ด่วน + ค่าปรับ
+  // รถยนต์ = Bill พนักงานกรอกเอง (ยังไม่มีอัตรา) / No Bill คิดเอง / ค่าอากร (dutyAmount) แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม (ผู้ใช้ 2026-10-02)
+  billTotal   Decimal @default(0) @db.Decimal(12, 2)
+  noBillTotal Decimal @default(0) @db.Decimal(12, 2)
+  dutyAmount  Decimal @default(0) @db.Decimal(12, 2)
+  useRequest  Boolean @default(false) // โอนขอใช้ (false = โอนปกติ) - เฉพาะมอเตอร์ไซค์
+  urgent      Boolean @default(false) // งานด่วน +50 ใน No Bill - เฉพาะมอเตอร์ไซค์
+  fineAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าปรับ (เกิน 15 วันหลังออกใบเสร็จ/ใบกำกับภาษี) ใน Bill - พนักงานกรอก เฉพาะมอเตอร์ไซค์
+
+  // ตรวจรถ (เฉพาะ INSPECTION) - ส่งตรวจ -> ผลตรวจ PASS | FAIL (ยกเลิกผลที่บันทึกผิด/ตรวจใหม่ได้ด้วยเหตุผล)
+  inspectionSentDate   DateTime?
+  inspectionResult     String?
+  inspectionResultDate DateTime?
+
+  // รับใบเสร็จกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปผ่าน ReceiptImage.vehicleTransferId)
+  returnedDate  DateTime?
+  receiptNo     String?
+  receiptDate   DateTime?
+  receiptAmount Decimal?  @db.Decimal(12, 2)
+
+  // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการ
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer    Customer?      @relation(fields: [customerId], references: [id])
+  cancelledBy User?          @relation("VehicleTransferCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  receipts    ReceiptImage[]
+
+  @@index([customerId])
+  @@index([submitDate])
+  @@index([returnedDate])
+  @@index([transferType])
 }
 
 // --- งานแจ้งย้ายยามาฮ่า (Yamaha relocation notice) --------------------------------

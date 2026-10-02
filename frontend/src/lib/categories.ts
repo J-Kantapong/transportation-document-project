@@ -65,3 +65,9 @@ export const CANCEL_USE_VEHICLE_KINDS: RegistrationSubtask[] = [
   { title: "รถยนต์", href: "/registration/other/cancel-use/car" },
   { title: "รถจักรยานยนต์", href: "/registration/other/cancel-use/moto" },
 ];
+
+// งานโอน (ผู้ใช้ 2026-10-02): 2 แบบ - โอนตามผู้ถือกรรมสิทธิ์ (ไม่มีตรวจรถ) / โอนตรวจรถ (มีตรวจรถ แยกจากคิวตรวจรถของรถจดใหม่)
+export const TRANSFER_TYPES: RegistrationSubtask[] = [
+  { title: "โอนตามผู้ถือกรรมสิทธิ์", href: "/registration/transfer/owner" },
+  { title: "โอนตรวจรถ", href: "/registration/transfer/inspection" },
+];
