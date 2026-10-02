@@ -203,7 +203,10 @@ function SubmitPickStep() {
         ...lookup.found.filter((v) => !isInWriteScope(writeScope, v.body)).map((v) => ({ chassis: v.chassis, reason: "บัญชีของคุณยื่นรถประเภทนี้ไม่ได้" })),
       ];
       // ผลค้นเลขตัวถังเป็นข้อมูลล่าสุด ณ วันที่ยื่นนี้ (คิวในจออาจโหลดไว้ก่อน/เป็นของวันเดิม)
-      const vehicles = found;
+      // backend ค้นด้วย `in` ไม่การันตีลำดับ (ได้ตามลำดับในฐานข้อมูล) - เรียงกลับตามลำดับที่ยิง/วางมา เพื่อให้ขั้นตั้งค่า/ตรวจทาน/ใบส่งงาน
+      // เรียงตามลำดับเดิม (พบ 2026-10-02)
+      const position = new Map(lines.map((c, i) => [c.toLowerCase(), i]));
+      const vehicles = [...found].sort((a, b) => (position.get(a.chassis.toLowerCase()) ?? 0) - (position.get(b.chassis.toLowerCase()) ?? 0));
       const fresh = vehicles.filter((v) => !selectedIds.has(v.id));
       select(fresh, date);
       const parts = [`เลือกเพิ่ม ${fresh.length} คัน`];
