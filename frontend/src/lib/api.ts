@@ -451,6 +451,8 @@ export const bookPhotoImageUrl = (id: string) => `${API_BASE_URL}/api/book-photo
 // (สิทธิ์เช็คผ่านแถว PlateSwap เอง) ดู backend/src/plate-swap/
 export const plateSwapPlatePhotoImageUrl = (swapId: string) => `${API_BASE_URL}/api/plate-swaps/${swapId}/plate-photo/image`;
 export const plateSwapBookPhotoImageUrl = (swapId: string) => `${API_BASE_URL}/api/plate-swaps/${swapId}/book-photo/image`;
+// รูปป้ายที่ได้รับของงานคัดแผ่นป้ายทะเบียน (ผู้ใช้ 2026-10-02) - คีย์ด้วย id ของงาน สิทธิ์เช็คผ่านแถว PlateCopy เอง ดู backend/src/plate-copy/
+export const plateCopyPlatePhotoImageUrl = (plateCopyId: string) => `${API_BASE_URL}/api/plate-copies/${plateCopyId}/plate-photo/image`;
 
 // หลังได้รับใบเสร็จ: รับป้ายทะเบียน / รับเล่มทะเบียน / Delivery - ดู backend/src/receiving/receiving.service.ts
 export type ReceivingStep = "plate" | "book" | "delivery";

@@ -194,6 +194,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/other/cancel-use/car', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   { prefix: '/registration/other/cancel-use/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
   { prefix: '/registration/other/cancel-use', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
+  // คัดแผ่นป้ายทะเบียน (หมวดอื่นๆ, ผู้ใช้ 2026-10-02): รถยนต์เท่านั้น = STAFF_CAR (+ACCOUNTANT อ่าน) - backend: /api/plate-copies
+  { prefix: '/registration/other/plate-copy', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   // ต่อภาษี: กลุ่มยื่นเอกสาร (รถยนต์/จักรยานยนต์ตามขอบเขตของตัวเอง) + ACCOUNTANT อ่าน - backend: /api/tax-renewals
   { prefix: '/registration/tax-renewal', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },

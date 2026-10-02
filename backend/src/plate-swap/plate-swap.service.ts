@@ -198,7 +198,7 @@ export function optionalIsoDateField(value: unknown, label: string): Date | null
 }
 
 // วันที่รับป้าย/รับเล่ม - บังคับกรอกเสมอ (ต่างจากวันที่ใบเสร็จซึ่งยังไม่รู้ได้)
-function requiredIsoDateField(value: unknown, label: string): Date {
+export function requiredIsoDateField(value: unknown, label: string): Date {
   const date = parseIsoDate(value);
   if (!date) throw new BadRequestException({ error: `${label}ไม่ถูกต้อง (ค.ศ. YYYY-MM-DD)` });
   return date;
