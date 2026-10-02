@@ -53,3 +53,12 @@ export function plateSwapSubtasks(kind: PlateSwapVehicleKind): RegistrationSubta
     { title: "รถเก่า กับ รถเก่า", href: `/registration/plate-swap/${kind}/old-old` },
   ];
 }
+
+// งานย่อยของ "อื่นๆ" (ผู้ใช้ 2026-10-02: เริ่มจาก ยกเลิกการใช้รถ - งานอื่นๆ ที่จะตามมายังรอผู้ใช้กำหนด)
+export const OTHER_SUBTASKS: RegistrationSubtask[] = [{ title: "ยกเลิกการใช้รถ", href: "/registration/other/cancel-use" }];
+
+// ยกเลิกการใช้รถ แยกตามประเภทรถ (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO เหมือนงานสลับเลข)
+export const CANCEL_USE_VEHICLE_KINDS: RegistrationSubtask[] = [
+  { title: "รถยนต์", href: "/registration/other/cancel-use/car" },
+  { title: "รถจักรยานยนต์", href: "/registration/other/cancel-use/moto" },
+];

@@ -16,6 +16,7 @@ import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
 import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
 import { PlateSwapModule } from './plate-swap/plate-swap.module.js';
+import { VehicleUseCancellationModule } from './vehicle-use-cancellation/vehicle-use-cancellation.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ReceiptsModule } from './receipts/receipts.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
@@ -40,6 +41,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     VehiclesModule,
     YamahaRelocationModule,
     PlateSwapModule,
+    VehicleUseCancellationModule,
     DocumentSubmissionModule,
     ReceivingModule,
     ReceiptsModule,
