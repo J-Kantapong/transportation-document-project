@@ -54,8 +54,11 @@ export function plateSwapSubtasks(kind: PlateSwapVehicleKind): RegistrationSubta
   ];
 }
 
-// งานย่อยของ "อื่นๆ" (ผู้ใช้ 2026-10-02: เริ่มจาก ยกเลิกการใช้รถ - งานอื่นๆ ที่จะตามมายังรอผู้ใช้กำหนด)
-export const OTHER_SUBTASKS: RegistrationSubtask[] = [{ title: "ยกเลิกการใช้รถ", href: "/registration/other/cancel-use" }];
+// งานย่อยของ "อื่นๆ" (ผู้ใช้ 2026-10-02: ยกเลิกการใช้รถ + คัดแผ่นป้ายทะเบียน - งานอื่นๆ ที่จะตามมายังรอผู้ใช้กำหนด)
+export const OTHER_SUBTASKS: RegistrationSubtask[] = [
+  { title: "ยกเลิกการใช้รถ", href: "/registration/other/cancel-use" },
+  { title: "คัดแผ่นป้ายทะเบียน", href: "/registration/other/plate-copy" },
+];
 
 // ยกเลิกการใช้รถ แยกตามประเภทรถ (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO เหมือนงานสลับเลข)
 export const CANCEL_USE_VEHICLE_KINDS: RegistrationSubtask[] = [

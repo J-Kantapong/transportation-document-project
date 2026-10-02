@@ -329,6 +329,22 @@ This private repository is the shared development surface for the user, Claude C
   `POST /:id/undo-return`, `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR`
   (cars) / `STAFF_MOTO` (motorcycles) write, `ACCOUNTANT` read. Not built (user did not ask): receive plate/book, Delivery,
   billing, executive overview.
+- Plate copy (คัดแผ่นป้ายทะเบียน, user 2026-10-02, migration `20261002160000_plate_copy`, code in `backend/src/plate-copy/`, pages
+  `/registration/other/plate-copy/{submit,return,receive-plate}`): second subtask of "อื่นๆ", built like vehicle use cancellation
+  (same fields: job owner, owner name, engine, chassis, brand, plate หมวด + เลข, submit date; receipt step with OCR) but cars only
+  (`vehicleClass` is always CAR, MOTO is refused; STAFF_CAR / ADMIN write, ACCOUNTANT read) and with a third step, receive
+  plate. Fixed fees snapshotted at submit: Bill 205, No Bill 100, ค่าอากร 10 kept apart (not in No Bill, not in the total);
+  constants in `plate-copy-fee.ts` (copied in `frontend/src/lib/plate-copy-fee.ts`). Receive plate = a card per job with a
+  camera / gallery photo of the plate, the received date (not before the submit date, not after today) and a confirm
+  button; the photo is required, stored in `PlatePhoto` (hash-checked, `PlateCopy.platePhotoId` + `plateReceivedDate`), no AI,
+  not tied to the receipt step. The usual wait is 15 days, so the card shows the expected date (submit + 15) and an overdue
+  warning (`PLATE_COPY_EXPECTED_DAYS`; information only). Correcting the date / detaching the photo needs a remark and goes to
+  `AuditLog` entity `PlateCopy`, like edit / cancel / undo-return / receipt changes after return; cancel is soft and frees
+  the receipt and plate photo hashes. Receipts use `ReceiptImage.plateCopyId` (the old receipts guards skip these rows).
+  API `/api/plate-copies` (`GET ?status&month`, `POST`, `PATCH /:id`, `PATCH /:id/return`, `POST /:id/undo-return`,
+  `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`, `GET /plate-queue?status`,
+  `POST /:id/plate-photo` (multipart `file`, `date`), `PATCH /:id/plate-photo/date`, `POST /:id/plate-photo/detach`,
+  `GET /:id/plate-photo/image`). Not built (user did not ask): Delivery, billing, executive overview, motorcycles.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,
