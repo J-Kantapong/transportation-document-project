@@ -1,4 +1,5 @@
 import type { BillingTerms, Invoice, InvoiceItemKind, InvoiceLine, ServiceFeeRate } from "@/lib/billing-api";
+import { jobSheetGroup } from "@/lib/job-sheet";
 import { comparePlate } from "@/lib/plate-order";
 
 // คำนวณยอดบิลแบบสดบนหน้าจอ - ต้องให้ผลเท่ากับ backend/src/billing/billing-calculator.ts (backend คำนวณซ้ำและเป็นตัวจริงตอนบันทึก)
@@ -107,12 +108,27 @@ export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "
   return out;
 }
 
+// ลำดับกลุ่มใบส่งงานในใบแนบ (วันที่ยื่นเดียวกัน): รย.1 ธรรมดา, รย.1 ด่วน, รย.2+3, มอเตอร์ไซค์ ธรรมดา, ด่วน, อื่นๆ
+const SHEET_GROUP_ORDER = ["รย.1 แบบธรรมดา", "รย.1 แบบด่วน", "รย.2 และ รย.3", "มอเตอร์ไซค์ แบบธรรมดา", "มอเตอร์ไซค์ แบบด่วน"];
+
+// ใบแนบเรียงตามใบยื่นก่อน (วันที่ยื่น เก่าสุดก่อน > กลุ่มใบส่งงาน) แล้วทะเบียน (หมวด > เลข) แล้วเลขตัวถัง
+// (ผู้ใช้ 2026-10-02) - บรรทัดที่หาใบยื่นไม่เจอ (submitDate ว่าง) ไว้ท้ายสุด
 export function sortLinesByPlate(lines: InvoiceLine[]): InvoiceLine[] {
   const split = (l: InvoiceLine) => {
     const [plateCategory = null, plateNumber = null] = l.plateText ? l.plateText.split(" ") : [];
     return { plateCategory, plateNumber };
   };
-  return [...lines].sort((a, b) => comparePlate(split(a), split(b)) || a.chassis.localeCompare(b.chassis));
+  const groupRank = (l: InvoiceLine) => {
+    const rank = SHEET_GROUP_ORDER.indexOf(jobSheetGroup(l.body, l.submitUrgent ?? false).label);
+    return rank < 0 ? SHEET_GROUP_ORDER.length : rank;
+  };
+  return [...lines].sort(
+    (a, b) =>
+      (a.submitDate ?? "9999").localeCompare(b.submitDate ?? "9999") ||
+      groupRank(a) - groupRank(b) ||
+      comparePlate(split(a), split(b)) ||
+      a.chassis.localeCompare(b.chassis),
+  );
 }
 
 const TH_NUM = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];

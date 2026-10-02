@@ -193,7 +193,17 @@ const itemsOf = (rows: ItemDbRow[]): Item[] =>
     }));
 
 // taxInvoices = ใบกำกับภาษีในระบบที่ยังใช้อยู่ (ผู้ใช้ 2026-09-28) - มีได้ใบเดียวต่อบิล
-const INVOICE_INCLUDE = { lines: true, items: true, taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true } } } as const;
+// lines.vehicle.documentSubmissions = ใบยื่นล่าสุดของรถแต่ละคัน - ใบแนบเรียงตามใบยื่นก่อนทะเบียน (ผู้ใช้ 2026-10-02)
+const INVOICE_INCLUDE = {
+  lines: {
+    include: {
+      vehicle: {
+        select: { documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { submitDate: true, urgent: true, createdAt: true } } },
+      },
+    },
+  },
+  items: true,
+  taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true } } } as const;
 
 // วันครบกำหนดชำระ = วันออกบิล + เครดิตเทอมของลูกค้า (ผู้ใช้ 2026-09-28) - ไม่ได้ตั้งเครดิตเทอม = ไม่มีวันครบกำหนด
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
@@ -1327,6 +1337,7 @@ export class BillingService {
       deductionNote: string | null;
       plateSwapId: string | null;
       swapReceiptAmount: unknown;
+      vehicle?: { documentSubmissions: Array<{ submitDate: Date; urgent: boolean; createdAt: Date }> } | null;
     }>;
   }, historyCount?: number) {
     return {
@@ -1388,6 +1399,9 @@ export class BillingService {
         deductionNote: l.deductionNote,
         plateSwapId: l.plateSwapId,
         swapReceiptAmount: l.swapReceiptAmount === null ? null : Number(l.swapReceiptAmount),
+        // ใบยื่นของรถคันนี้ (อ่านสด) - ใบแนบเรียงตาม วันที่ยื่น > กลุ่มใบส่งงาน > ทะเบียน
+        submitDate: iso(l.vehicle?.documentSubmissions[0]?.submitDate ?? null),
+        submitUrgent: l.vehicle?.documentSubmissions[0]?.urgent ?? null,
       })),
     };
   }

@@ -296,6 +296,9 @@ export interface InvoiceLine {
   // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount
   plateSwapId: string | null;
   swapReceiptAmount: number | null;
+  // ใบยื่นล่าสุดของรถ (อ่านสด ไม่ได้ snapshot) - ใช้เรียงใบแนบ; null = หาใบยื่นไม่เจอ / ข้อมูลจากหน้าจอที่ยังไม่บันทึก
+  submitDate?: string | null;
+  submitUrgent?: boolean | null;
 }
 
 // บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29): FEE = ค่าธรรมเนียมราชการ ไม่มี VAT ไม่หัก · SERVICE = ค่าบริการ VAT + หัก · GOODS = ขายสินค้า VAT ไม่หัก
