@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
 import {
   ACCOUNT_LABEL,
@@ -83,6 +83,7 @@ export function BillingCustomInvoicePage() {
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
   const [yamahaMonthPick, setYamahaMonthPick] = useState<string | null>(null);
   const [yamahaSize, setYamahaSize] = useState<YamahaSize>("SMALL");
+  const lastPulledRows = useRef<string | null>(null);
   const [yamahaBusy, setYamahaBusy] = useState(false);
   const [yamahaNote, setYamahaNote] = useState("");
   const [whtValue, setWhtValue] = useState<number | null>(null);
@@ -229,8 +230,13 @@ export function BillingCustomInvoicePage() {
     const hasContent = rows.some(
       (r) => r.description.trim() !== "" || r.unitPriceText.trim() !== "",
     );
+    // บรรทัดที่ยังเป็นชุดที่ดึงมาครั้งก่อนโดยไม่มีใครแก้ (เช่น เพิ่งสลับรถเล็ก/รถใหญ่) แทนที่ได้เลย ไม่ต้องถาม
+    const untouched =
+      lastPulledRows.current !== null &&
+      JSON.stringify(rows) === lastPulledRows.current;
     if (
       hasContent &&
+      !untouched &&
       !window.confirm("บรรทัดที่กรอกไว้จะถูกแทนที่ด้วยยอดของเดือนนี้ ดำเนินการต่อ?")
     )
       return;
@@ -243,10 +249,18 @@ export function BillingCustomInvoicePage() {
       const label = thaiMonthLabel(month);
       const sizeText = YAMAHA_SIZE_LABEL[size];
       if (res.counts[size] === 0) {
+        // ไม่มีรถขนาดนี้ในเดือนนั้น - ถ้าบรรทัดเป็นชุดที่ดึงมาครั้งก่อน (อีกขนาด) ต้องเอาออก ไม่ให้ค้างอยู่ในบิลนี้
+        if (untouched) {
+          setRows([emptyItemRow()]);
+          lastPulledRows.current = null;
+          setConfirming(false);
+        }
         setYamahaNote(`เดือน ${label} ยังไม่มีรายการแจ้งย้าย${sizeText}ในระบบ`);
         return;
       }
-      setRows(yamahaBillRows(month, res.counts, size));
+      const pulled = yamahaBillRows(month, res.counts, size);
+      setRows(pulled);
+      lastPulledRows.current = JSON.stringify(pulled);
       setConfirming(false);
       setYamahaNote(
         `ดึงยอดเดือน ${label} แล้ว: ${sizeText} ${res.counts[size]} คัน` +
@@ -507,7 +521,12 @@ export function BillingCustomInvoicePage() {
                   type="button"
                   className={yamahaSize === s ? "primary" : undefined}
                   disabled={yamahaBusy}
-                  onClick={() => (setYamahaSize(s), setYamahaNote(""))}
+                  onClick={() => {
+                    setYamahaSize(s);
+                    setYamahaNote("");
+                    // เคยดึงเดือนไว้แล้ว = สลับขนาดแล้วดึงของขนาดใหม่ให้เลย (ไม่งั้นบรรทัดของอีกขนาดค้างอยู่)
+                    if (yamahaMonthPick) void pullYamaha(yamahaMonthPick, s);
+                  }}
                 >
                   {YAMAHA_SIZE_LABEL[s]}
                 </button>
