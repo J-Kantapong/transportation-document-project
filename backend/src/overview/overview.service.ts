@@ -8,6 +8,7 @@ import {
   billValueOf,
   buildForecast,
   daysBetween,
+  dutyOfItems,
   FORECAST_SPEND_DAYS,
   inProcessMoney,
   isoOf,
@@ -67,9 +68,11 @@ interface SpendEvent {
   bill: number; // มีใบเสร็จ
   noBill: number; // ลงขัน ไม่มีใบเสร็จ
   other: number; // ไม่ได้แยกว่า Bill/No bill (ค่าแจ้งย้าย/ตัดบัญชี)
+  duty?: number; // ค่าอากร - แยกจากค่าใช้จ่าย ไม่อยู่ใน noBill และไม่นับในยอดรวม (ผู้ใช้ 2026-10-05)
 }
 
 const eventTotal = (e: SpendEvent) => e.bill + e.noBill + e.other;
+const dutyOf = (e: SpendEvent) => e.duty ?? 0;
 
 // แถวของตาราง "งานแต่ละขั้นตอน" - ค่า null ในช่อง car/moto = ขั้นนี้ไม่มีรถประเภทนั้น (เช่น สลับเลขมีแต่รถยนต์)
 export interface SplitValue {
@@ -85,7 +88,8 @@ export interface ProcessRow {
   href: string;
   done: SplitValue; // ทำไปในวันที่เลือก
   doneNote: string | null;
-  spend: SplitValue | null; // ค่าใช้จ่ายในวันที่เลือก (บาท) - null = ขั้นนี้ไม่มีค่าใช้จ่าย
+  spend: SplitValue | null; // ค่าใช้จ่ายในวันที่เลือก (บาท) - null = ขั้นนี้ไม่มีค่าใช้จ่าย (ไม่รวมค่าอากร)
+  duty: SplitValue | null; // ค่าอากรของวันที่เลือก - แสดงแยกอีกบรรทัด, null = ขั้นนี้ไม่มีค่าอากร
   pending: SplitValue | null; // ค้างอยู่ตอนนี้ - null = ไม่มีคิว
   oldestDays: number | null;
   lateCount: number;
@@ -149,16 +153,16 @@ export class OverviewService {
       // --- ค่าใช้จ่าย 60 วัน (กราฟรายวัน + เทียบช่วงก่อนหน้า) + 28 วันถึงวันนี้ (ประมาณการ) ---
       this.prisma.documentSubmission.findMany({
         where: { status: { not: 'FAILED' }, OR: spendWindows.map((w) => ({ submitDate: w })), vehicle: live },
-        select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, noBillTotal: true, taxAmount: true, vehicle: bodyOf },
+        select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, noBillTotal: true, noBillItems: true, taxAmount: true, vehicle: bodyOf },
       }),
       // งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอด (ผู้ใช้ 2026-09-27: ยกเลิกแบบไม่ลบแถว)
       this.prisma.plateSwap.findMany({
         where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
-        select: { submitDate: true, returnedDate: true, billTotal: true, noBillTotal: true },
+        select: { submitDate: true, returnedDate: true, billTotal: true, noBillTotal: true, noBillItems: true },
       }),
       this.prisma.taxRenewal.findMany({
         where: { cancelledAt: null, OR: spendWindows.map((w) => ({ paymentDate: w })) },
-        select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true },
+        select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true, noBillItems: true },
       }),
       this.prisma.yamahaRelocationEntry.findMany({
         where: { cancelledAt: null, OR: spendWindows.map((w) => ({ date: w })) },
@@ -315,29 +319,35 @@ export class OverviewService {
 
     // ---------- การใช้เงิน ----------
     const events: SpendEvent[] = [];
+    // noBillTotal ที่เก็บไว้รวมค่าอากรอยู่ด้วย - ตัดออกมาแสดงแยก (ผู้ใช้ 2026-10-05: ยอด 05/10 ต้องเป็น 20,738 ไม่ใช่ 20,858)
     for (const s of subs) {
+      const duty = dutyOfItems(s.noBillItems);
       events.push({
         date: isoOf(s.submitDate),
         category: 'submit',
         kind: vehicleKindOf(s.vehicle.body),
         bill: billValueOf(s),
-        noBill: num(s.noBillTotal),
+        noBill: round2(num(s.noBillTotal) - duty),
         other: 0,
+        duty,
       });
     }
     for (const s of swaps) {
       if (inSpendWindow(s.submitDate)) {
-        events.push({ date: isoOf(s.submitDate), category: 'plateSwap', kind: 'car', bill: num(s.billTotal), noBill: num(s.noBillTotal), other: 0 });
+        const duty = dutyOfItems(s.noBillItems);
+        events.push({ date: isoOf(s.submitDate), category: 'plateSwap', kind: 'car', bill: num(s.billTotal), noBill: round2(num(s.noBillTotal) - duty), other: 0, duty });
       }
     }
     for (const r of renewals) {
+      const duty = dutyOfItems(r.noBillItems);
       events.push({
         date: isoOf(r.paymentDate!),
         category: 'taxRenewal',
         kind: renewalKind(r.vehicleType),
         bill: num(r.billTotal),
-        noBill: num(r.noBillTotal),
+        noBill: round2(num(r.noBillTotal) - duty),
         other: 0,
+        duty,
       });
     }
     for (const y of yamaha) events.push({ date: isoOf(y.date), category: 'yamaha', kind: null, bill: num(y.billFee), noBill: num(y.noBillFee), other: 0 });
@@ -361,13 +371,15 @@ export class OverviewService {
       let total = 0;
       let bill = 0;
       let noBill = 0;
+      let duty = 0;
       for (const e of events) {
         if (e.date < from || e.date > to) continue;
         total += eventTotal(e);
         bill += e.bill;
         noBill += e.noBill;
+        duty += dutyOf(e);
       }
-      return { total: round2(total), bill: round2(bill), noBill: round2(noBill), other: round2(total - bill - noBill) };
+      return { total: round2(total), bill: round2(bill), noBill: round2(noBill), other: round2(total - bill - noBill), duty: round2(duty) };
     };
     const sumMoney = (rows: Array<{ date: string; amount: number }>, from: string, to: string) =>
       round2(rows.filter((r) => r.date >= from && r.date <= to).reduce((a, r) => a + r.amount, 0));
@@ -398,6 +410,7 @@ export class OverviewService {
         bill: s.bill,
         noBill: s.noBill,
         other: s.other,
+        duty: s.duty,
         billed: sumMoney(billedRows, date, date),
         collected: sumMoney(collectedRows, date, date),
         submitted: submittedByDay.get(date) ?? 0,
@@ -407,7 +420,9 @@ export class OverviewService {
     const categories = SPEND_CATEGORIES.map((c) => {
       const of = (w: readonly [string, string]) =>
         round2(events.filter((e) => e.category === c.key && e.date >= w[0] && e.date <= w[1]).reduce((a, e) => a + eventTotal(e), 0));
-      return { key: c.key, label: c.label, today: of(windows.today), last30: of(windows.last30) };
+      const dutyOfWindow = (w: readonly [string, string]) =>
+        round2(events.filter((e) => e.category === c.key && e.date >= w[0] && e.date <= w[1]).reduce((a, e) => a + dutyOf(e), 0));
+      return { key: c.key, label: c.label, today: of(windows.today), last30: of(windows.last30), dutyToday: dutyOfWindow(windows.today), dutyLast30: dutyOfWindow(windows.last30) };
     });
 
     // ค่าใช้จ่ายของวันที่เลือก แยกประเภทรถ - ใช้ในตารางงานแต่ละขั้นตอน
@@ -415,6 +430,12 @@ export class OverviewService {
       const rows = events.filter((e) => e.category === category && e.date === asOf);
       if (category === 'yamaha') return { car: null, moto: null, unsplit: round2(rows.reduce((a, e) => a + eventTotal(e), 0)) };
       return tally(rows, (e) => e.kind!, eventTotal);
+    };
+    // ค่าอากรของวันที่เลือก (แยกรถยนต์/จักรยานยนต์) - null = หมวดนี้ไม่มีค่าอากร จะได้ไม่แสดงเลข 0 ปลอม
+    const dayDuty = (category: CategoryKey): SplitValue | null => {
+      const rows = events.filter((e) => e.category === category && e.date === asOf);
+      if (!rows.some((e) => dutyOf(e) > 0)) return null;
+      return tally(rows, (e) => e.kind!, dutyOf);
     };
 
     // ---------- ลูกหนี้ / เงินจม ----------
@@ -556,7 +577,7 @@ export class OverviewService {
     const swapsReturned = swaps.filter((s) => s.returnedDate && isoOf(s.returnedDate) === asOf).length;
     const yamahaToday = yamaha.filter((y) => isoOf(y.date) === asOf);
 
-    const stageRow = (key: StageKey, group: ProcessRow['group'], done: SplitValue, spend: SplitValue | null, doneNote: string | null = null): ProcessRow => {
+    const stageRow = (key: StageKey, group: ProcessRow['group'], done: SplitValue, spend: SplitValue | null, doneNote: string | null = null, duty: SplitValue | null = null): ProcessRow => {
       const b = backlog[key];
       return {
         key,
@@ -566,6 +587,7 @@ export class OverviewService {
         done,
         doneNote,
         spend,
+        duty,
         pending: b.pending,
         oldestDays: b.oldestDays,
         lateCount: b.lateCount,
@@ -582,6 +604,7 @@ export class OverviewService {
         done: doneOf((v) => on(v.date)),
         doneNote: null,
         spend: null,
+        duty: null,
         pending: null,
         oldestDays: null,
         lateCount: 0,
@@ -590,7 +613,7 @@ export class OverviewService {
       stageRow('transfer', 'new', doneOf((v) => v.transferDone && on(v.transferCompletedDate)), daySpend('transfer')),
       stageRow('inspectSend', 'new', doneOf((v) => on(v.inspectionSentDate)), daySpend('inspection')),
       stageRow('inspectResult', 'new', doneOf((v) => on(v.inspectionResultDate)), null, passed || failedInspect ? `ผ่าน ${passed} · ไม่ผ่าน ${failedInspect}` : null),
-      stageRow('submit', 'new', tally(daySubs, (s) => vehicleKindOf(s.vehicle.body)), daySpend('submit')),
+      stageRow('submit', 'new', tally(daySubs, (s) => vehicleKindOf(s.vehicle.body)), daySpend('submit'), null, dayDuty('submit')),
       stageRow('receipt', 'new', tally(dayReceipts, (s) => vehicleKindOf(s.vehicle.body)), null),
       stageRow('plate', 'new', doneOf((v) => on(v.plateReceivedDate)), null),
       stageRow('book', 'new', doneOf((v) => on(v.bookReceivedDate)), null),
@@ -606,11 +629,12 @@ export class OverviewService {
           { car: swaps.filter((s) => isoOf(s.submitDate) === asOf).length, moto: null },
           { car: daySpend('plateSwap').car, moto: null },
           swapsReturned ? `รับเอกสารกลับ ${swapsReturned}` : null,
+          dayDuty('plateSwap') && { car: dayDuty('plateSwap')!.car, moto: null },
         ),
         label: 'สลับเลข (ยื่น)',
         pending: { car: backlog.plateSwap.pending.car, moto: null },
       },
-      { ...stageRow('taxRenewal', 'other', tally(renewals.filter((r) => isoOf(r.paymentDate!) === asOf), (r) => renewalKind(r.vehicleType)), daySpend('taxRenewal')), label: 'ต่อภาษี' },
+      { ...stageRow('taxRenewal', 'other', tally(renewals.filter((r) => isoOf(r.paymentDate!) === asOf), (r) => renewalKind(r.vehicleType)), daySpend('taxRenewal'), null, dayDuty('taxRenewal')), label: 'ต่อภาษี' },
       {
         key: 'yamaha',
         group: 'other',
@@ -619,6 +643,7 @@ export class OverviewService {
         done: { car: null, moto: null, unsplit: yamahaToday.reduce((a, y) => a + y.count, 0) },
         doneNote: null,
         spend: daySpend('yamaha'),
+        duty: null,
         pending: null,
         oldestDays: null,
         lateCount: 0,

@@ -50,7 +50,12 @@ const GROUPS: Array<{ key: ProcessRow["group"]; label: string }> = [
 
 export function ProcessBoard({ rows, dayWord }: { rows: ProcessRow[]; dayWord: string }) {
   const spendTotal = { car: 0, moto: 0, unsplit: 0 };
+  const dutyTotal = { car: 0, moto: 0 };
   for (const r of rows) {
+    if (r.duty) {
+      dutyTotal.car += r.duty.car ?? 0;
+      dutyTotal.moto += r.duty.moto ?? 0;
+    }
     if (!r.spend) continue;
     spendTotal.car += r.spend.car ?? 0;
     spendTotal.moto += r.spend.moto ?? 0;
@@ -142,6 +147,14 @@ export function ProcessBoard({ rows, dayWord }: { rows: ProcessRow[]; dayWord: s
               <td colSpan={5} className="muted">
                 {spendTotal.unsplit > 0 && `+ ไม่แยกประเภท ${baht(spendTotal.unsplit)} บาท`}
               </td>
+            </tr>
+            {/* ค่าอากรแยกบรรทัด ไม่รวมในค่าใช้จ่ายด้านบน (ผู้ใช้ 2026-10-05) */}
+            <tr className="muted">
+              <td>ค่าอากร (แยก ไม่รวมในยอด)</td>
+              <td colSpan={2} />
+              <td className="num-col">{baht(dutyTotal.car)}</td>
+              <td className="num-col proc-split-end">{baht(dutyTotal.moto)}</td>
+              <td colSpan={5} />
             </tr>
           </tfoot>
         </table>

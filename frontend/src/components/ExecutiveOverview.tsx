@@ -162,6 +162,12 @@ export function ExecutiveOverview() {
           <div className="foot">
             Bill {baht(spend.today.bill)} · No bill {baht(spend.today.noBill)}
             {spend.today.other > 0 && ` · อื่นๆ ${baht(spend.today.other)}`}
+            {spend.today.duty > 0 && (
+              <>
+                <br />
+                ค่าอากร {baht(spend.today.duty)} (แยก ไม่รวมในยอด)
+              </>
+            )}
             <br />
             <Change pct={spend.changeVsYesterday} suffix="จากวันก่อน" invert />
           </div>
@@ -269,6 +275,7 @@ export function ExecutiveOverview() {
                   <div className="chart-tip-sub">
                     Bill {baht(d.bill)} · No bill {baht(d.noBill)}
                     {d.other > 0 && ` · แจ้งย้าย ${baht(d.other)}`}
+                    {d.duty > 0 && ` · ค่าอากร (แยก) ${baht(d.duty)}`}
                   </div>
                   <div className="chart-tip-sub">
                     วางบิล {baht(d.billed)} · ยื่นเอกสาร {d.submitted} คัน
@@ -287,6 +294,7 @@ export function ExecutiveOverview() {
                     <th className="num-col">ใช้เงิน</th>
                     <th className="num-col">Bill</th>
                     <th className="num-col">No bill</th>
+                    <th className="num-col">ค่าอากร (แยก)</th>
                     <th className="num-col">รับเงิน</th>
                     <th className="num-col">วางบิล</th>
                     <th className="num-col">ยื่นเอกสาร (คัน)</th>
@@ -299,6 +307,7 @@ export function ExecutiveOverview() {
                       <td className="num-col">{baht(d.spend)}</td>
                       <td className="num-col">{baht(d.bill)}</td>
                       <td className="num-col">{baht(d.noBill)}</td>
+                      <td className="num-col">{baht(d.duty)}</td>
                       <td className="num-col">{baht(d.collected)}</td>
                       <td className="num-col">{baht(d.billed)}</td>
                       <td className="num-col">{d.submitted}</td>
@@ -347,6 +356,12 @@ export function ExecutiveOverview() {
                   <td>รวม</td>
                   <td className="num-col">{baht(spend.today.total)}</td>
                   <td className="num-col">{baht(spend.last30.total)}</td>
+                  <td />
+                </tr>
+                <tr className="muted">
+                  <td>ค่าอากร (แยก ไม่รวมในยอด)</td>
+                  <td className="num-col">{baht(spend.today.duty)}</td>
+                  <td className="num-col">{baht(spend.last30.duty)}</td>
                   <td />
                 </tr>
               </tfoot>

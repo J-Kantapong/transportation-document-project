@@ -8,6 +8,7 @@ export interface SpendSum {
   bill: number;
   noBill: number;
   other: number; // ค่าแจ้งย้าย/ตัดบัญชี (ไม่ได้แยก Bill/No bill)
+  duty: number; // ค่าอากร - แยกจากยอดรวม/No bill แสดงเป็นบรรทัดของตัวเอง (ผู้ใช้ 2026-10-05)
 }
 
 export interface DailyPoint {
@@ -16,6 +17,7 @@ export interface DailyPoint {
   bill: number;
   noBill: number;
   other: number;
+  duty: number;
   billed: number;
   collected: number;
   submitted: number;
@@ -55,7 +57,8 @@ export interface ProcessRow {
   href: string;
   done: SplitValue;
   doneNote: string | null;
-  spend: SplitValue | null;
+  spend: SplitValue | null; // ไม่รวมค่าอากร
+  duty: SplitValue | null; // ค่าอากรของวันที่เลือก (null = ขั้นนี้ไม่มี)
   pending: SplitValue | null;
   oldestDays: number | null;
   lateCount: number;
@@ -104,7 +107,7 @@ export interface Overview {
     changeVsYesterday: number | null;
     changeVs7: number | null;
     changeVs30: number | null;
-    categories: Array<{ key: string; label: string; today: number; last30: number }>;
+    categories: Array<{ key: string; label: string; today: number; last30: number; dutyToday: number; dutyLast30: number }>;
   };
   cash: {
     collectedToday: number;

@@ -59,6 +59,17 @@ export interface SubmissionMoney {
 
 const money = (d: unknown) => (d === null || d === undefined ? 0 : Number(d));
 
+// ค่าอากรในชุดรายการ No Bill ที่เก็บไว้ ([{label, amount}]) - ผู้ใช้ 2026-10-05: ค่าอากรไม่รวมในค่าใช้จ่าย แสดงแยกอีกบรรทัด
+// (เหมือนหน้าตรวจสอบก่อนยื่น / สลับเลข) รายการที่ชื่อขึ้นต้น "ค่าอากร" ทั้ง "ค่าอากร (ปกติ)" และ "ค่าอากร"
+export function dutyOfItems(items: unknown): number {
+  if (!Array.isArray(items)) return 0;
+  let total = 0;
+  for (const i of items as Array<{ label?: unknown; amount?: unknown }>) {
+    if (typeof i?.label === 'string' && i.label.startsWith('ค่าอากร')) total += money(i.amount);
+  }
+  return round2(total);
+}
+
 // ยอด Bill ของการยื่นหนึ่งครั้ง: ได้ใบเสร็จแล้วและกรอกยอดไว้ = ยอดบนใบเสร็จจริง (เหมือนหน้าวางบิล) ไม่งั้นใช้ค่าธรรมเนียม + ภาษี
 // ที่ระบบคำนวณตอนยื่น - ทุกช่องของภาพรวม (ใช้เงิน / ระหว่างดำเนินการ / รอวางบิล) ใช้กฎเดียวกัน รถคันเดียวจึงไม่เปลี่ยนยอด
 // ตอนย้ายช่อง (พบ 2026-09-27)

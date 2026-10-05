@@ -105,6 +105,22 @@ describe('OverviewService.overview', () => {
     expect(result.spend.today).toMatchObject({ bill: 4850, noBill: 200, total: 5050 });
   });
 
+  it('ใช้เงิน: ค่าอากรแยกออกจาก No bill และไม่รวมในยอดรวม แสดงเป็นบรรทัดของตัวเอง (ผู้ใช้ 2026-10-05)', async () => {
+    const duty = (label: string, amount: number) => [{ label, amount }, { label: 'ลงขัน', amount: 140 }];
+    const { svc } = service({
+      spendSubs: [
+        sub('2026-09-27', { status: 'RECEIPT_RECEIVED', receiptAmount: 1655, noBillTotal: 150, noBillItems: duty('ค่าอากร (ปกติ)', 10) }),
+        sub('2026-09-27', { status: 'RECEIPT_RECEIVED', receiptAmount: 7708, noBillTotal: 170, noBillItems: duty('ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)', 30) }),
+      ],
+    });
+    const result = await svc.overview();
+    expect(result.spend.today).toMatchObject({ bill: 9363, noBill: 280, duty: 40, total: 9643 });
+    const row = result.process.find((r) => r.key === 'submit')!;
+    expect(row.spend).toEqual({ car: 9643, moto: 0 });
+    expect(row.duty).toEqual({ car: 40, moto: 0 });
+    expect(result.process.find((r) => r.key === 'transfer')!.duty).toBeNull();
+  });
+
   it('จ่ายแล้วระหว่างดำเนินการ: ไม่นับงานที่คีย์ล่วงหน้า และใช้ยอดใบเสร็จจริงเมื่อมี', async () => {
     const { svc } = service({
       inProcessSubs: [
