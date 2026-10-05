@@ -44,6 +44,8 @@ export interface QuotationItem {
   includesReceipt: boolean;
 }
 
+export type YamahaSize = "SMALL" | "LARGE";
+
 export interface YamahaCounts {
   SMALL: number;
   LARGE: number;
@@ -73,6 +75,7 @@ export interface Quotation {
   whtAmount: number;
   netTotal: number;
   yamahaMonth: string | null;
+  yamahaSize: YamahaSize | null; // รถเล็ก / รถใหญ่ ออกคนละใบ · null = ใบเดิมที่รวมทั้งสอง
   yamahaCounts: YamahaCounts | null;
   approvedDate: string | null;
   poNumber: string | null;
@@ -114,6 +117,7 @@ export interface QuotationInput {
   items: Array<Pick<QuotationItem, "kind" | "description" | "quantity" | "unitPrice" | "cost">> | QuotationRateInput[];
   whtRate?: number;
   yamahaMonth?: string | null;
+  yamahaSize?: YamahaSize | null;
   expectedUpdatedAt?: string;
 }
 
@@ -133,6 +137,7 @@ export interface QuotationHistoryEntry {
 
 export interface YamahaMonthQuote {
   month: string;
+  size: YamahaSize;
   counts: YamahaCounts;
   items: Array<Pick<QuotationItem, "kind" | "description" | "quantity" | "unitPrice" | "cost">>;
   quotedBy: { id: string; quotationNo: string | null } | null;
@@ -157,7 +162,7 @@ export const quotationApi = {
   get: (id: string) => request<One>(at(id)),
   history: (id: string) => request<{ entries: QuotationHistoryEntry[] }>(at(id, "history")),
   ready: (customerId: string) => request<{ quotations: Quotation[] }>(`${base}/ready?customerId=${encodeURIComponent(customerId)}`),
-  yamahaMonth: (month: string) => request<YamahaMonthQuote>(`${base}/yamaha-month?month=${encodeURIComponent(month)}`),
+  yamahaMonth: (month: string, size: YamahaSize) => request<YamahaMonthQuote>(`${base}/yamaha-month?month=${encodeURIComponent(month)}&size=${size}`),
   create: (data: QuotationInput) => request<One>(base, json("POST", data)),
   update: (id: string, data: QuotationInput) => request<One>(at(id), json("PATCH", data)),
   remove: (id: string) => request<{ id: string }>(at(id), { method: "DELETE" }),

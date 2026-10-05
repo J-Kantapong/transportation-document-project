@@ -34,12 +34,17 @@ describe('yamaha monthly quote', () => {
     expect(yamahaServiceRate('SMALL', '2028-01')).toBe(22);
     expect(yamahaServiceRate('LARGE', '2028-06')).toBe(50);
   });
-  it('builds a fee and a service line per size, with the monthly fee between small and large', () => {
-    const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 40 });
+  it('builds the small-vehicle quotation: fee, service and the monthly fee', () => {
+    const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 40 }, 'SMALL');
     expect(items.map((i) => [i.kind, i.description, i.quantity, i.unitPrice])).toEqual([
       ['FEE', 'ค่าธรรมเนียมแจ้งย้ายรถจักรยานยนต์ (เล็ก) ประจำเดือน ตุลาคม 2026', 512, 5],
       ['SERVICE', 'ค่าบริการแจ้งย้ายรถจักรยานยนต์ (เล็ก)', 512, 20],
       ['SERVICE', 'ค่าบริการจัดการเอกสารบัญชีรถจักรยานยนต์ยามาฮ่า', 1, 9000],
+    ]);
+  });
+  it('builds the large-vehicle quotation separately: fee and service only', () => {
+    const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 40 }, 'LARGE');
+    expect(items.map((i) => [i.kind, i.description, i.quantity, i.unitPrice])).toEqual([
       ['FEE', 'ค่าธรรมเนียมแจ้งย้ายรถจักรยานยนต์ (ใหญ่) ประจำเดือน ตุลาคม 2026', 40, 5],
       ['SERVICE', 'ค่าบริการแจ้งย้ายรถจักรยานยนต์ (ใหญ่)', 40, 50],
     ]);
@@ -48,8 +53,9 @@ describe('yamaha monthly quote', () => {
     expect(thaiMonthLabel('2026-10')).toBe('ตุลาคม 2026');
     expect(thaiMonthLabel('2027-01')).toBe('มกราคม 2027');
   });
-  it('leaves out a size with no vehicles', () => {
-    expect(yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 0 }).map((i) => i.quantity)).toEqual([512, 512, 1]);
+  it('leaves out the per-vehicle lines of a size with no vehicles, keeping the monthly fee on the small quotation', () => {
+    expect(yamahaQuoteItems('2026-10', { SMALL: 0, LARGE: 0 }, 'SMALL').map((i) => i.quantity)).toEqual([1]);
+    expect(yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 0 }, 'LARGE')).toEqual([]);
   });
   it('validates the month format', () => {
     expect(isMonth('2026-10')).toBe(true);

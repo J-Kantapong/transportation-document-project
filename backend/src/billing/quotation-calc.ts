@@ -54,18 +54,22 @@ export interface YamahaCounts {
   LARGE: number;
 }
 
-// บรรทัดที่เสนอให้ของเดือน month (YYYY-MM ค.ศ.) - ขนาดที่ไม่มีรถในเดือนนั้นไม่ออกบรรทัด · บรรทัดรายเดือนอยู่ระหว่างรถเล็กกับรถใหญ่
-export function yamahaQuoteItems(month: string, counts: YamahaCounts) {
+export type YamahaSize = 'SMALL' | 'LARGE';
+export const isYamahaSize = (v: unknown): v is YamahaSize => v === 'SMALL' || v === 'LARGE';
+
+// รถเล็กกับรถใหญ่ส่งคนละแผนก ออกคนละใบ (ผู้ใช้ 2026-10-05): ใบรถเล็กมี ค่าธรรมเนียม / ค่าบริการ / ค่าบริการจัดการเอกสารรายเดือน 9,000
+// ใบรถใหญ่มีค่าธรรมเนียม / ค่าบริการ · ไม่มีรถขนาดนั้นในเดือนก็ไม่ออกบรรทัดต่อคัน (ใบรถเล็กยังมีบรรทัดรายเดือน)
+export function yamahaQuoteItems(month: string, counts: YamahaCounts, size: YamahaSize) {
   const label = thaiMonthLabel(month);
   type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: null };
-  const forSize = (size: 'SMALL' | 'LARGE'): Line[] => {
-    if (counts[size] <= 0) return [];
-    const tag = size === 'LARGE' ? '(ใหญ่)' : '(เล็ก)';
-    return [
-      { kind: 'FEE', description: `${YAMAHA_FEE_TITLE} ${tag} ประจำเดือน ${label}`, quantity: counts[size], unitPrice: YAMAHA_FEE_PER_VEHICLE, cost: null },
-      { kind: 'SERVICE', description: `${YAMAHA_SERVICE_TITLE} ${tag}`, quantity: counts[size], unitPrice: yamahaServiceRate(size, month), cost: null },
-    ];
-  };
+  const perVehicle: Line[] =
+    counts[size] <= 0
+      ? []
+      : [
+          { kind: 'FEE', description: `${YAMAHA_FEE_TITLE} ${size === 'LARGE' ? '(ใหญ่)' : '(เล็ก)'} ประจำเดือน ${label}`, quantity: counts[size], unitPrice: YAMAHA_FEE_PER_VEHICLE, cost: null },
+          { kind: 'SERVICE', description: `${YAMAHA_SERVICE_TITLE} ${size === 'LARGE' ? '(ใหญ่)' : '(เล็ก)'}`, quantity: counts[size], unitPrice: yamahaServiceRate(size, month), cost: null },
+        ];
+  if (size === 'LARGE') return perVehicle;
   const monthly: Line = { kind: 'SERVICE', description: YAMAHA_MONTHLY_FEE_TITLE, quantity: 1, unitPrice: YAMAHA_MONTHLY_FEE, cost: null };
-  return [...forSize('SMALL'), monthly, ...forSize('LARGE')];
+  return [...perVehicle, monthly];
 }

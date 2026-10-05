@@ -219,7 +219,7 @@ export function QuotationDetailPage() {
           <Info label="ยืนราคาถึง" value={`${isoToDisplayDate(q.validUntil)} (${q.validDays} วัน)`} />
           {q.replaces?.quotationNo && <Info label="ฉบับแก้ไขของ" value={q.replaces.quotationNo} />}
           {q.yamahaMonth && q.yamahaCounts && (
-            <Info label="ยอดแจ้งย้ายยามาฮ่า" value={`เดือน ${q.yamahaMonth.slice(5, 7)}/${q.yamahaMonth.slice(0, 4)} · รถเล็ก ${q.yamahaCounts.SMALL} · รถใหญ่ ${q.yamahaCounts.LARGE}`} />
+            <Info label="ยอดแจ้งย้ายยามาฮ่า" value={`เดือน ${q.yamahaMonth.slice(5, 7)}/${q.yamahaMonth.slice(0, 4)} · ${q.yamahaSize === "SMALL" ? `รถเล็ก ${q.yamahaCounts.SMALL} คัน` : q.yamahaSize === "LARGE" ? `รถใหญ่ ${q.yamahaCounts.LARGE} คัน` : `รถเล็ก ${q.yamahaCounts.SMALL} · รถใหญ่ ${q.yamahaCounts.LARGE}`}`} />
           )}
           {q.approvedDate && <Info label="ลูกค้าอนุมัติ" value={isoToDisplayDate(q.approvedDate)} />}
           {q.poNumber && <Info label="เลข PO" value={q.poNumber} />}

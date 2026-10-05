@@ -14,10 +14,10 @@ export class QuotationController {
     return this.quotations.list({ stage, q, offset });
   }
 
-  // ยอดแจ้งย้ายยามาฮ่าของเดือน + บรรทัดที่เสนอ ?month=YYYY-MM
+  // ยอดแจ้งย้ายยามาฮ่าของเดือน + บรรทัดที่เสนอของขนาดนั้น ?month=YYYY-MM&size=SMALL|LARGE (รถเล็ก/รถใหญ่ ออกคนละใบ)
   @Get('yamaha-month')
-  yamahaMonth(@Query('month') month?: string) {
-    return this.quotations.yamahaMonth(month);
+  yamahaMonth(@Query('month') month?: string, @Query('size') size?: string) {
+    return this.quotations.yamahaMonth(month, size);
   }
 
   // ใบที่อนุมัติแล้วและยังไม่ออกบิลของลูกค้า ?customerId=

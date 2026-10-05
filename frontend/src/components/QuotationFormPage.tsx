@@ -17,6 +17,7 @@ import {
   type QuotationKind,
   type QuotationRateInput,
   type YamahaCounts,
+  type YamahaSize,
 } from "@/lib/quotation-api";
 import { DateInput } from "@/components/DateInput";
 import { emptyItemRow, InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
@@ -100,6 +101,7 @@ function accountOn(periods: AccountPeriod[], iso: string): BillingAccount {
 }
 
 const monthLabel = (month: string) => `${month.slice(5, 7)}/${month.slice(0, 4)}`;
+const YAMAHA_SIZE_LABEL: Record<YamahaSize, string> = { SMALL: "รถเล็ก", LARGE: "รถใหญ่" };
 
 export function QuotationFormPage() {
   const router = useRouter();
@@ -119,7 +121,7 @@ export function QuotationFormPage() {
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
   const [rateRows, setRateRows] = useState<RateRow[]>([emptyRateRow()]);
   const [yamahaPick, setYamahaPick] = useState(todayIso().slice(0, 7));
-  const [yamaha, setYamaha] = useState<{ month: string; counts: YamahaCounts } | null>(null);
+  const [yamaha, setYamaha] = useState<{ month: string; size: YamahaSize | null; counts: YamahaCounts } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,7 +145,7 @@ export function QuotationFormPage() {
           setConditions(q.conditions ?? "");
           if (q.kind === "JOB") setRows(itemRowsFromItems(q.items));
           else setRateRows(rateRowsFromItems(q.items));
-          if (q.yamahaMonth && q.yamahaCounts) setYamaha({ month: q.yamahaMonth, counts: q.yamahaCounts });
+          if (q.yamahaMonth && q.yamahaCounts) setYamaha({ month: q.yamahaMonth, size: q.yamahaSize, counts: q.yamahaCounts });
         }
       } catch (err) {
         setError(err instanceof ApiError || err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ");
@@ -205,6 +207,7 @@ export function QuotationFormPage() {
       conditions: conditions.trim(),
       items: kind === "JOB" ? items.map(({ kind: k, description, quantity, unitPrice, cost }) => ({ kind: k, description, quantity, unitPrice, cost })) : rateRowsToInput(rateRows),
       yamahaMonth: kind === "JOB" ? (yamaha?.month ?? null) : null,
+      yamahaSize: kind === "JOB" ? (yamaha?.size ?? null) : null,
     };
   }
 
@@ -233,18 +236,21 @@ export function QuotationFormPage() {
     }
   }
 
-  async function pullYamaha() {
+  // รถเล็กกับรถใหญ่ส่งคนละแผนก ออกคนละใบ (ผู้ใช้ 2026-10-05) - ดึงทีละขนาด
+  async function pullYamaha(size: YamahaSize) {
     if (!/^\d{4}-\d{2}$/.test(yamahaPick)) return setError("เลือกเดือนของงานแจ้งย้าย");
     setError("");
     try {
-      const res = await quotationApi.yamahaMonth(yamahaPick);
+      const res = await quotationApi.yamahaMonth(yamahaPick, size);
+      const sizeText = YAMAHA_SIZE_LABEL[size];
       if (res.quotedBy && res.quotedBy.id !== editing?.id) {
-        return setError(`งานแจ้งย้ายเดือน ${monthLabel(res.month)} มีใบเสนอราคา ${res.quotedBy.quotationNo ?? ""} อยู่แล้ว - เปิดใบนั้นทำฉบับแก้ไข หรือยกเลิกก่อน`);
+        return setError(`งานแจ้งย้ายเดือน ${monthLabel(res.month)} (${sizeText}) มีใบเสนอราคา ${res.quotedBy.quotationNo ?? ""} อยู่แล้ว - เปิดใบนั้นทำฉบับแก้ไข หรือยกเลิกก่อน`);
       }
-      if (res.counts.SMALL + res.counts.LARGE === 0) return setError(`เดือน ${monthLabel(res.month)} ยังไม่มีรายการแจ้งย้ายในระบบ`);
+      if (res.counts[size] === 0) return setError(`เดือน ${monthLabel(res.month)} ยังไม่มีรายการแจ้งย้าย${sizeText}ในระบบ`);
       setRows(itemRowsFromItems(res.items.map((it) => ({ ...it, amount: round2(it.quantity * it.unitPrice) }))));
-      setYamaha({ month: res.month, counts: res.counts });
-      if (!title.trim()) setTitle(`งานแจ้งย้ายยามาฮ่า เดือน ${monthLabel(res.month)}`);
+      setYamaha({ month: res.month, size: res.size, counts: res.counts });
+      // ชื่องานที่ระบบตั้งให้ตามขนาด - เปลี่ยนตามเมื่อดึงอีกขนาด ส่วนชื่อที่พิมพ์เองไม่แตะ
+      if (!title.trim() || title.startsWith("งานแจ้งย้ายยามาฮ่า")) setTitle(`งานแจ้งย้ายยามาฮ่า (${sizeText}) เดือน ${monthLabel(res.month)}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "ดึงยอดแจ้งย้ายไม่สำเร็จ");
     }
@@ -389,12 +395,16 @@ export function QuotationFormPage() {
             <div style={{ border: "1px dashed #c9d6f5", borderRadius: 10, padding: "10px 12px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 14 }}>
               <span>งานแจ้งย้ายยามาฮ่า:</span>
               <input type="month" value={yamahaPick} onChange={(e) => setYamahaPick(e.target.value)} aria-label="เดือนของงานแจ้งย้าย" style={{ border: "1px solid #dce2ec", borderRadius: 8, padding: "7px 10px" }} />
-              <button type="button" className="text-button" onClick={pullYamaha}>
-                ดึงยอดของเดือนนี้มาใส่
+              <button type="button" className={yamaha?.size === "SMALL" ? "primary" : undefined} onClick={() => pullYamaha("SMALL")}>
+                ดึงยอดรถเล็ก
+              </button>
+              <button type="button" className={yamaha?.size === "LARGE" ? "primary" : undefined} onClick={() => pullYamaha("LARGE")}>
+                ดึงยอดรถใหญ่
               </button>
               {yamaha && (
                 <span className="badge">
-                  ผูกกับยอดเดือน {monthLabel(yamaha.month)} · รถเล็ก {yamaha.counts.SMALL} · รถใหญ่ {yamaha.counts.LARGE}{" "}
+                  ผูกกับยอดเดือน {monthLabel(yamaha.month)} ·{" "}
+                  {yamaha.size ? `${YAMAHA_SIZE_LABEL[yamaha.size]} ${yamaha.counts[yamaha.size]} คัน` : `รถเล็ก ${yamaha.counts.SMALL} · รถใหญ่ ${yamaha.counts.LARGE}`}{" "}
                   <button type="button" className="text-button" onClick={() => setYamaha(null)} style={{ padding: 0, marginLeft: 6 }}>
                     เลิกผูก
                   </button>
@@ -402,7 +412,7 @@ export function QuotationFormPage() {
               )}
               {yamaha && (
                 <span className="muted" style={{ fontSize: 12, flexBasis: "100%" }}>
-                  ออกเลขแล้วรายการแจ้งย้ายของเดือนนี้จะถูกล็อก (เพิ่ม / แก้ / ยกเลิกไม่ได้) จนกว่าจะยกเลิกใบเสนอราคา
+                  ออกเลขแล้วรายการแจ้งย้าย{yamaha.size ? YAMAHA_SIZE_LABEL[yamaha.size] : ""}ของเดือนนี้จะถูกล็อก (เพิ่ม / แก้ / ยกเลิกไม่ได้) จนกว่าจะยกเลิกใบเสนอราคา · รถเล็กกับรถใหญ่ออกคนละใบ (ส่งคนละแผนก)
                 </span>
               )}
             </div>
