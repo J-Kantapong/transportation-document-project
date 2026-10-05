@@ -26,6 +26,7 @@ import {
 import {
   formatQuotationNo,
   isMonth,
+  isYamahaSize,
   QUOTATION_KINDS,
   QUOTATION_STAGES,
   revisionNo,
@@ -34,6 +35,7 @@ import {
   type QuotationKind,
   type QuotationStage,
   type YamahaCounts,
+  type YamahaSize,
 } from './quotation-calc.js';
 
 // ใบเสนอราคา (ผู้ใช้ 2026-10-01): งานของ YM ต้องเสนอราคาและได้ PO กลับมาก่อนออกใบวางบิลทุกครั้ง และใช้กับลูกค้ารายอื่นได้
@@ -144,6 +146,7 @@ export interface QuotationDto {
   items?: unknown;
   whtRate?: unknown;
   yamahaMonth?: unknown;
+  yamahaSize?: unknown;
   expectedUpdatedAt?: unknown;
 }
 
@@ -182,6 +185,7 @@ export class QuotationService {
       whtAmount: Number(q.whtAmount),
       netTotal: Number(q.netTotal),
       yamahaMonth: q.yamahaMonth,
+      yamahaSize: (q.yamahaSize as YamahaSize | null) ?? null,
       yamahaCounts: (q.yamahaCounts as YamahaCounts | null) ?? null,
       approvedDate: iso(q.approvedDate),
       poNumber: q.poNumber,
@@ -310,18 +314,25 @@ export class QuotationService {
   }
 
   // ใบเสนอราคาที่ยังใช้อยู่ (ออกเลขแล้ว ยังไม่ถูกปฏิเสธ/ยกเลิก/แทนที่) ของเดือนนั้น - มีได้ใบเดียว และล็อกรายการแจ้งย้ายของเดือน
-  private liveForMonth(db: Pick<Prisma.TransactionClient, 'quotation'>, month: string, exceptIds: string[]) {
+  // รถเล็ก / รถใหญ่ออกคนละใบ (ผู้ใช้ 2026-10-05): ใบของขนาดเดียวกัน หรือใบเก่าที่ไม่ระบุขนาด (รวมทั้งสอง) ถือว่าซ้ำ
+  private liveForMonth(db: Pick<Prisma.TransactionClient, 'quotation'>, month: string, size: YamahaSize | null, exceptIds: string[]) {
     return db.quotation.findFirst({
-      where: { yamahaMonth: month, status: { in: ['ISSUED', 'APPROVED'] }, id: { notIn: exceptIds } },
+      where: {
+        yamahaMonth: month,
+        status: { in: ['ISSUED', 'APPROVED'] },
+        id: { notIn: exceptIds },
+        ...(size ? { OR: [{ yamahaSize: size }, { yamahaSize: null }] } : {}),
+      },
       select: { id: true, quotationNo: true },
     });
   }
 
-  // ยอดแจ้งย้ายของเดือน + บรรทัดที่เสนอ (รถเล็ก / รถใหญ่ / ค่าดูแลเอกสารรายเดือน) สำหรับปุ่ม "ดึงยอดแจ้งย้ายยามาฮ่า"
-  async yamahaMonth(monthRaw: unknown) {
+  // ยอดแจ้งย้ายของเดือน + บรรทัดที่เสนอของขนาดนั้น (รถเล็ก: ค่าธรรมเนียม / ค่าบริการ / ค่าบริการจัดการเอกสารรายเดือน · รถใหญ่: ค่าธรรมเนียม / ค่าบริการ)
+  async yamahaMonth(monthRaw: unknown, sizeRaw: unknown) {
     if (!isMonth(monthRaw)) throw bad('เดือนต้องเป็น ค.ศ. YYYY-MM');
-    const [counts, quoted] = await Promise.all([this.countYamaha(monthRaw), this.liveForMonth(this.prisma, monthRaw, [])]);
-    return { month: monthRaw, counts, items: yamahaQuoteItems(monthRaw, counts), quotedBy: quoted };
+    if (!isYamahaSize(sizeRaw)) throw bad('ขนาดรถต้องเป็นรถเล็ก (SMALL) หรือรถใหญ่ (LARGE)');
+    const [counts, quoted] = await Promise.all([this.countYamaha(monthRaw), this.liveForMonth(this.prisma, monthRaw, sizeRaw, [])]);
+    return { month: monthRaw, size: sizeRaw, counts, items: yamahaQuoteItems(monthRaw, counts, sizeRaw), quotedBy: quoted };
   }
 
   // ---------- ร่าง ----------
@@ -358,10 +369,13 @@ export class QuotationService {
         : { feeTotal: 0, serviceTotal: 0, goodsTotal: 0, vatRate: terms.vat ? VAT_RATE : 0, vatAmount: 0, whtRate: 0, whtAmount: 0, netTotal: 0 };
 
     let yamahaMonth: string | null = null;
+    let yamahaSize: YamahaSize | null = null;
     let yamahaCounts: YamahaCounts | null = null;
     if (dto.yamahaMonth !== undefined && dto.yamahaMonth !== null && dto.yamahaMonth !== '') {
       if (kind !== 'JOB') throw bad('ยอดแจ้งย้ายยามาฮ่าใช้กับใบเสนอราคาแบบยอดงานเท่านั้น');
       if (!isMonth(dto.yamahaMonth)) throw bad('เดือนของงานแจ้งย้ายต้องเป็น ค.ศ. YYYY-MM');
+      if (!isYamahaSize(dto.yamahaSize)) throw bad('ระบุขนาดรถของงานแจ้งย้าย (รถเล็ก / รถใหญ่ ออกคนละใบ)');
+      yamahaSize = dto.yamahaSize;
       yamahaMonth = dto.yamahaMonth;
       yamahaCounts = await this.countYamaha(yamahaMonth);
     }
@@ -386,6 +400,7 @@ export class QuotationService {
         whtAmount: totals.whtAmount,
         netTotal: totals.netTotal,
         yamahaMonth,
+        yamahaSize,
         yamahaCounts: (yamahaCounts ?? null) as Prisma.InputJsonValue | null,
       },
     };
@@ -445,12 +460,19 @@ export class QuotationService {
       if (draft.items.length === 0) throw bad('ต้องมีอย่างน้อย 1 บรรทัด');
 
       if (draft.yamahaMonth) {
-        const other = await this.liveForMonth(tx, draft.yamahaMonth, [id, ...(draft.replacesId ? [draft.replacesId] : [])]);
-        if (other) throw conflict(`งานแจ้งย้ายเดือนนี้มีใบเสนอราคา ${other.quotationNo} อยู่แล้ว - ทำฉบับแก้ไขของใบนั้น หรือยกเลิกก่อน`);
+        const size = isYamahaSize(draft.yamahaSize) ? draft.yamahaSize : null; // null = ร่างเก่าที่รวมทั้งสองขนาด
+        const other = await this.liveForMonth(tx, draft.yamahaMonth, size, [id, ...(draft.replacesId ? [draft.replacesId] : [])]);
+        if (other) throw conflict(`งานแจ้งย้ายเดือนนี้${size ? (size === 'LARGE' ? ' (รถใหญ่)' : ' (รถเล็ก)') : ''}มีใบเสนอราคา ${other.quotationNo} อยู่แล้ว - ทำฉบับแก้ไขของใบนั้น หรือยกเลิกก่อน`);
         const now = await this.countYamaha(draft.yamahaMonth);
         const saved = draft.yamahaCounts as YamahaCounts | null;
-        if (!saved || saved.SMALL !== now.SMALL || saved.LARGE !== now.LARGE) {
-          throw conflict(`ยอดแจ้งย้ายของเดือนนี้เปลี่ยนไปแล้ว (รถเล็ก ${now.SMALL} คัน รถใหญ่ ${now.LARGE} คัน) - เปิดร่างแล้วกดดึงยอดใหม่ก่อนออกเลข`);
+        // ใบแยกขนาดเทียบเฉพาะยอดของขนาดตัวเอง - รถอีกขนาดเพิ่มระหว่างนั้นไม่กระทบ
+        const sizes: YamahaSize[] = size ? [size] : ['SMALL', 'LARGE'];
+        if (!saved || sizes.some((s) => saved[s] !== now[s])) {
+          throw conflict(
+            size
+              ? `ยอดแจ้งย้ายของเดือนนี้เปลี่ยนไปแล้ว (${size === 'LARGE' ? 'รถใหญ่' : 'รถเล็ก'} ${now[size]} คัน) - เปิดร่างแล้วกดดึงยอดใหม่ก่อนออกเลข`
+              : `ยอดแจ้งย้ายของเดือนนี้เปลี่ยนไปแล้ว (รถเล็ก ${now.SMALL} คัน รถใหญ่ ${now.LARGE} คัน) - เปิดร่างแล้วกดดึงยอดใหม่ก่อนออกเลข`,
+          );
         }
       }
 
@@ -606,6 +628,7 @@ export class QuotationService {
           whtAmount: current.whtAmount,
           netTotal: current.netTotal,
           yamahaMonth: current.yamahaMonth,
+          yamahaSize: current.yamahaSize,
           yamahaCounts: (current.yamahaCounts ?? undefined) as Prisma.InputJsonValue | undefined,
           createdById: currentUser()?.id ?? null,
           items: {

@@ -1,7 +1,7 @@
 import type { ItemRow } from "@/components/InvoiceItemsEditor";
 
 // ราคาและชื่อบรรทัดบิลงานแจ้งย้ายยามาฮ่า (ผู้ใช้ 2026-10-05) ใช้ในหน้าบิลกำหนดเอง: dropdown ราคา + ปุ่มดึงยอดของเดือน
-// ลำดับและชื่อตามที่ผู้ใช้กำหนด - รถเล็ก: ค่าธรรมเนียม / ค่าบริการ / ค่าบริการจัดการเอกสารบัญชีรายเดือน · รถใหญ่: ค่าธรรมเนียม / ค่าบริการ
+// ลำดับและชื่อตามที่ผู้ใช้กำหนด - รถเล็ก: ค่าธรรมเนียม / ค่าบริการ / ค่าบริการจัดการเอกสารบัญชีรายเดือน · รถใหญ่: ค่าธรรมเนียม / ค่าบริการ (คนละใบ)
 // ชื่อและราคาตรงกับใบเสนอราคา (backend/src/billing/quotation-calc.ts) - แก้สองที่ให้ตรงกัน
 // ค่าธรรมเนียม = ค่าใบเสร็จกรมขนส่ง 5 บาท/คัน (ไม่มี VAT ไม่หัก) · ค่าบริการ = VAT + หัก ณ ที่จ่าย
 // ราคาค่าบริการรถเล็กทำ 3 ปีแรก: 2026 = 20, 2027 = 21, 2028 = 22 · ต้นทุนยังไม่ทราบ เว้นว่างไว้
@@ -56,8 +56,17 @@ interface YamahaLine {
   unitNote: string;
 }
 
-// ทุกบรรทัดของเดือน month ตามลำดับที่ผู้ใช้กำหนด
-function yamahaLines(month: string): YamahaLine[] {
+export type YamahaSize = "SMALL" | "LARGE";
+
+// รถเล็กกับรถใหญ่ส่งคนละแผนก ออกคนละใบ (ผู้ใช้ 2026-10-05): ใบรถเล็กมีค่าธรรมเนียม / ค่าบริการ / ค่าบริการจัดการเอกสารรายเดือน, ใบรถใหญ่มีสองบรรทัดแรกเท่านั้น
+// บรรทัดของขนาด size ในเดือน month ตามลำดับที่ผู้ใช้กำหนด
+function yamahaLines(month: string, size: YamahaSize): YamahaLine[] {
+  return allYamahaLines(month).filter((l) =>
+    size === "SMALL" ? l.size !== "LARGE" : l.size === "LARGE",
+  );
+}
+
+function allYamahaLines(month: string): YamahaLine[] {
   const m = thaiMonthLabel(month);
   const sized = (size: "SMALL" | "LARGE"): YamahaLine[] => {
     const tag = size === "SMALL" ? "(เล็ก)" : "(ใหญ่)";
@@ -114,20 +123,24 @@ export interface YamahaPriceOption {
 }
 
 // ตัวเลือกใน dropdown: เติมทีละบรรทัด จำนวน 1 ให้แก้เอง
-export function yamahaPriceOptions(month: string): YamahaPriceOption[] {
-  return yamahaLines(month).map((l) => ({
+export function yamahaPriceOptions(
+  month: string,
+  size: YamahaSize,
+): YamahaPriceOption[] {
+  return yamahaLines(month, size).map((l) => ({
     id: l.id,
     label: `${l.description} - ${money(l.unit)} บาท${l.unitNote}`,
     row: rowOf(l, 1),
   }));
 }
 
-// บิลทั้งชุดของเดือนจากยอดแจ้งย้ายในระบบ - ขนาดที่ไม่มีรถในเดือนนั้นไม่ออกบรรทัด · รายเดือนมีเสมอ
+// บิลของขนาด size ทั้งชุดจากยอดแจ้งย้ายในระบบ - ไม่มีรถขนาดนั้นก็ไม่ออกบรรทัดต่อคัน · รายเดือนมีเสมอในใบรถเล็ก
 export function yamahaBillRows(
   month: string,
   counts: { SMALL: number; LARGE: number },
+  size: YamahaSize,
 ): ItemRow[] {
-  return yamahaLines(month)
+  return yamahaLines(month, size)
     .filter((l) => l.size === null || counts[l.size] > 0)
     .map((l) => rowOf(l, l.size === null ? 1 : counts[l.size]));
 }

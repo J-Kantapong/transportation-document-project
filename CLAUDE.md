@@ -306,12 +306,17 @@ This private repository is the shared development surface for the user, Claude C
   go to the customer's AuditLog). `Customer.billingRequiresQuotation` (checkbox in the terms editor,
   `requiresQuotation` in the terms API): such a customer can only be billed from an approved quotation
   (`QUOTATION_REQUIRED_ERROR` in `createInvoice` / `createCustomInvoice`), so vehicle bills are blocked for them.
-  Yamaha: "ดึงยอดของเดือนนี้มาใส่" fills the lines from the month's relocation counts (`yamahaQuoteItems`: small 20/21/22
-  by work month, large 50, + 9,000 monthly fee) and stores `yamahaMonth` + `yamahaCounts`; issuing re-checks the counts
-  and allows one live quotation per month, and while one is ISSUED/APPROVED the month's `YamahaRelocationEntry` rows
-  cannot be added, edited or cancelled (`assertYamahaMonthNotQuoted`; fix = cancel the quotation first). API under
-  `/api/billing/quotations` (ADMIN + ACCOUNTANT): `GET ?stage&q&offset` -> { quotations, hasMore, counts }, `GET
-  /yamaha-month?month=`, `GET /ready?customerId=`, `POST`, `GET/PATCH/DELETE /:id` (PATCH/DELETE drafts only), `POST
+  Yamaha (small and large go to different departments, so they are separate quotations, user 2026-10-05): "ดึงยอดรถเล็ก" /
+  "ดึงยอดรถใหญ่" fills the lines of that size from the month's relocation counts (`yamahaQuoteItems(month, counts, size)`:
+  small = ค่าธรรมเนียมแจ้งย้าย (เล็ก) ประจำเดือน <Thai month, CE year> 5/vehicle, ค่าบริการแจ้งย้าย (เล็ก) 20/21/22 by work
+  month, ค่าบริการจัดการเอกสารบัญชี 9,000; large = ค่าธรรมเนียม (ใหญ่) 5/vehicle + ค่าบริการ (ใหญ่) 50/vehicle) and stores
+  `yamahaMonth` + `yamahaSize` (SMALL | LARGE, null on older quotations that cover both) + `yamahaCounts`; issuing
+  re-checks only its own size's count and allows one live quotation per month and size (an old null-size one counts for
+  both), and while one is ISSUED/APPROVED that size's `YamahaRelocationEntry` rows cannot be added, edited or cancelled
+  (`assertYamahaMonthNotQuoted(db, [{ date, size }])`; fix = cancel the quotation first). The custom-invoice page pulls the
+  same month counts per size (`frontend/src/lib/yamaha-billing.ts`; keep its names and prices in step with
+  `quotation-calc.ts`). API under `/api/billing/quotations` (ADMIN + ACCOUNTANT): `GET ?stage&q&offset` -> { quotations,
+  hasMore, counts }, `GET /yamaha-month?month=&size=SMALL|LARGE`, `GET /ready?customerId=`, `POST`, `GET/PATCH/DELETE /:id` (PATCH/DELETE drafts only), `POST
   /:id/issue`, `/approve` (multipart `approvedDate`, `poNumber`, `file`), `/unapprove`, `/reject`, `/cancel` (these three
   need `remark`), `/revise`, `/link-customer`, `/invoice` { invoiceNo, issueDate }, `/apply-rates`, `GET /:id/po-file`,
   `GET /:id/history` (AuditLog entity `Quotation`). Print: `frontend/src/lib/quotation-print.ts` (same CSS as the

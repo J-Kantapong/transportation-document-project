@@ -40,7 +40,13 @@ import {
   thaiMonthLabel,
   yamahaBillRows,
   yamahaPriceOptions,
+  type YamahaSize,
 } from "@/lib/yamaha-billing";
+
+const YAMAHA_SIZE_LABEL: Record<YamahaSize, string> = {
+  SMALL: "รถเล็ก",
+  LARGE: "รถใหญ่",
+};
 import { DateInput } from "@/components/DateInput";
 import {
   WhtRatePicker,
@@ -76,6 +82,7 @@ export function BillingCustomInvoicePage() {
   );
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
   const [yamahaMonthPick, setYamahaMonthPick] = useState<string | null>(null);
+  const [yamahaSize, setYamahaSize] = useState<YamahaSize>("SMALL");
   const [yamahaBusy, setYamahaBusy] = useState(false);
   const [yamahaNote, setYamahaNote] = useState("");
   const [whtValue, setWhtValue] = useState<number | null>(null);
@@ -196,7 +203,9 @@ export function BillingCustomInvoicePage() {
   const yamahaMonth = yamahaMonthPick || issueForCalc.slice(0, 7);
 
   function addYamahaRow(id: string) {
-    const option = yamahaPriceOptions(yamahaMonth).find((o) => o.id === id);
+    const option = yamahaPriceOptions(yamahaMonth, yamahaSize).find(
+      (o) => o.id === id,
+    );
     if (!option) return;
     // บรรทัดว่างที่ยังไม่ได้กรอกอะไรเลย (บรรทัดตั้งต้นของหน้า) ให้ถูกแทนที่ ไม่เหลือบรรทัดว่างค้าง
     const untouched = (r: ItemRow) =>
@@ -213,8 +222,9 @@ export function BillingCustomInvoicePage() {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   });
 
-  // ดึงยอดแจ้งย้ายของเดือนจากระบบ แล้วเติมบิลทั้งชุด (รถเล็ก 3 บรรทัด + รถใหญ่ 2 บรรทัด) พร้อมจำนวนรถ
-  async function pullYamaha(month: string) {
+  // ดึงยอดแจ้งย้ายของเดือนจากระบบ แล้วเติมบิลของขนาดที่เลือกทั้งชุด (รถเล็ก 3 บรรทัด / รถใหญ่ 2 บรรทัด) พร้อมจำนวนรถ
+  // รถเล็กกับรถใหญ่ส่งคนละแผนก ออกบิลคนละใบ (ผู้ใช้ 2026-10-05)
+  async function pullYamaha(month: string, size: YamahaSize = yamahaSize) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return;
     const hasContent = rows.some(
       (r) => r.description.trim() !== "" || r.unitPriceText.trim() !== "",
@@ -229,18 +239,19 @@ export function BillingCustomInvoicePage() {
     setYamahaNote("");
     setError("");
     try {
-      const res = await quotationApi.yamahaMonth(month);
+      const res = await quotationApi.yamahaMonth(month, size);
       const label = thaiMonthLabel(month);
-      if (res.counts.SMALL + res.counts.LARGE === 0) {
-        setYamahaNote(`เดือน ${label} ยังไม่มีรายการแจ้งย้ายในระบบ`);
+      const sizeText = YAMAHA_SIZE_LABEL[size];
+      if (res.counts[size] === 0) {
+        setYamahaNote(`เดือน ${label} ยังไม่มีรายการแจ้งย้าย${sizeText}ในระบบ`);
         return;
       }
-      setRows(yamahaBillRows(month, res.counts));
+      setRows(yamahaBillRows(month, res.counts, size));
       setConfirming(false);
       setYamahaNote(
-        `ดึงยอดเดือน ${label} แล้ว: รถเล็ก ${res.counts.SMALL} คัน · รถใหญ่ ${res.counts.LARGE} คัน` +
+        `ดึงยอดเดือน ${label} แล้ว: ${sizeText} ${res.counts[size]} คัน` +
           (res.quotedBy
-            ? ` · เดือนนี้มีใบเสนอราคา ${res.quotedBy.quotationNo ?? ""} อยู่แล้ว`
+            ? ` · เดือนนี้ (${sizeText}) มีใบเสนอราคา ${res.quotedBy.quotationNo ?? ""} อยู่แล้ว`
             : ""),
       );
     } catch (err) {
@@ -482,8 +493,26 @@ export function BillingCustomInvoicePage() {
             }}
           >
             <b style={{ fontWeight: 600, flexBasis: "100%" }}>
-              งานแจ้งย้ายยามาฮ่า - ดึงยอดของเดือนมาใส่ทั้งชุด
+              งานแจ้งย้ายยามาฮ่า - ดึงยอดของเดือนมาใส่ทั้งชุด (รถเล็กกับรถใหญ่
+              ออกบิลคนละใบ)
             </b>
+            <div
+              style={{ display: "flex", gap: 8, flexBasis: "100%" }}
+              role="group"
+              aria-label="ขนาดรถ"
+            >
+              {(["SMALL", "LARGE"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={yamahaSize === s ? "primary" : undefined}
+                  disabled={yamahaBusy}
+                  onClick={() => (setYamahaSize(s), setYamahaNote(""))}
+                >
+                  {YAMAHA_SIZE_LABEL[s]}
+                </button>
+              ))}
+            </div>
             <div
               style={{
                 display: "flex",
@@ -542,7 +571,7 @@ export function BillingCustomInvoicePage() {
               }}
             >
               <option value="">— เลือกราคาเพื่อเพิ่มบรรทัด —</option>
-              {yamahaPriceOptions(yamahaMonth).map((o) => (
+              {yamahaPriceOptions(yamahaMonth, yamahaSize).map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.label}
                 </option>

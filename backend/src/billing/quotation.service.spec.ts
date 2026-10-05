@@ -33,6 +33,7 @@ function quotationRow(over: Record<string, unknown> = {}) {
     whtAmount: 577.2,
     netTotal: 20009.6,
     yamahaMonth: null as string | null,
+    yamahaSize: null as string | null,
     yamahaCounts: null as unknown,
     approvedDate: null as Date | null,
     poNumber: null as string | null,
@@ -123,6 +124,20 @@ describe('QuotationService.issue', () => {
     await expect(svc.issue('q1')).rejects.toMatchObject({ response: { error: expect.stringContaining('520') } });
   });
 
+  it('only compares the count of its own size when the quotation is split by size', async () => {
+    // ใบรถใหญ่: รถเล็กเพิ่มขึ้นระหว่างนั้นไม่ทำให้ยอดเปลี่ยน
+    const large = setup([quotationRow({ yamahaMonth: '2026-10', yamahaSize: 'LARGE', yamahaCounts: { SMALL: 512, LARGE: 40 } })], { yamaha: { SMALL: 600, LARGE: 40 } });
+    await expect(large.svc.issue('q1')).resolves.toMatchObject({ status: 'ISSUED' });
+    const changed = setup([quotationRow({ yamahaMonth: '2026-10', yamahaSize: 'LARGE', yamahaCounts: { SMALL: 512, LARGE: 40 } })], { yamaha: { SMALL: 512, LARGE: 41 } });
+    await expect(changed.svc.issue('q1')).rejects.toMatchObject({ response: { error: expect.stringContaining('41') } });
+  });
+
+  it('looks for a live quotation of the same size or an old one covering both', async () => {
+    const { svc, db } = setup([quotationRow({ yamahaMonth: '2026-10', yamahaSize: 'SMALL', yamahaCounts: { SMALL: 512, LARGE: 0 } })], { yamaha: { SMALL: 512, LARGE: 0 } });
+    await svc.issue('q1');
+    expect((db.quotation.findFirst.mock.calls as unknown[][])[0][0]).toMatchObject({ where: { yamahaMonth: '2026-10', OR: [{ yamahaSize: 'SMALL' }, { yamahaSize: null }] } });
+  });
+
   it('refuses a second live quotation for the same Yamaha month', async () => {
     const { svc } = setup([quotationRow({ yamahaMonth: '2026-10', yamahaCounts: { SMALL: 512, LARGE: 0 } })], { yamaha: { SMALL: 512, LARGE: 0 }, liveForMonth: { id: 'x', quotationNo: 'QT2026-002' } });
     await expect(svc.issue('q1')).rejects.toMatchObject({ response: { error: expect.stringContaining('QT2026-002') } });
@@ -210,8 +225,11 @@ describe('cancel / unapprove guards', () => {
 describe('assertYamahaMonthNotQuoted', () => {
   it('blocks entries of a month with a live quotation', async () => {
     const db = { quotation: { findFirst: vi.fn(async () => ({ quotationNo: 'QT2026-004', yamahaMonth: '2026-10' })) } };
-    await expect(assertYamahaMonthNotQuoted(db as never, [day('2026-10-15')])).rejects.toMatchObject({ response: { error: expect.stringContaining('QT2026-004') } });
-    expect(db.quotation.findFirst.mock.calls[0]).toEqual([expect.objectContaining({ where: { yamahaMonth: { in: ['2026-10'] }, status: { in: ['ISSUED', 'APPROVED'] } } })]);
+    await expect(assertYamahaMonthNotQuoted(db as never, [{ date: day('2026-10-15'), size: 'LARGE' }])).rejects.toMatchObject({ response: { error: expect.stringContaining('QT2026-004') } });
+    // ล็อกเฉพาะขนาดเดียวกัน (หรือใบเก่าที่ไม่ระบุขนาด)
+    expect(db.quotation.findFirst.mock.calls[0]).toEqual([
+      expect.objectContaining({ where: { status: { in: ['ISSUED', 'APPROVED'] }, OR: [{ yamahaMonth: '2026-10', OR: [{ yamahaSize: 'LARGE' }, { yamahaSize: null }] }] } }),
+    ]);
   });
 });
 

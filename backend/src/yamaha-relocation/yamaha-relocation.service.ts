@@ -208,7 +208,7 @@ export class YamahaRelocationService {
     }));
 
     // เดือนที่ออกใบเสนอราคาไปแล้วถูกล็อก (ผู้ใช้ 2026-10-01) - ตรวจก่อนเก็บไฟล์
-    await assertYamahaMonthNotQuoted(this.prisma, [new Date(`${dateRaw}T00:00:00.000Z`)]);
+    await assertYamahaMonthNotQuoted(this.prisma, [{ date: new Date(`${dateRaw}T00:00:00.000Z`), size: dto.size }]);
 
     const stored: string[] = [];
     try {
@@ -315,7 +315,7 @@ export class YamahaRelocationService {
     const next = { date, size, count, ...calculateYamahaRelocationFees(size, count) };
     const changes = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
-    await assertYamahaMonthNotQuoted(this.prisma, [existing.date, date]);
+    await assertYamahaMonthNotQuoted(this.prisma, [{ date: existing.date, size: existing.size }, { date, size }]);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       // ตารางนี้ไม่มี updatedAt - กันแก้ทับกันด้วยค่าที่ฟอร์มโหลดมา (อีกคนแก้/ยกเลิกไปก่อน = ไม่เจอแถว)
@@ -334,7 +334,7 @@ export class YamahaRelocationService {
   async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกรายการแจ้งย้าย');
     const existing = await this.findActive(id);
-    await assertYamahaMonthNotQuoted(this.prisma, [existing.date]);
+    await assertYamahaMonthNotQuoted(this.prisma, [{ date: existing.date, size: existing.size }]);
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.yamahaRelocationEntry.updateMany({
         where: { id, cancelledAt: null },

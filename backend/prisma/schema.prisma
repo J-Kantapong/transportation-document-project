@@ -1326,6 +1326,8 @@ model Quotation {
   netTotal         Decimal   @default(0) @db.Decimal(12, 2)
   // ยอดงานแจ้งย้ายยามาฮ่าของเดือนนี้ (YYYY-MM) - ใบที่ออกแล้วล็อกรายการแจ้งย้ายของเดือนนั้น · yamahaCounts = { SMALL, LARGE } ตอนดึง
   yamahaMonth      String?
+  // รถเล็ก / รถใหญ่ ออกคนละใบ (ส่งคนละแผนก, ผู้ใช้ 2026-10-05): 'SMALL' | 'LARGE' · null = ใบเก่าที่รวมทั้งสองขนาด
+  yamahaSize       String?
   yamahaCounts     Json?
   approvedDate     DateTime?
   poNumber         String?
