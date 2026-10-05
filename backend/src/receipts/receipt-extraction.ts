@@ -117,6 +117,16 @@ export function checkReading(r: ReceiptReading): ReceiptChecks {
 export const CHASSIS_SERIAL_LENGTH = 6;
 export const CHASSIS_LENGTH = 17;
 export const CHASSIS_PREFIX = CHASSIS_LENGTH - CHASSIS_SERIAL_LENGTH;
+
+// เลขตัวถังสองเลขที่อ่านครบ 17 ตัวทั้งคู่และ "คนละคันชัดเจน" - ใช้ตัดคำเตือนใบเสร็จซ้ำ: รถ 1 คันต่อใบเสร็จ 1 ใบ รถคนละคันจึงเป็นคนละใบ
+// แม้เลขที่ใบเสร็จตรงกัน (AI อ่านเลขที่เพี้ยน / เลขที่ซ้ำกัน พบ 2026-10-05) · เทียบหลังแก้ I->1, O/Q->0 เพราะ AI สับสนตัวพวกนี้
+// (เลขตัวถังจริงไม่มี I O Q) · อ่านไม่ครบ 17 ตัวหรือใกล้เคียงกัน (isNearChassis) = ยังไม่ถือว่าคนละคัน ให้เตือนตามเดิม
+const chassisForCompare = (raw: string | null | undefined): string => (raw ?? '').replace(/[\s-]/g, '').toUpperCase().replace(/I/g, '1').replace(/[OQ]/g, '0');
+export function clearlyDifferentChassis(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = chassisForCompare(a);
+  const y = chassisForCompare(b);
+  return x.length === CHASSIS_LENGTH && y.length === CHASSIS_LENGTH && x !== y && !isNearChassis(x, y);
+}
 const CHASSIS_PREFIX_MAX_DIFF = 2;
 
 // เทียบทีละตัว: ต่างกันได้เฉพาะตำแหน่ง (ของเลขในระบบ) ที่อยู่ใน 11 ตัวแรก ไม่เกิน maxDiff ตัว
