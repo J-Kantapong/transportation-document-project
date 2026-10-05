@@ -6,7 +6,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { BackgroundReads, isBackgroundFlag } from './background-reads.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtraction, type ReceiptExtractor } from './receipt-extractor.js';
-import { CHASSIS_LENGTH, CHASSIS_PREFIX, CHASSIS_SERIAL_LENGTH, isNearChassis } from './receipt-extraction.js';
+import { CHASSIS_LENGTH, CHASSIS_PREFIX, CHASSIS_SERIAL_LENGTH, isNearChassis, normalizePcNo, pcNoDiffers } from './receipt-extraction.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from './receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from './upload-hash.js';
 
@@ -270,19 +270,24 @@ export class ReceiptsService implements OnApplicationBootstrap {
     if (!extraction || !('reading' in extraction)) return null;
     const receiptNo = extraction.reading.receiptNo?.trim();
     const chassis = extraction.reading.chassis?.trim().toUpperCase();
+    const pcNo = normalizePcNo(extraction.reading.pcNo);
     const notSelf = selfId ? { id: { not: selfId } } : {};
 
     if (receiptNo && /^\d+\/\d+$/.test(receiptNo)) {
       // เลขที่ใบเสร็จที่พนักงานยืนยันแล้วใน Step 5 ก่อน แล้วจึงเลขที่ AI อ่านจากรูปอื่น (ไม่รวมใบเสร็จงานสลับเลข)
+      // เลขที่เดียวกันแต่ PC No. ต่างกัน = คนละใบ (2026-10-05) · ฝั่งที่ไม่มี PC No. ยังนับว่าอาจซ้ำ
+      // (receipts none { pcNo <> ใหม่ }: รูปที่ไม่มี pcNo ไม่เข้าเงื่อนไข จึงไม่ทำให้รายการนั้นหลุด)
       const saved = await this.prisma.documentSubmission.findFirst({
-        where: { receiptNo, status: { not: 'FAILED' } },
+        where: { receiptNo, status: { not: 'FAILED' }, ...(pcNo ? { receipts: { none: { extraction: { path: ['reading', 'pcNo'], not: pcNo } } } } : {}) },
         select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } },
       });
       if (saved) return { by: 'receiptNo', receiptNo, chassis: saved.vehicle.chassis, receivedDate: isoDate(saved.receiptReceivedDate) };
-      const image = await this.prisma.receiptImage.findFirst({
+      const images = await this.prisma.receiptImage.findMany({
         where: { ...notSelf, plateSwapId: null, vehicleUseCancellationId: null, plateCopyId: null, vehicleTransferId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
         select: { extraction: true, submission: { select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } } } },
+        take: 20,
       });
+      const image = images.find((i) => !pcNoDiffers(pcNo, (i.extraction as { reading?: { pcNo?: string | null } } | null)?.reading?.pcNo));
       if (image) {
         const read = image.extraction as { reading?: { chassis?: string | null } } | null;
         return {

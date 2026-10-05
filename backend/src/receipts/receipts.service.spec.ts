@@ -3,7 +3,7 @@ import { requestContext } from '../auth/request-context.js';
 import type { UserRole } from '../generated/prisma/enums.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { NoAiReceiptExtractor, type ReceiptExtractor } from './receipt-extractor.js';
-import { checkReading, isNearChassis, normalizeChassis, normalizePlate, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
+import { checkReading, isNearChassis, normalizeChassis, normalizePlate, pcNoDiffers, normalizeReceiptDate, type ReceiptReading } from './receipt-extraction.js';
 import type { ReceiptStorage } from './receipt-storage.js';
 import { ReceiptsService, detectImageType } from './receipts.service.js';
 
@@ -25,9 +25,10 @@ function setup(submission: unknown = { id: 's1', status: 'PENDING', vehicle: { c
     },
     receiptImage: {
       create,
-      findFirst: vi.fn().mockResolvedValue(dups.image ?? null),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(receipt),
-      findMany: vi.fn().mockResolvedValue([]),
+      // findDuplicate ค้นรูปที่เลขที่ใบเสร็จตรงกัน (แล้วกรอง PC No. ในโค้ด) · ที่อื่นไม่ได้ใช้ findMany ของรูปในเทสต์เหล่านี้
+      findMany: vi.fn().mockResolvedValue(dups.image ? [dups.image] : []),
       count: vi.fn().mockResolvedValue(0),
       update: vi.fn().mockImplementation(async ({ data }) => ({ id: 'r1', ...data })),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -288,6 +289,7 @@ describe('ReceiptsService - ขอบเขตการดูรูป / ถา�
 
 const READING: ReceiptReading = {
   receiptNo: '69/0035358',
+  pcNo: null,
   date: '2026-09-07',
   plateCategory: '8ขก',
   plateNumber: '3484',
@@ -523,6 +525,16 @@ describe('normalizePlate - หมวด/เลขทะเบียนที่ 
   });
 });
 
+describe('pcNoDiffers', () => {
+  it('ต่างกันเมื่อรู้ทั้งสองฝั่งและไม่เท่ากัน เท่านั้น', () => {
+    expect(pcNoDiffers('5039', '5040')).toBe(true);
+    expect(pcNoDiffers('5039', ' 5039 ')).toBe(false);
+    expect(pcNoDiffers('5039', null)).toBe(false);
+    expect(pcNoDiffers(undefined, '5039')).toBe(false);
+    expect(pcNoDiffers('', '5039')).toBe(false);
+  });
+});
+
 describe('normalizeChassis', () => {
   it('ตัวใหญ่ ไม่มีช่องว่าง/ขีด · ไม่แก้ตัวอักษร', () => {
     expect(normalizeChassis(' mltzt 3681-t2002196 ')).toBe('MLTZT3681T2002196');
@@ -553,6 +565,32 @@ describe('ReceiptsService.upload - เตือนใบเสร็จซ้ำ
     const { svc, create } = setup(undefined, null, aiReading(READING), null, { image });
     await svc.upload(file());
     expect(create.mock.calls[0][0].data.extraction.duplicate).toMatchObject({ by: 'receiptNo', chassis: 'LS6CME0P7TC914754', receivedDate: null });
+  });
+
+  it('เลขที่ใบเสร็จตรงกันแต่ PC No. ต่างกัน = คนละใบ ไม่เตือน', async () => {
+    const image = { extraction: { reading: { pcNo: '5039', chassis: 'MLHJC9328T5942489' } }, submission: null };
+    const { svc, create } = setup(undefined, null, aiReading({ ...READING, receiptNo: '70/0000638', pcNo: '5040' }), null, { image });
+    await svc.upload(file());
+    expect(create.mock.calls[0][0].data.extraction.duplicate).toBeNull();
+  });
+
+  it('เลขที่และ PC No. ตรงกัน = ซ้ำ · รูปเดิมไม่มี PC No. (ใบเก่า) ก็ยังเตือน', async () => {
+    for (const oldPc of ['5039', undefined]) {
+      const image = { extraction: { reading: { pcNo: oldPc, chassis: 'MLHJC9328T5942489' } }, submission: null };
+      const { svc, create } = setup(undefined, null, aiReading({ ...READING, receiptNo: '70/0000638', pcNo: '5039' }), null, { image });
+      await svc.upload(file());
+      expect(create.mock.calls[0][0].data.extraction.duplicate).toMatchObject({ by: 'receiptNo', receiptNo: '70/0000638' });
+    }
+  });
+
+  it('ใบที่บันทึกแล้ว: ค้นโดยตัดรายการที่มีรูป PC No. คนละเลขออก (ไม่รู้ PC No. = ยังเทียบด้วยเลขที่)', async () => {
+    const { svc, submissions } = setup(undefined, null, aiReading({ ...READING, pcNo: '5039' }), { id: 's9' });
+    await svc.upload(file());
+    const where = submissions.findFirst.mock.calls.find((c) => c[0].where.receiptNo)![0].where;
+    expect(where.receipts).toEqual({ none: { extraction: { path: ['reading', 'pcNo'], not: '5039' } } });
+    const { svc: svc2, submissions: subs2 } = setup(undefined, null, aiReading(READING), { id: 's9' });
+    await svc2.upload(file());
+    expect(subs2.findFirst.mock.calls.find((c) => c[0].where.receiptNo)![0].where.receipts).toBeUndefined();
   });
 
   it('รถคันนี้มีใบเสร็จแล้ว (เลขตัวถัง) -> เตือน', async () => {

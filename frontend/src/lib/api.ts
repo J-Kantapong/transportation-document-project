@@ -354,6 +354,7 @@ export interface ReceiptImage {
 // ผลที่ AI อ่านจากใบเสร็จ - ดู backend/src/receipts/receipt-extraction.ts (วันที่เป็น ค.ศ. แล้ว)
 export interface ReceiptReading {
   receiptNo: string | null;
+  pcNo?: string | null; // เลขหลัง "PC No." ใต้เลขที่ใบเสร็จ (ใบที่อ่านก่อน 2026-10-05 ไม่มี)
   date: string | null;
   plateCategory: string | null;
   plateNumber: string | null;
