@@ -7,6 +7,8 @@ export type ReceiptField = (typeof RECEIPT_FIELDS)[number];
 
 export const ReceiptReadingSchema = z.object({
   receiptNo: z.string().nullable(),
+  // เลขหลัง "PC No." ใต้เลขที่ใบเสร็จ - เลขที่เดียวกันมี PC No. ต่างกันได้ = คนละใบ (พบ 2026-10-05) ใบเก่าที่เก็บไว้ไม่มีช่องนี้
+  pcNo: z.string().nullable(),
   date: z.string().nullable(), // ค.ศ. YYYY-MM-DD (ใบเสร็จพิมพ์เป็น พ.ศ.)
   plateCategory: z.string().nullable(), // หมวด เช่น "8ขก"
   plateNumber: z.string().nullable(), // เลข เช่น "3484"
@@ -76,6 +78,16 @@ export function normalizePlate(category: string | null, number: string | null): 
   return { plateCategory: only[1], plateNumber: only[2] };
 }
 
+// PC No. ที่ AI อ่าน: เหลือแต่ตัวเลข (ว่าง = ไม่มี)
+export const normalizePcNo = (raw: string | null | undefined): string | null => raw?.replace(/\D/g, '') || null;
+
+// เลขที่ใบเสร็จตรงกันแต่ PC No. รู้ทั้งสองฝั่งและต่างกัน = คนละใบ · ฝั่งใดไม่รู้ (ใบเก่า/อ่านไม่ได้) = ยังถือว่าอาจเป็นใบเดียวกัน
+export const pcNoDiffers = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  const x = normalizePcNo(a);
+  const y = normalizePcNo(b);
+  return x !== null && y !== null && x !== y;
+};
+
 // เลขตัวถังที่ AI อ่าน: ตัวใหญ่ ไม่มีช่องว่าง/ขีด (เทียบกับเลขในระบบได้ตรง) - ไม่แก้ตัวอักษร ให้ checkReading เตือนเองถ้ามี I O Q
 export const normalizeChassis = (raw: string | null): string | null => raw?.replace(/[\s-]/g, '').toUpperCase() || null;
 
@@ -105,6 +117,16 @@ export function checkReading(r: ReceiptReading): ReceiptChecks {
 export const CHASSIS_SERIAL_LENGTH = 6;
 export const CHASSIS_LENGTH = 17;
 export const CHASSIS_PREFIX = CHASSIS_LENGTH - CHASSIS_SERIAL_LENGTH;
+
+// เลขตัวถังสองเลขที่อ่านครบ 17 ตัวทั้งคู่และ "คนละคันชัดเจน" - ใช้ตัดคำเตือนใบเสร็จซ้ำ: รถ 1 คันต่อใบเสร็จ 1 ใบ รถคนละคันจึงเป็นคนละใบ
+// แม้เลขที่ใบเสร็จตรงกัน (AI อ่านเลขที่เพี้ยน / เลขที่ซ้ำกัน พบ 2026-10-05) · เทียบหลังแก้ I->1, O/Q->0 เพราะ AI สับสนตัวพวกนี้
+// (เลขตัวถังจริงไม่มี I O Q) · อ่านไม่ครบ 17 ตัวหรือใกล้เคียงกัน (isNearChassis) = ยังไม่ถือว่าคนละคัน ให้เตือนตามเดิม
+const chassisForCompare = (raw: string | null | undefined): string => (raw ?? '').replace(/[\s-]/g, '').toUpperCase().replace(/I/g, '1').replace(/[OQ]/g, '0');
+export function clearlyDifferentChassis(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = chassisForCompare(a);
+  const y = chassisForCompare(b);
+  return x.length === CHASSIS_LENGTH && y.length === CHASSIS_LENGTH && x !== y && !isNearChassis(x, y);
+}
 const CHASSIS_PREFIX_MAX_DIFF = 2;
 
 // เทียบทีละตัว: ต่างกันได้เฉพาะตำแหน่ง (ของเลขในระบบ) ที่อยู่ใน 11 ตัวแรก ไม่เกิน maxDiff ตัว
@@ -140,6 +162,7 @@ export function isNearChassis(read: string, actual: string): boolean {
 
 export const RECEIPT_READING_PROMPT = `รูปนี้คือใบเสร็จรับเงินของกรมการขนส่งทางบก (รถ 1 คันต่อ 1 ใบ) อ่านข้อมูลตามที่พิมพ์ไว้จริง:
 - receiptNo: เลขหลังคำว่า "เลขที่" มุมขวาบน (รูปแบบเช่น 69/0035358) ไม่ใช่เลขตัวใหญ่ที่ขึ้นต้นด้วย C มุมซ้ายบน
+- pcNo: เลขหลัง "PC No." ซึ่งพิมพ์อยู่บรรทัดใต้เลขที่ใบเสร็จ (เช่น 5039) เฉพาะตัวเลข ถ้าไม่มีบรรทัดนี้ให้ใส่ null
 - date: วันที่หลังคำว่า "วันที่" แปลงจาก พ.ศ. เป็น ค.ศ. (ลบ 543) รูปแบบ YYYY-MM-DD
 - plateCategory / plateNumber: ค่าหลัง "เลขทะเบียน" แยกเป็น 2 ช่อง
   - plateCategory = หมวด: เลขนำหน้า 1 หลัก (ถ้ามี) ตามด้วยพยัญชนะไทย 1-2 ตัว เช่น 8ขก, 2ฆน, กข
