@@ -34,6 +34,13 @@ import {
   printInvoice,
   type PrintableInvoice,
 } from "@/lib/invoice-print";
+import { quotationApi } from "@/lib/quotation-api";
+import {
+  isYamahaCustomer,
+  thaiMonthLabel,
+  yamahaBillRows,
+  yamahaPriceOptions,
+} from "@/lib/yamaha-billing";
 import { DateInput } from "@/components/DateInput";
 import {
   WhtRatePicker,
@@ -68,6 +75,9 @@ export function BillingCustomInvoicePage() {
     isoToDisplayDate(todayIso()),
   );
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
+  const [yamahaMonthPick, setYamahaMonthPick] = useState<string | null>(null);
+  const [yamahaBusy, setYamahaBusy] = useState(false);
+  const [yamahaNote, setYamahaNote] = useState("");
   const [whtValue, setWhtValue] = useState<number | null>(null);
   const [whtChecked, setWhtChecked] = useState(false);
   const [remark, setRemark] = useState("");
@@ -182,7 +192,69 @@ export function BillingCustomInvoicePage() {
 
   const { known: knownProfit, unknown: unknownProfit } = itemRowsProfit(rows);
 
+  // เดือนของงานยามาฮ่า: ค่าตั้งต้น = เดือนของวันที่ออกบิล แก้ได้
+  const yamahaMonth = yamahaMonthPick || issueForCalc.slice(0, 7);
+
+  function addYamahaRow(id: string) {
+    const option = yamahaPriceOptions(yamahaMonth).find((o) => o.id === id);
+    if (!option) return;
+    // บรรทัดว่างที่ยังไม่ได้กรอกอะไรเลย (บรรทัดตั้งต้นของหน้า) ให้ถูกแทนที่ ไม่เหลือบรรทัดว่างค้าง
+    const untouched = (r: ItemRow) =>
+      r.description.trim() === "" && r.unitPriceText.trim() === "";
+    setRows((cur) => [...cur.filter((r) => !untouched(r)), option.row]);
+    setConfirming(false);
+  }
+
+  // ปุ่มเดือน: 6 เดือนล่าสุดนับถึงเดือนของวันที่ออกบิล (ใหม่สุดก่อน) เดือนอื่นเลือกจากช่องเดือน
+  const recentMonths = Array.from({ length: 6 }, (_, i) => {
+    const y = Number(issueForCalc.slice(0, 4));
+    const m = Number(issueForCalc.slice(5, 7)) - 1 - i;
+    const d = new Date(Date.UTC(y, m, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+
+  // ดึงยอดแจ้งย้ายของเดือนจากระบบ แล้วเติมบิลทั้งชุด (รถเล็ก 3 บรรทัด + รถใหญ่ 2 บรรทัด) พร้อมจำนวนรถ
+  async function pullYamaha(month: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return;
+    const hasContent = rows.some(
+      (r) => r.description.trim() !== "" || r.unitPriceText.trim() !== "",
+    );
+    if (
+      hasContent &&
+      !window.confirm("บรรทัดที่กรอกไว้จะถูกแทนที่ด้วยยอดของเดือนนี้ ดำเนินการต่อ?")
+    )
+      return;
+    setYamahaMonthPick(month);
+    setYamahaBusy(true);
+    setYamahaNote("");
+    setError("");
+    try {
+      const res = await quotationApi.yamahaMonth(month);
+      const label = thaiMonthLabel(month);
+      if (res.counts.SMALL + res.counts.LARGE === 0) {
+        setYamahaNote(`เดือน ${label} ยังไม่มีรายการแจ้งย้ายในระบบ`);
+        return;
+      }
+      setRows(yamahaBillRows(month, res.counts));
+      setConfirming(false);
+      setYamahaNote(
+        `ดึงยอดเดือน ${label} แล้ว: รถเล็ก ${res.counts.SMALL} คัน · รถใหญ่ ${res.counts.LARGE} คัน` +
+          (res.quotedBy
+            ? ` · เดือนนี้มีใบเสนอราคา ${res.quotedBy.quotationNo ?? ""} อยู่แล้ว`
+            : ""),
+      );
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "ดึงยอดแจ้งย้ายไม่สำเร็จ",
+      );
+    } finally {
+      setYamahaBusy(false);
+    }
+  }
+
   function chooseCustomer(id: string) {
+    setYamahaMonthPick(null);
+    setYamahaNote("");
     setCustomerId(id);
     setTerms(null);
     setPeriods([]);
@@ -391,6 +463,96 @@ export function BillingCustomInvoicePage() {
             >
               ไปหน้าใบเสนอราคา →
             </Link>
+          </div>
+        )}
+
+        {/* ราคายามาฮ่า (ผู้ใช้ 2026-10-05): เลือกลูกค้ายามาฮ่าแล้วมีตัวเลือกราคาให้เลือกเติมบรรทัดได้เลย */}
+        {customer && isYamahaCustomer(customer) && (
+          <div
+            style={{
+              border: "1px solid #c9d6f5",
+              background: "#f6f9ff",
+              borderRadius: 10,
+              padding: "10px 14px",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+              fontSize: 14,
+            }}
+          >
+            <b style={{ fontWeight: 600, flexBasis: "100%" }}>
+              งานแจ้งย้ายยามาฮ่า - ดึงยอดของเดือนมาใส่ทั้งชุด
+            </b>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center",
+                flexBasis: "100%",
+              }}
+            >
+              {recentMonths.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={yamahaMonth === m ? "primary" : undefined}
+                  disabled={yamahaBusy}
+                  onClick={() => pullYamaha(m)}
+                >
+                  {thaiMonthLabel(m)}
+                </button>
+              ))}
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span className="muted">เดือนอื่น</span>
+                <input
+                  type="month"
+                  value={yamahaMonth}
+                  disabled={yamahaBusy}
+                  onChange={(e) => void pullYamaha(e.target.value)}
+                  style={{
+                    border: "1px solid #dce2ec",
+                    borderRadius: 8,
+                    padding: "7px 10px",
+                  }}
+                />
+              </label>
+            </div>
+            {yamahaNote && (
+              <span style={{ fontSize: 13, flexBasis: "100%" }}>
+                {yamahaNote}
+              </span>
+            )}
+            <span className="muted" style={{ flex: "0 0 auto" }}>
+              หรือเพิ่มทีละบรรทัด
+            </span>
+            <select
+              value=""
+              onChange={(e) => addYamahaRow(e.target.value)}
+              aria-label="เลือกราคายามาฮ่าเพื่อเพิ่มบรรทัด"
+              style={{
+                border: "1px solid #dce2ec",
+                borderRadius: 8,
+                padding: "8px 10px",
+                background: "white",
+                flex: "1 1 300px",
+                minWidth: 0,
+                font: "inherit",
+              }}
+            >
+              <option value="">— เลือกราคาเพื่อเพิ่มบรรทัด —</option>
+              {yamahaPriceOptions(yamahaMonth).map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <span className="muted" style={{ fontSize: 12, flexBasis: "100%" }}>
+              ปุ่มเดือนดึงจำนวนรถจากงานแจ้งย้ายที่บันทึกไว้ (ไม่นับที่ยกเลิก)
+              รถเล็กราคาเปลี่ยนตามปีของเดือนงาน · เพิ่มทีละบรรทัดจะใส่จำนวน 1
+              แก้เป็นจำนวนรถได้
+            </span>
           </div>
         )}
 

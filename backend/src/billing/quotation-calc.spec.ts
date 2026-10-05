@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatQuotationNo, isMonth, revisionNo, stageOf, yamahaQuoteItems, yamahaServiceRate } from './quotation-calc.js';
+import { formatQuotationNo, isMonth, revisionNo, stageOf, thaiMonthLabel, yamahaQuoteItems, yamahaServiceRate } from './quotation-calc.js';
 
 describe('quotation numbers', () => {
   it('pads to 3 digits and appends the revision', () => {
@@ -37,12 +37,16 @@ describe('yamaha monthly quote', () => {
   it('builds a fee and a service line per size, with the monthly fee between small and large', () => {
     const items = yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 40 });
     expect(items.map((i) => [i.kind, i.description, i.quantity, i.unitPrice])).toEqual([
-      ['FEE', 'ค่าธรรมเนียมแจ้งจำหน่ายรถจักรยานยนต์ เดือน 10/2026', 512, 5],
-      ['SERVICE', 'ค่าดำเนินการแจ้งจำหน่ายรถจักรยานยนต์ เดือน 10/2026', 512, 20],
-      ['SERVICE', 'ค่าดำเนินการจัดการเอกสารบัญชีรถจักรยานยนต์ยามาฮ่า เดือน 10/2026', 1, 9000],
-      ['FEE', 'ค่าธรรมเนียมแจ้งจำหน่ายรถจักรยานยนต์(ใหญ่) เดือน 10/2026', 40, 5],
-      ['SERVICE', 'ค่าดำเนินการแจ้งจำหน่ายรถจักรยานยนต์(ใหญ่) เดือน 10/2026', 40, 50],
+      ['FEE', 'ค่าธรรมเนียมแจ้งย้ายรถจักรยานยนต์ (เล็ก) ประจำเดือน ตุลาคม 2026', 512, 5],
+      ['SERVICE', 'ค่าบริการแจ้งย้ายรถจักรยานยนต์ (เล็ก)', 512, 20],
+      ['SERVICE', 'ค่าบริการจัดการเอกสารบัญชีรถจักรยานยนต์ยามาฮ่า', 1, 9000],
+      ['FEE', 'ค่าธรรมเนียมแจ้งย้ายรถจักรยานยนต์ (ใหญ่) ประจำเดือน ตุลาคม 2026', 40, 5],
+      ['SERVICE', 'ค่าบริการแจ้งย้ายรถจักรยานยนต์ (ใหญ่)', 40, 50],
     ]);
+  });
+  it('writes the month in Thai with a Gregorian year', () => {
+    expect(thaiMonthLabel('2026-10')).toBe('ตุลาคม 2026');
+    expect(thaiMonthLabel('2027-01')).toBe('มกราคม 2027');
   });
   it('leaves out a size with no vehicles', () => {
     expect(yamahaQuoteItems('2026-10', { SMALL: 512, LARGE: 0 }).map((i) => i.quantity)).toEqual([512, 512, 1]);
