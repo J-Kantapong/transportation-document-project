@@ -10,9 +10,19 @@ import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
 // mode: original = ต้นฉบับ + สำเนา (พิมพ์ต้นฉบับได้เฉพาะวันที่ออกใบ) · copy = สำเนาอย่างเดียว · replacement = ใบแทน + สำเนา
 export type TaxInvoicePrintMode = "original" | "copy" | "replacement" | "preview";
 
+// สถานะสำนักงานของผู้ซื้อ: ว่าง = สำนักงานใหญ่ · "สาขา 00001" / "สำนักงานใหญ่" พิมพ์ตามที่เก็บ · "00001" เติมคำว่า "สาขา" ให้ (กันพิมพ์ซ้ำ "สาขา สาขา 00001")
+const branchText = (branch: string | null): string => {
+  const b = (branch ?? "").trim();
+  if (!b) return "สำนักงานใหญ่";
+  return /^(สาขา|สำนักงานใหญ่)/.test(b) ? b : `สาขา ${b}`;
+};
+
+// อัตราหัก ณ ที่จ่ายที่ลูกค้าหักจริง = ยอดหัก / ค่าบริการ (e-WHT อาจหัก 1% ไม่ใช่ 3% ตามบิล) - คำนวณจากยอดจริงบนใบ ไม่ใช้อัตราตามบิล
+const whtRateText = (t: TaxInvoice): string => (t.serviceTotal > 0 ? `${Math.round((t.whtAmount / t.serviceTotal) * 10_000) / 100}%` : "");
+
 function buyerHtml(t: TaxInvoice): string {
   const c = t.customer;
-  const taxLine = c.taxId ? `เลขที่เสียภาษี ${escapeHtml(c.taxId)} · สาขา ${escapeHtml(c.branch || "สำนักงานใหญ่")}` : t.buyerNotVatRegistered ? "ผู้ซื้อไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม" : "";
+  const taxLine = c.taxId ? `เลขที่เสียภาษี ${escapeHtml(c.taxId)} · ${escapeHtml(branchText(c.branch))}` : t.buyerNotVatRegistered ? "ผู้ซื้อไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม" : "";
   return `<div class="meta"><span class="k">ชื่อลูกค้า</span><br><b>${escapeHtml(c.name)}</b><br>
 <span class="k">${taxLine}${taxLine ? "<br>" : ""}${escapeHtml(c.address || "")}</span></div>`;
 }
@@ -45,15 +55,15 @@ ${buyerHtml(t)}
 <thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th class="r">จำนวนเงิน (บาท)</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="foot"><div><span class="k">ได้รับเงินแล้ว :</span><br>${COMPANY_PROFILE.paymentLines.map(escapeHtml).join("<br>")}<br>วันที่ ${escapeHtml(isoToThaiDate(t.issueDate))}<br>
 ${t.lineCount ? `<span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo)}</span><br>` : ""}
-${t.feeTotal > 0 ? `<span class="k">ค่าธรรมเนียมกรมการขนส่งทางบกเป็นเงินทดรองจ่าย ไม่รวมในมูลค่าที่คิดภาษีมูลค่าเพิ่ม</span>` : ""}</div>
-<div class="tot">${t.feeTotal > 0 ? `<div><span>ค่าธรรมเนียม (ทดรองจ่าย)</span><span>${formatMoney(t.feeTotal)}</span></div>` : ""}
+${t.feeTotal > 0 ? `<span class="k">ค่าธรรมเนียมกรมการขนส่งทางบกเป็นเงินทดรองจ่าย ไม่รวมในมูลค่าที่คิดภาษีมูลค่าเพิ่มและภาษีหัก ณ ที่จ่าย</span>` : ""}</div>
+<div class="tot">${t.feeTotal > 0 ? `<div><span>ค่าธรรมเนียม (ทดรองจ่าย)<br><span class="note">ไม่คิด VAT และไม่หักภาษี ณ ที่จ่าย</span></span><span>${formatMoney(t.feeTotal)}</span></div>` : ""}
 <div><span>ค่าบริการ</span><span>${formatMoney(t.serviceTotal)}</span></div>
 ${t.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${formatMoney(t.goodsTotal)}</span></div>` : ""}
-<div><span>ภาษีมูลค่าเพิ่ม ${t.vatRate}%</span><span>${formatMoney(t.vatAmount)}</span></div>
+<div><span>ภาษีมูลค่าเพิ่ม ${t.vatRate}%<br><span class="note">คิดจาก${t.goodsTotal > 0 ? "ค่าบริการ + ค่าสินค้า" : "ค่าบริการ"} ${formatMoney(round2(t.serviceTotal + t.goodsTotal))} บาท</span></span><span>${formatMoney(t.vatAmount)}</span></div>
 <div class="g"><span>รวมเงินทั้งสิ้น</span><span>${formatMoney(t.grandTotal)}</span></div>
-${t.whtAmount > 0 ? `<div><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
-<div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div></div></div>
-<div class="baht">(${escapeHtml(bahtText(t.grandTotal))})</div>
+${t.whtAmount > 0 ? `<div><span>หักภาษี ณ ที่จ่าย ${whtRateText(t)}<br><span class="note">คิดจากค่าบริการ ${formatMoney(t.serviceTotal)} บาท</span></span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
+<div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)} บาท</span></div></div></div>
+<div class="baht">(${escapeHtml(bahtText(t.receivedAmount))})</div>
 <div class="sign one"><div>ผู้รับเงิน / ผู้มีอำนาจลงนาม<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
 </section>`;
 }
@@ -62,7 +72,9 @@ const EXTRA_CSS = `
   .tag { display: inline-block; border: 1.5px solid #111; padding: 0 3mm; font-size: 10pt; font-weight: 600; margin-bottom: 1.5mm; }
   /* ผู้ใช้ 2026-10-06: ทุกบรรทัดยอดขนาดเท่ากัน มีแต่ "รับชำระสุทธิ" ตัวใหญ่ เพื่อให้เห็นทันทีว่าลูกค้าต้องจ่ายเท่าไร */
   .tot .g { font-size: inherit; font-weight: 600; }
-  .tot .paid { border-top: 1px solid #111; margin-top: 1.5mm; padding-top: 2mm; font-size: 15pt; font-weight: 600; align-items: baseline; }
+  .tot .paid { border-top: 1px solid #111; margin-top: 1.5mm; padding-top: 2mm; font-size: 13pt; font-weight: 600; align-items: baseline; }
+  /* หมายเหตุตัวเล็กใต้ยอด (คิดจากค่าบริการ / ไม่คิด VAT) - ผู้ใช้ 2026-10-06 ให้เล็กกว่านี้ ส่วนคำอ่านยอดสุทธิใช้ขนาดปกติ */
+  .tot .note { font-size: 7pt; font-weight: 400; color: #555; }
   .sign.one { justify-content: flex-end; }
   .sign.one div { flex: 0 0 70mm; }
 `;
@@ -88,6 +100,7 @@ ${tags.map((tag) => pageHtml(t, tag)).join("\n")}
 </html>`;
 }
 
+// ช่องเซ็นเว้นว่างไว้ให้เซ็นด้วยมือ (ผู้ใช้ 2026-10-06: "เดี๋ยวเซ็นเอง") - ไม่พิมพ์ลายเซ็น/ชื่ออัตโนมัติ
 export function printTaxInvoice(t: TaxInvoice, mode: TaxInvoicePrintMode): void {
   printHtml(buildTaxInvoiceHtml(t, mode));
 }
