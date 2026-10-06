@@ -7,6 +7,7 @@ import {
   ReceiptReadingSchema,
   checkReading,
   normalizeChassis,
+  normalizePcNo,
   normalizePlate,
   normalizeReceiptDate,
   normalizeUncertainFields,
@@ -86,6 +87,7 @@ export class ClaudeReceiptExtractor implements ReceiptExtractor {
         date: normalizeReceiptDate(parsed.date), // ใบเสร็จเป็น พ.ศ. - ถ้า AI ไม่ได้แปลงมา แปลงเป็น ค.ศ. ตรงนี้
         ...normalizePlate(parsed.plateCategory, parsed.plateNumber), // หมวด/เลขทะเบียนที่ AI ใส่ผิดช่อง
         chassis: normalizeChassis(parsed.chassis),
+        pcNo: normalizePcNo(parsed.pcNo),
         uncertainFields: normalizeUncertainFields(parsed.uncertainFields),
       };
       return {

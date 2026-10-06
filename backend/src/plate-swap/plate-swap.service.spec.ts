@@ -761,7 +761,7 @@ describe('linkedPlateIsNewPlate', () => {
 describe('PlateSwapService.addReceipt - เติมข้อมูลใบเสร็จจาก OCR', () => {
   const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
   const file = { buffer: JPEG, size: JPEG.length, originalname: 'r.jpg' };
-  const reading = { receiptNo: '69/0035358', date: '2026-09-20', total: 775, chassis: null, plateCategory: null, plateNumber: null, weightKg: null, items: [], uncertainFields: [] };
+  const reading = { receiptNo: '69/0035358', pcNo: null, date: '2026-09-20', total: 775, chassis: null, plateCategory: null, plateNumber: null, weightKg: null, items: [], uncertainFields: [] };
 
   it('อ่านสำเร็จและช่องยังว่างทั้ง 3 = เติมเลขที่ใบเสร็จ/วันที่/ยอดเงินให้อัตโนมัติ', async () => {
     const { svc, update } = service(swapRow(), { extraction: { reading, checks: { chassisValid: false, receiptNoValid: true, plateValid: false, itemsSumMatchesTotal: true }, usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 } } });

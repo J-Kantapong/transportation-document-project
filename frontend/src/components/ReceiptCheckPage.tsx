@@ -729,7 +729,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
         </div>
       )}
 
-      {message.text && (
+      {message.text && !(canEdit && openSheet) && (
         <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 12 }}>
           {message.text}
         </div>
@@ -1050,9 +1050,16 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
             {/* ปุ่มบันทึกติดขอบล่างจอ - ตรวจแถวไหนอยู่ก็กดยืนยันได้โดยไม่ต้องเลื่อนลงไปท้ายตาราง */}
             {canEdit && (
               <div className="receipt-save-bar">
-                <span className="customer-message" style={{ fontSize: 13 }}>
-                  คันที่ไม่มีใบเสร็จและยังไม่ทราบสาเหตุ จะค้างอยู่ในใบนี้ และขึ้นว่า &quot;ยังขาด&quot; ในรายการด้านบน
-                </span>
+                {/* ผลของการกดบันทึก (ไม่ผ่านการตรวจ / บันทึกแล้ว) ต้องขึ้นตรงนี้ด้วย - ข้อความด้านบนอยู่นอกจอเมื่อเลื่อนลงมากดปุ่ม ดูเหมือนกดแล้วไม่เกิดอะไร (พบ 2026-10-05) */}
+                {message.text ? (
+                  <span className={`customer-message${message.error ? " error" : " success"}`} style={{ fontSize: 13 }} role="alert">
+                    {message.text}
+                  </span>
+                ) : (
+                  <span className="customer-message" style={{ fontSize: 13 }}>
+                    คันที่ไม่มีใบเสร็จและยังไม่ทราบสาเหตุ จะค้างอยู่ในใบนี้ และขึ้นว่า &quot;ยังขาด&quot; ในรายการด้านบน
+                  </span>
+                )}
                 <span style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                   <span>วันที่รับใบเสร็จ {dateText}</span>
                   <button type="button" className="primary" disabled={saving} onClick={handleSave}>
