@@ -26,7 +26,7 @@ const runRow = (over: Record<string, unknown> = {}) => ({
   id: 'r1',
   month: '2026-10',
   status: 'DRAFT',
-  payDate: null,
+  payDate: new Date('2026-10-31T00:00:00.000Z'),
   ssoRate: 5,
   ssoWageCap: 17_500,
   createdByName: null,
@@ -85,7 +85,7 @@ function setup(overrides: { updateMany?: number } = {}) {
 describe('PayrollService.createRun', () => {
   it('builds one line per employee with SSO and tax worked out, in employee-code order', async () => {
     const { svc, create, auditCreate } = setup();
-    const run = await as(() => svc.createRun({ month: '2026-10' }));
+    const run = await as(() => svc.createRun({ month: '2026-10', payDate: '2026-10-31' }));
     const items = create.mock.calls[0][0].data.items.create;
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({ code: 'TI002', salary: 25_000, ssoAmount: 875, taxAmount: 0, netPay: 24_125 });
@@ -98,13 +98,13 @@ describe('PayrollService.createRun', () => {
 
   it('rejects a malformed month', async () => {
     const { svc } = setup();
-    await expect(as(() => svc.createRun({ month: '2026-13' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('YYYY-MM') } });
+    await expect(as(() => svc.createRun({ month: '2026-13', payDate: '2026-10-31' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('YYYY-MM') } });
   });
 
   it('answers 409 when the month already has a live run', async () => {
     const { svc, create } = setup();
     create.mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002' }));
-    await expect(as(() => svc.createRun({ month: '2026-10' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('มีรอบเงินเดือนอยู่แล้ว') } });
+    await expect(as(() => svc.createRun({ month: '2026-10', payDate: '2026-10-31' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('มีรอบเงินเดือนอยู่แล้ว') } });
   });
 });
 
@@ -122,6 +122,56 @@ describe('PayrollService.getRun year-to-date', () => {
     expect(run.items[0].ytd).toEqual({ income: 76_000, sso: 2_625, tax: 10 });
     // เฉพาะรอบเดือนก่อนหน้าของปีเดียวกันที่ไม่ยกเลิก
     expect((prisma.payrollItem.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0].where.run).toMatchObject({ cancelledAt: null, month: { gte: '2026-01', lt: '2026-10' } });
+  });
+});
+
+describe('PayrollService pay date', () => {
+  it('stores the planned pay date on the new run', async () => {
+    const { svc, create } = setup();
+    await as(() => svc.createRun({ month: '2026-10', payDate: '2026-10-31' }));
+    expect(create.mock.calls[0][0].data.payDate).toEqual(new Date('2026-10-31T00:00:00.000Z'));
+  });
+
+  it('requires a valid pay date inside the allowed window', async () => {
+    const { svc, create } = setup();
+    for (const payDate of [undefined, '', '31/10/2026', '2026-02-30', '2026-09-30', '2027-01-15']) {
+      await expect(as(() => svc.createRun({ month: '2026-10', payDate }))).rejects.toMatchObject({ response: { error: expect.stringMatching(/วันที่จ่าย/) } });
+    }
+    expect(create).not.toHaveBeenCalled();
+    // ต้นเดือนถัดไป (จ่ายเดือนก่อนช้าไปหน่อย) ใช้ได้
+    await as(() => svc.createRun({ month: '2026-10', payDate: '2026-11-05' }));
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a draft run change its pay date without a reason, and audits it', async () => {
+    const { svc, updateMany, auditCreate } = setup();
+    await as(() => svc.setPayDate('r1', { payDate: '2026-11-03' }));
+    expect(updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'r1', status: 'DRAFT', cancelledAt: null }, data: { payDate: new Date('2026-11-03T00:00:00.000Z') } });
+    expect(auditCreate.mock.calls[0][0].data).toMatchObject({ entity: 'PayrollRun', action: 'set-pay-date' });
+  });
+
+  it('needs a reason once the run is approved and refuses a paid run', async () => {
+    const { svc, prisma } = setup();
+    const find = prisma.payrollRun.findUnique as ReturnType<typeof vi.fn>;
+    find.mockResolvedValueOnce({ month: '2026-10', status: 'APPROVED', payDate: new Date('2026-10-31T00:00:00.000Z'), cancelledAt: null });
+    await expect(as(() => svc.setPayDate('r1', { payDate: '2026-11-03' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('เหตุผล') } });
+    find.mockResolvedValueOnce({ month: '2026-10', status: 'PAID', payDate: new Date('2026-10-31T00:00:00.000Z'), cancelledAt: null });
+    await expect(as(() => svc.setPayDate('r1', { payDate: '2026-11-03', remark: 'x' }))).rejects.toMatchObject({ response: { error: expect.stringContaining('จ่ายแล้ว') } });
+  });
+
+  it('refuses to approve a run that has no pay date (older runs)', async () => {
+    const { svc, prisma, updateMany } = setup();
+    (prisma.payrollRun.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(runRow({ payDate: null }));
+    await expect(as(() => svc.approve('r1'))).rejects.toMatchObject({ response: { error: expect.stringContaining('ระบุวันที่จ่าย') } });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps the pay date when a payment is undone', async () => {
+    const { svc, updateMany } = setup();
+    await as(() => svc.unpay('r1', { remark: 'โอนผิดบัญชี' }));
+    const data = updateMany.mock.calls[0][0].data;
+    expect(data).toMatchObject({ paidAt: null, paidByName: null, status: 'APPROVED' });
+    expect('payDate' in data).toBe(false);
   });
 });
 

@@ -153,7 +153,9 @@ export const hrApi = {
   removeSignature: () => request<PayslipSignature>("/api/hr/payslip-signature", { method: "DELETE" }),
 
   listRuns: () => request<{ runs: PayrollRunSummary[] }>("/api/hr/payroll/runs"),
-  createRun: (month: string) => request<{ run: PayrollRun }>("/api/hr/payroll/runs", json("POST", { month })),
+  createRun: (month: string, payDate: string) => request<{ run: PayrollRun }>("/api/hr/payroll/runs", json("POST", { month, payDate })),
+  setPayDate: (id: string, payDate: string, remark?: string) =>
+    request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(id)}/pay-date`, json("PATCH", { payDate, remark })),
   getRun: (id: string) => request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(id)}`),
   runHistory: (id: string) => request<{ history: HistoryEntry[] }>(`/api/hr/payroll/runs/${enc(id)}/history`),
   updateItem: (runId: string, itemId: string, data: PayrollItemInput) => request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(runId)}/items/${enc(itemId)}`, json("PATCH", data)),

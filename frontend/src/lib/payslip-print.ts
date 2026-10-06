@@ -62,7 +62,7 @@ function slipHtml(run: PayrollRun, item: PayrollItem, options: PayslipOptions): 
     </div>
     <div class="ttl">
       <div class="chip"><span class="chip-th">สลิปเงินเดือน</span><span class="chip-en">PAYSLIP</span></div>
-      <div class="ttl-meta">งวด <b>${esc(monthLabel(run.month))}</b>${run.payDate ? `<br>วันที่จ่าย <b>${esc(thaiDate(run.payDate))}</b>` : ""}</div>
+      <div class="ttl-meta">งวด <b>${esc(monthLabel(run.month))}</b>${run.payDate ? `<br>วันที่จ่ายเงินเดือน <b>${esc(thaiDate(run.payDate))}</b>` : ""}</div>
     </div>
   </header>
 

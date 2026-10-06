@@ -69,8 +69,13 @@ export class HrController {
     return this.payroll.listRuns();
   }
 
+  @Patch('payroll/runs/:id/pay-date')
+  async setPayDate(@Param('id') id: string, @Body() body: { payDate?: unknown; remark?: unknown }) {
+    return { run: await this.payroll.setPayDate(id, body ?? {}) };
+  }
+
   @Post('payroll/runs')
-  async createRun(@Body() body: { month?: unknown }) {
+  async createRun(@Body() body: { month?: unknown; payDate?: unknown }) {
     return { run: await this.payroll.createRun(body ?? {}) };
   }
 

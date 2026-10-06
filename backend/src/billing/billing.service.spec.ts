@@ -122,6 +122,23 @@ describe('BillingService.createCustomInvoice', () => {
     });
   });
 
+  // เครดิตเทอมของลูกค้า ณ วันออกบิล -> วันครบกำหนดชำระ (ผู้ใช้ 2026-09-28) - ไม่ตั้ง = ไม่มีวันครบกำหนด
+  it('sets the due date from the customer credit days at issue, none when the customer has no credit terms', async () => {
+    const withCredit = customService();
+    withCredit.svc = new BillingService({
+      customer: { findUnique: vi.fn().mockResolvedValue({ ...customer, billingCreditDays: 30, accountPeriods: [] }) },
+      invoice: { create: withCredit.create },
+    } as unknown as PrismaService);
+    const invoice = await withCredit.svc.createCustomInvoice(customDto());
+    expect(withCredit.create.mock.calls[0][0].data.dueDate).toEqual(new Date('2027-03-03T00:00:00.000Z'));
+    expect(invoice.dueDate).toBe('2027-03-03');
+
+    const none = customService();
+    const noCredit = await none.svc.createCustomInvoice(customDto());
+    expect(none.create.mock.calls[0][0].data.dueDate).toBeNull();
+    expect(noCredit.dueDate).toBeNull();
+  });
+
   it('takes the WHT rate chosen for the bill', async () => {
     const { svc } = customService();
     const invoice = await svc.createCustomInvoice(customDto({ whtRate: 1 }));
