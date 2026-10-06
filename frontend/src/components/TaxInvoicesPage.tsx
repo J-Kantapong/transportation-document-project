@@ -8,6 +8,8 @@ import { billingApi, WHT_METHOD_LABEL, type Invoice, type TaxInvoice, type TaxIn
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { canPrintOriginal, printTaxInvoice } from "@/lib/tax-invoice-print";
+import { buildAccountingPackage, buildSalesTaxExcel } from "@/lib/accounting-bundle";
+import { downloadBlob } from "@/lib/pdf-export";
 import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
 
@@ -26,6 +28,7 @@ export function TaxInvoicesPage() {
   // บิลรอรับเงินที่ออกใบกำกับได้ (บัญชีบริษัท + มี VAT) - เลือกจากรายการแล้วออกใบกำกับจากบิลนั้นตรง ๆ (ผู้ใช้ 2026-10-06)
   const [waiting, setWaiting] = useState<Invoice[] | null>(null);
   const [issuing, setIssuing] = useState<Invoice | null>(null);
+  const [packing, setPacking] = useState(""); // ข้อความความคืบหน้าตอนสร้างชุดส่งบัญชี (ว่าง = ไม่ได้ทำ)
 
   async function reload(m = month) {
     try {
@@ -69,28 +72,33 @@ export function TaxInvoicesPage() {
   const active = (rows ?? []).filter((r) => r.status === "ISSUED");
   const sum = (f: (r: TaxInvoice) => number) => round2(active.reduce((s, r) => s + f(r), 0));
 
+  // Excel รายงานภาษีขาย (ชุดเดียวกับในชุดส่งบัญชี: + ค่าธรรมเนียมทดรองจ่าย ยอดหัก ณ ที่จ่าย แถวรวม และชีท 50 ทวิ)
   async function exportExcel() {
     if (!rows) return;
-    const XLSX = await import("xlsx");
-    // รายงานภาษีขาย: มูลค่า = ค่าบริการ + ค่าสินค้า (ฐาน VAT) ไม่รวมค่าธรรมเนียมทดรองจ่าย · ใบที่ยกเลิกแสดงยอด 0
-    const data = rows.map((r, i) => {
-      const cancelled = r.status === "CANCELLED";
-      return {
-        ลำดับ: i + 1,
-        "วัน เดือน ปี": isoToDisplayDate(r.issueDate),
-        เลขที่: r.taxInvoiceNo,
-        "ชื่อผู้ซื้อสินค้า/ผู้รับบริการ": r.customer.name,
-        เลขประจำตัวผู้เสียภาษี: r.customer.taxId ?? "",
-        สถานประกอบการ: r.customer.taxId ? r.customer.branch || "สำนักงานใหญ่" : "",
-        "มูลค่าสินค้าหรือบริการ": cancelled ? 0 : round2(r.serviceTotal + r.goodsTotal),
-        ภาษีมูลค่าเพิ่ม: cancelled ? 0 : r.vatAmount,
-        หมายเหตุ: cancelled ? `ยกเลิก - ${r.cancelReason ?? ""}` : r.replacesNo ? `ออกแทน ${r.replacesNo}` : "",
-      };
-    });
-    const sheet = XLSX.utils.json_to_sheet(data);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "ภาษีขาย");
-    XLSX.writeFile(book, `รายงานภาษีขาย-${month}.xlsx`);
+    const bytes = await buildSalesTaxExcel(rows);
+    downloadBlob(new Blob([bytes as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `รายงานภาษีขาย-${month}.xlsx`);
+  }
+
+  // ชุดส่งบัญชีรายเดือน (ผู้ใช้ 2026-10-06): ZIP = Excel + PDF สำเนาทุกใบ + ไฟล์ 50 ทวิ + สรุป - ดาวน์โหลดแล้วแนบอีเมลส่งบัญชีเอง
+  async function exportPackage() {
+    if (!rows?.length || packing) return;
+    setPacking("เริ่มสร้างชุดส่งบัญชี...");
+    setError("");
+    setNotice("");
+    try {
+      const pkg = await buildAccountingPackage(month, rows, setPacking);
+      downloadBlob(pkg.blob, pkg.fileName);
+      const mb = (pkg.sizeBytes / 1024 / 1024).toFixed(1);
+      setNotice(
+        `สร้างชุดส่งบัญชี ${month} แล้ว: ใบกำกับ ${pkg.taxInvoices} ใบ (ยกเลิก ${pkg.cancelled}) · ไฟล์ 50 ทวิ ${pkg.certificateFiles} ไฟล์ · ขนาด ${mb} MB` +
+          (pkg.tooBigForEmail ? " - ไฟล์ใหญ่เกิน 20 MB อีเมลบางเจ้าอาจไม่รับ ให้แบ่งส่ง หรือส่งผ่าน Drive" : " - แนบอีเมลส่งบัญชีได้เลย") +
+          (pkg.warnings.length ? ` · มี ${pkg.warnings.length} ข้อควรตรวจ (ดูใน summary.txt): ${pkg.warnings.join(" / ")}` : ""),
+      );
+    } catch (err) {
+      setError(errorText(err, "สร้างชุดส่งบัญชีไม่สำเร็จ - ลองใหม่ หรือใช้ปุ่ม Excel กับพิมพ์สำเนาทีละใบแทน"));
+    } finally {
+      setPacking("");
+    }
   }
 
   return (
@@ -104,6 +112,11 @@ export function TaxInvoicesPage() {
       {series && !series.enabled && (
         <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
           ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ตอนนี้บิลยังบันทึกรับเงินแบบเดิม (พิมพ์เลข TV จาก Google Sheet) {isAdmin ? "ตั้งเลขล่าสุดด้านล่างเพื่อเริ่มใช้" : "ให้ ADMIN ตั้งเลขเริ่ม"}
+        </div>
+      )}
+      {packing && (
+        <div className="customer-message" role="status" style={{ margin: "12px 0" }}>
+          {packing}
         </div>
       )}
       {notice && (
@@ -148,8 +161,11 @@ export function TaxInvoicesPage() {
           <h2>ใบกำกับภาษี</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="เดือน" />
-            <button type="button" onClick={exportExcel} disabled={!rows?.length}>
+            <button type="button" onClick={exportExcel} disabled={!rows?.length || !!packing}>
               ⬇ Excel รายงานภาษีขาย
+            </button>
+            <button type="button" className="primary" onClick={exportPackage} disabled={!rows?.length || !!packing}>
+              {packing ? "กำลังสร้าง..." : "📦 ชุดส่งบัญชี (ZIP)"}
             </button>
           </div>
         </div>

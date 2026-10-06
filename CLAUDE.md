@@ -297,6 +297,16 @@ This private repository is the shared development surface for the user, Claude C
   (`TaxInvoice.sellerSnapshot`, from `backend/src/billing/seller-profile.ts`, a copy of `COMPANY_PROFILE`; change both when
   the company data changes) and the buyer snapshot now carries `email`; `seller` is null on older TVs and the print falls back
   to the current company profile. The issue dialog hints when the customer has no email. Paper stays until 2027.
+  Monthly accounting package (user 2026-10-06, no migration, frontend only): the "📦 ชุดส่งบัญชี (ZIP)" button on
+  `/accounting/tax-invoices` builds one ZIP for the chosen month in the browser (`frontend/src/lib/accounting-bundle.ts`, zip by
+  `fflate`): `tax-sales-report.xlsx` (sheet "ภาษีขาย" = the sales-tax report plus ค่าธรรมเนียมทดรองจ่าย, รวม, หัก ณ ที่จ่าย, รับสุทธิ, 50 ทวิ
+  status and a totals row of the live invoices; sheet "50 ทวิ" = what customers withheld and which file covers it),
+  `tax-invoice-copies.pdf` (a copy page per invoice in number order, cancelled ones watermarked; `buildTaxInvoiceBundleHtml` through
+  `htmlToPdfBlob` in `pdf-export.ts`, which also page-breaks at `section.page`), `50tawi/` (the attached 50 ทวิ files, named with the
+  TV numbers they cover) and `summary.txt`. File names inside are ASCII. The system does not send email: the user downloads the
+  ZIP and attaches it (a notice warns above 20 MB). The plain Excel button uses the same workbook builder.
+  The tax invoice list page also has a panel of company-account bills waiting for payment with the issue dialog, and the custom
+  tax invoice page links a customer's waiting bills to `/accounting/tax-invoices?issue=<invoiceId>`.
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT
