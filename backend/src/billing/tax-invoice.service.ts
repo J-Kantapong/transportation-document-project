@@ -135,7 +135,7 @@ export class TaxInvoiceService {
     ]);
     const year = Number(bangkokToday().slice(0, 4));
     const current = seriesRows.find((s) => s.year === year);
-    const last = await this.prisma.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    const last = await this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
     return {
       enabled: seriesRows.length > 0,
       buyer,
@@ -232,7 +232,7 @@ export class TaxInvoiceService {
     const buyer = this.buyerOf(customer);
     const [seriesRows, last] = await Promise.all([
       this.prisma.taxInvoiceSeries.findMany(),
-      this.prisma.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } }),
+      this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } }),
     ]);
     const current = seriesRows.find((s) => s.year === year);
     return {
@@ -593,7 +593,8 @@ export class TaxInvoiceService {
     if ((await tx.taxInvoiceSeries.count()) === 0) throw bad('ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มก่อน');
     await tx.$executeRaw`INSERT INTO "TaxInvoiceSeries" ("year", "lastNumber", "updatedAt") VALUES (${year}, 0, NOW()) ON CONFLICT DO NOTHING`;
     const [series] = await tx.$queryRaw<Array<{ lastNumber: number }>>`SELECT "lastNumber" FROM "TaxInvoiceSeries" WHERE "year" = ${year} FOR UPDATE`;
-    const last = await tx.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    const last = await tx.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    // เทียบวันที่กับใบที่ "ยังใช้อยู่" เท่านั้น (ผู้ใช้ 2026-10-06): ใบที่ยกเลิกแล้วใช้ไม่ได้ วันที่ของมันไม่ควรกันการออกใบใหม่ที่ลงวันที่ก่อนหน้า
     if (last && iso(last.issueDate)! > paidIso) {
       throw bad(`วันที่ต้องไม่ก่อนใบกำกับล่าสุด ${last.taxInvoiceNo} (${dmy(iso(last.issueDate)!)}) - เลขใบกำกับต้องเรียงตามวันที่`);
     }

@@ -75,7 +75,7 @@ function fakeDb(
   const svc = new TaxInvoiceService(db as unknown as PrismaService, {} as ReceiptStorage);
   // ไม่ต้องอ่านใบที่เพิ่งออกกลับ - ทดสอบแค่สิ่งที่เขียน
   vi.spyOn(svc, 'get').mockImplementation(async (id: string) => ({ id }) as never);
-  return { svc, created, invoiceUpdates, seriesUpdates, audits };
+  return { svc, created, invoiceUpdates, seriesUpdates, audits, db };
 }
 
 describe('TaxInvoiceService.issue', () => {
@@ -117,6 +117,14 @@ describe('TaxInvoiceService.issue', () => {
     const { svc, created } = fakeDb({ lastNumber: 10, lastTv: { taxInvoiceNo: 'TV2026-010', issueDate: new Date('2026-10-20T00:00:00.000Z') } });
     await expect(svc.issue('i1', { ...ok, paidDate: '2026-10-19' })).rejects.toMatchObject({ status: 400 });
     expect(created).toHaveLength(0);
+  });
+
+  it('the date-order check only looks at live tax invoices, so a cancelled one does not block an earlier date', async () => {
+    const { svc, created, db } = fakeDb({ lastNumber: 124, lastTv: null });
+    await svc.issue('i1', { ...ok, paidDate: '2026-10-02' });
+    const calls = (db.taxInvoice as { findFirst: { mock: { calls: Array<[{ where: Record<string, unknown> }]> } } }).findFirst.mock.calls;
+    expect(calls.some(([a]) => a.where.status === 'ISSUED' && a.where.year === 2026)).toBe(true);
+    expect(created[0]).toMatchObject({ taxInvoiceNo: 'TV2026-125' });
   });
 
   it('personal-account and no-VAT bills have no tax invoice', async () => {
