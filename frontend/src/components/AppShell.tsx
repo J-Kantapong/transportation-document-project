@@ -65,6 +65,8 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/accounting/quotations")) return [{ label: "งานบัญชี" }, { label: "ใบเสนอราคา", href: "/accounting/quotations" }];
   if (within(pathname, "/accounting/tax-invoices")) return [{ label: "งานบัญชี" }, { label: "ใบกำกับภาษี", href: "/accounting/tax-invoices" }];
   if (within(pathname, "/accounting/customer-payments")) return [{ label: "งานบัญชี" }, { label: "การจ่ายของลูกค้า", href: "/accounting/customer-payments" }];
+  if (within(pathname, "/hr/employees")) return [{ label: "ฝ่ายบุคคล" }, { label: "ทะเบียนพนักงาน", href: "/hr/employees" }];
+  if (within(pathname, "/hr/payroll")) return [{ label: "ฝ่ายบุคคล" }, { label: "เงินเดือน", href: "/hr/payroll" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
   if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
   const category = REGISTRATION_CATEGORIES.find((c) => within(pathname, c.href));
@@ -238,6 +240,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/billing" icon="stack" label="วางบิล" pathname={pathname} onClick={close} />}
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/tax-invoices" icon="stack" label="ใบกำกับภาษี / 50 ทวิ" pathname={pathname} onClick={close} />}
                 <NavLink href="/accounting/customer-payments" icon="stack" label="การจ่ายของลูกค้า" pathname={pathname} onClick={close} />
+              </>
+            )}
+            {has("ADMIN") && (
+              <>
+                <div className="label">ฝ่ายบุคคล</div>
+                <NavLink href="/hr/employees" icon="users" label="ทะเบียนพนักงาน" pathname={pathname} onClick={close} />
+                <NavLink href="/hr/payroll" icon="stack" label="เงินเดือน" pathname={pathname} onClick={close} />
               </>
             )}
             {has("ADMIN") && (

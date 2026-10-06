@@ -10,6 +10,7 @@ import { CustomerPaymentsModule } from './customer-payments/customer-payments.mo
 import { CustomersModule } from './customers/customers.module.js';
 import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
+import { HrModule } from './hr/hr.module.js';
 import { FinanceCompaniesModule } from './finance-companies/finance-companies.module.js';
 import { OverviewModule } from './overview/overview.module.js';
 import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
@@ -55,6 +56,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BillingModule,
     CustomerPaymentsModule,
     OverviewModule,
+    HrModule,
     VehicleSearchModule,
   ],
   controllers: [AppController],

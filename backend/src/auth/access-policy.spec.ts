@@ -144,3 +144,17 @@ describe('access policy tax renewal / Yamaha / plate swap corrections', () => {
     }
   });
 });
+
+// ฝ่ายบุคคล / เงินเดือน (ผู้ใช้ 2026-10-05): ข้อมูลส่วนบุคคลและเงินเดือนเห็นได้เฉพาะ ADMIN - กฎ GET ท้ายตารางเปิดให้พนักงานทุกกลุ่มอ่าน จึงต้องมีกฎเฉพาะ
+describe('access policy HR / payroll', () => {
+  it('keeps every /api/hr route to ADMIN, reads included', () => {
+    for (const role of ['STAFF_ENTRY', 'STAFF_CAR', 'STAFF_MOTO', 'ACCOUNTANT', 'DELIVERY', 'CUSTOMER'] as const) {
+      expect(isAllowed(accessFor('/api/hr/employees', 'GET'), [role])).toBe(false);
+      expect(isAllowed(accessFor('/api/hr/payroll/runs/r1', 'GET'), [role])).toBe(false);
+      expect(isAllowed(accessFor('/api/hr/payroll/runs/r1/approve', 'POST'), [role])).toBe(false);
+    }
+    expect(isAllowed(accessFor('/api/hr/employees', 'GET'), ['ADMIN'])).toBe(true);
+    expect(isAllowed(accessFor('/API/HR/Payroll/runs', 'POST'), ['ADMIN'])).toBe(true);
+    expect(isAllowed(accessFor('/API/HR/Employees', 'GET'), ['ACCOUNTANT'])).toBe(false);
+  });
+});
