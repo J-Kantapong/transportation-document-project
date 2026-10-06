@@ -25,6 +25,8 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [creditText, setCreditText] = useState(terms.creditDays == null ? "" : String(terms.creditDays));
   // ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM)
   const [requiresQuotation, setRequiresQuotation] = useState(terms.requiresQuotation ?? false);
+  // ประเภท 50 ทวิ ที่ลูกค้าส่งมาตามปกติ (ผู้ใช้ 2026-10-06)
+  const [whtMethod, setWhtMethod] = useState<"PAPER" | "EWHT">(terms.whtMethod === "EWHT" ? "EWHT" : "PAPER");
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -48,7 +50,7 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, remark: remark.trim() });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, whtMethod, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -96,6 +98,16 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
         เครดิตเทอม (วัน นับจากวันออกบิล)
         <input type="text" inputMode="numeric" value={creditText} onChange={(e) => setCreditText(e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="เช่น 30 (ว่าง = ไม่ตั้ง)" />
       </label>
+      {withholds && (
+        <div className="inspect-filter" style={{ padding: 0 }} role="group" aria-label="ประเภท 50 ทวิ ที่ลูกค้าส่ง">
+          <button type="button" className={`filter-chip${whtMethod === "PAPER" ? " selected" : ""}`} onClick={() => setWhtMethod("PAPER")}>
+            50 ทวิ กระดาษ
+          </button>
+          <button type="button" className={`filter-chip${whtMethod === "EWHT" ? " selected" : ""}`} onClick={() => setWhtMethod("EWHT")}>
+            e-WHT (หักผ่านธนาคาร)
+          </button>
+        </div>
+      )}
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
         <input type="checkbox" checked={requiresQuotation} onChange={(e) => setRequiresQuotation(e.target.checked)} />
         ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น)

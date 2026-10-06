@@ -65,7 +65,11 @@ export function TaxInvoiceIssueDialog({
   useEffect(() => {
     billingApi
       .taxInvoicePreview(invoice.id)
-      .then(setPreview)
+      .then((p) => {
+        setPreview(p);
+        // ประเภท 50 ทวิ ตั้งต้นตามที่ตั้งไว้ที่ลูกค้า (แก้ในหน้าต่างได้)
+        setWhtMethod(p.defaultWhtMethod === "EWHT" ? "EWHT" : "PAPER");
+      })
       .catch((err) => setLoadError(errorText(err, "โหลดข้อมูลไม่สำเร็จ")));
   }, [invoice.id]);
 

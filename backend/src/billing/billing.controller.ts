@@ -18,7 +18,7 @@ export class BillingController {
 
   @Patch('customers/:id/terms')
   // remark บังคับ (ผู้ใช้ 2026-09-27) - เก็บค่าก่อน/หลังลง AuditLog ของลูกค้า
-  async updateTerms(@Param('id') id: string, @Body() body: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; requiresQuotation?: unknown; remark?: unknown }) {
+  async updateTerms(@Param('id') id: string, @Body() body: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; whtMethod?: unknown; requiresQuotation?: unknown; remark?: unknown }) {
     return { terms: await this.billingService.updateTerms(id, body) };
   }
 

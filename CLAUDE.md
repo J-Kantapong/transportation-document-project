@@ -307,6 +307,10 @@ This private repository is the shared development surface for the user, Claude C
   ZIP and attaches it (a notice warns above 20 MB). The plain Excel button uses the same workbook builder.
   The tax invoice list page also has a panel of company-account bills waiting for payment with the issue dialog, and the custom
   tax invoice page links a customer's waiting bills to `/accounting/tax-invoices?issue=<invoiceId>`.
+  Per-customer default 50 ทวิ type (user 2026-10-06, migration `20261006230000_customer_wht_method`): `Customer.billingWhtMethod`
+  PAPER (default) | EWHT, set in the terms editor (`whtMethod` in `PATCH /api/billing/customers/:id/terms`, shown when the customer
+  withholds); the issue dialog and the custom tax invoice page preselect it (`defaultWhtMethod` in the preview) and it can be changed
+  per invoice. Today YM and Lexus Auto City are e-WHT, everyone else paper. Issued invoices are not affected.
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT
