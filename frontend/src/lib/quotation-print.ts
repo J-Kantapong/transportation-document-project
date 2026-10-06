@@ -2,6 +2,7 @@ import type { RateKind } from "@/lib/billing-api";
 import { COMPANY_PROFILE, PERSONAL_PROFILE } from "@/lib/company-profile";
 import { bahtText, formatMoney, isoToThaiDate, round2 } from "@/lib/invoice";
 import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
+import type { PayslipSignature } from "@/lib/hr-api";
 import { quotationGrandTotal, type Quotation, type QuotationItem } from "@/lib/quotation-api";
 
 // ใบเสนอราคา (ผู้ใช้ 2026-10-01) - หน้าตาเดียวกับใบวางบิล (CSS ชุดเดียวกัน) ต่างกันที่: ชื่อเอกสาร, วันยืนราคา, เรื่อง,
@@ -63,6 +64,12 @@ function issuerHtml(q: PrintableQuotation): string {
 <span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>`;
 }
 
+// ตัวเลือกการพิมพ์: ลายเซ็นผู้เสนอราคา (ผู้ใช้ 2026-10-06, ชุดเดียวกับสลิปเงินเดือน) พิมพ์เฉพาะใบที่ออกเลขแล้วและยังใช้ได้
+// ร่าง / ยกเลิก / ถูกแทนที่ไม่พิมพ์ลายเซ็น กันเอาใบที่ยังไม่อนุมัติหรือเลิกใช้ไปใช้ต่อ
+export interface QuotationPrintOptions {
+  signature?: Pick<PayslipSignature, "exists" | "imageDataUrl" | "signerName"> | null;
+}
+
 const markOf = (q: PrintableQuotation) => (q.status === "DRAFT" ? "ร่าง" : q.status === "CANCELLED" || q.status === "SUPERSEDED" ? "ยกเลิก" : "");
 
 function jobBodyHtml(q: PrintableQuotation): string {
@@ -111,9 +118,10 @@ const conditionsHtml = (q: PrintableQuotation) =>
     q.conditions ? `<br><span class="k">เงื่อนไข :</span><br>${escapeHtml(q.conditions).replace(/\n/g, "<br>")}` : ""
   }`;
 
-export function buildQuotationHtml(q: PrintableQuotation): string {
+export function buildQuotationHtml(q: PrintableQuotation, options: QuotationPrintOptions = {}): string {
   const c = q.customer;
   const mark = markOf(q);
+  const sig = !mark && q.quotationNo && options.signature?.exists && options.signature.imageDataUrl?.startsWith("data:image/png;base64,") ? options.signature : null;
   return `<!doctype html>
 <html lang="th">
 <head>
@@ -123,7 +131,10 @@ export function buildQuotationHtml(q: PrintableQuotation): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
 <style>
-${PRINT_CSS}</style>
+${PRINT_CSS}
+  /* ช่องเซ็น (ผู้เสนอราคา / ผู้อนุมัติ) ชิดล่างสุดของหน้าพิมพ์ (ผู้ใช้ 2026-10-06): พื้นที่พิมพ์ A4 สูง 273 มม. (ขอบ 12 มม. บนล่าง) เว้น 1 มม. กันล้นไปหน้าถัดไป */
+  @media print { .face { min-height: 272mm; } }
+</style>
 </head>
 <body>
 <section class="page face">${mark ? `<div class="void-mark" aria-hidden="true">${mark}</div>` : ""}
@@ -133,12 +144,12 @@ ${PRINT_CSS}</style>
 <span class="k">${c.taxId ? `เลขที่เสียภาษี ${escapeHtml(c.taxId)}<br>` : ""}${escapeHtml(c.address || "")}</span>
 ${q.title ? `<div style="margin-top:2mm"><span class="k">เรื่อง</span> ${escapeHtml(q.title)}</div>` : ""}</div>
 ${q.kind === "RATE" ? rateBodyHtml(q) : jobBodyHtml(q)}
-<div class="sign"><div>ผู้เสนอราคา<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(q.issueDate))}</span></div><div>ผู้อนุมัติ (ลูกค้า)<br><span class="k">วันที่ : ____/____/______</span></div></div>
+<div class="sign"><div style="position:relative">${sig ? `<img src="${sig.imageDataUrl}" alt="" style="position:absolute;left:50%;bottom:100%;transform:translateX(-50%);max-height:11mm;max-width:40mm;margin-bottom:.6mm">` : ""}ผู้เสนอราคา${sig?.signerName ? `<br><span class="k">(${escapeHtml(sig.signerName)})</span>` : ""}<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(q.issueDate))}</span></div><div>ผู้อนุมัติ (ลูกค้า)<br><span class="k">วันที่ : ____/____/______</span></div></div>
 </section>
 </body>
 </html>`;
 }
 
-export function printQuotation(q: PrintableQuotation): void {
-  printHtml(buildQuotationHtml(q));
+export function printQuotation(q: PrintableQuotation, options: QuotationPrintOptions = {}): void {
+  printHtml(buildQuotationHtml(q, options));
 }

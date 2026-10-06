@@ -7,6 +7,7 @@ import { api, ApiError, type Customer } from "@/lib/api";
 import { billingApi, type AccountPeriod, type BillingAccount, type BillingTerms, type RateKind, type RateVehicleKind } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { computeTotals, formatMoney, round2 } from "@/lib/invoice";
+import { fetchPrintSignature } from "@/lib/print-signature";
 import { buildQuotationHtml, printQuotation, RATE_KIND_LABEL, type PrintableQuotation } from "@/lib/quotation-print";
 import {
   QUOTATION_KIND_LABEL,
@@ -222,7 +223,7 @@ export function QuotationFormPage() {
       if (!issue) return router.push("/accounting/quotations?stage=DRAFT");
       try {
         const { quotation } = await quotationApi.issue(draft.id, draft.updatedAt);
-        printQuotation(quotation);
+        printQuotation(quotation, { signature: await fetchPrintSignature() });
         router.push(`/accounting/quotations/view?id=${encodeURIComponent(quotation.id)}`);
       } catch (err) {
         setEditing(draft);

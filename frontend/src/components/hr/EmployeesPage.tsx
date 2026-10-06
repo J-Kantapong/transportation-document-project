@@ -228,7 +228,7 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
   const [salaryText, setSalaryText] = useState(employee ? String(employee.baseSalary) : "");
   const [allowanceText, setAllowanceText] = useState(employee && employee.otherAllowance ? String(employee.otherAllowance) : "");
   const [socialSecurity, setSocialSecurity] = useState(employee?.socialSecurity ?? true);
-  const [withholdTax, setWithholdTax] = useState(employee?.withholdTax ?? true);
+  const [withholdTax, setWithholdTax] = useState(employee?.withholdTax ?? false);
   const [note, setNote] = useState(employee?.note ?? "");
   const [remark, setRemark] = useState("");
   const [busy, setBusy] = useState(false);
