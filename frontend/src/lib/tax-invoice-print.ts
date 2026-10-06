@@ -5,7 +5,7 @@ import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (ผู้ใช้ 2026-09-28) - หน้าตาเดียวกับใบวางบิล (CSS ชุดเดียวกัน) ต่างกันที่:
 // ชื่อเอกสาร + ป้ายต้นฉบับ/สำเนา, เลข TV + อ้างอิงเลขใบวางบิล, วันที่ = วันรับเงิน, ช่องยอดรวมก่อนหัก ณ ที่จ่ายแล้วต่อด้วย
-// ยอดหักจริงและรับชำระสุทธิ, "ได้รับเงินแล้ว" แทนเงื่อนไขชำระเงิน, ช่องเซ็นช่องเดียว "ผู้รับเงิน"
+// ยอดหักจริงและรับชำระสุทธิ, "ได้รับเงินแล้ว" แทนเงื่อนไขชำระเงิน, ช่องเซ็นช่องเดียว "ผู้รับเงิน / ผู้มีอำนาจลงนาม" (ผู้ใช้ 2026-10-06)
 // รายละเอียดรถรายคันไม่พิมพ์ซ้ำ - อ้างเอกสารแนบของใบวางบิล (IV…-A, ผู้ใช้เลือกแบบ ก)
 // mode: original = ต้นฉบับ + สำเนา (พิมพ์ต้นฉบับได้เฉพาะวันที่ออกใบ) · copy = สำเนาอย่างเดียว · replacement = ใบแทน + สำเนา
 export type TaxInvoicePrintMode = "original" | "copy" | "replacement" | "preview";
@@ -54,7 +54,7 @@ ${t.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${forma
 ${t.whtAmount > 0 ? `<div><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
 <div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div></div></div>
 <div class="baht">(${escapeHtml(bahtText(t.grandTotal))})</div>
-<div class="sign one"><div>ผู้รับเงิน<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
+<div class="sign one"><div>ผู้รับเงิน / ผู้มีอำนาจลงนาม<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
 </section>`;
 }
 
