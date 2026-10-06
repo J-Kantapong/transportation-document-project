@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { EmployeesService, type EmployeeInput } from './employees.service.js';
 import { PayrollService } from './payroll.service.js';
+import { PayslipSignatureService } from './payslip-signature.service.js';
 
 // ฝ่ายบุคคล / เงินเดือน - ADMIN เท่านั้น (access-policy.ts: /api/hr) ข้อมูลส่วนบุคคลและเงินเดือนไม่เปิดให้บทบาทอื่น
 @Controller('api/hr')
@@ -8,7 +9,24 @@ export class HrController {
   constructor(
     private readonly employees: EmployeesService,
     private readonly payroll: PayrollService,
+    private readonly signature: PayslipSignatureService,
   ) {}
+
+  // ลายเซ็นผู้จ่ายเงินบนสลิป (ผู้ใช้ 2026-10-06)
+  @Get('payslip-signature')
+  getSignature() {
+    return this.signature.get();
+  }
+
+  @Put('payslip-signature')
+  setSignature(@Body() body: { imageDataUrl?: unknown; signerName?: unknown }) {
+    return this.signature.set(body ?? {});
+  }
+
+  @Delete('payslip-signature')
+  removeSignature() {
+    return this.signature.remove();
+  }
 
   @Get('employees')
   listEmployees(@Query('status') status?: string, @Query('q') q?: string) {

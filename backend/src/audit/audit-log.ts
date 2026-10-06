@@ -23,7 +23,8 @@ export type AuditEntity =
   | 'WhtCertificate'
   | 'Quotation'
   | 'Employee'
-  | 'PayrollRun';
+  | 'PayrollRun'
+  | 'PayslipSignature';
 
 export interface AuditEntry {
   entity: AuditEntity;

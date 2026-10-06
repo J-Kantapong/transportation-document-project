@@ -293,11 +293,10 @@ This private repository is the shared development surface for the user, Claude C
   `GET /api/billing/wht-pending` (overdue after 30 days, user) + `POST .../wht-pending/remind`. Credit terms:
   `Customer.billingCreditDays` (terms editor, `creditDays` in `PATCH .../customers/:id/terms`), `Invoice.dueDate` =
   issue date + days at issue (shifted when the issue date is edited); the invoice list flags overdue / due in 7 days.
-- Quotations (ใบเสนอราคา, user 2026-10-01, migration `20261001090000_quotations`, code in
-  `backend/src/billing/quotation.*`, pages `/accounting/quotations` (list), `/new` (`?edit=<id>` = edit a draft),
-  `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
-  the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
-  per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
+  e-Tax preparation (user 2026-10-06, migration `20261006100000_tax_invoice_seller_snapshot`): every new TV stores the seller
+  (`TaxInvoice.sellerSnapshot`, from `backend/src/billing/seller-profile.ts`, a copy of `COMPANY_PROFILE`; change both when
+  the company data changes) and the buyer snapshot now carries `email`; `seller` is null on older TVs and the print falls back
+  to the current company profile. The issue dialog hints when the customer has no email. Paper stays until 2027.
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT
@@ -309,6 +308,11 @@ This private repository is the shared development surface for the user, Claude C
   `POST /api/billing/tax-invoices/custom` { customerId, issueDate (= paid date), items, whtAmount, whtMethod,
   buyerNotVatRegistered?, replacesId? }; TaxInvoice reads now return `invoiceNo` / `invoiceId` null for these. Page
   `/accounting/tax-invoices/new` (`?replaces=<id>`), button on `/accounting/tax-invoices`; `InvoiceItemsEditor` has `hideCost`.
+- Quotations (ใบเสนอราคา, user 2026-10-01, migration `20261001090000_quotations`, code in
+  `backend/src/billing/quotation.*`, pages `/accounting/quotations` (list), `/new` (`?edit=<id>` = edit a draft),
+  `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
+  the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
+  per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
   `ISSUED` -> `APPROVED` | `REJECTED`, plus `CANCELLED` and `SUPERSEDED`; the screen groups by `stage` (`stageOf`:
   WAITING / EXPIRED by `validUntil`, DONE once billed or applied as rates). Number `QT{year}-{3 digits}` from
   `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; an issued
@@ -389,12 +393,24 @@ This private repository is the shared development surface for the user, Claude C
   `PATCH /:id/inspection-sent`, `PATCH /:id/inspection-result`, `POST /:id/inspection-undo`, `PATCH /:id/return`, `POST /:id/undo-return`,
   `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR` (cars) / `STAFF_MOTO` (motorcycles)
   write, `ACCOUNTANT` read. Not built (user did not ask): vehicle photos for the inspection, receive plate/book, Delivery, billing, executive overview.
+- Combined job sheet (ใบส่งงานรวมทุกงาน, user 2026-10-05, no migration, code in `backend/src/delivery/delivery-sheet.service.ts`, page
+  `/registration/new-vehicle/delivery/report/sheet` = second tab "ใบรวมทุกงาน" of the delivery report): read-only; pick owner (เจ้าของงาน) +
+  date range, prints / saves PDF one sheet per owner x day with a section per job type, no prices, not a DL (no DL number of its own, the
+  footer lists the DL numbers included). `GET /api/delivery/sheet?from&to&customerId` -> `{ rows, truncated }` (same access as `GET
+  /api/delivery/slips`; DELIVERY sees DL rows only, STAFF_CAR / STAFF_MOTO see their vehicle kind, plate copy is cars only). The date of a
+  row is the job's own "sent" date because only new vehicles + plate swaps have a delivery step: DL slip date (`VEHICLE`, `PLATE_SWAP`,
+  cancelled slips/items left out), `TaxRenewal.deliveredDate`, `returnedDate` for vehicle use cancellation / plate copy / vehicle transfer,
+  `YamahaRelocationEntry.date` (no owner in the data: shown under a pseudo-owner "ยามาฮ่า (แจ้งย้าย)" only when no owner is picked). A
+  wrong date is fixed from the row ("✎ แก้วันที่", reason mandatory): DL rows reuse the slip edit dialog (`PATCH /api/delivery/slips/:id`, whole
+  slip), the others call the job's own existing PATCH with just the date + `remark` (`deliveredDate` / `returnedDate` / Yamaha `date` +
+  `expectedDate`), so validation, scope and AuditLog are those of each job type; no new write route. Printing: `lib/delivery-sheet.ts`
+  (grouping, `canEditSheetRow`), `lib/delivery-sheet-print.ts` (reuses the DL slip styles exported from `lib/delivery-print.ts`).
 - HR / payroll (ฝ่ายบุคคล + เงินเดือน, user 2026-10-05, migration `20261005140000_hr_payroll`, code in `backend/src/hr/`, pages `/hr/employees`,
   `/hr/payroll`, `/hr/payroll/view?id=`): **ADMIN only, reads included** (`/api/hr` rule in `access-policy.ts`, `/hr` in `PAGE_RULES`; without the
   rule the catch-all GET rule would let every staff role read salaries). First round = employee register + monthly salary only (user's choice:
   no leave/attendance/OT, no documents, no loans). `Employee` is its own table (not `User`): code (TI001), prefix, first/last name, position,
   `idType` CITIZEN (13 digits) | OTHER (foreign workers, e.g. an 11-digit number), `idNumber` unique, birthDate, startDate, `baseSalary`,
-  `socialSecurity` (per person, some are not enrolled), `withholdTax`, `otherAllowance` (yearly deductions beyond the personal 60,000),
+  `socialSecurity` (per person, some are not enrolled), `withholdTax` (default OFF in the form and the Excel import: the company does not withhold tax from employees, user 2026-10-06; tick it per person if that changes), `otherAllowance` (yearly deductions beyond the personal 60,000),
   status ACTIVE | RESIGNED + `resignedDate`, optional `userId` link. Never deleted; edits need a remark and go to `AuditLog` entity `Employee`
   (salary changes included). Personal data is never seeded in the repo: the register has a paste-from-Excel import (`lib/hr-api.ts`
   `parseEmployeePaste`, columns: code, prefix, name, position, id number, (unused), birth date D/M/พ.ศ., salary, social security; blank or "-" =
@@ -412,7 +428,7 @@ This private repository is the shared development surface for the user, Claude C
   `GET employees/:id/history`; `GET/POST payroll/runs` { month }, `GET payroll/runs/:id` (items + totals incl. `ssoRemit` = employee + employer
   share for สปส.1-10 and `tax` for ภ.ง.ด.1), `PATCH payroll/runs/:id/items/:itemId` { salary, otherIncome(+Note), otherDeduction(+Note), sso, tax
   (number = override, null = auto) }, `POST .../recalculate | approve | pay { payDate } | unapprove | unpay | cancel { remark }`, `GET .../history`.
-  SSO schedule checked against the official announcement 2026-10-05 (5%; cap 17,500 from 2569, 20,000 from 2572, 23,000 from 2575). Payslips print from the run page (`lib/payslip-print.ts`, 2 per A4, all dates in พ.ศ., also "save as PDF") and carry year-to-date income / SSO / tax (`items[].ytd` on `GET payroll/runs/:id`: earlier non-cancelled runs of the same year + this one), CSV download of the run. Not built (user did not ask):
+  SSO schedule checked against the official announcement 2026-10-05 (5%; cap 17,500 from 2569, 20,000 from 2572, 23,000 from 2575). Payslips print from the run page (`lib/payslip-print.ts`, one per A4 page, black-and-white design, all dates in พ.ศ., also "save as PDF"; the tax row prints only when the amount is not 0; no year-to-date block on the slip because the system started mid-2569 and the totals would be too low, `items[].ytd` is still returned by `GET payroll/runs/:id` for later), CSV download of the run. Payer signature on payslips (user 2026-10-06, migration `20261006100000_payslip_signature`): `PayslipSignature` single row (id `payer`, `signerName`, `image` PNG bytes <= 300 KB / 1200x600 in the database, never in git); ADMIN uploads it in the panel at the top of `/hr/payroll` (`components/hr/SignaturePanel.tsx`; the browser first cleans the photo with `lib/signature-image.ts`: paper background -> transparent, ink -> black, cropped, <= 600x240); API `GET/PUT/DELETE /api/hr/payslip-signature` (`{ imageDataUrl: "data:image/png;base64,...", signerName }`, the server re-checks PNG magic + size, AuditLog entity `PayslipSignature` without the image). Every payslip then prints the signature, the name and the pay date (dotted when not paid yet) in the "ผู้จ่ายเงิน" block; "ผู้รับเงิน" stays blank for the employee. The same signature is printed in the "ผู้เสนอราคา" block of issued quotations (`buildQuotationHtml(q, { signature })`; not on DRAFT / CANCELLED / SUPERSEDED), read through `GET /api/billing/print-signature` (ADMIN + ACCOUNTANT, read-only; changing it stays ADMIN-only under `/api/hr`), `lib/print-signature.ts`. Not built (user did not ask):
   bank account / transfer file, leave and attendance, bonus tax special case, year-end 50 ทวิ for employees, ภ.ง.ด.1 / สปส.1-10 forms, linking
   salaries to the cash ledger.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being

@@ -1,4 +1,4 @@
-import type { TaxInvoice } from "@/lib/billing-api";
+import type { Invoice, TaxInvoice, TaxInvoicePreview, WhtMethod } from "@/lib/billing-api";
 import { COMPANY_PROFILE } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2 } from "@/lib/invoice";
 import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
@@ -8,7 +8,7 @@ import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
 // ยอดหักจริงและรับชำระสุทธิ, "ได้รับเงินแล้ว" แทนเงื่อนไขชำระเงิน, ช่องเซ็นช่องเดียว "ผู้รับเงิน"
 // รายละเอียดรถรายคันไม่พิมพ์ซ้ำ - อ้างเอกสารแนบของใบวางบิล (IV…-A, ผู้ใช้เลือกแบบ ก)
 // mode: original = ต้นฉบับ + สำเนา (พิมพ์ต้นฉบับได้เฉพาะวันที่ออกใบ) · copy = สำเนาอย่างเดียว · replacement = ใบแทน + สำเนา
-export type TaxInvoicePrintMode = "original" | "copy" | "replacement";
+export type TaxInvoicePrintMode = "original" | "copy" | "replacement" | "preview";
 
 function buyerHtml(t: TaxInvoice): string {
   const c = t.customer;
@@ -18,7 +18,8 @@ function buyerHtml(t: TaxInvoice): string {
 }
 
 function pageHtml(t: TaxInvoice, tag: string): string {
-  const co = COMPANY_PROFILE;
+  // ผู้ขายตามที่ฝังในใบตอนออก - ใบเก่าที่ไม่มี snapshot ใช้ข้อมูลบริษัทปัจจุบัน
+  const co = t.seller ?? COMPANY_PROFILE;
   const cancelled = t.status === "CANCELLED";
   const rows = invoiceFaceLines(t)
     .map((l) => `<tr><td>${escapeHtml(l.name)}</td><td class="r">${l.qty}</td><td class="r">${formatMoney(l.unit)}</td><td class="r">${formatMoney(round2(l.qty * l.unit))}</td></tr>`)
@@ -50,7 +51,8 @@ ${t.feeTotal > 0 ? `<span class="k">ค่าธรรมเนียมกร�
 ${t.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${formatMoney(t.goodsTotal)}</span></div>` : ""}
 <div><span>ภาษีมูลค่าเพิ่ม ${t.vatRate}%</span><span>${formatMoney(t.vatAmount)}</span></div>
 <div class="g"><span>รวมเงินทั้งสิ้น</span><span>${formatMoney(t.grandTotal)}</span></div>
-${t.whtAmount > 0 ? `<div class="k"><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div><div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div>` : ""}</div></div>
+${t.whtAmount > 0 ? `<div><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
+<div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div></div></div>
 <div class="baht">(${escapeHtml(bahtText(t.grandTotal))})</div>
 <div class="sign one"><div>ผู้รับเงิน<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
 </section>`;
@@ -58,14 +60,17 @@ ${t.whtAmount > 0 ? `<div class="k"><span>หัก ภาษี ณ ที่�
 
 const EXTRA_CSS = `
   .tag { display: inline-block; border: 1.5px solid #111; padding: 0 3mm; font-size: 10pt; font-weight: 600; margin-bottom: 1.5mm; }
-  .tot .paid { border-top: 1px dashed #999; margin-top: 1mm; padding-top: 1.5mm; font-weight: 600; }
+  /* ผู้ใช้ 2026-10-06: ทุกบรรทัดยอดขนาดเท่ากัน มีแต่ "รับชำระสุทธิ" ตัวใหญ่ เพื่อให้เห็นทันทีว่าลูกค้าต้องจ่ายเท่าไร */
+  .tot .g { font-size: inherit; font-weight: 600; }
+  .tot .paid { border-top: 1px solid #111; margin-top: 1.5mm; padding-top: 2mm; font-size: 15pt; font-weight: 600; align-items: baseline; }
   .sign.one { justify-content: flex-end; }
   .sign.one div { flex: 0 0 70mm; }
 `;
 
 export function buildTaxInvoiceHtml(t: TaxInvoice, mode: TaxInvoicePrintMode): string {
   // ใบที่ยกเลิกแล้วพิมพ์ได้แค่สำเนา (มีลายน้ำ) ไว้เก็บเข้าแฟ้ม
-  const tags = t.status === "CANCELLED" || mode === "copy" ? ["สำเนา"] : mode === "replacement" ? ["ใบแทน", "สำเนา"] : ["ต้นฉบับ", "สำเนา"];
+  // preview = หน้าเดียวป้าย "ตัวอย่าง" ใช้ในหน้าต่างรับเงินก่อนกดออกใบจริง
+  const tags = mode === "preview" ? ["ตัวอย่าง"] : t.status === "CANCELLED" || mode === "copy" ? ["สำเนา"] : mode === "replacement" ? ["ใบแทน", "สำเนา"] : ["ต้นฉบับ", "สำเนา"];
   return `<!doctype html>
 <html lang="th">
 <head>
@@ -93,4 +98,50 @@ export function canPrintOriginal(t: TaxInvoice, todayIso: string): boolean {
   const created = new Date(t.createdAt);
   const bangkok = new Date(created.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
   return bangkok === todayIso;
+}
+
+// ใบกำกับจำลองจากบิล + ข้อมูลที่กำลังกรอกในหน้าต่างรับเงิน - ใช้แสดงตัวอย่างก่อนออกเลขจริง (ไม่บันทึกอะไร)
+export function draftTaxInvoice(
+  invoice: Invoice,
+  preview: TaxInvoicePreview,
+  input: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean },
+): TaxInvoice {
+  const grandTotal = round2(invoice.feeTotal + invoice.serviceTotal + invoice.goodsTotal + invoice.vatAmount);
+  return {
+    id: "draft",
+    taxInvoiceNo: preview.nextNo ?? "TV----",
+    invoiceId: invoice.id,
+    invoiceNo: invoice.invoiceNo,
+    invoiceIssueDate: invoice.issueDate,
+    customerId: invoice.customerId,
+    customer: preview.buyer,
+    seller: null,
+    buyerNotVatRegistered: input.buyerNotVatRegistered,
+    issueDate: input.paidDate,
+    createdAt: new Date().toISOString(),
+    vatRate: invoice.vatRate,
+    feeTotal: invoice.feeTotal,
+    serviceTotal: invoice.serviceTotal,
+    goodsTotal: invoice.goodsTotal,
+    vatAmount: invoice.vatAmount,
+    grandTotal,
+    whtAmount: input.whtAmount,
+    receivedAmount: round2(grandTotal - input.whtAmount),
+    whtMethod: input.whtMethod,
+    whtCertificate: null,
+    whtRemindedAt: null,
+    replacesNo: preview.replaces?.taxInvoiceNo ?? null,
+    replacedByNo: null,
+    replacementIssuedAt: null,
+    replacementReason: null,
+    status: "ISSUED",
+    cancelledAt: null,
+    cancelReason: null,
+    jobLabel: invoice.jobLabel,
+    extras: invoice.extras,
+    whtRate: invoice.whtRate,
+    lines: invoice.lines,
+    items: invoice.items,
+    lineCount: invoice.lines.length,
+  };
 }

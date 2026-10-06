@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HistoryDialog, HrDialog, errorText, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
 import { ApiError } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
-import { downloadCsv, hrApi, monthLabel, STATUS_LABEL, type PayrollItem, type PayrollRun, type PayrollStatus } from "@/lib/hr-api";
+import { downloadCsv, hrApi, monthLabel, STATUS_LABEL, type PayrollItem, type PayrollRun, type PayrollStatus, type PayslipSignature } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
 import { printPayslips } from "@/lib/payslip-print";
 
@@ -24,6 +24,7 @@ export function PayrollRunPage() {
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
+  const [signature, setSignature] = useState<PayslipSignature | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -39,6 +40,14 @@ export function PayrollRunPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  // ลายเซ็นผู้จ่ายเงินที่พิมพ์บนสลิป - โหลดไม่ได้ก็ยังพิมพ์สลิปได้ (ช่องเซ็นเปล่า)
+  useEffect(() => {
+    hrApi
+      .getSignature()
+      .then(setSignature)
+      .catch(() => setSignature(null));
+  }, []);
 
   // ทำการแล้วรับรอบใหม่ที่ backend ส่งกลับ - 409 (สถานะเปลี่ยนไปแล้ว) โหลดรอบใหม่ให้เห็นสถานะจริง
   async function act(call: () => Promise<{ run: PayrollRun }>, done?: string): Promise<void> {
@@ -100,7 +109,7 @@ export function PayrollRunPage() {
         <div className="form-actions" style={{ flexWrap: "wrap" }}>
           {status !== "CANCELLED" && (
             <>
-              <button type="button" onClick={() => printPayslips(run, run.items)}>
+              <button type="button" onClick={() => printPayslips(run, run.items, { signature })}>
                 🖨 พิมพ์สลิปทุกคน
               </button>
               <button type="button" onClick={exportCsv}>
@@ -230,7 +239,7 @@ export function PayrollRunPage() {
                       </button>
                     )}
                     {status !== "CANCELLED" && (
-                      <button type="button" className="text-button" onClick={() => printPayslips(run, [i])}>
+                      <button type="button" className="text-button" onClick={() => printPayslips(run, [i], { signature })}>
                         สลิป
                       </button>
                     )}

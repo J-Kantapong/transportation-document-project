@@ -6,7 +6,7 @@ import { billingApi, type Invoice, type TaxInvoice, type TaxInvoicePreview, type
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 import { formatMoney, round2 } from "@/lib/invoice";
-import { printTaxInvoice } from "@/lib/tax-invoice-print";
+import { buildTaxInvoiceHtml, draftTaxInvoice, printTaxInvoice } from "@/lib/tax-invoice-print";
 
 // หน้าต่างของใบกำกับภาษี (ผู้ใช้ 2026-09-28): รับเงิน + ออกใบกำกับ, ยกเลิก / ใบแทน (เหตุผลบังคับ), แนบ 50 ทวิ
 
@@ -58,6 +58,7 @@ export function TaxInvoiceIssueDialog({
   const [notRegistered, setNotRegistered] = useState(false);
   const [certNo, setCertNo] = useState("");
   const [certFile, setCertFile] = useState<File | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -74,6 +75,13 @@ export function TaxInvoiceIssueDialog({
   const missing = preview ? (notRegistered ? preview.missingIfNotRegistered : preview.missing) : [];
   const onlyTaxIdMissing = !!preview && preview.missing.length > 0 && preview.missingIfNotRegistered.length === 0;
   const whtDiffers = wht !== null && wht !== invoice.whtAmount;
+
+  // ตัวอย่างหน้าใบตามที่กรอกอยู่ตอนนี้ (วันที่ / ยอดหัก) - ยังไม่ออกเลขจริง
+  const draftDate = displayDateToIso(digits(paidDateText)) || todayIso();
+  const previewHtml =
+    showPreview && preview
+      ? buildTaxInvoiceHtml(draftTaxInvoice(invoice, preview, { paidDate: draftDate, whtAmount: wht ?? 0, whtMethod: wht ? whtMethod : "NONE", buyerNotVatRegistered: notRegistered }), "preview")
+      : null;
 
   async function handleConfirm() {
     setError("");
@@ -125,7 +133,7 @@ export function TaxInvoiceIssueDialog({
   }
 
   return (
-    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(560px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: showPreview ? "min(880px, 96vw)" : "min(560px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
         ×
       </button>
@@ -165,6 +173,13 @@ export function TaxInvoiceIssueDialog({
               <span className="muted" style={{ fontSize: 13 }}>
                 {preview.buyer.taxId ? `เลขผู้เสียภาษี ${preview.buyer.taxId} · สาขา ${preview.buyer.branch || "สำนักงานใหญ่"}` : "ไม่มีเลขผู้เสียภาษี"}
               </span>
+              {/* ยังไม่บังคับ - เตรียมไว้ส่งใบกำกับอิเล็กทรอนิกส์ปี 2027 (ผู้ใช้ 2026-10-06) */}
+              {!preview.buyer.email && (
+                <>
+                  <br />
+                  <span style={{ fontSize: 12, color: "#b45309" }}>ลูกค้ายังไม่มีอีเมลในฐานข้อมูล - เก็บไว้ใช้ส่งใบกำกับอิเล็กทรอนิกส์ปีหน้า</span>
+                </>
+              )}
             </span>
           </div>
           {preview.lastIssued && (
@@ -236,6 +251,10 @@ export function TaxInvoiceIssueDialog({
             </fieldset>
           )}
 
+          <button type="button" className="text-button" onClick={() => setShowPreview((v) => !v)}>
+            {showPreview ? "ซ่อนตัวอย่างใบกำกับ" : "ดูตัวอย่างใบกำกับ"}
+          </button>
+          {previewHtml && <iframe title="ตัวอย่างใบกำกับภาษี" srcDoc={previewHtml} style={{ width: "100%", height: 520, border: "1px solid #e2e6ee", background: "white", marginTop: 6 }} />}
           <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
             วันที่ใบกำกับ = วันที่รับเงิน · ออกแล้วแก้ไม่ได้ ถ้าผิดต้องยกเลิกแล้วออกใบใหม่ · กดยืนยันแล้วจะเปิดหน้าพิมพ์ต้นฉบับ + สำเนาให้ทันที
           </p>

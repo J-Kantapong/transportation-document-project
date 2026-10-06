@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { errorText } from "@/components/hr/HrDialog";
+import { SignaturePanel } from "@/components/hr/SignaturePanel";
 import { hrApi, monthLabel, STATUS_LABEL, thaiMonthName, type PayrollRunSummary, type PayrollStatus } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
 import { isoToDisplayDate } from "@/lib/date";
@@ -80,6 +81,8 @@ export function PayrollListPage() {
           </p>
         )}
       </section>
+
+      <SignaturePanel />
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-head">

@@ -157,4 +157,13 @@ describe('access policy HR / payroll', () => {
     expect(isAllowed(accessFor('/API/HR/Payroll/runs', 'POST'), ['ADMIN'])).toBe(true);
     expect(isAllowed(accessFor('/API/HR/Employees', 'GET'), ['ACCOUNTANT'])).toBe(false);
   });
+
+  // ลายเซ็นบนใบเสนอราคา: อ่านผ่าน /api/billing (ADMIN + ACCOUNTANT) แต่ตั้ง/ลบผ่าน /api/hr (ADMIN เท่านั้น)
+  it('lets accounting read the print signature but only ADMIN change it', () => {
+    expect(isAllowed(accessFor('/api/billing/print-signature', 'GET'), ['ACCOUNTANT'])).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/print-signature', 'GET'), ['STAFF_CAR'])).toBe(false);
+    expect(isAllowed(accessFor('/api/hr/payslip-signature', 'PUT'), ['ACCOUNTANT'])).toBe(false);
+    expect(isAllowed(accessFor('/api/hr/payslip-signature', 'DELETE'), ['ACCOUNTANT'])).toBe(false);
+    expect(isAllowed(accessFor('/api/hr/payslip-signature', 'PUT'), ['ADMIN'])).toBe(true);
+  });
 });

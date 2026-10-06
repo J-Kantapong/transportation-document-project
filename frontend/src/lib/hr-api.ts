@@ -123,6 +123,15 @@ export interface HistoryEntry {
   at: string;
 }
 
+// ลายเซ็นผู้จ่ายเงินที่พิมพ์บนสลิป (ผู้ใช้ 2026-10-06) - PNG โปร่งใสเป็น data URL
+export interface PayslipSignature {
+  exists: boolean;
+  signerName: string | null;
+  imageDataUrl: string | null;
+  updatedAt: string | null;
+  updatedByName: string | null;
+}
+
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const enc = encodeURIComponent;
 
@@ -138,6 +147,10 @@ export const hrApi = {
   resignEmployee: (id: string, date: string, remark: string) => request<{ employee: Employee }>(`/api/hr/employees/${enc(id)}/resign`, json("POST", { date, remark })),
   reinstateEmployee: (id: string, remark: string) => request<{ employee: Employee }>(`/api/hr/employees/${enc(id)}/reinstate`, json("POST", { remark })),
   employeeHistory: (id: string) => request<{ history: HistoryEntry[] }>(`/api/hr/employees/${enc(id)}/history`),
+
+  getSignature: () => request<PayslipSignature>("/api/hr/payslip-signature"),
+  setSignature: (imageDataUrl: string, signerName: string | null) => request<PayslipSignature>("/api/hr/payslip-signature", json("PUT", { imageDataUrl, signerName })),
+  removeSignature: () => request<PayslipSignature>("/api/hr/payslip-signature", { method: "DELETE" }),
 
   listRuns: () => request<{ runs: PayrollRunSummary[] }>("/api/hr/payroll/runs"),
   createRun: (month: string) => request<{ run: PayrollRun }>("/api/hr/payroll/runs", json("POST", { month })),
@@ -238,7 +251,7 @@ export function parseEmployeePaste(text: string): ParsedEmployeeRow[] {
             startDate: null,
             baseSalary: baseSalary!,
             socialSecurity: (sso ?? 0) > 0,
-            withholdTax: true,
+            withholdTax: false, // บริษัทไม่หักภาษี ณ ที่จ่ายพนักงาน (ผู้ใช้ 2026-10-06) - ติ๊กเป็นรายคนในทะเบียนถ้าต้องการ
             otherAllowance: 0,
             note: null,
           },

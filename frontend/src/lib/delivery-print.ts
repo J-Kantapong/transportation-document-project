@@ -12,8 +12,8 @@ import { escapeHtml, printHtmlDocument } from "@/lib/print-html";
 // ส่งแล้ว = วงกลมทึบ (ผู้ใช้ 2026-09-26 ขอเปลี่ยนจากติ๊ก)
 const TICK = "●";
 
-const esc = (text: string | null | undefined) => escapeHtml(text ?? "");
-const tick = (sent: boolean) => (sent ? TICK : "");
+export const esc = (text: string | null | undefined) => escapeHtml(text ?? "");
+export const tick = (sent: boolean) => (sent ? TICK : "");
 
 export interface DeliveryCounts {
   vehicles: number;
@@ -79,7 +79,7 @@ const BASE_STYLE = `
   .muted { color: #444; }
 `;
 
-function htmlDocument(title: string, pageRule: string, extraStyle: string, body: string): string {
+export function htmlDocument(title: string, pageRule: string, extraStyle: string, body: string): string {
   return `<!doctype html>
 <html lang="th">
 <head>
@@ -103,10 +103,10 @@ ${body}
 // ทุกแถวสูงเท่ากัน (ผู้ใช้ 2026-09-26): ช่องกว้างคงที่ ข้อความบรรทัดเดียว ข้อความยาวย่อตัวอักษรลงจนพอดีช่อง
 // วัดความกว้างจริงในเอกสาร (FIT_SCRIPT) หลังฟอนต์โหลดเสร็จ - ทั้งหน้าต่างพิมพ์และบันทึก PDF รอ fonts.ready ก่อนเสมอ
 // .slip กว้างเท่าพื้นที่พิมพ์ A4 (210 - ขอบ 12mm x2) จึงวัดบนจอได้ตรงกับบนกระดาษ ย่อได้ต่ำสุด 6pt แล้วค่อยตัดด้วย "…"
-const fitCell = (text: string, align = "") => `<td class="fit${align ? ` ${align}` : ""}"><span>${esc(text)}</span></td>`;
+export const fitCell = (text: string, align = "") => `<td class="fit${align ? ` ${align}` : ""}"><span>${esc(text)}</span></td>`;
 
 // วัดที่ span (ความกว้างข้อความจริง) เทียบกับพื้นที่ในช่อง - scrollWidth ของ td ในตาราง table-layout: fixed เชื่อไม่ได้
-const FIT_SCRIPT = `<script>
+export const FIT_SCRIPT = `<script>
 (function () {
   function fit() {
     document.querySelectorAll("td.fit").forEach(function (td) {
@@ -184,7 +184,7 @@ ${hidden ? `<p class="note">* ฉบับพิมพ์ซ้ำนี้แ�
 // ใบส่งงานพิมพ์ขาวดำเป็นหลัก (ผู้ใช้ 2026-09-26): ไม่มีพื้นสี ตัวอักษรดำทั้งหมด - เด่นด้วยเส้นกับตัวหนาแทนการถมสี
 // ประหยัดหมึก คมทุกเครื่องพิมพ์ ถ่ายเอกสารต่อได้ชัด โครงเดิม: หัวบริษัท + กล่องชื่อเอกสาร, การ์ดลูกค้า, ตาราง, ช่องลงชื่อ
 const LINE = "#9a9a9a";
-const SLIP_STYLE = `
+export const SLIP_STYLE = `
   .slip { page-break-after: always; break-after: page; width: 186mm; }
   .slip:last-child { page-break-after: auto; break-after: auto; }
   /* หัวบริษัท: ข้อมูลบริษัท + กล่องชื่อเอกสารด้านขวา - ไม่มีโลโก้ (ผู้ใช้ 2026-09-26) */

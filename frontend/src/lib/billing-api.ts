@@ -114,6 +114,16 @@ export interface BillingTerms {
 export type WhtMethod = "NONE" | "PAPER" | "EWHT";
 export const WHT_METHOD_LABEL: Record<WhtMethod, string> = { NONE: "ไม่หัก", PAPER: "50 ทวิ กระดาษ", EWHT: "e-WHT" };
 
+export interface TaxInvoiceSeller {
+  nameTh: string;
+  nameEn: string;
+  taxId: string;
+  branch: string;
+  addressLines: string[];
+  phone: string;
+  email: string;
+}
+
 export interface TaxInvoice {
   id: string;
   taxInvoiceNo: string;
@@ -121,7 +131,9 @@ export interface TaxInvoice {
   invoiceNo: string | null;
   invoiceIssueDate: string | null;
   customerId: string;
-  customer: { name: string; branch: string | null; address: string | null; taxId: string | null };
+  customer: { name: string; branch: string | null; address: string | null; taxId: string | null; email?: string | null };
+  // ผู้ขาย ณ วันออกใบ (เตรียมไว้สำหรับ e-Tax) - null = ใบที่ออกก่อนมีคอลัมน์นี้ ใช้ COMPANY_PROFILE ปัจจุบัน
+  seller?: TaxInvoiceSeller | null;
   buyerNotVatRegistered: boolean;
   issueDate: string; // = วันที่รับเงิน
   createdAt: string;
@@ -159,7 +171,7 @@ export interface TaxInvoiceSeries {
 
 export interface TaxInvoicePreview {
   enabled: boolean;
-  buyer: { name: string; branch: string | null; address: string | null; taxId: string | null };
+  buyer: { name: string; branch: string | null; address: string | null; taxId: string | null; email?: string | null };
   missing: string[];
   missingIfNotRegistered: string[];
   nextNo: string | null;

@@ -520,7 +520,15 @@ export function DeliveryPage() {
                                     />
                                   ) : null}
                                 </td>
-                                <td>{r.chassis}</td>
+                                <td>
+                                  {r.chassis}
+                                  {r.deliveredDate ? (
+                                    <div style={{ fontSize: 12, color: "#9a6700", fontWeight: 600, whiteSpace: "nowrap" }}>
+                                      ส่งเล่มแล้ว {isoToDisplayDate(r.deliveredDate)}
+                                      {r.bookSlip ? ` (${slipNoText(r.bookSlip.slipNo)})` : ""} · เหลือส่งป้าย
+                                    </div>
+                                  ) : null}
+                                </td>
                                 <td>{plateText(r)}</td>
                                 <td>{r.receiptNo || "—"}</td>
                                 <td>

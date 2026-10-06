@@ -8,6 +8,8 @@ import { billingApi, ITEM_KIND_LABEL, type NextInvoiceNumbers } from "@/lib/bill
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
+import type { PayslipSignature } from "@/lib/hr-api";
+import { fetchPrintSignature } from "@/lib/print-signature";
 import { printQuotation, rateConditionText } from "@/lib/quotation-print";
 import { QUOTATION_KIND_LABEL, quotationApi, quotationFilePath, quotationGrandTotal, type Quotation, type QuotationHistoryEntry } from "@/lib/quotation-api";
 import { DateInput } from "@/components/DateInput";
@@ -39,6 +41,7 @@ export function QuotationDetailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [signature, setSignature] = useState<PayslipSignature | null>(null);
 
   // ช่องของฟอร์มย่อยแต่ละการกระทำ
   const [remark, setRemark] = useState("");
@@ -59,6 +62,11 @@ export function QuotationDetailPage() {
       setError(errorText(err, "โหลดใบเสนอราคาไม่สำเร็จ"));
     }
   }
+
+  // ลายเซ็นที่พิมพ์บนใบ (ชุดเดียวกับสลิปเงินเดือน) - โหลดไม่ได้ก็ยังพิมพ์ได้ ช่องเซ็นว่าง
+  useEffect(() => {
+    void fetchPrintSignature().then(setSignature);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -272,7 +280,7 @@ export function QuotationDetailPage() {
 
         {/* ปุ่มตามขั้น */}
         <div className="form-actions" style={{ marginTop: 0, flexWrap: "wrap", borderTop: "1px solid #f0f2f6", paddingTop: 14 }}>
-          <button type="button" onClick={() => printQuotation(q)}>
+          <button type="button" onClick={() => printQuotation(q, { signature })}>
             🖨 พิมพ์
           </button>
           {q.status === "DRAFT" && (

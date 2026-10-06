@@ -100,7 +100,9 @@ describe('TaxInvoiceService.issue', () => {
       receivedAmount: 60256.6,
       whtMethod: 'PAPER',
       createdById: 'u1',
-      customerSnapshot: { name: 'บริษัท ทีดับเบิ้ลอี มอเตอร์ จำกัด', branch: null, address: 'สมุทรปราการ', taxId: '0105560000000' },
+      customerSnapshot: { name: 'บริษัท ทีดับเบิ้ลอี มอเตอร์ จำกัด', branch: null, address: 'สมุทรปราการ', taxId: '0105560000000', email: null },
+      // ผู้ขายฝังในใบตอนออก (เตรียมไว้สำหรับ e-Tax) - ที่อยู่บริษัทเปลี่ยนทีหลังใบเก่าไม่เปลี่ยน
+      sellerSnapshot: { taxId: '0115556016801', branch: 'สำนักงานใหญ่' },
     });
     expect(invoiceUpdates[0]).toMatchObject({ status: 'PAID', taxInvoiceNo: 'TV2026-158' });
   });
