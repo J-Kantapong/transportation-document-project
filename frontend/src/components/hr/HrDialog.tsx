@@ -125,6 +125,10 @@ const ACTION_LABEL: Record<string, string> = {
   resign: "ลาออก",
   reinstate: "รับกลับเข้าทำงาน",
   create: "สร้างรอบ",
+  issue: "ออก 50 ทวิ",
+  add: "เพิ่มข้อมูล",
+  deactivate: "เลิกใช้",
+  reactivate: "ใช้ต่อ",
   recalculate: "คำนวณใหม่",
   approve: "อนุมัติ",
   unapprove: "ยกเลิกการอนุมัติ",
@@ -151,6 +155,12 @@ const FIELD_LABEL: Record<string, string> = {
   note: "หมายเหตุ",
   status: "สถานะ",
   resignedDate: "วันที่ลาออก",
+  name: "ชื่อ-สกุล",
+  taxId: "เลขประจำตัว",
+  address: "ที่อยู่",
+  defaultIncomeType: "ประเภทเงินได้เริ่มต้น",
+  defaultDescription: "รายละเอียดเริ่มต้น",
+  defaultRate: "อัตราภาษี %",
 };
 
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "ว่าง" : typeof v === "boolean" ? (v ? "ใช่" : "ไม่") : String(v));

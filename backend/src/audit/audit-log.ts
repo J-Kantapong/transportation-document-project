@@ -17,14 +17,16 @@ export type AuditEntity =
   | 'VehicleTransfer'
   | 'PlateCopy'
   | 'User'
-  | 'CustomerPayment'
   | 'TaxInvoiceSeries'
   | 'TaxInvoice'
   | 'WhtCertificate'
   | 'Quotation'
   | 'Employee'
   | 'PayrollRun'
-  | 'PayslipSignature';
+  | 'PayslipSignature'
+  | 'IssuedWhtCertificate'
+  | 'IssuedWhtSeries'
+  | 'Supplier';
 
 export interface AuditEntry {
   entity: AuditEntity;

@@ -64,9 +64,10 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
   if (within(pathname, "/accounting/quotations")) return [{ label: "งานบัญชี" }, { label: "ใบเสนอราคา", href: "/accounting/quotations" }];
   if (within(pathname, "/accounting/tax-invoices")) return [{ label: "งานบัญชี" }, { label: "ใบกำกับภาษี", href: "/accounting/tax-invoices" }];
-  if (within(pathname, "/accounting/customer-payments")) return [{ label: "งานบัญชี" }, { label: "การจ่ายของลูกค้า", href: "/accounting/customer-payments" }];
   if (within(pathname, "/hr/employees")) return [{ label: "ฝ่ายบุคคล" }, { label: "ทะเบียนพนักงาน", href: "/hr/employees" }];
   if (within(pathname, "/hr/payroll")) return [{ label: "ฝ่ายบุคคล" }, { label: "เงินเดือน", href: "/hr/payroll" }];
+  if (within(pathname, "/hr/wht")) return [{ label: "งานบัญชี" }, { label: "Withholding Tax", href: "/hr/wht" }];
+  if (within(pathname, "/hr/suppliers")) return [{ label: "งานบัญชี" }, { label: "Suppliers", href: "/hr/suppliers" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
   if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
   const category = REGISTRATION_CATEGORIES.find((c) => within(pathname, c.href));
@@ -239,7 +240,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/quotations" icon="stack" label="ใบเสนอราคา" pathname={pathname} onClick={close} />}
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/billing" icon="stack" label="วางบิล" pathname={pathname} onClick={close} />}
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/tax-invoices" icon="stack" label="ใบกำกับภาษี / 50 ทวิ" pathname={pathname} onClick={close} />}
-                <NavLink href="/accounting/customer-payments" icon="stack" label="การจ่ายของลูกค้า" pathname={pathname} onClick={close} />
+                {/* Withholding Tax (50 ทวิ ที่บริษัทออก) + ทะเบียนผู้รับเงิน: เมนูอยู่งานบัญชี แต่สิทธิ์ยัง ADMIN เท่านั้น (ส่วนพนักงานอ่านเงินเดือน) - URL ยังเป็น /hr/... */}
+                {has("ADMIN") && <NavLink href="/hr/wht" icon="stack" label="Withholding Tax" pathname={pathname} onClick={close} />}
+                {has("ADMIN") && <NavLink href="/hr/suppliers" icon="users" label="Suppliers" pathname={pathname} onClick={close} />}
               </>
             )}
             {has("ADMIN") && (

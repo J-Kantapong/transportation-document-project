@@ -1635,6 +1635,7 @@ model Employee {
 
   user         User?         @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
   payrollItems PayrollItem[]
+  issuedWht    IssuedWhtCertificate[]
 
   @@index([status])
 }
@@ -1702,4 +1703,96 @@ model PayslipSignature {
   mimeType      String   @default("image/png")
   updatedAt     DateTime @updatedAt
   updatedByName String?
+}
+
+// หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่บริษัท "ออก" ให้ผู้รับเงิน (ผู้ใช้ 2026-10-06) - คนละอย่างกับ WhtCertificate ที่ลูกค้าส่งมาให้เรา
+// ผู้รับ 2 แบบ: EMPLOYEE (ออกปลายปีจากเงินเดือนที่จ่ายแล้วใน PayrollRun, แบบ ภ.ง.ด.1ก) และ OTHER (บุคคลธรรมดาอื่น เช่น ซับ/ผู้รับจ้าง พิมพ์เอง, แบบ ภ.ง.ด.3)
+// ออกแล้วแก้ไม่ได้: ผิด = ยกเลิก (เลขเดิมคงไว้ สถานะ CANCELLED) แล้วออกใหม่ที่อ้าง replacesId · เลขที่ IW{ปีภาษี ค.ศ.}-{3 หลัก} เรียงต่อปีภาษี (ล็อกด้วย advisory lock)
+// พนักงานคนเดียวมีใบที่ยังไม่ยกเลิกได้ใบเดียวต่อปีภาษี (partial unique index IssuedWhtCertificate_employee_year_active_key ใน migration)
+model IssuedWhtCertificate {
+  id              String    @id @default(cuid())
+  certificateNo   String    @unique
+  taxYear         Int // ปีภาษีที่จ่ายเงิน ค.ศ.
+  number          Int
+  issueDate       DateTime // "ออกให้ ณ วันที่" บนฟอร์ม
+  payeeKind       String // EMPLOYEE | OTHER
+  employeeId      String?
+  payeeName       String
+  payeeTaxId      String
+  payeeAddress    String?
+  formType        String // PND1K (ภ.ง.ด.1ก) | PND3 (ภ.ง.ด.3)
+  payMethod       String    @default("WITHHOLD") // WITHHOLD หักภาษี ณ ที่จ่าย | FOREVER ออกให้ตลอดไป | ONCE ออกให้ครั้งเดียว
+  totalPaid       Decimal   @db.Decimal(14, 2) // server คำนวณจากบรรทัดเสมอ
+  totalTax        Decimal   @db.Decimal(14, 2)
+  ssoAmount       Decimal   @default(0) @db.Decimal(12, 2) // เงินสมทบกองทุนประกันสังคม (ช่องท้ายฟอร์ม)
+  providentFund   Decimal   @default(0) @db.Decimal(12, 2) // กองทุนสำรองเลี้ยงชีพ
+  payerSnapshot   Json // ผู้จ่ายเงิน ณ วันที่ออก (สำเนา SELLER_PROFILE)
+  note            String?
+  status          String    @default("ISSUED") // ISSUED | CANCELLED
+  cancelledAt     DateTime?
+  cancelReason    String?
+  cancelledByName String?
+  replacesId      String?   @unique // ใบที่ยกเลิกแล้วออกใหม่แทนได้ครั้งเดียว
+  supplierId      String? // ผู้รับเงินจากทะเบียน Supplier (ไม่บังคับ; ชื่อ/เลข/ที่อยู่ในใบยังเป็น snapshot ของตอนออก)
+  createdByName   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employee   Employee?             @relation(fields: [employeeId], references: [id])
+  supplier   Supplier?             @relation(fields: [supplierId], references: [id])
+  replaces   IssuedWhtCertificate? @relation("IssuedWhtReplaces", fields: [replacesId], references: [id])
+  replacedBy IssuedWhtCertificate? @relation("IssuedWhtReplaces")
+  items      IssuedWhtItem[]
+
+  @@unique([taxYear, number])
+  @@index([employeeId])
+  @@index([taxYear, status])
+  @@index([supplierId])
+}
+
+// บรรทัดเงินได้ของ 50 ทวิ: incomeType SALARY 40(1) | FEE 40(2) | ROYALTY 40(3) | INTEREST 40(4)(ก) | SERVICE ข้อ 5 (มาตรา 3 เตรส เช่น จ้างทำของ ค่าบริการ ค่าขนส่ง) | OTHER ข้อ 6
+// dateLabel = ข้อความวันที่ที่พิมพ์แทน paidDate (เช่น "ม.ค. - ธ.ค. 2569" ของพนักงานรายปี)
+model IssuedWhtItem {
+  id            String   @id @default(cuid())
+  certificateId String
+  incomeType    String
+  description   String?
+  paidDate      DateTime
+  dateLabel     String?
+  amountPaid    Decimal  @db.Decimal(14, 2)
+  taxWithheld   Decimal  @db.Decimal(14, 2)
+  sortOrder     Int      @default(0)
+
+  certificate IssuedWhtCertificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([certificateId])
+}
+
+// เลขที่ 50 ทวิ ล่าสุดที่ใช้ไปแล้วนอกระบบ (ผู้ใช้ 2026-10-06: ใบ 2026-001 ถึง 2026-008 ออกจากไฟล์เดิมก่อนมีระบบ) - ระบบออกเลขต่อจาก
+// max(lastNumber นี้, เลขสูงสุดของใบในระบบ) ตั้งได้ปีละครั้งเฉพาะปีที่ยังไม่มีใบในระบบ (ADMIN, AuditLog entity 'IssuedWhtSeries')
+model IssuedWhtSeries {
+  year       Int      @id
+  lastNumber Int
+  updatedAt  DateTime @updatedAt
+}
+
+// ทะเบียนผู้รับเงินที่ไม่ใช่พนักงาน (ซับ/ผู้รับจ้างที่เป็นบุคคลธรรมดา) ไว้ออก 50 ทวิ (ผู้ใช้ 2026-10-06) - แยกจาก Employee
+// เก็บแค่ข้อมูลผู้รับ + ค่าเริ่มต้นของงาน (ประเภทเงินได้ / รายละเอียด / อัตราภาษี %) ที่เติมให้ในฟอร์มออกใบ ไม่ใช่ระบบจัดซื้อ
+// ไม่ลบแถว (เลิกใช้ = INACTIVE) แก้ไข/เลิกใช้ต้องมีเหตุผลและบันทึกใน AuditLog entity 'Supplier'
+model Supplier {
+  id                 String   @id @default(cuid())
+  name               String
+  taxId              String   @unique // เลขประจำตัวประชาชน / ผู้เสียภาษี 13 หลัก (ตรวจเลขหลักสุดท้าย)
+  address            String?
+  defaultIncomeType  String   @default("SERVICE") // SERVICE | FEE | ROYALTY | INTEREST | OTHER (ไม่ใช่ SALARY)
+  defaultDescription String?
+  defaultRate        Decimal  @default(3) @db.Decimal(5, 2) // อัตราหัก ณ ที่จ่าย %
+  status             String   @default("ACTIVE") // ACTIVE | INACTIVE
+  note               String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  whtCertificates IssuedWhtCertificate[]
+
+  @@index([status])
 }
