@@ -164,6 +164,7 @@ export interface TaxInvoice {
   lines: InvoiceLine[];
   items: InvoiceItem[];
   lineCount: number;
+  faceLayout?: InvoiceFaceLayout; // ของบิลที่ใบกำกับอ้าง (ใบกำหนดเอง = SUMMARY แต่ไม่มีรถ/งาน จึงพิมพ์บรรทัดตรงๆ)
 }
 
 export interface TaxInvoiceSeries {
@@ -332,6 +333,97 @@ export interface InvoiceItem {
   unitPrice: number; // ราคาต่อหน่วยก่อน VAT
   amount: number; // quantity x unitPrice (backend คำนวณเองตอนบันทึก)
   cost: number | null; // ต้นทุนต่อหน่วย ภายใน ไม่พิมพ์บนบิล (null = ไม่ทราบ, FEE = null เสมอ)
+  // งานอื่นๆ ที่ดึงเข้าบิล (ผู้ใช้ 2026-10-07) - บรรทัดที่ผูกกับงานแก้ในหน้าแก้บิลไม่ได้ (ยกเลิกบิลแล้วออกใหม่) และไม่ส่งกลับไปใน items
+  sourceType?: JobType | null;
+  sourceId?: string | null;
+  sourceSnapshot?: JobSnapshot | null; // ข้อมูลงานตอนออกบิล ไว้พิมพ์ตารางในใบแนบ (ทั้ง 2 บรรทัดของงานเดียวกันเก็บเหมือนกัน)
+}
+
+// snapshot ของงานอื่นๆ บนบรรทัดบิล - เหมือน JobSnapshot ฝั่ง backend (other-jobs.ts)
+export interface JobSnapshot {
+  chassis: string;
+  plateText: string;
+  brand: string | null;
+  ownerName: string | null;
+  receiptNo: string | null;
+  doneDate: string;
+  vehicleClass: "CAR" | "MOTO";
+  variant: string | null;
+  serviceLabel: string;
+}
+
+// รูปแบบหน้าบิล (ผู้ใช้ 2026-10-07): SUMMARY = ค่าธรรมเนียมรวม + ค่าบริการรวม อ้างใบแนบ (บิลใหม่) · GROUPED = แบบเดิม (บิลเก่า พิมพ์ซ้ำเหมือนเดิม)
+export type InvoiceFaceLayout = "SUMMARY" | "GROUPED";
+
+// บรรทัดที่พิมพ์เอง (แก้ได้) กับบรรทัดที่มาจากงานอื่นๆ (อ่านอย่างเดียว)
+export const isSourceItem = (it: Pick<InvoiceItem, "sourceType">): boolean => !!it.sourceType;
+export const editableItems = (items: InvoiceItem[]): InvoiceItem[] => items.filter((it) => !isSourceItem(it));
+export const sourceItems = (items: InvoiceItem[]): InvoiceItem[] => items.filter(isSourceItem);
+
+// ---------- งานอื่นๆ ในใบวางบิล (ผู้ใช้ 2026-10-07) ----------
+export type JobType = "TRANSFER" | "USE_CANCEL" | "PLATE_COPY" | "MOVE_OUT" | "TAX_RENEWAL";
+export const JOB_TYPES: JobType[] = ["TRANSFER", "USE_CANCEL", "PLATE_COPY", "MOVE_OUT", "TAX_RENEWAL"];
+export const JOB_LABEL: Record<JobType, string> = {
+  TRANSFER: "งานโอน",
+  USE_CANCEL: "ยกเลิกการใช้รถ",
+  PLATE_COPY: "คัดแผ่นป้ายทะเบียน",
+  MOVE_OUT: "ย้ายออก",
+  TAX_RENEWAL: "ต่อภาษี",
+};
+
+// ตารางราคาค่าบริการต่อลูกค้า ต่อประเภทงาน (ก่อน VAT) - แถวแรกที่ตรงชนิดรถ/แบบงานชนะ
+export interface JobFeeRate {
+  id?: string;
+  jobType: JobType;
+  vehicleClass: "CAR" | "MOTO" | "ANY";
+  variant: "OWNER" | "INSPECTION" | null; // งานโอนเท่านั้น (null = ทุกแบบ)
+  label: string;
+  amount: number;
+}
+
+export interface OtherJob {
+  type: JobType;
+  id: string;
+  typeLabel: string;
+  customerId: string;
+  vehicleClass: "CAR" | "MOTO";
+  variant: string | null;
+  chassis: string;
+  plateText: string;
+  brand: string | null;
+  ownerName: string | null;
+  doneDate: string; // วันที่รับใบเสร็จกลับ (ต่อภาษี = วันที่คืนเอกสาร)
+  receiptNo: string | null;
+  receiptAmount: number | null;
+  fee: number; // ค่าธรรมเนียมราชการที่จะขึ้นบิล (ใบเสร็จจริง ไม่มี = ยอด Bill ที่คิดไว้)
+  feeSource: "RECEIPT" | "ESTIMATE" | "TAX";
+  billTotal: number;
+  suggestedRateId: string | null;
+  suggestedServiceFee: number | null;
+  suggestedServiceLabel: string;
+  warnings: string[];
+}
+
+export interface OtherJobsCustomer {
+  id: string;
+  name: string;
+  company: string | null;
+  branch: string | null;
+  address: string | null;
+  taxId: string | null;
+  account: BillingAccount;
+  terms: BillingTerms;
+  rates: Array<JobFeeRate & { id: string }>;
+  jobs: OtherJob[];
+}
+
+export interface CreateJobInvoiceInput {
+  customerId: string;
+  invoiceNo: string;
+  issueDate: string;
+  jobLabel?: string;
+  whtRate?: number;
+  jobs: Array<{ type: JobType; id: string; serviceFee: number; serviceLabel: string }>;
 }
 
 export interface Invoice {
@@ -361,6 +453,7 @@ export interface Invoice {
   quotationId?: string | null;
   quotationNo?: string | null;
   poNumber?: string | null;
+  faceLayout?: InvoiceFaceLayout; // ไม่มี = SUMMARY (ตัวอย่างก่อนออกบิล)
   account?: BillingAccount; // บัญชีบุคคล = หัวบิลชื่อบุคคล + บัญชีรับเงินบุคคล ไม่มี VAT (บิลเก่าก่อน 2026-09-27 = บัญชีบริษัท)
   // หน้าแก้บิลส่งกลับเป็น expectedUpdatedAt - มีคนแก้/รับเงิน/ยกเลิกไปก่อน backend ตอบ 409 (ผู้ใช้ 2026-09-27)
   updatedAt: string | null;
@@ -450,6 +543,8 @@ export interface CreateInvoiceInput {
   }>;
   extras: Array<{ label: string; amount: number }>;
   whtRate?: number; // อัตราหัก ณ ที่จ่ายของบิลนี้ ไม่ส่ง = ตามเงื่อนไขลูกค้า (ผู้ใช้ 2026-09-29)
+  items?: InvoiceItem[];
+  jobs?: CreateJobInvoiceInput["jobs"]; // งานอื่นๆ ของลูกค้ารายเดียวกันพ่วงในบิลนี้ (ผู้ใช้ 2026-10-07)
 }
 
 // บิลกำหนดเอง (ผู้ใช้ 2026-09-29) - งานเก่าจากระบบเดิม / ขายสินค้า ไม่มีรถ
@@ -467,6 +562,10 @@ export interface NextInvoiceNumbers {
   suggestedPersonalInvoiceNo: string;
   lastInvoiceNo: string | null;
   lastPersonalInvoiceNo: string | null;
+}
+
+export interface OtherJobsQueue extends NextInvoiceNumbers {
+  customers: OtherJobsCustomer[];
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
@@ -507,6 +606,12 @@ export const billingApi = {
   listInvoices: (params: { offset?: number; limit?: number } = {}) =>
     request<InvoiceList>(`/api/billing/invoices?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`),
   createInvoice: (data: CreateInvoiceInput) => request<{ invoice: Invoice }>("/api/billing/invoices", json("POST", data)),
+  // งานอื่นๆ ที่พร้อมวางบิล + ตารางราคาต่อลูกค้า / ออกบิลจากงานที่เลือก (server คิดค่าธรรมเนียมจากใบเสร็จเอง)
+  otherJobsQueue: () => request<OtherJobsQueue>("/api/billing/other-jobs"),
+  createJobInvoice: (data: CreateJobInvoiceInput) => request<{ invoice: Invoice }>("/api/billing/other-jobs/invoice", json("POST", data)),
+  getJobRates: (customerId: string) => request<{ rates: Array<JobFeeRate & { id: string }> }>(`/api/billing/customers/${encodeURIComponent(customerId)}/job-rates`),
+  replaceJobRates: (customerId: string, rates: JobFeeRate[], remark: string) =>
+    request<{ rates: Array<JobFeeRate & { id: string }> }>(`/api/billing/customers/${encodeURIComponent(customerId)}/job-rates`, json("PUT", { rates, remark })),
   createCustomInvoice: (data: CreateCustomInvoiceInput) => request<{ invoice: Invoice }>("/api/billing/custom-invoices", json("POST", data)),
   nextInvoiceNumbers: () => request<NextInvoiceNumbers>("/api/billing/next-invoice-no"),
   getInvoice: (id: string) => request<{ invoice: Invoice }>(`/api/billing/invoices/${encodeURIComponent(id)}`),

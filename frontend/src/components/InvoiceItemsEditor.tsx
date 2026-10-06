@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  editableItems,
   ITEM_KIND_LABEL,
   type InvoiceItem,
   type InvoiceItemKind,
@@ -47,8 +48,9 @@ const lineTotal = (r: ItemRow): number | null => {
   return q === null || u === null ? null : round2(q * u);
 };
 
+// บรรทัดที่มาจากงานอื่นๆ (sourceType) ไม่เข้าตัวแก้ - แสดงอ่านอย่างเดียวและ server คงไว้ให้เอง (ผู้ใช้ 2026-10-07)
 export const itemRowsFromItems = (items: InvoiceItem[]): ItemRow[] =>
-  items.map((it) => ({
+  editableItems(items).map((it) => ({
     kind: it.kind,
     description: it.description,
     quantityText: String(it.quantity),
@@ -331,6 +333,42 @@ export function InvoiceItemsEditor({
           {hideCost ? "" : " · ต้นทุนไม่พิมพ์บนบิล"}
         </p>
       )}
+    </div>
+  );
+}
+
+// บรรทัดที่ดึงมาจากงานอื่นๆ (ผู้ใช้ 2026-10-07) - แสดงอ่านอย่างเดียวในหน้าแก้บิล ยอดยังนับในบิล
+// ผิดต้องยกเลิกบิลแล้วออกใหม่ (งานกลับเข้าคิวเอง) เพราะบรรทัดผูกกับงานที่ต้องกันวางบิลซ้ำ
+export function SourceItemsNotice({ items }: { items: InvoiceItem[] }) {
+  const linked = items.filter((it) => it.sourceType);
+  if (linked.length === 0) return null;
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 6,
+        border: "1px solid #e3e8f2",
+        borderRadius: 10,
+        padding: "10px 12px",
+        background: "#f5f7fb",
+        fontSize: 14,
+      }}
+    >
+      <b style={{ fontWeight: 600 }}>งานอื่นๆ ที่ดึงมาจากระบบ ({linked.length} บรรทัด)</b>
+      <span className="muted" style={{ fontSize: 12 }}>
+        แก้ที่นี่ไม่ได้ ถ้าผิดให้ยกเลิกบิลแล้วออกใหม่ งานจะกลับเข้าคิววางบิลเอง
+      </span>
+      {linked.map((it, i) => (
+        <div key={it.id ?? i} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {ITEM_KIND_LABEL[it.kind]} ·{" "}
+            </span>
+            {it.description}
+          </span>
+          <span>{formatMoney(it.amount)}</span>
+        </div>
+      ))}
     </div>
   );
 }

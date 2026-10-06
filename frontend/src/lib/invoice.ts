@@ -1,4 +1,4 @@
-import type { BillingTerms, Invoice, InvoiceItemKind, InvoiceLine, ServiceFeeRate } from "@/lib/billing-api";
+import { editableItems, JOB_LABEL, sourceItems, type BillingTerms, type Invoice, type InvoiceItem, type InvoiceItemKind, type InvoiceLine, type JobType, type ServiceFeeRate } from "@/lib/billing-api";
 import { jobSheetGroup } from "@/lib/job-sheet";
 import { comparePlate } from "@/lib/plate-order";
 
@@ -77,12 +77,58 @@ export interface InvoiceFaceLine {
   unit: number;
 }
 
-// บรรทัดบนหน้าบิลตามแบบที่บริษัทใช้อยู่: ค่าธรรมเนียมรวมเป็นบรรทัดเดียว ("ค่าธรรมเนียมจดทะเบียนรถยนต์ LEXUS 6 คัน")
-// ค่าดำเนินการรวมคันที่ข้อความและราคาเท่ากันเป็นบรรทัดเดียว คันที่มีการหักยอด (เช่น ลูกค้าชำระค่าขอใช้เลขเอง) แยกบรรทัดพร้อมทะเบียน
-// บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29) พิมพ์ตามลำดับที่กรอก บรรทัดละรายการ ต่อจากบรรทัดของรถ
-export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "extras" | "feeTotal" | "items">): InvoiceFaceLine[] {
+// งานอื่นๆ ในบิล (ผู้ใช้ 2026-10-07) นับเป็นงาน ไม่ใช่บรรทัด: บรรทัด FEE + SERVICE ของงานเดียวกันมี sourceId เดียวกัน
+export const jobsOfItems = (items: InvoiceItem[]) => {
+  const byId = new Map<string, { type: JobType; items: InvoiceItem[] }>();
+  for (const it of items) {
+    if (!it.sourceType || !it.sourceId) continue;
+    const key = `${it.sourceType}:${it.sourceId}`;
+    const g = byId.get(key) ?? { type: it.sourceType, items: [] };
+    g.items.push(it);
+    byId.set(key, g);
+  }
+  return [...byId.values()];
+};
+
+// "จดทะเบียนรถยนต์ 4 คัน, งานโอน 3 งาน, ต่อภาษี 2 งาน" - ส่วนประกอบของบรรทัดสรุปบนหน้าบิลแบบ SUMMARY
+export function invoiceContentSummary(invoice: Pick<Invoice, "jobLabel" | "lines" | "items">): string {
+  const parts: string[] = [];
+  if (invoice.lines.length) parts.push(`${invoice.jobLabel} ${invoice.lines.length} คัน`);
+  const counts = new Map<JobType, number>();
+  for (const j of jobsOfItems(invoice.items)) counts.set(j.type, (counts.get(j.type) ?? 0) + 1);
+  for (const [type, n] of counts) parts.push(`${JOB_LABEL[type]} ${n} งาน`);
+  return parts.join(", ");
+}
+
+export type FaceInvoice = Pick<Invoice, "jobLabel" | "lines" | "extras" | "feeTotal" | "items"> & Partial<Pick<Invoice, "faceLayout">> & { invoiceNo?: string | null };
+
+// บรรทัดบนหน้าบิล
+// SUMMARY (บิลใหม่ทุกใบ ผู้ใช้ 2026-10-07): ค่าธรรมเนียมรวม 1 บรรทัด + ค่าบริการรวม 1 บรรทัด อ้างใบแนบ (รายละเอียดรายคัน/รายงานอยู่ในใบแนบ)
+//   บรรทัดที่พิมพ์เอง (งานเก่า / ขายสินค้า) และค่าใช้จ่ายอื่นแบบเดิมยังเป็นบรรทัดของตัวเองต่อท้าย เพราะไม่อยู่ในใบแนบ
+// GROUPED (บิลก่อน 2026-10-07 พิมพ์ซ้ำเหมือนที่ลูกค้าเคยได้รับ): ค่าธรรมเนียมรวมเป็นบรรทัดเดียว ("ค่าธรรมเนียมจดทะเบียนรถยนต์ LEXUS 6 คัน")
+//   ค่าดำเนินการรวมคันที่ข้อความและราคาเท่ากันเป็นบรรทัดเดียว คันที่มีการหักยอด (เช่น ลูกค้าชำระค่าขอใช้เลขเอง) แยกบรรทัดพร้อมทะเบียน
+//   บรรทัดกำหนดเอง (ผู้ใช้ 2026-09-29) พิมพ์ตามลำดับที่กรอก บรรทัดละรายการ ต่อจากบรรทัดของรถ
+export function invoiceFaceLines(invoice: FaceInvoice): InvoiceFaceLine[] {
+  const linked = sourceItems(invoice.items);
+  const typed = editableItems(invoice.items);
+  const typedLines = typed.map((it) => ({ name: it.description, qty: it.quantity, unit: it.unitPrice }));
+  const extraLines = invoice.extras.map((e) => ({ name: e.label, qty: 1, unit: e.amount }));
+  // ไม่มีรถและไม่มีงานอื่น (บิลกำหนดเอง) = ไม่มีใบแนบ พิมพ์บรรทัดตรงๆ ทั้งสองแบบ
+  if (invoice.lines.length === 0 && linked.length === 0) return [...typedLines, ...extraLines];
+
+  if ((invoice.faceLayout ?? "SUMMARY") === "SUMMARY") {
+    const ref = invoice.invoiceNo ? ` ตามเอกสารแนบเลขที่ ${invoice.invoiceNo}-A` : " ตามเอกสารแนบ";
+    const summary = invoiceContentSummary(invoice);
+    const typedFees = typed.filter((it) => it.kind === "FEE").reduce((s, it) => s + it.amount, 0);
+    const fee = round2(invoice.feeTotal - typedFees);
+    const service = round2(invoice.lines.reduce((s, l) => s + l.serviceFee, 0) + linked.filter((it) => it.kind === "SERVICE").reduce((s, it) => s + it.amount, 0));
+    const out: InvoiceFaceLine[] = [];
+    if (fee > 0) out.push({ name: `ค่าธรรมเนียมราชการ (${summary})${ref}`, qty: 1, unit: fee });
+    if (service > 0) out.push({ name: `ค่าบริการ (${summary})${ref}`, qty: 1, unit: service });
+    return [...out, ...typedLines, ...extraLines];
+  }
+
   const itemLines = invoice.items.map((it) => ({ name: it.description, qty: it.quantity, unit: it.unitPrice }));
-  if (invoice.lines.length === 0) return [...itemLines, ...invoice.extras.map((e) => ({ name: e.label, qty: 1, unit: e.amount }))];
   const brands = [...new Set(invoice.lines.map((l) => l.brandName.toUpperCase()))];
   const brandText = brands.length === 1 ? ` ${brands[0]}` : "";
   // ค่าธรรมเนียมของรถ = ยอดค่าธรรมเนียมทั้งบิลหักส่วนที่มาจากบรรทัดกำหนดเอง (บรรทัดพวกนั้นพิมพ์แยกของมันเอง)
@@ -104,7 +150,7 @@ export function invoiceFaceLines(invoice: Pick<Invoice, "jobLabel" | "lines" | "
   // เช่น (ต่ำกว่า 300 cc) → (300-799 cc) → (ต่ำกว่า 300 cc + ขอใช้) → (300-799 cc + ขอใช้)
   out.push(...[...groups.values()].sort((a, b) => a.parts - b.parts || a.unit - b.unit).map(({ name, qty, unit }) => ({ name, qty, unit })));
   out.push(...itemLines);
-  for (const e of invoice.extras) out.push({ name: e.label, qty: 1, unit: e.amount });
+  out.push(...extraLines);
   return out;
 }
 

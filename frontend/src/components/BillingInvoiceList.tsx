@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import {
   billingApi,
+  editableItems,
+  sourceItems,
   type BillingTerms,
   type Invoice,
   type InvoiceHistoryEntry,
@@ -15,11 +17,11 @@ import {
 } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
-import { computeTotals, effectiveWhtRate, formatMoney, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
+import { computeTotals, effectiveWhtRate, formatMoney, jobsOfItems, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
 import Link from "next/link";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
-import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
+import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, SourceItemsNotice, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
 import { canPrintOriginal, printTaxInvoice } from "@/lib/tax-invoice-print";
 
@@ -265,7 +267,11 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                     {dueBadge(i, todayIso())}
                   </td>
                   <td>{i.customer.name}</td>
-                  <td>{i.lines.length ? i.lines.length : <span className="muted">บิลกำหนดเอง</span>}</td>
+                  <td>
+                    {i.lines.length ? i.lines.length : null}
+                    {jobsOfItems(i.items).length > 0 && <div className="muted">งานอื่น {jobsOfItems(i.items).length}</div>}
+                    {!i.lines.length && jobsOfItems(i.items).length === 0 && <span className="muted">บิลกำหนดเอง</span>}
+                  </td>
                   <td style={{ textAlign: "right" }}>{formatMoney(i.netTotal)}</td>
                   <td>
                     <span className={STATUS[i.status].className}>{STATUS[i.status].text}</span>
@@ -625,7 +631,8 @@ function InvoiceEditDialog({
     extraValues.map((e) => ({ amount: e.amount ?? 0 })),
     useCurrent && currentTerms ? currentTerms : invoiceTerms,
     issueForTotals,
-    itemRowsToItems(itemRows),
+    // บรรทัดที่มาจากงานอื่นๆ แก้ที่นี่ไม่ได้ แต่ยังนับในยอดบิล
+    [...sourceItems(invoice.items), ...itemRowsToItems(itemRows)],
     whtOverrideOf(whtValue),
   );
 
@@ -674,7 +681,7 @@ function InvoiceEditDialog({
     if (itemError) return fail(itemError);
     const nextItems = itemRowsToItems(itemRows);
     const itemKey = (items: InvoiceItem[]) => JSON.stringify(items.map((it) => [it.kind, it.description, it.quantity, it.unitPrice, it.cost]));
-    if (itemKey(nextItems) !== itemKey(invoice.items)) edits.items = nextItems;
+    if (itemKey(nextItems) !== itemKey(editableItems(invoice.items))) edits.items = nextItems;
     const whtError = whtProblem(invoice.whtRate, whtValue, whtChecked);
     if (whtError) return fail(whtError);
     const whtOverride = whtOverrideOf(whtValue);
@@ -862,6 +869,7 @@ function InvoiceEditDialog({
 
       <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
         <b style={{ fontWeight: 600 }}>บรรทัดอื่นในบิลนี้ (งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น)</b>
+        <SourceItemsNotice items={invoice.items} />
         <InvoiceItemsEditor rows={itemRows} onChange={setItemRows} />
       </div>
 
