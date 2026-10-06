@@ -6,7 +6,6 @@ import { AuthModule } from './auth/auth.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { BookPhotosModule } from './book-photos/book-photos.module.js';
 import { BrandsModule } from './brands/brands.module.js';
-import { CustomerPaymentsModule } from './customer-payments/customer-payments.module.js';
 import { CustomersModule } from './customers/customers.module.js';
 import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
@@ -17,6 +16,7 @@ import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
 import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
 import { PlateSwapModule } from './plate-swap/plate-swap.module.js';
+import { VehicleMoveOutModule } from './vehicle-move-out/vehicle-move-out.module.js';
 import { VehicleUseCancellationModule } from './vehicle-use-cancellation/vehicle-use-cancellation.module.js';
 import { VehicleTransferModule } from './vehicle-transfer/vehicle-transfer.module.js';
 import { PlateCopyModule } from './plate-copy/plate-copy.module.js';
@@ -45,6 +45,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     YamahaRelocationModule,
     PlateSwapModule,
     VehicleUseCancellationModule,
+    VehicleMoveOutModule,
     VehicleTransferModule,
     PlateCopyModule,
     DocumentSubmissionModule,
@@ -54,7 +55,6 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BookPhotosModule,
     DeliveryModule,
     BillingModule,
-    CustomerPaymentsModule,
     OverviewModule,
     HrModule,
     VehicleSearchModule,

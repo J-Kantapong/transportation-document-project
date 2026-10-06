@@ -171,8 +171,6 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/portal', roles: ['CUSTOMER'] },
   // ฝ่ายบุคคล / เงินเดือน (ผู้ใช้ 2026-10-05): ADMIN เท่านั้น - backend: /api/hr (ถ้าไม่มีกฎนี้ หน้าที่ไม่อยู่ในตารางเปิดให้พนักงานทุกกลุ่ม)
   { prefix: '/hr', roles: ['ADMIN'] },
-  // บันทึกการจ่ายของลูกค้า + ตารางล้อ (SPI) - พนักงานรถยนต์ดูแลงาน SPI (ผู้ใช้ 2026-09-27) - backend: /api/customer-payments
-  { prefix: '/accounting/customer-payments', roles: ['ADMIN', 'ACCOUNTANT', 'STAFF_CAR'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
   // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
   { prefix: '/registration/new-vehicle/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },
@@ -196,6 +194,10 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/other/cancel-use/car', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   { prefix: '/registration/other/cancel-use/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
   { prefix: '/registration/other/cancel-use', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
+  // ย้ายออก (หมวดอื่นๆ, ผู้ใช้ 2026-10-06): สิทธิ์เดียวกับยกเลิกการใช้รถ - backend: /api/vehicle-move-outs (VehicleMoveOutService.assertClassScope)
+  { prefix: '/registration/other/move-out/car', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  { prefix: '/registration/other/move-out/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
+  { prefix: '/registration/other/move-out', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   // คัดแผ่นป้ายทะเบียน (หมวดอื่นๆ, ผู้ใช้ 2026-10-02): รถยนต์เท่านั้น = STAFF_CAR (+ACCOUNTANT อ่าน) - backend: /api/plate-copies
   { prefix: '/registration/other/plate-copy', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02): กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO, รวมในหน้าเดียวกัน) + ACCOUNTANT อ่าน

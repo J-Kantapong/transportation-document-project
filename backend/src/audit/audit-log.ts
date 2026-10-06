@@ -14,17 +14,20 @@ export type AuditEntity =
   | 'YamahaRelocation'
   | 'PlateSwap'
   | 'VehicleUseCancellation'
+  | 'VehicleMoveOut'
   | 'VehicleTransfer'
   | 'PlateCopy'
   | 'User'
-  | 'CustomerPayment'
   | 'TaxInvoiceSeries'
   | 'TaxInvoice'
   | 'WhtCertificate'
   | 'Quotation'
   | 'Employee'
   | 'PayrollRun'
-  | 'PayslipSignature';
+  | 'PayslipSignature'
+  | 'IssuedWhtCertificate'
+  | 'IssuedWhtSeries'
+  | 'Supplier';
 
 export interface AuditEntry {
   entity: AuditEntity;

@@ -152,6 +152,9 @@ describe('access policy HR / payroll', () => {
       expect(isAllowed(accessFor('/api/hr/employees', 'GET'), [role])).toBe(false);
       expect(isAllowed(accessFor('/api/hr/payroll/runs/r1', 'GET'), [role])).toBe(false);
       expect(isAllowed(accessFor('/api/hr/payroll/runs/r1/approve', 'POST'), [role])).toBe(false);
+      expect(isAllowed(accessFor('/api/hr/wht', 'GET'), [role])).toBe(false);
+      expect(isAllowed(accessFor('/api/hr/suppliers', 'GET'), [role])).toBe(false);
+      expect(isAllowed(accessFor('/api/hr/wht/employee-year', 'POST'), [role])).toBe(false);
     }
     expect(isAllowed(accessFor('/api/hr/employees', 'GET'), ['ADMIN'])).toBe(true);
     expect(isAllowed(accessFor('/API/HR/Payroll/runs', 'POST'), ['ADMIN'])).toBe(true);

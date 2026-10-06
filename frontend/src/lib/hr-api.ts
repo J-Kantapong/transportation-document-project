@@ -132,6 +132,131 @@ export interface PayslipSignature {
   updatedByName: string | null;
 }
 
+// ---------- 50 ทวิ ที่บริษัทออกให้ผู้รับเงิน (ผู้ใช้ 2026-10-06) - ดู backend/src/hr/wht-issue.service.ts ----------
+export type WhtIncomeType = "SALARY" | "FEE" | "ROYALTY" | "INTEREST" | "SERVICE" | "OTHER";
+export type WhtFormType = "PND1K" | "PND3";
+export type WhtPayMethod = "WITHHOLD" | "FOREVER" | "ONCE";
+
+export const WHT_INCOME_LABEL: Record<WhtIncomeType, string> = {
+  SALARY: "เงินเดือน ค่าจ้าง เบี้ยเลี้ยง โบนัส ฯลฯ ตามมาตรา 40 (1)",
+  FEE: "ค่าธรรมเนียม ค่านายหน้า ฯลฯ ตามมาตรา 40 (2)",
+  ROYALTY: "ค่าแห่งลิขสิทธิ์ ฯลฯ ตามมาตรา 40 (3)",
+  INTEREST: "ดอกเบี้ย ฯลฯ ตามมาตรา 40 (4) (ก)",
+  SERVICE: "ตามมาตรา 3 เตรส: จ้างทำของ ค่าบริการ ค่าขนส่ง ฯลฯ",
+  OTHER: "อื่นๆ",
+};
+// ประเภทที่เลือกได้ตอนออกให้ผู้รับเงินอื่น (เงินเดือน 40(1) ออกให้พนักงานจากหน้ารอบปีเท่านั้น)
+export const WHT_OTHER_INCOME_TYPES: WhtIncomeType[] = ["SERVICE", "FEE", "ROYALTY", "INTEREST", "OTHER"];
+export const WHT_FORM_LABEL: Record<WhtFormType, string> = { PND1K: "ภ.ง.ด.1ก", PND3: "ภ.ง.ด.3" };
+export const WHT_PAY_METHOD_LABEL: Record<WhtPayMethod, string> = { WITHHOLD: "หัก ณ ที่จ่าย", FOREVER: "ออกให้ตลอดไป", ONCE: "ออกให้ครั้งเดียว" };
+
+export interface WhtItem {
+  id?: string;
+  incomeType: WhtIncomeType;
+  description: string | null;
+  paidDate: string; // ค.ศ. YYYY-MM-DD
+  dateLabel: string | null;
+  amountPaid: number;
+  taxWithheld: number;
+}
+
+export interface WhtPayer {
+  nameTh: string;
+  taxId: string;
+  addressLines: string[];
+}
+
+export interface WhtCertificate {
+  id: string;
+  certificateNo: string;
+  taxYear: number; // ค.ศ.
+  issueDate: string;
+  payeeKind: "EMPLOYEE" | "OTHER";
+  employeeId: string | null;
+  supplierId: string | null;
+  payeeName: string;
+  payeeTaxId: string;
+  payeeAddress: string | null;
+  formType: WhtFormType;
+  payMethod: WhtPayMethod;
+  totalPaid: number;
+  totalTax: number;
+  ssoAmount: number;
+  providentFund: number;
+  payer: WhtPayer;
+  note: string | null;
+  status: "ISSUED" | "CANCELLED";
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancelledByName: string | null;
+  replacesId: string | null;
+  replacedBy: { id: string; certificateNo: string } | null;
+  createdByName: string | null;
+  createdAt: string;
+  items: WhtItem[];
+}
+
+export interface WhtEmployeeYearRow {
+  employeeId: string;
+  code: string;
+  fullName: string;
+  idType: EmployeeIdType;
+  idNumber: string;
+  idValid: boolean;
+  income: number;
+  sso: number;
+  tax: number;
+  months: number;
+  periodLabel: string;
+  lastPayDate: string;
+  certificate: { id: string; certificateNo: string } | null;
+}
+
+// ทะเบียนผู้รับเงินที่ไม่ใช่พนักงาน (ซับ) ไว้ออก 50 ทวิ (ผู้ใช้ 2026-10-06) - แยกจากทะเบียนพนักงาน
+export interface Supplier {
+  id: string;
+  name: string;
+  taxId: string;
+  address: string | null;
+  defaultIncomeType: WhtIncomeType;
+  defaultDescription: string | null;
+  defaultRate: number; // อัตราหัก ณ ที่จ่าย %
+  status: "ACTIVE" | "INACTIVE";
+  note: string | null;
+  certificateCount: number;
+  updatedAt: string;
+}
+
+export interface SupplierInput {
+  name: string;
+  taxId: string;
+  address: string | null;
+  defaultIncomeType: WhtIncomeType;
+  defaultDescription: string | null;
+  defaultRate: number;
+  note: string | null;
+}
+
+export interface WhtSeries {
+  year: number;
+  lastNumber: number; // เลขล่าสุดที่ใช้ไปแล้วนอกระบบ
+  systemCount: number; // จำนวนใบของปีนี้ที่ออกในระบบแล้ว (มีแล้ว = ตั้งเลขเริ่มไม่ได้)
+  nextNo: string;
+}
+
+export interface WhtOtherInput {
+  taxYear: number;
+  issueDate: string;
+  payeeName: string;
+  payeeTaxId: string;
+  payeeAddress: string | null;
+  payMethod: WhtPayMethod;
+  items: Array<Omit<WhtItem, "id" | "dateLabel">>;
+  note: string | null;
+  replacesId?: string | null;
+  supplierId?: string | null;
+}
+
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const enc = encodeURIComponent;
 
@@ -165,6 +290,31 @@ export const hrApi = {
   pay: (id: string, payDate: string) => request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(id)}/pay`, json("POST", { payDate })),
   unpay: (id: string, remark: string) => request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(id)}/unpay`, json("POST", { remark })),
   cancelRun: (id: string, remark: string) => request<{ run: PayrollRun }>(`/api/hr/payroll/runs/${enc(id)}/cancel`, json("POST", { remark })),
+
+  listWht: (params: { year?: number; kind?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v).map(([k, v]) => [k, String(v)])).toString();
+    return request<{ certificates: WhtCertificate[]; truncated: boolean }>(`/api/hr/wht${qs ? `?${qs}` : ""}`);
+  },
+  whtEmployeeYear: (year: number) => request<{ year: number; unpaidRuns: number; rows: WhtEmployeeYearRow[] }>(`/api/hr/wht/employee-year?year=${year}`),
+  issueWhtEmployeeYear: (year: number, issueDate: string, employeeIds: string[]) =>
+    request<{ created: Array<{ id: string; employeeId: string; certificateNo: string }>; skipped: Array<{ employeeId: string; name: string; reason: string }> }>(
+      "/api/hr/wht/employee-year",
+      json("POST", { year, issueDate, employeeIds }),
+    ),
+  issueWhtOther: (data: WhtOtherInput) => request<{ certificate: WhtCertificate }>("/api/hr/wht", json("POST", data)),
+  listSuppliers: (params: { status?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+    return request<{ suppliers: Supplier[] }>(`/api/hr/suppliers${qs ? `?${qs}` : ""}`);
+  },
+  createSupplier: (data: SupplierInput) => request<{ supplier: Supplier }>("/api/hr/suppliers", json("POST", data)),
+  updateSupplier: (id: string, data: SupplierInput & { remark: string; expectedUpdatedAt: string }) => request<{ supplier: Supplier }>(`/api/hr/suppliers/${enc(id)}`, json("PATCH", data)),
+  deactivateSupplier: (id: string, remark: string) => request<{ supplier: Supplier }>(`/api/hr/suppliers/${enc(id)}/deactivate`, json("POST", { remark })),
+  reactivateSupplier: (id: string, remark: string) => request<{ supplier: Supplier }>(`/api/hr/suppliers/${enc(id)}/reactivate`, json("POST", { remark })),
+  supplierHistory: (id: string) => request<{ history: HistoryEntry[] }>(`/api/hr/suppliers/${enc(id)}/history`),
+  whtSeries: (year: number) => request<WhtSeries>(`/api/hr/wht/series?year=${year}`),
+  setWhtSeries: (year: number, lastNumber: number, remark: string) => request<WhtSeries>("/api/hr/wht/series", json("POST", { year, lastNumber, remark })),
+  whtHistory: (id: string) => request<{ history: HistoryEntry[] }>(`/api/hr/wht/${enc(id)}/history`),
+  cancelWht: (id: string, remark: string) => request<{ certificate: WhtCertificate }>(`/api/hr/wht/${enc(id)}/cancel`, json("POST", { remark })),
 };
 
 export const STATUS_LABEL: Record<PayrollStatus, string> = { DRAFT: "ร่าง", APPROVED: "อนุมัติแล้ว", PAID: "จ่ายแล้ว", CANCELLED: "ยกเลิก" };
