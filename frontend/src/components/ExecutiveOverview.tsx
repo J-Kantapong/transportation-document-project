@@ -162,6 +162,7 @@ export function ExecutiveOverview() {
           <div className="foot">
             Bill {baht(spend.today.bill)} · No bill {baht(spend.today.noBill)}
             {spend.today.other > 0 && ` · อื่นๆ ${baht(spend.today.other)}`}
+            {spend.today.overhead > 0 && ` · เงินเดือน/ค่าจ้าง ${baht(spend.today.overhead)}`}
             {spend.today.duty > 0 && (
               <>
                 <br />
@@ -275,6 +276,7 @@ export function ExecutiveOverview() {
                   <div className="chart-tip-sub">
                     Bill {baht(d.bill)} · No bill {baht(d.noBill)}
                     {d.other > 0 && ` · แจ้งย้าย ${baht(d.other)}`}
+                    {d.overhead > 0 && ` · เงินเดือน/ค่าจ้าง ${baht(d.overhead)}`}
                     {d.duty > 0 && ` · ค่าอากร (แยก) ${baht(d.duty)}`}
                   </div>
                   <div className="chart-tip-sub">

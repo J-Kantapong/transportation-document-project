@@ -7,6 +7,7 @@
 
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
 import { INSPECTION_VALID_DAYS } from '../document-submission/submission-eligibility.js';
+import { PLATE_COPY_EXPECTED_DAYS } from '../plate-copy/plate-copy-fee.js';
 import { addDays, daysBetween, isoOf } from './overview-calculator.js';
 
 export type { VehicleKind };
@@ -27,6 +28,15 @@ export const STAGES = {
   billing: { label: 'วางบิล', href: '/accounting/billing', sla: 7 },
   plateSwap: { label: 'สลับเลข (รอรับเอกสารกลับ)', href: '/registration/plate-swap/old-new', sla: 14 },
   taxRenewal: { label: 'ต่อภาษี (รอชำระ)', href: '/registration/tax-renewal', sla: 7 },
+  // งานอื่นๆ ที่เพิ่มเข้ามาภายหลัง (ผู้ใช้ 2026-10-02 / 2026-10-06) - กำหนดเวลาเป็นค่าตั้งต้นของ Claude เหมือนขั้นอื่น
+  // (คัดป้ายใช้ 15 วัน ตามที่ผู้ใช้บอกว่าป้ายออกตามปกติ)
+  useCancel: { label: 'ยกเลิกการใช้รถ (รอรับใบเสร็จ)', href: '/registration/other/cancel-use', sla: 7 },
+  moveOut: { label: 'ย้ายออก (รอรับใบเสร็จ)', href: '/registration/other/move-out', sla: 7 },
+  plateCopy: { label: 'คัดแผ่นป้าย (รอรับใบเสร็จ)', href: '/registration/other/plate-copy/return', sla: 7 },
+  plateCopyPlate: { label: 'คัดแผ่นป้าย (รอรับป้าย)', href: '/registration/other/plate-copy/receive-plate', sla: PLATE_COPY_EXPECTED_DAYS },
+  transferInspectSend: { label: 'งานโอนตรวจรถ (รอส่งตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 3 },
+  transferInspectResult: { label: 'งานโอนตรวจรถ (รอผลตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 7 },
+  transferJob: { label: 'งานโอน (รอรับใบเสร็จ)', href: '/registration/transfer', sla: 7 },
 } as const;
 export type StageKey = keyof typeof STAGES;
 
@@ -83,6 +93,41 @@ const later = (a: Date, b: Date) => (a > b ? a : b);
 function wait(stage: StageKey, since: string, flags: Flag[] = [], reasons: Array<string | null> = []): Wait {
   const text = reasons.filter(Boolean).join(' · ');
   return { stage, since, flags, reason: text || null };
+}
+
+// --- งานอื่นๆ (ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / งานโอน) --------------------------------
+// แถวของตัวเองไม่ใช่ Vehicle จึงไม่ผ่าน waitsFor · ใบเสร็จยังไม่กลับ (returnedDate ว่าง) = ค้าง ตรงกับที่หน้างานนับ
+
+export function receiptWait(stage: 'useCancel' | 'moveOut' | 'plateCopy', submitDate: Date): Wait {
+  return wait(stage, iso(submitDate));
+}
+
+// คัดป้ายมีขั้นรับป้ายแยกจากรับใบเสร็จ (ไม่ผูกกัน - ดู PlateCopy.plateReceivedDate)
+export function plateCopyWaits(j: { submitDate: Date; returnedDate: Date | null; plateReceivedDate: Date | null }): Wait[] {
+  const waits: Wait[] = [];
+  if (!j.returnedDate) waits.push(receiptWait('plateCopy', j.submitDate));
+  if (!j.plateReceivedDate) waits.push(wait('plateCopyPlate', iso(j.submitDate)));
+  return waits;
+}
+
+// งานโอน: OWNER = ยื่น -> รับใบเสร็จ · INSPECTION = ยื่น -> ส่งตรวจ -> ผลตรวจ -> (ผ่านเท่านั้น) รับใบเสร็จ
+// ตรวจไม่ผ่านต้องส่งตรวจใหม่ (ใช้ธง INSPECTION_FAILED เหมือนรถจดใหม่ จึงนับเป็น "ด่วน")
+export function transferWaits(t: {
+  transferType: string;
+  submitDate: Date;
+  returnedDate: Date | null;
+  inspectionSentDate: Date | null;
+  inspectionResult: string | null;
+  inspectionResultDate: Date | null;
+}): Wait[] {
+  if (t.returnedDate) return [];
+  if (t.transferType !== 'INSPECTION') return [wait('transferJob', iso(t.submitDate))];
+  if (!t.inspectionSentDate) return [wait('transferInspectSend', iso(t.submitDate))];
+  if (!t.inspectionResultDate) return [wait('transferInspectResult', iso(t.inspectionSentDate))];
+  if (t.inspectionResult === 'FAIL') {
+    return [wait('transferInspectSend', iso(t.inspectionResultDate), ['INSPECTION_FAILED'], ['ตรวจไม่ผ่าน - รอส่งตรวจใหม่'])];
+  }
+  return [wait('transferJob', iso(t.inspectionResultDate))];
 }
 
 export function waitsFor(v: OpenVehicle, today: string): Wait[] {
@@ -187,7 +232,8 @@ export function summarizeBacklog(items: BacklogItem[], today: string): Record<St
 
 export interface StuckSubject {
   id: string;
-  source: 'vehicle' | 'plateSwap' | 'taxRenewal';
+  source: 'vehicle' | 'plateSwap' | 'taxRenewal' | 'otherJob';
+  href?: string; // หน้าที่พาไปจัดการ - ไม่ระบุ = หน้าของขั้นนั้น (งานอื่นๆ มีหน้าแยกรถยนต์/จักรยานยนต์)
   kind: VehicleKind;
   customerName: string;
   brandName: string | null;
@@ -220,7 +266,7 @@ export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string
     if (overdueDays === 0 && w.flags.length === 0) continue;
     const severity = w.flags.some((f) => HIGH_FLAGS.includes(f)) ? 'high' : 'medium';
     const reason = w.reason ?? `ค้างที่ขั้น${stage.label}เกินกำหนด ${stage.sla} วัน`;
-    const item: StuckItem = { ...subject, stage: w.stage, stageLabel: stage.label, href: stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags };
+    const item: StuckItem = { ...subject, stage: w.stage, stageLabel: stage.label, href: subject.href ?? stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags };
     if (!best || rank(item) > rank(best)) best = item;
   }
   return best;

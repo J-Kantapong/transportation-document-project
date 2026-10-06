@@ -168,7 +168,7 @@ type KindFilter = "all" | VehicleKind;
 // "ไปจัดการ" พาไปหน้าที่มีรถคันนั้นจริงพร้อม ?focus= แบบเดียวกับหน้าค้นหารถ (พบ 2026-09-27: เดิมไปหน้าเมนู/หน้าเลือกประเภทรถ)
 // ต่อภาษีไม่แสดงเลขตัวถังในตาราง จึงเปิดหน้าอย่างเดียว
 function stuckHref(s: StuckItem): string {
-  if (s.source === "taxRenewal") return s.href;
+  if (s.source !== "vehicle" && s.source !== "plateSwap") return s.href; // ต่อภาษีและงานอื่นๆ: href จาก backend (งานอื่นๆ พาไปหน้ารับใบเสร็จ/รับป้ายตรงๆ)
   return focusHref(workPageFor(s.stage, s.kind, s.flags, s.href), s.chassis);
 }
 

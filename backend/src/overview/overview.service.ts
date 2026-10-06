@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { WHT_OVERDUE_DAYS } from '../billing/tax-invoice.service.js';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -22,8 +23,11 @@ import {
   limitStuckPerKind,
   STAGES,
   sortStuck,
+  plateCopyWaits,
+  receiptWait,
   stuckItemFor,
   summarizeBacklog,
+  transferWaits,
   vehicleKindOf,
   waitsFor,
   type BacklogItem,
@@ -49,6 +53,7 @@ const MOTO_TYPE_PREFIX = 'รย.12'; // ต่อภาษี: vehicleType ข�
 
 const num = (d: unknown) => (d === null || d === undefined ? 0 : Number(d));
 const renewalKind = (vehicleType: string): VehicleKind => (vehicleType.startsWith(MOTO_TYPE_PREFIX) ? 'moto' : 'car');
+const classKind = (vehicleClass: string): VehicleKind => (vehicleClass === 'MOTO' ? 'moto' : 'car'); // งานที่มีช่อง vehicleClass CAR | MOTO
 const plateText = (category: string | null, number: string | null) => (category && number ? `${category} ${number}` : null);
 
 export const SPEND_CATEGORIES = [
@@ -58,6 +63,14 @@ export const SPEND_CATEGORIES = [
   { key: 'plateSwap', label: 'สลับเลข' },
   { key: 'taxRenewal', label: 'ต่อภาษี' },
   { key: 'yamaha', label: 'แจ้งย้ายยามาฮ่า' },
+  // งานอื่นๆ (ผู้ใช้ 2026-10-02 / 2026-10-06): ค่าใช้จ่ายตาม snapshot ตอนยื่น (billTotal / noBillTotal / dutyAmount) นับที่วันที่ยื่น
+  { key: 'vehicleTransfer', label: 'งานโอน' },
+  { key: 'useCancel', label: 'ยกเลิกการใช้รถ' },
+  { key: 'plateCopy', label: 'คัดแผ่นป้ายทะเบียน' },
+  { key: 'moveOut', label: 'ย้ายออก' },
+  // รายจ่ายของบริษัทเอง (ผู้ใช้ 2026-10-06): เงินเดือนตามรอบที่จ่ายแล้ว + ค่าจ้างบุคคลภายนอกตาม 50 ทวิ ที่ออกในระบบ
+  { key: 'payroll', label: 'เงินเดือนพนักงาน' },
+  { key: 'subcontract', label: 'ค่าจ้างบุคคลภายนอก (ตาม 50 ทวิ)' },
 ] as const;
 type CategoryKey = (typeof SPEND_CATEGORIES)[number]['key'];
 
@@ -69,9 +82,10 @@ interface SpendEvent {
   noBill: number; // ลงขัน ไม่มีใบเสร็จ
   other: number; // ไม่ได้แยกว่า Bill/No bill (ค่าแจ้งย้าย/ตัดบัญชี)
   duty?: number; // ค่าอากร - แยกจากค่าใช้จ่าย ไม่อยู่ใน noBill และไม่นับในยอดรวม (ผู้ใช้ 2026-10-05)
+  overhead?: number; // รายจ่ายของบริษัทเอง ไม่ใช่เงินทดรองจ่ายรายงาน (เงินเดือน, ค่าจ้างบุคคลภายนอก) - รวมในยอดใช้เงินแต่แสดงแยก (ผู้ใช้ 2026-10-06 "เอารายจ่ายทั้งหมดเข้าไป")
 }
 
-const eventTotal = (e: SpendEvent) => e.bill + e.noBill + e.other;
+const eventTotal = (e: SpendEvent) => e.bill + e.noBill + e.other + (e.overhead ?? 0);
 const dutyOf = (e: SpendEvent) => e.duty ?? 0;
 
 // แถวของตาราง "งานแต่ละขั้นตอน" - ค่า null ในช่อง car/moto = ขั้นนี้ไม่มีรถประเภทนั้น (เช่น สลับเลขมีแต่รถยนต์)
@@ -149,6 +163,18 @@ export class OverviewService {
       openSwaps,
       openRenewals,
       pendingUsers,
+      useCancels,
+      plateCopies,
+      moveOuts,
+      vehicleTransfers,
+      openUseCancels,
+      openPlateCopies,
+      openMoveOuts,
+      openTransfers,
+      whtPendingRows,
+      quotations,
+      payrollRuns,
+      subcontractItems,
     ] = await Promise.all([
       // --- ค่าใช้จ่าย 60 วัน (กราฟรายวัน + เทียบช่วงก่อนหน้า) + 28 วันถึงวันนี้ (ประมาณการ) ---
       this.prisma.documentSubmission.findMany({
@@ -158,7 +184,7 @@ export class OverviewService {
       // งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอด (ผู้ใช้ 2026-09-27: ยกเลิกแบบไม่ลบแถว)
       this.prisma.plateSwap.findMany({
         where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
-        select: { submitDate: true, returnedDate: true, billTotal: true, noBillTotal: true, noBillItems: true },
+        select: { submitDate: true, returnedDate: true, vehicleClass: true, billTotal: true, noBillTotal: true, noBillItems: true },
       }),
       this.prisma.taxRenewal.findMany({
         where: { cancelledAt: null, OR: spendWindows.map((w) => ({ paymentDate: w })) },
@@ -189,7 +215,7 @@ export class OverviewService {
       this.prisma.invoice.findMany({ where: { status: 'PAID', paidDate: range }, select: { paidDate: true, netTotal: true } }),
       this.prisma.invoice.findMany({
         where: { status: 'ISSUED' },
-        select: { id: true, invoiceNo: true, issueDate: true, customerId: true, netTotal: true, customerSnapshot: true },
+        select: { id: true, invoiceNo: true, issueDate: true, dueDate: true, customerId: true, netTotal: true, customerSnapshot: true },
       }),
       this.prisma.invoice.findMany({
         where: { status: 'PAID', paidDate: { gte: toDate(addDays(today, -180)) } },
@@ -299,7 +325,7 @@ export class OverviewService {
       // --- งานอื่นที่ค้าง ---
       this.prisma.plateSwap.findMany({
         where: { returnedDate: null, cancelledAt: null },
-        select: { id: true, submitDate: true, oldOwnerName: true, oldChassis: true, oldBrand: true, oldPlateCategory: true, oldPlateNumber: true },
+        select: { id: true, vehicleClass: true, submitDate: true, oldOwnerName: true, oldChassis: true, oldBrand: true, oldPlateCategory: true, oldPlateNumber: true },
       }),
       this.prisma.taxRenewal.findMany({
         where: { paymentDate: null, cancelledAt: null },
@@ -315,6 +341,105 @@ export class OverviewService {
         },
       }),
       this.prisma.user.count({ where: { status: 'PENDING' } }),
+      // --- งานอื่นๆ: ยื่น 60 วัน (ค่าใช้จ่าย) + วันที่เลือก (รับใบเสร็จ/รับป้าย/ส่งตรวจ/ผลตรวจที่ทำวันนั้น) - ยกเลิกแล้ว (cancelledAt) ไม่นับ ---
+      this.prisma.vehicleUseCancellation.findMany({
+        where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
+        select: { submitDate: true, returnedDate: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true },
+      }),
+      this.prisma.plateCopy.findMany({
+        where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }, { plateReceivedDate: day }] },
+        select: { submitDate: true, returnedDate: true, plateReceivedDate: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true },
+      }),
+      this.prisma.vehicleMoveOut.findMany({
+        where: { cancelledAt: null, OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }] },
+        select: { submitDate: true, returnedDate: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true },
+      }),
+      this.prisma.vehicleTransfer.findMany({
+        where: {
+          cancelledAt: null,
+          OR: [...spendWindows.map((w) => ({ submitDate: w })), { returnedDate: day }, { inspectionSentDate: day }, { inspectionResultDate: day }],
+        },
+        select: {
+          submitDate: true,
+          returnedDate: true,
+          inspectionSentDate: true,
+          inspectionResult: true,
+          inspectionResultDate: true,
+          vehicleClass: true,
+          billTotal: true,
+          noBillTotal: true,
+          dutyAmount: true,
+        },
+      }),
+      // งานค้าง (ยังไม่รับใบเสร็จกลับ / ยังไม่รับป้าย) + ข้อมูลที่ใช้ขึ้นรายการ "ติดขัด"
+      this.prisma.vehicleUseCancellation.findMany({
+        where: { cancelledAt: null, returnedDate: null },
+        select: { id: true, vehicleClass: true, submitDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
+      }),
+      this.prisma.plateCopy.findMany({
+        where: { cancelledAt: null, OR: [{ returnedDate: null }, { plateReceivedDate: null }] },
+        select: {
+          id: true,
+          vehicleClass: true,
+          submitDate: true,
+          returnedDate: true,
+          plateReceivedDate: true,
+          ownerName: true,
+          chassis: true,
+          brand: true,
+          plateCategory: true,
+          plateNumber: true,
+          customer: { select: { name: true } },
+        },
+      }),
+      this.prisma.vehicleMoveOut.findMany({
+        where: { cancelledAt: null, returnedDate: null },
+        select: { id: true, vehicleClass: true, submitDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
+      }),
+      this.prisma.vehicleTransfer.findMany({
+        where: { cancelledAt: null, returnedDate: null },
+        select: {
+          id: true,
+          vehicleClass: true,
+          transferType: true,
+          submitDate: true,
+          inspectionSentDate: true,
+          inspectionResult: true,
+          inspectionResultDate: true,
+          transfereeName: true,
+          chassis: true,
+          brand: true,
+          plateCategory: true,
+          plateNumber: true,
+          customer: { select: { name: true } },
+        },
+      }),
+      // 50 ทวิที่ลูกค้าหักไว้แต่ยังไม่ส่งหลักฐาน (หน้า /accounting/tax-invoices/wht)
+      this.prisma.taxInvoice.findMany({
+        where: { status: 'ISSUED', whtAmount: { gt: 0 }, whtCertificateId: null },
+        select: { issueDate: true, whtAmount: true },
+      }),
+      // ใบเสนอราคาที่ยังมีเรื่องต้องตาม: ส่งแล้วรอลูกค้าตอบ / อนุมัติแล้วยังไม่ออกบิลหรือตั้งราคา
+      this.prisma.quotation.findMany({
+        where: { status: { in: ['ISSUED', 'APPROVED'] } },
+        select: {
+          status: true,
+          kind: true,
+          validUntil: true,
+          ratesAppliedAt: true,
+          _count: { select: { invoices: { where: NOT_VOID.invoice } } },
+        },
+      }),
+      // --- รายจ่ายบริษัท: เงินเดือนเฉพาะรอบที่บันทึกว่าจ่ายแล้ว (PAID) นับตามวันที่จ่ายจริง ---
+      this.prisma.payrollRun.findMany({
+        where: { status: 'PAID', cancelledAt: null, OR: spendWindows.map((w) => ({ payDate: w })) },
+        select: { payDate: true, items: { select: { salary: true, otherIncome: true, ssoAmount: true } } },
+      }),
+      // ค่าจ้างบุคคลภายนอก (ซับ) = บรรทัดใน 50 ทวิ ที่บริษัทออกให้ผู้รับเงินที่ไม่ใช่พนักงาน (OTHER) - ใบของพนักงานรายปีเป็นยอดรวมของเงินเดือนที่นับข้างบนแล้ว จึงไม่นับซ้ำ
+      this.prisma.issuedWhtItem.findMany({
+        where: { paidDate: { gte: range.gte, lte: toDate(today) }, certificate: { status: 'ISSUED', payeeKind: 'OTHER' } },
+        select: { paidDate: true, amountPaid: true },
+      }),
     ]);
 
     // ---------- การใช้เงิน ----------
@@ -335,9 +460,20 @@ export class OverviewService {
     for (const s of swaps) {
       if (inSpendWindow(s.submitDate)) {
         const duty = dutyOfItems(s.noBillItems);
-        events.push({ date: isoOf(s.submitDate), category: 'plateSwap', kind: 'car', bill: num(s.billTotal), noBill: round2(num(s.noBillTotal) - duty), other: 0, duty });
+        events.push({ date: isoOf(s.submitDate), category: 'plateSwap', kind: classKind(s.vehicleClass), bill: num(s.billTotal), noBill: round2(num(s.noBillTotal) - duty), other: 0, duty });
       }
     }
+    // งานอื่นๆ: noBillTotal ไม่รวมค่าอากรอยู่แล้ว (dutyAmount แยกคอลัมน์) - ต่างจากสลับเลข/ต่อภาษีที่ค่าอากรอยู่ในรายการ No Bill
+    const jobEvents = (category: CategoryKey, rows: Array<{ submitDate: Date; vehicleClass: string; billTotal: unknown; noBillTotal: unknown; dutyAmount: unknown }>) => {
+      for (const j of rows) {
+        if (!inSpendWindow(j.submitDate)) continue; // แถวที่ดึงมาเพราะรับใบเสร็จ/รับป้ายในวันที่เลือก แต่ยื่นนานแล้ว
+        events.push({ date: isoOf(j.submitDate), category, kind: classKind(j.vehicleClass), bill: num(j.billTotal), noBill: num(j.noBillTotal), other: 0, duty: num(j.dutyAmount) });
+      }
+    };
+    jobEvents('vehicleTransfer', vehicleTransfers);
+    jobEvents('useCancel', useCancels);
+    jobEvents('plateCopy', plateCopies);
+    jobEvents('moveOut', moveOuts);
     for (const r of renewals) {
       const duty = dutyOfItems(r.noBillItems);
       events.push({
@@ -367,19 +503,30 @@ export class OverviewService {
       });
     }
 
+    // เงินเดือน = ต้นทุนบริษัท: เงินเดือน + รายได้อื่น + ประกันสังคมส่วนนายจ้าง (เท่ากับส่วนพนักงาน) · ไม่ใช่เงินสุทธิที่โอนให้พนักงาน เพราะภาษี/ประกันสังคมที่หักไว้บริษัทต้องนำส่งต่อ
+    for (const r of payrollRuns) {
+      const cost = r.items.reduce((a, i) => a + num(i.salary) + num(i.otherIncome) + num(i.ssoAmount), 0);
+      if (cost > 0) events.push({ date: isoOf(r.payDate!), category: 'payroll', kind: null, bill: 0, noBill: 0, other: 0, overhead: round2(cost) });
+    }
+    for (const i of subcontractItems) {
+      if (inSpendWindow(i.paidDate)) events.push({ date: isoOf(i.paidDate), category: 'subcontract', kind: null, bill: 0, noBill: 0, other: 0, overhead: num(i.amountPaid) });
+    }
+
     const sumEvents = (from: string, to: string) => {
       let total = 0;
       let bill = 0;
       let noBill = 0;
       let duty = 0;
+      let overhead = 0;
       for (const e of events) {
         if (e.date < from || e.date > to) continue;
         total += eventTotal(e);
+        overhead += e.overhead ?? 0;
         bill += e.bill;
         noBill += e.noBill;
         duty += dutyOf(e);
       }
-      return { total: round2(total), bill: round2(bill), noBill: round2(noBill), other: round2(total - bill - noBill), duty: round2(duty) };
+      return { total: round2(total), bill: round2(bill), noBill: round2(noBill), overhead: round2(overhead), other: round2(total - bill - noBill - overhead), duty: round2(duty) };
     };
     const sumMoney = (rows: Array<{ date: string; amount: number }>, from: string, to: string) =>
       round2(rows.filter((r) => r.date >= from && r.date <= to).reduce((a, r) => a + r.amount, 0));
@@ -410,6 +557,7 @@ export class OverviewService {
         bill: s.bill,
         noBill: s.noBill,
         other: s.other,
+        overhead: s.overhead,
         duty: s.duty,
         billed: sumMoney(billedRows, date, date),
         collected: sumMoney(collectedRows, date, date),
@@ -443,6 +591,7 @@ export class OverviewService {
       customerId: i.customerId,
       customerName: (i.customerSnapshot as { name?: string } | null)?.name ?? '-',
       issueDate: isoOf(i.issueDate),
+      dueDate: i.dueDate ? isoOf(i.dueDate) : null,
       amount: num(i.netTotal),
     }));
     const unbilledItems = unbilledVehicles.map((v) => {
@@ -529,12 +678,13 @@ export class OverviewService {
     }
     for (const s of openSwaps) {
       const since = isoOf(s.submitDate);
-      backlogItems.push({ stage: 'plateSwap', kind: 'car', since });
+      const swapKind = classKind(s.vehicleClass);
+      backlogItems.push({ stage: 'plateSwap', kind: swapKind, since });
       const item = stuckItemFor(
         {
           id: s.id,
           source: 'plateSwap',
-          kind: 'car',
+          kind: swapKind,
           customerName: s.oldOwnerName,
           brandName: s.oldBrand,
           chassis: s.oldChassis,
@@ -563,6 +713,47 @@ export class OverviewService {
         today,
       );
       if (item) stuck.push(item);
+    }
+    // งานอื่นๆ: เข้าคิวค้างเหมือนงานข้างบน หนึ่งงานแสดงแถวเดียวในรายการติดขัด (ขั้นที่หนักที่สุด)
+    // "ไปจัดการ" พาไปหน้ารับใบเสร็จ/รับป้ายของงานนั้นตรงๆ (หน้างานแยกรถยนต์/จักรยานยนต์ตามที่มี)
+    interface OtherJob {
+      id: string;
+      vehicleClass: string;
+      chassis: string;
+      brand: string;
+      plateCategory: string;
+      plateNumber: string;
+      customer: { name: string } | null;
+    }
+    const addJob = (job: OtherJob, name: string, waits: ReturnType<typeof transferWaits>, href: string) => {
+      const kind = classKind(job.vehicleClass);
+      for (const w of waits) backlogItems.push({ stage: w.stage, kind, since: w.since });
+      const item = stuckItemFor(
+        {
+          id: job.id,
+          source: 'otherJob',
+          kind,
+          customerName: job.customer?.name ?? name,
+          brandName: job.brand,
+          chassis: job.chassis,
+          plate: plateText(job.plateCategory, job.plateNumber),
+          href,
+        },
+        waits,
+        today,
+      );
+      if (item) stuck.push(item);
+    };
+    for (const j of openUseCancels) addJob(j, j.ownerName, [receiptWait('useCancel', j.submitDate)], `/registration/other/cancel-use/${classKind(j.vehicleClass)}/return`);
+    for (const j of openMoveOuts) addJob(j, j.ownerName, [receiptWait('moveOut', j.submitDate)], `/registration/other/move-out/${classKind(j.vehicleClass)}/return`);
+    for (const j of openPlateCopies) {
+      const waits = plateCopyWaits(j);
+      addJob(j, j.ownerName, waits, waits.some((w) => w.stage === 'plateCopy') ? '/registration/other/plate-copy/return' : '/registration/other/plate-copy/receive-plate');
+    }
+    for (const t of openTransfers) {
+      const waits = transferWaits({ ...t, returnedDate: null }); // คิวค้างดึงเฉพาะที่ยังไม่รับใบเสร็จกลับ
+      const href = waits[0]?.stage === 'transferJob' ? `/registration/transfer/${t.transferType === 'INSPECTION' ? 'inspection' : 'owner'}/return` : '/registration/transfer/inspection/inspect';
+      addJob(t, t.transfereeName, waits, href);
     }
     const backlog = summarizeBacklog(backlogItems, today);
     const sortedStuck = sortStuck(stuck);
@@ -595,6 +786,29 @@ export class OverviewService {
       };
     };
 
+    // งานอื่นๆ: แถวสรุปของงานที่ยื่นในวันที่เลือก (done = ยื่นกี่งาน, spend/duty = ค่าใช้จ่ายของงานที่ยื่นวันนั้น, pending = ค้างตามขั้น stage)
+    // carOnly = งานนี้มีแต่รถยนต์ (คัดป้าย) ช่องจักรยานยนต์เป็น null เหมือนสลับเลขตอนก่อนมีรถจักรยานยนต์
+    const returnedNote = (rows: Array<{ returnedDate: Date | null }>) => {
+      const n = rows.filter((r) => on(r.returnedDate)).length;
+      return n ? `รับใบเสร็จกลับ ${n}` : null;
+    };
+    const jobRow = (
+      category: CategoryKey,
+      stage: StageKey,
+      label: string,
+      rows: Array<{ submitDate: Date; vehicleClass: string }>,
+      note: string | null,
+      carOnly = false,
+    ): ProcessRow => {
+      const row = stageRow(stage, 'other', tally(rows.filter((r) => isoOf(r.submitDate) === asOf), (r) => classKind(r.vehicleClass)), daySpend(category), note, dayDuty(category));
+      return carOnly ? { ...row, label, done: { ...row.done, moto: null }, spend: row.spend && { ...row.spend, moto: null }, duty: row.duty && { ...row.duty, moto: null }, pending: { car: backlog[stage].pending.car, moto: null } } : { ...row, label };
+    };
+    // ส่งตรวจ / ผลตรวจของงานโอนตรวจรถ - ไม่มีค่าใช้จ่ายของตัวเอง (ค่าใช้จ่ายรวมอยู่ที่แถว "งานโอน (ยื่น)")
+    const transferStageRow = (stage: StageKey, label: string, rows: Array<{ vehicleClass: string }>, note: string | null): ProcessRow => ({
+      ...stageRow(stage, 'other', tally(rows, (r) => classKind(r.vehicleClass)), null, note),
+      label,
+    });
+
     const process: ProcessRow[] = [
       {
         key: 'entry',
@@ -621,18 +835,17 @@ export class OverviewService {
       // ส่งป้ายตามหลัง = ส่งป้ายในวันที่เลือก ของรถที่ส่งงาน (ใบเสร็จ + เล่ม) ไปก่อนหน้านั้นแล้ว
       stageRow('plateDelivery', 'new', doneOf((v) => on(v.plateDeliveredDate) && !on(v.deliveredDate)), null),
       stageRow('billing', 'new', tally(dayBilledLines, vKind), null),
-      // สลับเลขตอนนี้มีแต่รถยนต์ (ผู้ใช้ 2026-09-22) - ช่องจักรยานยนต์เป็น null
+      // สลับเลขมีทั้งรถยนต์และจักรยานยนต์ (vehicleClass) - แยกตามประเภทของแต่ละงาน
       {
         ...stageRow(
           'plateSwap',
           'other',
-          { car: swaps.filter((s) => isoOf(s.submitDate) === asOf).length, moto: null },
-          { car: daySpend('plateSwap').car, moto: null },
+          tally(swaps.filter((s) => isoOf(s.submitDate) === asOf), (s) => classKind(s.vehicleClass)),
+          daySpend('plateSwap'),
           swapsReturned ? `รับเอกสารกลับ ${swapsReturned}` : null,
-          dayDuty('plateSwap') && { car: dayDuty('plateSwap')!.car, moto: null },
+          dayDuty('plateSwap'),
         ),
         label: 'สลับเลข (ยื่น)',
-        pending: { car: backlog.plateSwap.pending.car, moto: null },
       },
       { ...stageRow('taxRenewal', 'other', tally(renewals.filter((r) => isoOf(r.paymentDate!) === asOf), (r) => renewalKind(r.vehicleType)), daySpend('taxRenewal'), null, dayDuty('taxRenewal')), label: 'ต่อภาษี' },
       {
@@ -649,10 +862,39 @@ export class OverviewService {
         lateCount: 0,
         sla: null,
       },
+      // ---- งานอื่นๆ ที่เพิ่มภายหลัง: ยื่นวันนี้กี่งาน / ค่าใช้จ่าย / ค้างรับใบเสร็จ (งานโอนตรวจรถมีขั้นส่งตรวจ-ผลตรวจเพิ่ม, คัดป้ายมีขั้นรับป้าย) ----
+      jobRow('vehicleTransfer', 'transferJob', 'งานโอน (ยื่น)', vehicleTransfers, returnedNote(vehicleTransfers)),
+      transferStageRow('transferInspectSend', 'งานโอนตรวจรถ (ส่งตรวจ)', vehicleTransfers.filter((t) => on(t.inspectionSentDate)), null),
+      transferStageRow(
+        'transferInspectResult',
+        'งานโอนตรวจรถ (ผลตรวจ)',
+        vehicleTransfers.filter((t) => on(t.inspectionResultDate)),
+        (() => {
+          const ok = vehicleTransfers.filter((t) => on(t.inspectionResultDate) && t.inspectionResult === 'PASS').length;
+          const bad = vehicleTransfers.filter((t) => on(t.inspectionResultDate) && t.inspectionResult === 'FAIL').length;
+          return ok || bad ? `ผ่าน ${ok} · ไม่ผ่าน ${bad}` : null;
+        })(),
+      ),
+      jobRow('useCancel', 'useCancel', 'ยกเลิกการใช้รถ (ยื่น)', useCancels, returnedNote(useCancels)),
+      jobRow('plateCopy', 'plateCopy', 'คัดแผ่นป้ายทะเบียน (ยื่น)', plateCopies, returnedNote(plateCopies), true),
+      {
+        ...stageRow('plateCopyPlate', 'other', { car: plateCopies.filter((j) => on(j.plateReceivedDate)).length, moto: null }, null),
+        label: 'คัดแผ่นป้ายทะเบียน (รับป้าย)',
+        pending: { car: backlog.plateCopyPlate.pending.car, moto: null },
+      },
+      jobRow('moveOut', 'moveOut', 'ย้ายออก (ยื่น)', moveOuts, returnedNote(moveOuts)),
     ];
 
     // ---------- สิ่งที่ควรจัดการ (เรียงตามความเร่งด่วน) ----------
     const overdueAr = receivableItems.filter((r) => daysBetween(r.issueDate, today) > 60);
+    // เลยกำหนดเครดิตของลูกค้า (Invoice.dueDate = วันที่ออกบิล + เครดิตวัน ณ วันออกบิล) แต่ยังไม่ถึง 60 วัน - 60 วันขึ้นไปอยู่ในการเตือนข้างบนแล้ว
+    const pastDue = receivableItems.filter((r) => r.dueDate !== null && r.dueDate < today && daysBetween(r.issueDate, today) <= 60);
+    const dueSoon = receivableItems.filter((r) => r.dueDate !== null && r.dueDate >= today && daysBetween(today, r.dueDate) <= 7);
+    const whtOverdue = whtPendingRows.filter((r) => daysBetween(isoOf(r.issueDate), today) > WHT_OVERDUE_DAYS);
+    // ใบเสนอราคา: รอลูกค้าตอบ (หมดอายุแล้วนับแยก) · อนุมัติแล้วแต่ยังไม่ได้ออกบิล/ตั้งเป็นราคาลูกค้า (stageOf ใน quotation-calc.ts)
+    const quoteWaiting = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) >= today).length;
+    const quoteExpired = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) < today).length;
+    const quoteApprovedOpen = quotations.filter((q) => q.status === 'APPROVED' && (q.kind === 'RATE' ? !q.ratesAppliedAt : q._count.invoices === 0)).length;
     const variance = receiptRows
       .map((r) => num(r.receiptAmount) - (num(r.billFeeTotal) + num(r.taxAmount)))
       .filter((d) => Math.abs(d) >= 1);
@@ -673,6 +915,48 @@ export class OverviewService {
         severity: 'high',
         title: 'บิลค้างชำระเกิน 60 วัน',
         detail: `${overdueAr.length} ใบ รวม ${fmt(overdueAr.reduce((a, r) => a + r.amount, 0))} บาท - ควรติดตามทวงถาม`,
+        href: '/accounting/billing',
+      },
+      pastDue.length && {
+        key: 'ar-past-due',
+        severity: 'medium',
+        title: 'บิลเลยกำหนดชำระตามเครดิตลูกค้า',
+        detail: `${pastDue.length} ใบ รวม ${fmt(pastDue.reduce((a, r) => a + r.amount, 0))} บาท`,
+        href: '/accounting/billing',
+      },
+      whtOverdue.length && {
+        key: 'wht-overdue',
+        severity: 'medium',
+        title: `ลูกค้าหัก ณ ที่จ่ายแล้วยังไม่ส่ง 50 ทวิ เกิน ${WHT_OVERDUE_DAYS} วัน`,
+        detail: `${whtOverdue.length} ใบกำกับ ภาษีที่หักไว้ ${fmt(whtOverdue.reduce((a, r) => a + num(r.whtAmount), 0))} บาท - ควรทวงหลักฐาน`,
+        href: '/accounting/tax-invoices/wht',
+      },
+      quoteApprovedOpen && {
+        key: 'quotation-approved-open',
+        severity: 'medium',
+        title: 'ใบเสนอราคาอนุมัติแล้ว ยังไม่ได้ออกบิล / ตั้งราคา',
+        detail: `${quoteApprovedOpen} ใบ - ลูกค้าตอบรับแล้ว รอดำเนินการต่อ`,
+        href: '/accounting/quotations',
+      },
+      quoteExpired && {
+        key: 'quotation-expired',
+        severity: 'info',
+        title: 'ใบเสนอราคาหมดอายุโดยลูกค้ายังไม่ตอบ',
+        detail: `${quoteExpired} ใบ${quoteWaiting ? ` (ยังรอตอบอยู่อีก ${quoteWaiting} ใบ)` : ''} - ติดตามลูกค้าหรือยกเลิก`,
+        href: '/accounting/quotations',
+      },
+      !quoteExpired && quoteWaiting && {
+        key: 'quotation-waiting',
+        severity: 'info',
+        title: 'ใบเสนอราคารอลูกค้าตอบ',
+        detail: `${quoteWaiting} ใบ`,
+        href: '/accounting/quotations',
+      },
+      dueSoon.length && {
+        key: 'ar-due-soon',
+        severity: 'info',
+        title: 'บิลที่จะครบกำหนดชำระภายใน 7 วัน',
+        detail: `${dueSoon.length} ใบ รวม ${fmt(dueSoon.reduce((a, r) => a + r.amount, 0))} บาท`,
         href: '/accounting/billing',
       },
       flags('INSPECTION_EXPIRING') && {
@@ -746,6 +1030,8 @@ export class OverviewService {
         href: '/admin/users',
       },
     ].filter(Boolean) as Array<{ key: string; severity: 'high' | 'medium' | 'info'; title: string; detail: string; href: string }>;
+    const severityRank = { high: 0, medium: 1, info: 2 } as const;
+    alerts.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]); // เรียงตามความเร่งด่วน (sort เสถียร คงลำดับเดิมในระดับเดียวกัน)
 
     return {
       asOf,

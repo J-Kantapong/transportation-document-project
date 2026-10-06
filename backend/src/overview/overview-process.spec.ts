@@ -3,7 +3,9 @@ import {
   sortStuck,
   STAGES,
   stuckItemFor,
+  plateCopyWaits,
   summarizeBacklog,
+  transferWaits,
   waitsFor,
   type OpenVehicle,
   type StuckItem,
@@ -203,5 +205,50 @@ describe('limitStuckPerKind (พบ 2026-09-27)', () => {
     expect(limited.map((i) => i.id)).toEqual(['c1', 'c2', 'm1', 'm2']);
     // แถวแรกๆ ยังเป็นคันที่ด่วนที่สุดของทั้งหมดตามลำดับเดิม
     expect(limited.slice(0, 2).map((i) => i.id)).toEqual(sorted.slice(0, 2).map((i) => i.id));
+  });
+});
+
+// งานอื่นๆ (ผู้ใช้ 2026-10-02 / 2026-10-06): คิวค้างของงานโอน คัดป้าย
+describe('transferWaits', () => {
+  const base = { transferType: 'INSPECTION', submitDate: d('2026-09-20'), returnedDate: null, inspectionSentDate: null, inspectionResult: null, inspectionResultDate: null };
+
+  it('โอนตามผู้ถือกรรมสิทธิ์ไม่มีตรวจรถ: รอรับใบเสร็จตั้งแต่วันยื่น', () => {
+    expect(transferWaits({ ...base, transferType: 'OWNER' })).toEqual([{ stage: 'transferJob', since: '2026-09-20', flags: [], reason: null }]);
+  });
+
+  it('รับใบเสร็จกลับแล้ว = ไม่ค้าง', () => {
+    expect(transferWaits({ ...base, returnedDate: d('2026-09-22') })).toEqual([]);
+  });
+
+  it('โอนตรวจรถ: ยื่น -> ส่งตรวจ -> ผลตรวจ -> รับใบเสร็จ', () => {
+    expect(transferWaits(base)[0]).toMatchObject({ stage: 'transferInspectSend', since: '2026-09-20' });
+    expect(transferWaits({ ...base, inspectionSentDate: d('2026-09-21') })[0]).toMatchObject({ stage: 'transferInspectResult', since: '2026-09-21' });
+    expect(transferWaits({ ...base, inspectionSentDate: d('2026-09-21'), inspectionResult: 'PASS', inspectionResultDate: d('2026-09-23') })[0]).toMatchObject({
+      stage: 'transferJob',
+      since: '2026-09-23',
+    });
+  });
+
+  it('ตรวจไม่ผ่าน: กลับไปรอส่งตรวจใหม่ และติดธงด่วน', () => {
+    const [w] = transferWaits({ ...base, inspectionSentDate: d('2026-09-21'), inspectionResult: 'FAIL', inspectionResultDate: d('2026-09-23') });
+    expect(w).toMatchObject({ stage: 'transferInspectSend', since: '2026-09-23', flags: ['INSPECTION_FAILED'] });
+    const item = stuckItemFor({ id: 't', source: 'otherJob', kind: 'car', customerName: 'x', brandName: null, chassis: 'C', plate: null, href: '/x' }, [w], TODAY);
+    expect(item).toMatchObject({ severity: 'high', href: '/x' });
+  });
+});
+
+describe('plateCopyWaits', () => {
+  it('รับใบเสร็จกับรับป้ายเป็นสองขั้นแยกกัน', () => {
+    const j = { submitDate: d('2026-09-01'), returnedDate: null, plateReceivedDate: null };
+    expect(plateCopyWaits(j).map((w) => w.stage)).toEqual(['plateCopy', 'plateCopyPlate']);
+    expect(plateCopyWaits({ ...j, returnedDate: d('2026-09-05') }).map((w) => w.stage)).toEqual(['plateCopyPlate']);
+    expect(plateCopyWaits({ ...j, returnedDate: d('2026-09-05'), plateReceivedDate: d('2026-09-10') })).toEqual([]);
+  });
+
+  it('รอรับป้ายเกิน 15 วันถึงนับว่าติดขัด', () => {
+    const waits = plateCopyWaits({ submitDate: d('2026-09-10'), returnedDate: d('2026-09-11'), plateReceivedDate: null });
+    const subject = { id: 'p', source: 'otherJob' as const, kind: 'car' as const, customerName: 'x', brandName: null, chassis: 'C', plate: null };
+    expect(stuckItemFor(subject, waits, '2026-09-24')).toBeNull(); // 14 วัน
+    expect(stuckItemFor(subject, waits, '2026-09-26')).toMatchObject({ stage: 'plateCopyPlate', overdueDays: 1 }); // 16 วัน
   });
 });

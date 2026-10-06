@@ -1,6 +1,7 @@
 import type { PayslipSignature, WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
 import { bahtText, formatMoney } from "@/lib/invoice";
 import { escapeHtml, printHtmlDocument, safeFileName } from "@/lib/print-html";
+import { canUseOfficialForm, OFFICIAL_FORM_STYLE, officialFormPageHtml } from "@/lib/wht-form-layout";
 
 // หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่บริษัทออก (ผู้ใช้ 2026-10-06) - จัดหน้าตามใบตัวอย่างของบริษัท (ฟอร์มทางการของกรมสรรพากรเต็มรูปแบบ), A4
 // วันที่ทุกช่องเป็นปี ค.ศ. (24/1/2026) ตามใบที่บริษัทใช้อยู่ - ไม่ใช่ พ.ศ.
@@ -73,6 +74,7 @@ function rowsHtml(items: WhtItem[]): string {
 
 export interface WhtPrintOptions {
   signature?: PayslipSignature | null;
+  assetBase?: string; // ที่อยู่ที่เปิดภาพฟอร์มเปล่าได้ (ค่าเริ่มต้นตอนพิมพ์จากหน้าเว็บ = origin ของหน้านั้น)
 }
 
 function pageHtml(c: WhtCertificate, options: WhtPrintOptions): string {
@@ -219,7 +221,14 @@ tr.sum td{padding:.8mm 1.5mm;font-size:9pt}
 .notes{margin-top:1mm;font-size:7pt;line-height:1.2}
 `;
 
+// หน้าตาเหมือนใบ PDF ที่บริษัทใช้อยู่ (ผู้ใช้ 2026-10-06): ฟอร์มเปล่าของสรรพากรเป็นพื้น + ข้อมูลวางทับตามช่องกรอกเดิม (lib/wht-form-layout.ts)
+// ใบที่มีรายการเกินช่องของแบบ (เช่น ข้อ 5 เกิน 4 รายการ) ใช้หน้าแบบเดิมด้านล่างแทน เพื่อไม่ให้ข้อมูลหายไป
 export function whtDocumentHtml(certs: WhtCertificate[], options: WhtPrintOptions = {}): string {
+  if (certs.every(canUseOfficialForm)) {
+    const body = certs.flatMap((c) => [officialFormPageHtml(c, options), officialFormPageHtml(c, options)]).join("\n");
+    const title = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo}` : `50 ทวิ ${certs.length} ใบ`;
+    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${OFFICIAL_FORM_STYLE}</style></head><body>${body}</body></html>`;
+  }
   // 1 ใบ = 2 หน้าเหมือนกัน (ฉบับที่ 1 + ฉบับที่ 2) เพื่อไม่ต้องถ่ายเอกสารเพิ่ม
   const body = certs.flatMap((c) => [pageHtml(c, options), pageHtml(c, options)]).join("\n");
   const title = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo}` : `50 ทวิ ${certs.length} ใบ`;
@@ -229,5 +238,7 @@ export function whtDocumentHtml(certs: WhtCertificate[], options: WhtPrintOption
 export function printWhtCertificates(certs: WhtCertificate[], options: WhtPrintOptions = {}): void {
   if (!certs.length) return;
   const name = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo} ${certs[0].payeeName}` : `50 ทวิ ${certs.length} ใบ ปี ${certs[0].taxYear}`;
-  printHtmlDocument(whtDocumentHtml(certs, options), safeFileName(name));
+  // ภาพฟอร์มเปล่าอยู่ที่ /forms/... ของเว็บเดียวกัน - iframe srcdoc ไม่มี base URL จึงต้องใส่ origin เต็ม
+  const assetBase = options.assetBase ?? (typeof window === "undefined" ? "" : window.location.origin);
+  printHtmlDocument(whtDocumentHtml(certs, { ...options, assetBase }), safeFileName(name));
 }
