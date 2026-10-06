@@ -32,20 +32,10 @@ function Group({ title, count, children }: { title: string; count: number; child
   );
 }
 
-function VehicleCard({ v }: { v: VehiclePhotos }) {
-  const plate = [v.plateCategory, v.plateNumber].filter(Boolean).join(" ");
+// รูปใบเสร็จ / ป้าย / เล่มของรถคันหนึ่ง - ใช้ทั้งหน้าค้นหารูปและกล่องรูปในหน้าค้นหารถ
+export function VehiclePhotoGallery({ v }: { v: VehiclePhotos }) {
   return (
-    <section className="panel" style={{ marginBottom: 16 }}>
-      <div className="panel-head">
-        <div>
-          <strong style={{ fontSize: 16 }}>{v.chassis}</strong>
-          <div className="muted" style={{ marginTop: 2 }}>
-            {v.brandName} · {v.customerName} · {v.body ?? "ไม่ระบุประเภทรถ"}
-            {plate ? ` · ทะเบียน ${plate}` : ""} · บันทึก {isoToDisplayDate(v.date)}
-          </div>
-        </div>
-      </div>
-      <div style={{ padding: "0 18px 18px" }}>
+    <>
         <Group title="ใบเสร็จ" count={v.receipts.length}>
           {v.receipts.map((r, i) => (
             <div key={r.id} style={{ width: 96 }}>
@@ -78,6 +68,25 @@ function VehicleCard({ v }: { v: VehiclePhotos }) {
             </div>
           )}
         </Group>
+    </>
+  );
+}
+
+function VehicleCard({ v }: { v: VehiclePhotos }) {
+  const plate = [v.plateCategory, v.plateNumber].filter(Boolean).join(" ");
+  return (
+    <section className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-head">
+        <div>
+          <strong style={{ fontSize: 16 }}>{v.chassis}</strong>
+          <div className="muted" style={{ marginTop: 2 }}>
+            {v.brandName} · {v.customerName} · {v.body ?? "ไม่ระบุประเภทรถ"}
+            {plate ? ` · ทะเบียน ${plate}` : ""} · บันทึก {isoToDisplayDate(v.date)}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "0 18px 18px" }}>
+        <VehiclePhotoGallery v={v} />
       </div>
     </section>
   );

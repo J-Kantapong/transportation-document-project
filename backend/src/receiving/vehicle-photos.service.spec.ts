@@ -69,3 +69,25 @@ describe('VehiclePhotosService.searchByChassis', () => {
     ]);
   });
 });
+
+describe('VehiclePhotosService.findByVehicleId', () => {
+  it('returns the photos of that one vehicle, filtered by id and not deleted', async () => {
+    const { svc, findMany } = service([row]);
+    const v = await svc.findByVehicleId(' v1 ');
+    expect(v.id).toBe('v1');
+    expect(v.receipts.map((r) => r.id)).toEqual(['r2']);
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ deletedAt: null, id: 'v1' });
+    expect(findMany.mock.calls[0][0].take).toBe(1);
+  });
+
+  it('answers 404 when the vehicle is missing or outside the user scope', async () => {
+    const { svc } = service([]);
+    await expect(svc.findByVehicleId('nope')).rejects.toMatchObject({ response: { error: 'ไม่พบรถคันนี้' } });
+  });
+
+  it('rejects a blank id', async () => {
+    const { svc, findMany } = service([]);
+    await expect(svc.findByVehicleId('  ')).rejects.toMatchObject({ response: { error: 'กรุณาระบุรถ' } });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});

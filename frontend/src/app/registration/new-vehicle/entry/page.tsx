@@ -871,7 +871,7 @@ export default function VehicleEntryPage() {
       );
       setEditWarning(null);
       setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
-      // มาจากปุ่ม "แก้ข้อมูลรถ" ในหน้าวางบิล (ผู้ใช้ 2026-09-28): บันทึกเสร็จกลับไปหน้าวางบิลทันที ราคาคิดใหม่จากข้อมูลที่แก้
+      // มาจากปุ่ม "แก้ข้อมูลรถ" ในหน้าวางบิล (ผู้ใช้ 2026-09-28) หรือปุ่ม "แก้ไข" ในหน้าค้นหารถ (2026-10-05): บันทึกเสร็จกลับไปหน้านั้นทันที
       const back = returnToAfterEdit();
       if (back) {
         router.push(back);
@@ -1474,9 +1474,11 @@ export default function VehicleEntryPage() {
   );
 }
 
-// ?returnTo= จากหน้าวางบิล - รับเฉพาะหน้าวางบิลในเว็บนี้ (กันลิงก์พาไปที่อื่นหลังบันทึก) ไม่มี/ไม่ผ่าน = อยู่หน้านี้ตามเดิม
+// ?returnTo= จากหน้าวางบิล / หน้าค้นหารถ (ผู้ใช้ 2026-10-05) - รับเฉพาะสองหน้านี้ในเว็บนี้ (กันลิงก์พาไปที่อื่นหลังบันทึก)
+// ไม่มี/ไม่ผ่าน = อยู่หน้านี้ตามเดิม
+const RETURN_PAGES = ["/accounting/billing", "/vehicles"];
 function returnToAfterEdit(): string | null {
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("returnTo") ?? "";
-  return raw === "/accounting/billing" || raw.startsWith("/accounting/billing?") ? raw : null;
+  return RETURN_PAGES.some((page) => raw === page || raw.startsWith(`${page}?`)) ? raw : null;
 }

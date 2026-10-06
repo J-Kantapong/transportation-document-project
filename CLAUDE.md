@@ -154,6 +154,11 @@ This private repository is the shared development surface for the user, Claude C
   Pages that hide rows reveal it themselves: inspection jumps to the right page of 10, the step-4 queue prefills its
   chassis box, the receipt / plate / book links go to that vehicle's `/car` or `/moto` page (the receipt page opens the vehicle's sheet), and
   Delivery/billing select the vehicle's customer.
+  Row actions (user 2026-10-05): "🖼 รูป" opens a dialog with that vehicle's receipt / plate / book photos
+  (`GET /api/vehicles/receiving/photos?vehicleId=`, same access as the receipt page: ADMIN / STAFF_CAR / STAFF_MOTO /
+  ACCOUNTANT, so STAFF_ENTRY does not see the button) and "✎ แก้ไข" (ADMIN / STAFF_ENTRY) opens the entry page's edit form
+  with `?focus=<chassis>&edit=1&returnTo=/vehicles?<current filters>`; saving returns to the search with the same filters
+  (`returnToAfterEdit` accepts only `/vehicles` and `/accounting/billing`).
 - Date inputs (user's choice 2026-09-25): every วว/ดด/ปปปป box is `components/DateInput.tsx`, which keeps typing
   (each caller still formats / converts a Buddhist year as before) and adds a calendar button that opens a hidden
   native `<input type="date">` via `showPicker()` and hands back "วว/ดด/ปปปป". Use it for any new date field.

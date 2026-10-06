@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   api,
   ApiError,
@@ -13,13 +13,17 @@ import {
   type VehicleSearchStatus,
   type VehicleStageStatus,
 } from "@/lib/api";
-import { canAccessPage, getCachedUser, type UserRole } from "@/lib/auth";
+import { canAccessPage, canEditEntrySteps, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { VehiclePhotoGallery } from "@/components/VehiclePhotosPage";
+import { type VehiclePhotos, vehiclePhotosApi } from "@/lib/vehicle-photos-api";
 
 // หน้าค้นหารถ (ผู้ใช้ 2026-09-25): ค้นรถจดใหม่ทั้งฐานข้อมูล + ดูว่าตอนนี้ค้างขั้นไหน ค้างกี่วัน มีปัญหาอะไร
-// เงื่อนไขค้นหาเก็บใน URL (?q=&from=&to=&status=&kind=) ให้รีเฟรช/กดย้อนกลับ/ส่งลิงก์ต่อได้ - อ่านอย่างเดียว
+// เงื่อนไขค้นหาเก็บใน URL (?q=&from=&to=&status=&kind=) ให้รีเฟรช/กดย้อนกลับ/ส่งลิงก์ต่อได้
+// ปุ่มท้ายแถว (ผู้ใช้ 2026-10-05): "รูป" = ใบเสร็จ/ป้าย/เล่มของคันนั้น (บทบาทที่เปิดหน้ารับใบเสร็จได้ ซึ่งอ่านรูปได้),
+// "แก้ไข" = ไปฟอร์มแก้ไขข้อมูลรถในหน้าเพิ่มข้อมูลรถ (ADMIN / STAFF_ENTRY) บันทึกเสร็จกลับมาหน้านี้ตามเงื่อนไขเดิม
 // กรองทันทีระหว่างพิมพ์ ไม่ต้องกดปุ่มค้นหา (ผู้ใช้ 2026-09-25)
 
 const STAGE_LABEL = new Map<string, string>(VEHICLE_SEARCH_STAGES);
@@ -102,6 +106,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [roles, setRoles] = useState<UserRole[]>([]);
+  const [photoRow, setPhotoRow] = useState<VehicleSearchRow | null>(null);
 
   const appliedKey = queryString(applied);
   const filtered = Boolean(applied.q || applied.from || applied.to || applied.kind);
@@ -196,6 +201,8 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
   }
 
   const incompleteDate = fromIso === null || toIso === null;
+  const canSeePhotos = canAccessPage("/registration/new-vehicle/receive-receipt", roles);
+  const canEdit = canEditEntrySteps(roles);
 
   return (
     <div className="content">
@@ -301,10 +308,12 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                 <tr>
                   <th>วันที่</th>
                   <th>ชื่อลูกค้า</th>
+                  <th>ชื่อเจ้าของ</th>
                   <th>เลขตัวถัง / เลขเครื่อง</th>
                   <th>ทะเบียน</th>
                   <th>ยี่ห้อ</th>
                   <th>สถานะ</th>
+                  {(canSeePhotos || canEdit) && <th>จัดการ</th>}
                 </tr>
               </thead>
               <tbody>
@@ -314,6 +323,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                     <td>
                       <Highlight text={v.customerName} query={applied.q} />
                     </td>
+                    <td>{v.ownerName ? <Highlight text={v.ownerName} query={applied.q} /> : "—"}</td>
                     <td>
                       <Highlight text={v.chassis} query={applied.q} />
                       {v.engine && (
@@ -330,6 +340,28 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                     <td>
                       <VehicleStatusCell row={v} roles={roles} />
                     </td>
+                    {(canSeePhotos || canEdit) && (
+                      <td>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {canSeePhotos && (
+                            <button className="text-button" type="button" onClick={() => setPhotoRow(v)}>
+                              🖼 รูป
+                            </button>
+                          )}
+                          {canEdit && (
+                            <Link
+                              className="text-button"
+                              href={focusHref("/registration/new-vehicle/entry", v.chassis, {
+                                edit: "1",
+                                returnTo: `/vehicles${appliedKey}`,
+                              })}
+                            >
+                              ✎ แก้ไข
+                            </Link>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -351,7 +383,68 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
           </div>
         )}
       </section>
+      <PhotoDialog row={photoRow} onClose={() => setPhotoRow(null)} />
     </div>
+  );
+}
+
+// กล่องรูปของรถคันที่เลือก - โหลดตอนเปิด (ไม่ดึงรูปมากับผลค้นหาทุกแถว) ใบเสร็จมีค่าใช้จ่าย จึงจำกัดเท่ากับหน้ารับใบเสร็จ
+function PhotoDialog({ row, onClose }: { row: VehicleSearchRow | null; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [photos, setPhotos] = useState<VehiclePhotos | null>(null);
+  const [error, setError] = useState("");
+  const rowId = row?.id ?? null;
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (!rowId) {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- เปลี่ยนคันต้องล้างรูป/ข้อความเก่าก่อนโหลดของคันใหม่
+    setPhotos(null);
+    setError("");
+    if (!dialog.open) dialog.showModal();
+    vehiclePhotosApi
+      .forVehicle(rowId)
+      .then((data) => !cancelled && setPhotos(data))
+      .catch((err) => !cancelled && setError(err instanceof ApiError ? err.message : "โหลดรูปไม่สำเร็จ"));
+    return () => {
+      cancelled = true;
+    };
+  }, [rowId]);
+
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) ref.current?.close();
+      }}
+      style={{ width: "min(760px, 92vw)" }}
+    >
+      <button className="close" aria-label="ปิด" onClick={() => ref.current?.close()}>
+        ×
+      </button>
+      <h2>รูปของรถ</h2>
+      {row && (
+        <p className="muted" style={{ marginTop: -6 }}>
+          {row.chassis}
+          {row.plate ? ` · ทะเบียน ${row.plate}` : ""} · {row.customerName}
+        </p>
+      )}
+      {error ? (
+        <p className="customer-message error" role="alert">
+          {error}
+        </p>
+      ) : !photos ? (
+        <p className="muted">กำลังโหลดรูป…</p>
+      ) : (
+        <VehiclePhotoGallery v={photos} />
+      )}
+    </dialog>
   );
 }
 
