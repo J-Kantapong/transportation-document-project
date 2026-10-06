@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { getCachedUser } from "@/lib/auth";
-import { billingApi, WHT_METHOD_LABEL, type TaxInvoice, type TaxInvoiceSeries } from "@/lib/billing-api";
+import { billingApi, WHT_METHOD_LABEL, type Invoice, type TaxInvoice, type TaxInvoiceSeries } from "@/lib/billing-api";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { canPrintOriginal, printTaxInvoice } from "@/lib/tax-invoice-print";
-import { TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
+import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
 
 // หน้า "ใบกำกับภาษี" (ผู้ใช้ 2026-09-28): รายการใบกำกับรายเดือน (รวมใบที่ยกเลิก) + Excel รายงานภาษีขาย + พิมพ์/ใบแทน/ยกเลิก
@@ -23,17 +23,36 @@ export function TaxInvoicesPage() {
   const [notice, setNotice] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [remark, setRemark] = useState<{ kind: "cancel" | "replacement"; tv: TaxInvoice } | null>(null);
+  // บิลรอรับเงินที่ออกใบกำกับได้ (บัญชีบริษัท + มี VAT) - เลือกจากรายการแล้วออกใบกำกับจากบิลนั้นตรง ๆ (ผู้ใช้ 2026-10-06)
+  const [waiting, setWaiting] = useState<Invoice[] | null>(null);
+  const [issuing, setIssuing] = useState<Invoice | null>(null);
 
   async function reload(m = month) {
     try {
-      const [list, s] = await Promise.all([billingApi.taxInvoices(m), billingApi.taxInvoiceSeries()]);
+      const [list, s, bills] = await Promise.all([billingApi.taxInvoices(m), billingApi.taxInvoiceSeries(), billingApi.listInvoices({ limit: 1 })]);
       setRows(list.taxInvoices);
       setSeries(s);
+      setWaiting(bills.invoices.filter((i) => i.status === "ISSUED" && i.account !== "PERSONAL" && i.vatRate > 0));
       setError("");
     } catch (err) {
       setError(errorText(err, "โหลดใบกำกับไม่สำเร็จ"));
     }
   }
+
+  // ?issue=<id> = มาจากหน้าออกใบกำกับกำหนดเอง - เปิดหน้าต่างรับเงิน + ออกใบกำกับของบิลนั้นให้ทันทีที่โหลดรายการเสร็จ
+  const [wantedBill, setWantedBill] = useState<string | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน URL หลัง mount (ไม่ใช้ useSearchParams จะได้ไม่ต้องมี Suspense)
+    setWantedBill(new URLSearchParams(window.location.search).get("issue"));
+  }, []);
+  useEffect(() => {
+    if (!wantedBill || !waiting) return;
+    const bill = waiting.find((b) => b.id === wantedBill);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (bill) setIssuing(bill);
+    else setError("ไม่พบบิลรอรับเงินที่เลือก (อาจออกใบกำกับหรือยกเลิกไปแล้ว)");
+    setWantedBill(null);
+  }, [wantedBill, waiting]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
@@ -96,6 +115,32 @@ export function TaxInvoicesPage() {
         <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
           {error}
         </div>
+      )}
+
+      {series?.enabled && waiting && waiting.length > 0 && (
+        <section className="panel" style={{ marginTop: 12 }}>
+          <div className="panel-head">
+            <h2>บิลรอรับเงิน - ออกใบกำกับได้</h2>
+            <span className="muted">
+              {waiting.length} ใบ · {formatMoney(round2(waiting.reduce((s, i) => s + i.netTotal, 0)))} บาท
+            </span>
+          </div>
+          <div style={{ display: "grid" }}>
+            {waiting.map((i) => (
+              <div key={i.id} style={{ padding: "10px 23px", borderTop: "1px solid #f0f2f6", display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span>
+                  <b>{i.invoiceNo}</b> · {isoToDisplayDate(i.issueDate)} · {i.customer.name}
+                  <span className="muted" style={{ display: "block", fontSize: 13 }}>
+                    {i.lines.length ? `${i.lines.length} คัน` : "บิลกำหนดเอง"} · ยอดสุทธิ {formatMoney(i.netTotal)} บาท{i.dueDate ? ` · ครบกำหนด ${isoToDisplayDate(i.dueDate)}` : ""}
+                  </span>
+                </span>
+                <button type="button" className="primary" onClick={() => { setNotice(""); setIssuing(i); }}>
+                  รับเงิน + ออกใบกำกับ
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="panel" style={{ marginTop: 12 }}>
@@ -176,6 +221,18 @@ export function TaxInvoicesPage() {
       </section>
 
       {isAdmin && series && <SeriesPanel series={series} onSaved={(s) => setSeries(s)} />}
+
+      {issuing && (
+        <TaxInvoiceIssueDialog
+          invoice={issuing}
+          onClose={() => setIssuing(null)}
+          onIssued={(_tv, text) => {
+            setNotice(text);
+            reload();
+          }}
+          onRefused={() => reload()}
+        />
+      )}
 
       {remark && (
         <TaxInvoiceRemarkDialog

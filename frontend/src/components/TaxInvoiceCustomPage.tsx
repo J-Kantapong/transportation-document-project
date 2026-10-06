@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
-import { billingApi, ACCOUNT_LABEL, WHT_METHOD_LABEL, type TaxInvoice, type TaxInvoicePreview, type WhtMethod } from "@/lib/billing-api";
+import { billingApi, ACCOUNT_LABEL, WHT_METHOD_LABEL, type Invoice, type TaxInvoice, type TaxInvoicePreview, type WhtMethod } from "@/lib/billing-api";
 import { DateInput } from "@/components/DateInput";
 import { emptyItemRow, InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
@@ -46,6 +46,8 @@ export function TaxInvoiceCustomPage() {
   const [notRegistered, setNotRegistered] = useState(false);
   const [preview, setPreview] = useState<TaxInvoicePreview | null>(null);
   const [replaced, setReplaced] = useState<TaxInvoice | null>(null);
+  // บิลรอรับเงินในระบบ (บัญชีบริษัท + มี VAT) - ถ้าลูกค้ารายนี้มี ให้ออกใบกำกับจากบิลโดยตรง ผูกกันและปิดบิลให้ (ผู้ใช้ 2026-10-06)
+  const [waitingBills, setWaitingBills] = useState<Invoice[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -57,6 +59,12 @@ export function TaxInvoiceCustomPage() {
       try {
         const c = await api.listCustomers();
         setCustomers(c.customers);
+        try {
+          const bills = await billingApi.listInvoices({ limit: 1 });
+          setWaitingBills(bills.invoices.filter((i) => i.status === "ISSUED" && i.account !== "PERSONAL" && i.vatRate > 0));
+        } catch {
+          setWaitingBills([]); // ไม่มีรายการบิลก็ออกใบกำหนดเองต่อได้
+        }
         if (replacesId) {
           const { taxInvoice: old } = await billingApi.taxInvoice(replacesId);
           if (old.status !== "CANCELLED" || old.invoiceId !== null) throw new Error("ออกแทนได้เฉพาะใบกำกับกำหนดเองที่ยกเลิกแล้ว");
@@ -231,6 +239,24 @@ export function TaxInvoiceCustomPage() {
           <div className="customer-message" style={{ fontSize: 13 }}>
             ใบนี้จะออกแทน {replaced.taxInvoiceNo} ที่ยกเลิกไป{replaced.cancelReason ? ` (${replaced.cancelReason})` : ""}
             {replaced.whtCertificate ? " · 50 ทวิ ที่แนบไว้ย้ายมาใบนี้ (ถ้าเป็นลูกค้าคนเดิมและยังมียอดหัก)" : ""}
+          </div>
+        )}
+
+        {customerId && waitingBills.some((b) => b.customerId === customerId) && (
+          <div className="customer-message" style={{ fontSize: 13 }}>
+            ลูกค้ารายนี้มีบิลรอรับเงินในระบบ - ถ้าเป็นงานเดียวกัน ให้ออกใบกำกับจากบิลโดยตรง (ดึงยอดและรายการจากบิล ผูกกับบิล และปิดบิลเป็นรับเงินแล้วให้เอง ไม่ต้องพิมพ์รายการซ้ำ):
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {waitingBills
+                .filter((b) => b.customerId === customerId)
+                .map((b) => (
+                  <li key={b.id}>
+                    <Link href={`/accounting/tax-invoices?issue=${encodeURIComponent(b.id)}`} className="text-button">
+                      {b.invoiceNo}
+                    </Link>{" "}
+                    · {isoToDisplayDate(b.issueDate)} · ยอดสุทธิ {formatMoney(b.netTotal)} บาท
+                  </li>
+                ))}
+            </ul>
           </div>
         )}
 
