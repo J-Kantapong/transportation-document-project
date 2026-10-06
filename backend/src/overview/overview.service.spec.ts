@@ -61,6 +61,14 @@ function service(o: { spendSubs?: unknown[]; inProcessSubs?: unknown[]; openVehi
     plateSwap: empty(),
     taxRenewal: empty(),
     yamahaRelocationEntry: empty(),
+    vehicleUseCancellation: empty(),
+    plateCopy: empty(),
+    vehicleMoveOut: empty(),
+    vehicleTransfer: empty(),
+    taxInvoice: empty(),
+    quotation: empty(),
+    payrollRun: empty(),
+    issuedWhtItem: empty(),
     invoice: empty(),
     invoiceLine: empty(),
     user: { count: vi.fn().mockResolvedValue(0) },
@@ -95,6 +103,19 @@ describe('OverviewService.overview', () => {
     expect(result.forecast.avgDailySpend).toBe(100);
     const where = subFind.mock.calls.find(([a]) => a.where.status?.not === 'FAILED')![0].where;
     expect(where.OR).toEqual([{ submitDate: { gte: d('2026-07-30'), lte: d('2026-09-27') } }]);
+  });
+
+  // ผู้ใช้ 2026-10-06 "เอารายจ่ายทั้งหมดเข้าไป": เงินเดือนที่จ่ายแล้ว + ค่าจ้างบุคคลภายนอกรวมในยอดใช้เงิน แต่แยกจาก Bill / No bill
+  it('ใช้เงิน: รวมเงินเดือน (เงินเดือน + รายได้อื่น + ประกันสังคมส่วนนายจ้าง) และค่าจ้างบุคคลภายนอก', async () => {
+    const { svc, prisma } = service({ spendSubs: [sub('2026-09-27', { billFeeTotal: 250, taxAmount: 0 })] });
+    prisma.payrollRun.findMany.mockResolvedValue([{ payDate: d('2026-09-27'), items: [{ salary: 20000, otherIncome: 1000, ssoAmount: 875 }, { salary: 15000, otherIncome: 0, ssoAmount: 750 }] }]);
+    prisma.issuedWhtItem.findMany.mockResolvedValue([{ paidDate: d('2026-09-27'), amountPaid: 3000 }]);
+    const result = await svc.overview();
+    expect(result.spend.today.overhead).toBe(37625 + 3000);
+    expect(result.spend.today.total).toBe(250 + 37625 + 3000);
+    expect(result.spend.today.bill).toBe(250);
+    expect(result.spend.today.other).toBe(0);
+    expect(result.spend.categories.find((c) => c.key === 'payroll')!.today).toBe(37625);
   });
 
   it('ใช้เงิน: งานที่ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จจริงแทน Bill ที่ระบบคำนวณ', async () => {
@@ -189,10 +210,10 @@ describe('OverviewService.overview', () => {
   });
 
   // ผู้ใช้ 2026-09-27: งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอดในภาพรวม
-  it('ไม่นับงานสลับเลข ต่อภาษี และยามาฮ่าที่ยกเลิกแล้ว', async () => {
+  it('ไม่นับงานสลับเลข ต่อภาษี ยามาฮ่า และงานอื่นๆ ที่ยกเลิกแล้ว', async () => {
     const { svc, prisma } = service();
     await svc.overview();
-    for (const model of ['plateSwap', 'taxRenewal', 'yamahaRelocationEntry']) {
+    for (const model of ['plateSwap', 'taxRenewal', 'yamahaRelocationEntry', 'vehicleUseCancellation', 'plateCopy', 'vehicleMoveOut', 'vehicleTransfer']) {
       const calls = prisma[model].findMany.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       for (const [args] of calls) expect(args.where).toMatchObject({ cancelledAt: null });

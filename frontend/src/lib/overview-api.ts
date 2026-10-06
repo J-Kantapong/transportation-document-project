@@ -8,6 +8,7 @@ export interface SpendSum {
   bill: number;
   noBill: number;
   other: number; // ค่าแจ้งย้าย/ตัดบัญชี (ไม่ได้แยก Bill/No bill)
+  overhead: number; // รายจ่ายบริษัท (เงินเดือน + ค่าจ้างบุคคลภายนอก) รวมในยอดใช้เงิน
   duty: number; // ค่าอากร - แยกจากยอดรวม/No bill แสดงเป็นบรรทัดของตัวเอง (ผู้ใช้ 2026-10-05)
 }
 
@@ -17,6 +18,7 @@ export interface DailyPoint {
   bill: number;
   noBill: number;
   other: number;
+  overhead: number;
   duty: number;
   billed: number;
   collected: number;
@@ -67,7 +69,7 @@ export interface ProcessRow {
 
 export interface StuckItem {
   id: string;
-  source: "vehicle" | "plateSwap" | "taxRenewal";
+  source: "vehicle" | "plateSwap" | "taxRenewal" | "otherJob";
   kind: VehicleKind;
   customerName: string;
   brandName: string | null;
