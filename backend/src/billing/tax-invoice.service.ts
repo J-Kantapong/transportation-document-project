@@ -11,6 +11,7 @@ import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receip
 import { detectAttachmentType } from '../yamaha-relocation/yamaha-relocation.service.js';
 import { accountOn } from './billing-account.js';
 import { computeInvoiceTotals, effectiveWhtRate, round2 } from './billing-calculator.js';
+import { SELLER_PROFILE, type SellerSnapshot } from './seller-profile.js';
 import { parseItems, toPeriods, toTerms } from './billing.service.js';
 import { daysBetween, formatTaxInvoiceNo, missingBuyerFields, taxInvoiceAmounts, WHT_METHODS, type WhtMethod } from './tax-invoice-calc.js';
 
@@ -59,7 +60,7 @@ function parseWht(dto: { whtAmount?: unknown; whtMethod?: unknown }): { whtAmoun
   return { whtAmount, whtMethod };
 }
 
-type CustomerSnapshot = { name: string; branch: string | null; address: string | null; taxId: string | null };
+type CustomerSnapshot = { name: string; branch: string | null; address: string | null; taxId: string | null; email?: string | null };
 
 const TV_INCLUDE = {
   invoice: { select: { invoiceNo: true, issueDate: true, jobLabel: true, extras: true, lines: true, items: true, whtRate: true, vatRate: true } },
@@ -195,6 +196,7 @@ export class TaxInvoiceService {
             customerId: invoice.customerId,
             issueDate: paidDate,
             customerSnapshot: buyer,
+            sellerSnapshot: SELLER_PROFILE,
             buyerNotVatRegistered,
             vatRate: invoice.vatRate,
             feeTotal: fee,
@@ -297,6 +299,7 @@ export class TaxInvoiceService {
             customerId: customer.id,
             issueDate: paidDate,
             customerSnapshot: buyer,
+            sellerSnapshot: SELLER_PROFILE,
             buyerNotVatRegistered,
             vatRate: totals.vatRate,
             feeTotal: totals.feeTotal,
@@ -600,8 +603,8 @@ export class TaxInvoiceService {
     return { number, taxInvoiceNo };
   }
 
-  private buyerOf(c: { name: string; company: string | null; branch: string | null; address: string | null; taxId: string | null }): CustomerSnapshot {
-    return { name: c.company || c.name, branch: c.branch, address: c.address, taxId: c.taxId ? c.taxId.replace(/\D/g, '') || c.taxId : null };
+  private buyerOf(c: { name: string; company: string | null; branch: string | null; address: string | null; taxId: string | null; email?: string | null }): CustomerSnapshot {
+    return { name: c.company || c.name, branch: c.branch, address: c.address, taxId: c.taxId ? c.taxId.replace(/\D/g, '') || c.taxId : null, email: c.email?.trim() || null };
   }
 
   // ใบที่ยกเลิกล่าสุดของบิลนี้ซึ่งยังไม่มีใบใหม่ออกแทน
@@ -624,6 +627,8 @@ export class TaxInvoiceService {
       invoiceIssueDate: t.invoice ? iso(t.invoice.issueDate) : null,
       customerId: t.customerId,
       customer: t.customerSnapshot as CustomerSnapshot,
+      // ผู้ขาย ณ วันออกใบ - ใบที่ออกก่อนมีคอลัมน์นี้เป็น null (หน้าจอใช้ข้อมูลบริษัทปัจจุบันแทน)
+      seller: (t.sellerSnapshot as SellerSnapshot | null) ?? null,
       buyerNotVatRegistered: t.buyerNotVatRegistered,
       issueDate: iso(t.issueDate),
       createdAt: t.createdAt.toISOString(),

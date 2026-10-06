@@ -293,6 +293,10 @@ This private repository is the shared development surface for the user, Claude C
   `GET /api/billing/wht-pending` (overdue after 30 days, user) + `POST .../wht-pending/remind`. Credit terms:
   `Customer.billingCreditDays` (terms editor, `creditDays` in `PATCH .../customers/:id/terms`), `Invoice.dueDate` =
   issue date + days at issue (shifted when the issue date is edited); the invoice list flags overdue / due in 7 days.
+  e-Tax preparation (user 2026-10-06, migration `20261006100000_tax_invoice_seller_snapshot`): every new TV stores the seller
+  (`TaxInvoice.sellerSnapshot`, from `backend/src/billing/seller-profile.ts`, a copy of `COMPANY_PROFILE`; change both when
+  the company data changes) and the buyer snapshot now carries `email`; `seller` is null on older TVs and the print falls back
+  to the current company profile. The issue dialog hints when the customer has no email. Paper stays until 2027.
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT

@@ -1228,7 +1228,9 @@ model TaxInvoice {
   invoiceId             String?
   customerId            String
   issueDate             DateTime // = วันที่รับเงิน
-  customerSnapshot      Json // { name, branch, address, taxId } ข้อมูลลูกค้าปัจจุบัน ณ วันออกใบ
+  customerSnapshot      Json // { name, branch, address, taxId, email } ข้อมูลลูกค้าปัจจุบัน ณ วันออกใบ
+  // ข้อมูลผู้ขาย ณ วันออกใบ (ผู้ใช้ 2026-10-06 เตรียมไว้สำหรับ e-Tax ปี 2027) - null = ใบที่ออกก่อนมีคอลัมน์นี้ ใช้ข้อมูลบริษัทปัจจุบันตอนพิมพ์
+  sellerSnapshot        Json?
   buyerNotVatRegistered Boolean   @default(false) // ผู้ซื้อไม่ได้จด VAT - ไม่มีเลขผู้เสียภาษีก็ออกได้
   vatRate               Decimal   @db.Decimal(5, 2)
   feeTotal              Decimal   @db.Decimal(12, 2) // ค่าธรรมเนียมกรมฯ ทดรองจ่าย ไม่คิด VAT
