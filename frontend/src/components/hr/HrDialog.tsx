@@ -54,6 +54,7 @@ export function ReasonDialog({
   confirmLabel,
   danger,
   withDate,
+  defaultDateIso,
   noReason,
   onConfirm,
   onClose,
@@ -63,12 +64,13 @@ export function ReasonDialog({
   confirmLabel: string;
   danger?: boolean;
   withDate?: { label: string };
+  defaultDateIso?: string; // วันที่เริ่มต้นของช่องวันที่ (ค.ศ. YYYY-MM-DD) - ไม่ระบุ = วันนี้
   noReason?: boolean; // ไม่ต้องกรอกเหตุผล (เช่น บันทึกการจ่าย - มีแต่วันที่)
   onConfirm: (remark: string, dateIso: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [remark, setRemark] = useState("");
-  const [dateText, setDateText] = useState(isoToDisplayDate(todayIso()));
+  const [dateText, setDateText] = useState(isoToDisplayDate(defaultDateIso || todayIso()));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const closeRef = useRef<() => void>(() => {});

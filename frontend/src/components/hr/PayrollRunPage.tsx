@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HistoryDialog, HrDialog, errorText, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
 import { ApiError } from "@/lib/api";
-import { isoToDisplayDate } from "@/lib/date";
+import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { downloadCsv, hrApi, monthLabel, STATUS_LABEL, type PayrollItem, type PayrollRun, type PayrollStatus, type PayslipSignature } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
 import { printPayslips } from "@/lib/payslip-print";
@@ -15,7 +15,7 @@ import { printPayslips } from "@/lib/payslip-print";
 
 const BADGE: Record<PayrollStatus, string> = { DRAFT: "badge", APPROVED: "badge warn", PAID: "badge done", CANCELLED: "badge" };
 
-type Dialog = null | "unapprove" | "pay" | "unpay" | "cancel" | "history" | { item: PayrollItem };
+type Dialog = null | "unapprove" | "pay" | "paydate" | "unpay" | "cancel" | "history" | { item: PayrollItem };
 
 export function PayrollRunPage() {
   const id = useSearchParams().get("id") ?? "";
@@ -101,8 +101,8 @@ export function PayrollRunPage() {
           </h1>
           <p>
             ประกันสังคม {run.ssoRate}% เพดานฐาน {formatMoney(run.ssoWageCap)} บาท
-            {run.payDate ? ` · จ่ายวันที่ ${isoToDisplayDate(run.payDate)}${run.paidByName ? ` โดย ${run.paidByName}` : ""}` : ""}
-            {run.approvedAt && !run.payDate ? ` · อนุมัติโดย ${run.approvedByName ?? "-"}` : ""}
+            {run.payDate ? ` · ${status === "PAID" ? "จ่ายแล้ววันที่" : "กำหนดจ่ายวันที่"} ${isoToDisplayDate(run.payDate)}${status === "PAID" && run.paidByName ? ` โดย ${run.paidByName}` : ""}` : " · ยังไม่ระบุวันที่จ่าย"}
+            {run.approvedAt && status === "APPROVED" ? ` · อนุมัติโดย ${run.approvedByName ?? "-"}` : ""}
             {status === "CANCELLED" ? ` · ยกเลิกโดย ${run.cancelledByName ?? "-"}: ${run.cancelReason ?? ""}` : ""}
           </p>
         </div>
@@ -164,12 +164,18 @@ export function PayrollRunPage() {
                 >
                   คำนวณใหม่จากทะเบียนพนักงาน
                 </button>
+                <button type="button" disabled={busy} onClick={() => setDialog("paydate")}>
+                  แก้วันที่จ่าย
+                </button>
               </>
             )}
             {status === "APPROVED" && (
               <>
                 <button type="button" className="primary" disabled={busy} onClick={() => setDialog("pay")}>
                   บันทึกว่าจ่ายแล้ว
+                </button>
+                <button type="button" disabled={busy} onClick={() => setDialog("paydate")}>
+                  แก้วันที่จ่าย
                 </button>
                 <button type="button" disabled={busy} onClick={() => setDialog("unapprove")}>
                   ยกเลิกการอนุมัติ
@@ -275,11 +281,24 @@ export function PayrollRunPage() {
         <ReasonDialog
           title="บันทึกว่าจ่ายแล้ว"
           description={<p className="muted">กดหลังโอนเงินเดือนให้พนักงานแล้ว ใส่วันที่จ่ายจริง (ไม่เกินวันนี้)</p>}
-          withDate={{ label: "วันที่จ่าย" }}
+          withDate={{ label: "วันที่จ่ายจริง" }}
+          defaultDateIso={run.payDate && run.payDate <= todayIso() ? run.payDate : todayIso()}
           noReason
           confirmLabel="บันทึกการจ่าย"
           onClose={() => setDialog(null)}
           onConfirm={(_, dateIso) => act(() => hrApi.pay(run.id, dateIso), "บันทึกการจ่ายแล้ว")}
+        />
+      )}
+      {dialog === "paydate" && (
+        <ReasonDialog
+          title="แก้วันที่จ่ายเงินเดือน"
+          description={<p className="muted">วันที่นี้พิมพ์ลงสลิปทุกใบ ใส่ล่วงหน้าได้ รอบที่อนุมัติแล้วต้องระบุเหตุผล</p>}
+          withDate={{ label: "วันที่จ่ายเงินเดือน" }}
+          defaultDateIso={run.payDate ?? undefined}
+          noReason={status === "DRAFT"}
+          confirmLabel="บันทึกวันที่จ่าย"
+          onClose={() => setDialog(null)}
+          onConfirm={(remark, dateIso) => act(() => hrApi.setPayDate(run.id, dateIso, remark || undefined), "แก้วันที่จ่ายแล้ว")}
         />
       )}
       {dialog === "unapprove" && <ReasonDialog title="ยกเลิกการอนุมัติ" confirmLabel="ยกเลิกการอนุมัติ" onClose={() => setDialog(null)} onConfirm={(remark) => act(() => hrApi.unapprove(run.id, remark))} />}

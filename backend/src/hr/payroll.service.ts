@@ -22,6 +22,19 @@ function parseMonth(raw: unknown): string {
   return raw;
 }
 
+// วันที่จ่ายเงินเดือน (ผู้ใช้ 2026-10-06: ต้องระบุเสมอ พิมพ์ลงสลิป): อยู่ระหว่างวันแรกของเดือนของรอบ ถึง 62 วันหลังสิ้นเดือนนั้น
+// (จ่ายสิ้นเดือนหรือต้นเดือนถัดไปเป็นปกติ) - วันที่ล่วงหน้าได้ เพราะสลิปพิมพ์ก่อนวันจ่ายจริง
+function parsePayDate(raw: unknown, month: string): Date {
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw)) || new Date(`${raw}T00:00:00.000Z`).toISOString().slice(0, 10) !== raw) {
+    throw bad('ต้องระบุวันที่จ่ายเงินเดือน เป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง');
+  }
+  const start = new Date(`${month}-01T00:00:00.000Z`);
+  const endOfMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+  const limit = new Date(endOfMonth.getTime() + 62 * 86_400_000).toISOString().slice(0, 10);
+  if (raw < `${month}-01` || raw > limit) throw bad(`วันที่จ่ายต้องอยู่ระหว่าง ${month}-01 ถึง ${limit} (ตั้งแต่ต้นเดือนของรอบถึง 2 เดือนหลังสิ้นเดือน)`);
+  return new Date(`${raw}T00:00:00.000Z`);
+}
+
 function money(raw: unknown, label: string): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 99_999_999) throw bad(`${label}ต้องเป็นจำนวนเงินตั้งแต่ 0 ขึ้นไป`);
   return round2(raw);
@@ -140,8 +153,9 @@ export class PayrollService {
   }
 
   // สร้างรอบเดือนใหม่ (DRAFT) จากพนักงานที่ทำงานอยู่ + ที่ลาออกในเดือนนั้นหรือหลังจากนั้น
-  async createRun(dto: { month?: unknown }) {
+  async createRun(dto: { month?: unknown; payDate?: unknown }) {
     const month = parseMonth(dto?.month);
+    const payDate = parsePayDate(dto?.payDate, month);
     const monthStart = new Date(`${month}-01T00:00:00.000Z`);
     const employees = await this.prisma.employee.findMany({
       where: { OR: [{ status: 'ACTIVE' }, { status: 'RESIGNED', resignedDate: { gte: monthStart } }] },
@@ -152,10 +166,10 @@ export class PayrollService {
     try {
       const run = await this.prisma.$transaction(async (tx) => {
         const created = await tx.payrollRun.create({
-          data: { month, ssoRate: SSO_RATE_PERCENT, ssoWageCap: cap, createdByName: nameOf(), items: { create: employees.map((e, i) => itemFromEmployee(e, cap, i)) } },
+          data: { month, payDate, ssoRate: SSO_RATE_PERCENT, ssoWageCap: cap, createdByName: nameOf(), items: { create: employees.map((e, i) => itemFromEmployee(e, cap, i)) } },
           include: RUN_INCLUDE,
         });
-        await writeAudit(tx, { entity: 'PayrollRun', entityId: created.id, action: 'create', remark: `สร้างรอบเงินเดือน ${month}`, changes: { month, employees: employees.length } });
+        await writeAudit(tx, { entity: 'PayrollRun', entityId: created.id, action: 'create', remark: `สร้างรอบเงินเดือน ${month}`, changes: { month, payDate, employees: employees.length } });
         return created;
       });
       return mapRun(run);
@@ -220,8 +234,26 @@ export class PayrollService {
     });
   }
 
+  // แก้วันที่จ่าย (DRAFT / APPROVED เท่านั้น - จ่ายแล้วต้องยกเลิกการจ่ายก่อน) รอบที่อนุมัติแล้วต้องมีเหตุผล
+  async setPayDate(id: string, dto: { payDate?: unknown; remark?: unknown }) {
+    await this.prisma.$transaction(async (tx) => {
+      const run = await tx.payrollRun.findUnique({ where: { id }, select: { month: true, status: true, payDate: true, cancelledAt: true } });
+      if (!run) throw new NotFoundException({ error: 'ไม่พบรอบเงินเดือน' });
+      if (run.cancelledAt || (run.status !== 'DRAFT' && run.status !== 'APPROVED')) throw new ConflictException({ error: 'รอบนี้จ่ายแล้วหรือยกเลิกแล้ว แก้วันที่จ่ายไม่ได้ (ยกเลิกการจ่ายก่อนถ้าต้องการแก้)' });
+      const payDate = parsePayDate(dto?.payDate, run.month);
+      const remark = run.status === 'APPROVED' ? requireRemark(dto?.remark, 'รอบที่อนุมัติแล้ว ต้องระบุเหตุผลที่แก้วันที่จ่าย') : typeof dto?.remark === 'string' && dto.remark.trim() ? dto.remark.trim() : 'แก้วันที่จ่ายเงินเดือน';
+      if (iso(run.payDate) === iso(payDate)) throw bad('วันที่จ่ายเหมือนเดิม ไม่มีอะไรเปลี่ยน');
+      const { count } = await tx.payrollRun.updateMany({ where: { id, status: run.status, cancelledAt: null }, data: { payDate } });
+      if (count === 0) throw new ConflictException({ error: 'รอบนี้เปลี่ยนสถานะไปแล้ว กรุณาโหลดใหม่' });
+      await writeAudit(tx, { entity: 'PayrollRun', entityId: id, action: 'set-pay-date', remark, changes: { payDate: { from: run.payDate, to: payDate } } });
+    });
+    return this.getRun(id);
+  }
+
   async approve(id: string) {
     return this.transition(id, 'DRAFT', 'APPROVED', 'approve', 'อนุมัติรอบเงินเดือน', { approvedAt: new Date(), approvedByName: nameOf() }, async (tx) => {
+      // รอบเก่าก่อนมีข้อกำหนดนี้อาจไม่มีวันที่จ่าย - ต้องระบุก่อน เพราะสลิปพิมพ์วันที่จ่ายจากตรงนี้
+      if (!(await tx.payrollRun.findUnique({ where: { id }, select: { payDate: true } }))?.payDate) throw bad('ระบุวันที่จ่ายเงินเดือนก่อนอนุมัติ');
       if ((await tx.payrollItem.count({ where: { runId: id } })) === 0) throw bad('รอบนี้ไม่มีรายการเงินเดือน');
     });
   }
@@ -231,7 +263,8 @@ export class PayrollService {
     return this.transition(id, 'APPROVED', 'DRAFT', 'unapprove', remark, { approvedAt: null, approvedByName: null });
   }
 
-  // บันทึกว่าจ่ายแล้ว: วันที่จ่ายจริงต้องไม่เกินวันนี้ (กดหลังโอนเงินแล้วเท่านั้น)
+  // บันทึกว่าจ่ายแล้ว: วันที่จ่ายจริงต้องไม่เกินวันนี้ (กดหลังโอนเงินแล้วเท่านั้น) ถ้าต่างจากวันที่กำหนดไว้ จะใช้วันที่จริงแทน
+  // ยกเลิกการจ่ายแล้ววันที่จ่ายยังอยู่ (เป็นวันที่กำหนดจ่าย) แก้ได้ด้วย setPayDate
   async pay(id: string, dto: { payDate?: unknown }) {
     if (typeof dto?.payDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dto.payDate) || !Number.isFinite(Date.parse(dto.payDate))) throw bad('วันที่จ่ายต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง');
     if (dto.payDate > bangkokToday()) throw bad('วันที่จ่ายต้องไม่เกินวันนี้ (บันทึกหลังจ่ายแล้วเท่านั้น)');
@@ -240,7 +273,7 @@ export class PayrollService {
 
   async unpay(id: string, dto: { remark?: unknown }) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่ยกเลิกการจ่าย');
-    return this.transition(id, 'PAID', 'APPROVED', 'unpay', remark, { payDate: null, paidAt: null, paidByName: null });
+    return this.transition(id, 'PAID', 'APPROVED', 'unpay', remark, { paidAt: null, paidByName: null });
   }
 
   async cancel(id: string, dto: { remark?: unknown }) {

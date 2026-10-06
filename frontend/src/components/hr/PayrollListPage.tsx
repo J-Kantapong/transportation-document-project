@@ -7,10 +7,18 @@ import { errorText } from "@/components/hr/HrDialog";
 import { SignaturePanel } from "@/components/hr/SignaturePanel";
 import { hrApi, monthLabel, STATUS_LABEL, thaiMonthName, type PayrollRunSummary, type PayrollStatus } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
-import { isoToDisplayDate } from "@/lib/date";
+import { DateInput } from "@/components/DateInput";
+import { digits } from "@/components/hr/HrDialog";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 
 // เงินเดือน (ผู้ใช้ 2026-10-05) - รายการรอบรายเดือน + สร้างรอบใหม่ (ADMIN เท่านั้น)
 const BADGE: Record<PayrollStatus, string> = { DRAFT: "badge", APPROVED: "badge warn", PAID: "badge done", CANCELLED: "badge" };
+
+// วันที่จ่ายเงินเดือนเริ่มต้น = วันสุดท้ายของเดือนของรอบ (ผู้ใช้ 2026-10-06: ต้องระบุวันที่จ่ายเสมอ แก้ได้)
+function lastDayIso(year: number, monthIndex: number): string {
+  const d = new Date(Date.UTC(year, monthIndex + 1, 0));
+  return d.toISOString().slice(0, 10);
+}
 
 export function PayrollListPage() {
   const router = useRouter();
@@ -20,6 +28,9 @@ export function PayrollListPage() {
   const [monthIndex, setMonthIndex] = useState(now.getMonth());
   const [year, setYear] = useState(now.getFullYear());
   const [busy, setBusy] = useState(false);
+  // วันที่จ่ายที่ผู้ใช้พิมพ์เอง (null = ใช้วันสุดท้ายของเดือนที่เลือก)
+  const [payOverride, setPayOverride] = useState<string | null>(null);
+  const payText = payOverride ?? isoToDisplayDate(lastDayIso(year, monthIndex));
 
   const load = useCallback(async () => {
     try {
@@ -36,9 +47,11 @@ export function PayrollListPage() {
 
   async function create() {
     setError("");
+    const payDate = displayDateToIso(digits(payText));
+    if (!payDate) return setError("ระบุวันที่จ่ายเงินเดือนให้ถูกต้อง");
     setBusy(true);
     try {
-      const { run } = await hrApi.createRun(`${year}-${String(monthIndex + 1).padStart(2, "0")}`);
+      const { run } = await hrApi.createRun(`${year}-${String(monthIndex + 1).padStart(2, "0")}`, payDate);
       router.push(`/hr/payroll/view?id=${encodeURIComponent(run.id)}`);
     } catch (err) {
       setError(errorText(err, "สร้างรอบเงินเดือนไม่สำเร็จ"));
@@ -68,12 +81,16 @@ export function PayrollListPage() {
             ปี (พ.ศ.)
             <input type="number" value={year + 543} onChange={(e) => setYear(Number(e.target.value) - 543)} min={2500} max={2700} />
           </label>
+          <label className="field" style={{ minWidth: 190 }}>
+            วันที่จ่ายเงินเดือน *
+            <DateInput value={payText} onChange={(v) => setPayOverride(formatDateDigitsCe(digits(v)))} />
+          </label>
           <button type="button" className="primary" disabled={busy} onClick={create}>
             {busy ? "กำลังสร้าง…" : "สร้างรอบเดือนนี้"}
           </button>
         </div>
         <p className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-          ระบบดึงพนักงานที่ทำงานอยู่ (และที่ลาออกในเดือนนั้นหรือหลังจากนั้น) พร้อมคำนวณประกันสังคมและภาษีหัก ณ ที่จ่ายให้ แล้วแก้ได้ก่อนอนุมัติ
+          ระบบดึงพนักงานที่ทำงานอยู่ (และที่ลาออกในเดือนนั้นหรือหลังจากนั้น) พร้อมคำนวณประกันสังคมและภาษีหัก ณ ที่จ่ายให้ แล้วแก้ได้ก่อนอนุมัติ วันที่จ่ายเงินเดือนพิมพ์ลงสลิปทุกใบ (ตั้งต้นเป็นวันสุดท้ายของเดือน แก้ได้ภายหลังจนกว่าจะบันทึกว่าจ่ายแล้ว)
         </p>
         {error && (
           <p className="customer-message error" role="alert">
