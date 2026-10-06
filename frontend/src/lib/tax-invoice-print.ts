@@ -5,7 +5,7 @@ import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (ผู้ใช้ 2026-09-28) - หน้าตาเดียวกับใบวางบิล (CSS ชุดเดียวกัน) ต่างกันที่:
 // ชื่อเอกสาร + ป้ายต้นฉบับ/สำเนา, เลข TV + อ้างอิงเลขใบวางบิล, วันที่ = วันรับเงิน, ช่องยอดรวมก่อนหัก ณ ที่จ่ายแล้วต่อด้วย
-// ยอดหักจริงและรับชำระสุทธิ, "ได้รับเงินแล้ว" แทนเงื่อนไขชำระเงิน, ช่องเซ็นช่องเดียว "ผู้รับเงิน"
+// ยอดหักจริงและรับชำระสุทธิ, "ได้รับเงินแล้ว" แทนเงื่อนไขชำระเงิน, ช่องเซ็นช่องเดียว "ผู้รับเงิน / ผู้มีอำนาจลงนาม" (ผู้ใช้ 2026-10-06)
 // รายละเอียดรถรายคันไม่พิมพ์ซ้ำ - อ้างเอกสารแนบของใบวางบิล (IV…-A, ผู้ใช้เลือกแบบ ก)
 // mode: original = ต้นฉบับ + สำเนา (พิมพ์ต้นฉบับได้เฉพาะวันที่ออกใบ) · copy = สำเนาอย่างเดียว · replacement = ใบแทน + สำเนา
 export type TaxInvoicePrintMode = "original" | "copy" | "replacement" | "preview";
@@ -54,7 +54,7 @@ ${t.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${forma
 ${t.whtAmount > 0 ? `<div><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
 <div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div></div></div>
 <div class="baht">(${escapeHtml(bahtText(t.grandTotal))})</div>
-<div class="sign one"><div>ผู้รับเงิน<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
+<div class="sign one"><div>ผู้รับเงิน / ผู้มีอำนาจลงนาม<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
 </section>`;
 }
 
@@ -90,6 +90,30 @@ ${tags.map((tag) => pageHtml(t, tag)).join("\n")}
 
 export function printTaxInvoice(t: TaxInvoice, mode: TaxInvoicePrintMode): void {
   printHtml(buildTaxInvoiceHtml(t, mode));
+}
+
+// สำเนาใบกำกับทุกใบของเดือนในเอกสารเดียว สำหรับ PDF ชุดส่งบัญชี (ผู้ใช้ 2026-10-06): ใบละหน้า ป้าย "สำเนา" เรียงตามเลขที่
+// ใบที่ยกเลิกมีลายน้ำ "ยกเลิก" อยู่แล้ว · override ขอบ/เส้นประของหน้าจอ (@media screen ใน PRINT_CSS) เพราะวาดเป็นรูปลง PDF
+const BUNDLE_CSS = `
+  @media screen { body { padding: 0; } .page { margin: 0; padding: 0; border: 0; } }
+`;
+
+export function buildTaxInvoiceBundleHtml(list: TaxInvoice[]): string {
+  return `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>สำเนาใบกำกับภาษี</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
+<style>
+${PRINT_CSS}${EXTRA_CSS}${BUNDLE_CSS}</style>
+</head>
+<body>
+${list.map((t) => pageHtml(t, "สำเนา")).join("\n")}
+</body>
+</html>`;
 }
 
 // พิมพ์ต้นฉบับได้เฉพาะวันที่กดออกใบ (เผื่อกระดาษติด) - หลังจากนั้นพิมพ์ได้แค่สำเนา ต้นฉบับหาย = ออกใบแทน (ผู้ใช้ 2026-09-28)

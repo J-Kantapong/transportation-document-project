@@ -45,7 +45,8 @@ function layoutOf(doc: Document): Layout {
     .map((el) => el.getBoundingClientRect().bottom - top);
   // ขอบบนของกลุ่มที่ห้ามตัดกลาง = ตัดก่อนเริ่มกลุ่มได้ (ถ้าทั้งกลุ่มไม่พอในหน้านี้ จะขึ้นหน้าใหม่ทั้งกลุ่ม)
   soft.push(...[...doc.querySelectorAll(KEEP_TOGETHER)].map((el) => el.getBoundingClientRect().top - top));
-  const forced = [...doc.querySelectorAll("section.slip")].slice(1).map((el) => el.getBoundingClientRect().top - top);
+  // section.page = เอกสารบัญชี (ใบกำกับ / ใบวางบิล) หลายใบในไฟล์เดียว ขึ้นหน้าใหม่ทุกใบเหมือน section.slip ของใบส่งงาน
+  const forced = [...doc.querySelectorAll("section.slip, section.page")].slice(1).map((el) => el.getBoundingClientRect().top - top);
   const tables = [...doc.querySelectorAll("table")].flatMap((table) => {
     const head = table.querySelector("thead");
     if (!head) return [];
@@ -56,7 +57,8 @@ function layoutOf(doc: Document): Layout {
   return { soft: soft.sort((a, b) => a - b), forced: forced.sort((a, b) => a - b), tables };
 }
 
-export async function downloadHtmlAsPdf(html: string, fileName: string, setup: PdfPageSetup): Promise<void> {
+// สร้างไฟล์ PDF เป็น Blob (ไม่ดาวน์โหลดเอง) - ใช้ตอนต้องใส่ PDF ลงในชุดไฟล์ เช่น ชุดส่งบัญชีรายเดือน (ผู้ใช้ 2026-10-06)
+export async function htmlToPdfBlob(html: string, setup: PdfPageSetup): Promise<Blob> {
   const [{ jsPDF }, { default: html2canvas }] = await Promise.all([import("jspdf"), import("html2canvas-pro")]);
   const pageW = setup.orientation === "portrait" ? 210 : 297;
   const pageH = setup.orientation === "portrait" ? 297 : 210;
@@ -139,8 +141,23 @@ export async function downloadHtmlAsPdf(html: string, fileName: string, setup: P
       if (n > 0) pdf.addPage();
       pdf.addImage(image, "JPEG", setup.marginMm, setup.marginMm, contentWmm, slice.height / SCALE / PX_PER_MM);
     }
-    pdf.save(fileName);
+    return pdf.output("blob");
   } finally {
     iframe.remove();
   }
+}
+
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+export async function downloadHtmlAsPdf(html: string, fileName: string, setup: PdfPageSetup): Promise<void> {
+  downloadBlob(await htmlToPdfBlob(html, setup), fileName);
 }
