@@ -51,7 +51,8 @@ ${t.feeTotal > 0 ? `<span class="k">ค่าธรรมเนียมกร�
 ${t.goodsTotal > 0 ? `<div><span>ค่าสินค้า</span><span>${formatMoney(t.goodsTotal)}</span></div>` : ""}
 <div><span>ภาษีมูลค่าเพิ่ม ${t.vatRate}%</span><span>${formatMoney(t.vatAmount)}</span></div>
 <div class="g"><span>รวมเงินทั้งสิ้น</span><span>${formatMoney(t.grandTotal)}</span></div>
-${t.whtAmount > 0 ? `<div class="k"><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div><div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div>` : ""}</div></div>
+${t.whtAmount > 0 ? `<div><span>หัก ภาษี ณ ที่จ่าย</span><span>${formatMoney(t.whtAmount)}</span></div>` : ""}
+<div class="paid"><span>รับชำระสุทธิ</span><span>${formatMoney(t.receivedAmount)}</span></div></div></div>
 <div class="baht">(${escapeHtml(bahtText(t.grandTotal))})</div>
 <div class="sign one"><div>ผู้รับเงิน<br><span class="k">วันที่ : ${escapeHtml(isoToThaiDate(t.issueDate))}</span></div></div>
 </section>`;
@@ -59,7 +60,9 @@ ${t.whtAmount > 0 ? `<div class="k"><span>หัก ภาษี ณ ที่�
 
 const EXTRA_CSS = `
   .tag { display: inline-block; border: 1.5px solid #111; padding: 0 3mm; font-size: 10pt; font-weight: 600; margin-bottom: 1.5mm; }
-  .tot .paid { border-top: 1px dashed #999; margin-top: 1mm; padding-top: 1.5mm; font-weight: 600; }
+  /* ผู้ใช้ 2026-10-06: ทุกบรรทัดยอดขนาดเท่ากัน มีแต่ "รับชำระสุทธิ" ตัวใหญ่ เพื่อให้เห็นทันทีว่าลูกค้าต้องจ่ายเท่าไร */
+  .tot .g { font-size: inherit; font-weight: 600; }
+  .tot .paid { border-top: 1px solid #111; margin-top: 1.5mm; padding-top: 2mm; font-size: 15pt; font-weight: 600; align-items: baseline; }
   .sign.one { justify-content: flex-end; }
   .sign.one div { flex: 0 0 70mm; }
 `;
