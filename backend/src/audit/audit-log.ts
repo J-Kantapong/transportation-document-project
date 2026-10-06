@@ -14,6 +14,7 @@ export type AuditEntity =
   | 'YamahaRelocation'
   | 'PlateSwap'
   | 'VehicleUseCancellation'
+  | 'VehicleMoveOut'
   | 'VehicleTransfer'
   | 'PlateCopy'
   | 'User'

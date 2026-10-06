@@ -58,9 +58,16 @@ export function plateSwapSubtasks(kind: PlateSwapVehicleKind): RegistrationSubta
 export const OTHER_SUBTASKS: RegistrationSubtask[] = [
   { title: "ยกเลิกการใช้รถ", href: "/registration/other/cancel-use" },
   { title: "คัดแผ่นป้ายทะเบียน", href: "/registration/other/plate-copy" },
+  { title: "ย้ายออก", href: "/registration/other/move-out" },
 ];
 
 // ยกเลิกการใช้รถ แยกตามประเภทรถ (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO เหมือนงานสลับเลข)
+// ย้ายออก แยกตามประเภทรถ (ผู้ใช้ 2026-10-06) เหมือนยกเลิกการใช้รถ
+export const MOVE_OUT_VEHICLE_KINDS: RegistrationSubtask[] = [
+  { title: "รถยนต์", href: "/registration/other/move-out/car" },
+  { title: "รถจักรยานยนต์", href: "/registration/other/move-out/moto" },
+];
+
 export const CANCEL_USE_VEHICLE_KINDS: RegistrationSubtask[] = [
   { title: "รถยนต์", href: "/registration/other/cancel-use/car" },
   { title: "รถจักรยานยนต์", href: "/registration/other/cancel-use/moto" },
