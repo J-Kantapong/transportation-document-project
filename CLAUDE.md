@@ -389,6 +389,32 @@ This private repository is the shared development surface for the user, Claude C
   `PATCH /:id/inspection-sent`, `PATCH /:id/inspection-result`, `POST /:id/inspection-undo`, `PATCH /:id/return`, `POST /:id/undo-return`,
   `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR` (cars) / `STAFF_MOTO` (motorcycles)
   write, `ACCOUNTANT` read. Not built (user did not ask): vehicle photos for the inspection, receive plate/book, Delivery, billing, executive overview.
+- HR / payroll (ฝ่ายบุคคล + เงินเดือน, user 2026-10-05, migration `20261005140000_hr_payroll`, code in `backend/src/hr/`, pages `/hr/employees`,
+  `/hr/payroll`, `/hr/payroll/view?id=`): **ADMIN only, reads included** (`/api/hr` rule in `access-policy.ts`, `/hr` in `PAGE_RULES`; without the
+  rule the catch-all GET rule would let every staff role read salaries). First round = employee register + monthly salary only (user's choice:
+  no leave/attendance/OT, no documents, no loans). `Employee` is its own table (not `User`): code (TI001), prefix, first/last name, position,
+  `idType` CITIZEN (13 digits) | OTHER (foreign workers, e.g. an 11-digit number), `idNumber` unique, birthDate, startDate, `baseSalary`,
+  `socialSecurity` (per person, some are not enrolled), `withholdTax`, `otherAllowance` (yearly deductions beyond the personal 60,000),
+  status ACTIVE | RESIGNED + `resignedDate`, optional `userId` link. Never deleted; edits need a remark and go to `AuditLog` entity `Employee`
+  (salary changes included). Personal data is never seeded in the repo: the register has a paste-from-Excel import (`lib/hr-api.ts`
+  `parseEmployeePaste`, columns: code, prefix, name, position, id number, (unused), birth date D/M/พ.ศ., salary, social security; blank or "-" =
+  not enrolled), all-or-nothing, existing code / id number skipped. `PayrollRun` (`month` YYYY-MM, status DRAFT -> APPROVED -> PAID, soft cancel,
+  one live run per month by partial unique index `PayrollRun_month_active_key`, `ssoRate` / `ssoWageCap` snapshot) with `PayrollItem` per person
+  (snapshot of code / name / position; salary, otherIncome, otherDeduction, ssoAmount, taxAmount, netPay computed by the server; `ssoManual` /
+  `taxManual` = typed over). Rules in `payroll-calc.ts` (Claude's reading of the law, check before the rules change): SSO 5% of salary, wage base
+  floor 1,650, cap by year 15,000 (before 2026) / 17,500 (2026-2028, confirmed by the user's real sheet: 25,000 -> 875) / 20,000 (2029-2031) /
+  23,000 (2032+); withholding (ภ.ง.ด.1) = projected-annual method: monthly income x 12 - expense 50% (max 100,000) - personal 60,000 - SSO (max
+  9,000) - `otherAllowance`, progressive brackets, / 12 (a bonus month is only an estimate, the line is editable). Only DRAFT is editable
+  (row-locked via a conditional `updateMany` on the run); unapprove / unpay / cancel / recalculate need a remark or confirmation and are logged to
+  `AuditLog` entity `PayrollRun`; a PAID run must be un-paid before it can be cancelled; pay date <= today. Employees included in a run: ACTIVE
+  plus those resigned on/after the first of that month; no proration (edit the line). API `/api/hr`: `GET/POST employees`, `POST employees/import`
+  { rows }, `PATCH employees/:id` { fields, remark, expectedUpdatedAt }, `POST employees/:id/resign` { date, remark } / `reinstate` { remark },
+  `GET employees/:id/history`; `GET/POST payroll/runs` { month }, `GET payroll/runs/:id` (items + totals incl. `ssoRemit` = employee + employer
+  share for สปส.1-10 and `tax` for ภ.ง.ด.1), `PATCH payroll/runs/:id/items/:itemId` { salary, otherIncome(+Note), otherDeduction(+Note), sso, tax
+  (number = override, null = auto) }, `POST .../recalculate | approve | pay { payDate } | unapprove | unpay | cancel { remark }`, `GET .../history`.
+  SSO schedule checked against the official announcement 2026-10-05 (5%; cap 17,500 from 2569, 20,000 from 2572, 23,000 from 2575). Payslips print from the run page (`lib/payslip-print.ts`, 2 per A4, all dates in พ.ศ., also "save as PDF") and carry year-to-date income / SSO / tax (`items[].ytd` on `GET payroll/runs/:id`: earlier non-cancelled runs of the same year + this one), CSV download of the run. Not built (user did not ask):
+  bank account / transfer file, leave and attendance, bonus tax special case, year-end 50 ทวิ for employees, ภ.ง.ด.1 / สปส.1-10 forms, linking
+  salaries to the cash ledger.
 - Customer payments (user 2026-09-27): SPI decides itself what it pays per vehicle and its pricing is still being
   negotiated, so `/accounting/customer-payments` records what the customer actually paid (`CustomerPayment`: paid date,
   transferred amount, WHT, reference, account snapshot; `CustomerPaymentLine` per chassis as the customer listed it,

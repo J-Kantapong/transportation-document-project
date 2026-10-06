@@ -169,6 +169,8 @@ interface PageRule {
 const PAGE_RULES: PageRule[] = [
   { prefix: '/admin', roles: ['ADMIN'] },
   { prefix: '/portal', roles: ['CUSTOMER'] },
+  // ฝ่ายบุคคล / เงินเดือน (ผู้ใช้ 2026-10-05): ADMIN เท่านั้น - backend: /api/hr (ถ้าไม่มีกฎนี้ หน้าที่ไม่อยู่ในตารางเปิดให้พนักงานทุกกลุ่ม)
+  { prefix: '/hr', roles: ['ADMIN'] },
   // บันทึกการจ่ายของลูกค้า + ตารางล้อ (SPI) - พนักงานรถยนต์ดูแลงาน SPI (ผู้ใช้ 2026-09-27) - backend: /api/customer-payments
   { prefix: '/accounting/customer-payments', roles: ['ADMIN', 'ACCOUNTANT', 'STAFF_CAR'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },

@@ -91,6 +91,7 @@ model User {
   accountPeriods     CustomerAccountPeriod[] @relation("CustomerAccountPeriods")
   paymentsCreated    CustomerPayment[]       @relation("CustomerPaymentsCreated")
   paymentsCancelled  CustomerPayment[]       @relation("CustomerPaymentsCancelled")
+  employee           Employee?               @relation("EmployeeUser")
 
   @@index([status])
   @@index([customerId])
@@ -1601,4 +1602,89 @@ model CustomerPaymentLine {
 
   @@index([paymentId])
   @@index([vehicleId])
+}
+
+// ฝ่ายบุคคล / เงินเดือน (ผู้ใช้ 2026-10-05): ทะเบียนพนักงาน + เงินเดือนรายเดือน, เห็นและแก้ได้เฉพาะ ADMIN (/api/hr)
+// แยกจาก User: พนักงานที่ไม่ได้ล็อกอินก็มีเงินเดือนได้ และพนักงานที่ลาออกแล้วประวัติเงินเดือนยังอยู่ครบ - ผูก User ได้ไม่บังคับ
+// ไม่ลบแถวพนักงาน (ลาออก = status RESIGNED)
+model Employee {
+  id             String    @id @default(cuid())
+  code           String    @unique // รหัสพนักงาน เช่น TI001
+  prefix         String? // คำนำหน้า นาย / นาง / นางสาว / Mr.
+  firstName      String
+  lastName       String?
+  position       String? // ตำแหน่ง
+  idType         String    @default("CITIZEN") // CITIZEN = บัตรประชาชน 13 หลัก | OTHER = เลขอื่น (พนักงานต่างชาติ: พาสปอร์ต/บัตรต่างด้าว)
+  idNumber       String    @unique
+  birthDate      DateTime? // เก็บ ค.ศ. (หน้าจอแปลงจาก พ.ศ.)
+  startDate      DateTime? // วันเริ่มงาน
+  baseSalary     Decimal   @db.Decimal(12, 2) // เงินเดือนปัจจุบัน
+  socialSecurity Boolean   @default(true) // อยู่ในประกันสังคมมาตรา 33 ไหม (รายคน เพราะบางคนไม่เข้า เช่น อายุเกิน/กรรมการ)
+  withholdTax    Boolean   @default(true) // หักภาษี ณ ที่จ่าย (ภ.ง.ด.1) ไหม
+  otherAllowance Decimal   @default(0) @db.Decimal(12, 2) // ค่าลดหย่อนอื่นๆ ต่อปี (คู่สมรส บุตร เบี้ยประกัน ฯลฯ) ใช้คำนวณภาษี ไม่รวมส่วนตัว 60,000 และค่าใช้จ่าย
+  status         String    @default("ACTIVE") // ACTIVE | RESIGNED
+  resignedDate   DateTime?
+  userId         String?   @unique // ผูกบัญชีล็อกอิน (ไม่บังคับ)
+  note           String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user         User?         @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
+  payrollItems PayrollItem[]
+
+  @@index([status])
+}
+
+// เงินเดือน 1 เดือน: DRAFT (แก้ได้) -> APPROVED (ล็อก) -> PAID (บันทึกวันที่จ่ายแล้ว) / ยกเลิกแบบ soft ได้เมื่อยังไม่จ่าย
+// เดือนเดียวมีรอบที่ไม่ยกเลิกได้รอบเดียว (partial unique index PayrollRun_month_active_key ใน migration)
+// ชื่อผู้ทำเก็บเป็นข้อความ (snapshot) ส่วนผู้ทำจริงอยู่ใน AuditLog entity 'PayrollRun'
+model PayrollRun {
+  id              String    @id @default(cuid())
+  month           String // 'YYYY-MM' (ค.ศ.)
+  status          String    @default("DRAFT")
+  payDate         DateTime? // วันที่จ่ายจริง (ใส่ตอนกดจ่ายแล้ว)
+  ssoRate         Decimal   @default(5) @db.Decimal(5, 2) // อัตราประกันสังคม % ณ ตอนสร้างรอบ (snapshot)
+  ssoWageCap      Decimal   @db.Decimal(12, 2) // เพดานฐานค่าจ้างประกันสังคม ณ ตอนสร้างรอบ (snapshot)
+  createdByName   String?
+  approvedAt      DateTime?
+  approvedByName  String?
+  paidAt          DateTime?
+  paidByName      String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  cancelledByName String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items PayrollItem[]
+
+  @@index([month])
+}
+
+// บรรทัดเงินเดือนรายคน: code / fullName / position เป็น snapshot ตอนสร้างรอบ (ลาออก-เปลี่ยนตำแหน่งทีหลังสลิปเดิมไม่เปลี่ยน)
+// ssoManual / taxManual = ผู้ใช้พิมพ์ทับยอดที่ระบบคำนวณ (ไม่ถูกคำนวณทับตอนแก้ช่องอื่น)
+model PayrollItem {
+  id              String  @id @default(cuid())
+  runId           String
+  employeeId      String
+  code            String
+  fullName        String
+  position        String?
+  salary          Decimal @db.Decimal(12, 2) // เงินเดือนเดือนนี้ (ปกติ = Employee.baseSalary แก้รายเดือนได้ เช่น ทำงานไม่เต็มเดือน)
+  otherIncome     Decimal @default(0) @db.Decimal(12, 2) // รายได้อื่น (โบนัส ค่าเดินทาง ฯลฯ)
+  otherIncomeNote String?
+  ssoAmount       Decimal @default(0) @db.Decimal(12, 2) // ประกันสังคมที่หักพนักงาน
+  taxAmount       Decimal @default(0) @db.Decimal(12, 2) // ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)
+  otherDeduction  Decimal @default(0) @db.Decimal(12, 2) // รายการหักอื่น
+  deductionNote   String?
+  netPay          Decimal @db.Decimal(12, 2) // = salary + otherIncome - ssoAmount - taxAmount - otherDeduction (server คำนวณเสมอ)
+  ssoManual       Boolean @default(false)
+  taxManual       Boolean @default(false)
+  sortOrder       Int     @default(0)
+
+  run      PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employee Employee   @relation(fields: [employeeId], references: [id])
+
+  @@unique([runId, employeeId])
+  @@index([employeeId])
 }
