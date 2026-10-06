@@ -283,7 +283,6 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
     const payload: ServiceFeeRateInput[] = [];
     for (const [i, r] of rows.entries()) {
       const at = `แถวที่ ${i + 1}`;
-      if (!r.label.trim()) return setError(`${at}: ใส่ชื่อรายการ`);
       const amount = Number.parseFloat(r.amountText.replace(/,/g, ""));
       if (!Number.isFinite(amount) || amount < 0) return setError(`${at}: ราคาไม่ถูกต้อง`);
       const ccMin = parseCc(r.ccMinText);
@@ -352,7 +351,7 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                     </select>
                   </td>
                   <td>
-                    <input type="text" value={r.label} onChange={(e) => patch(i, { label: e.target.value })} style={{ width: 200 }} aria-label="ชื่อรายการ" />
+                    <input type="text" value={r.label} onChange={(e) => patch(i, { label: e.target.value })} style={{ width: 200 }} aria-label="ชื่อรายการ" placeholder="เว้นว่างได้ = ไม่มีข้อความบนบิล" />
                   </td>
                   <td>
                     <select value={r.vehicleKind} onChange={(e) => patch(i, { vehicleKind: e.target.value as RateVehicleKind })} aria-label="ชนิดรถ">
