@@ -906,7 +906,7 @@ describe('BillingService.updateTerms', () => {
   it('บันทึกเงื่อนไขใหม่ ล็อกแถวลูกค้าก่อนอ่าน และเก็บเฉพาะช่องที่เปลี่ยนลงประวัติลูกค้า', async () => {
     const { svc, queryRaw, findUnique, update, auditCreate } = termsService();
     const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: ' หมดโปรอัตราพิเศษ ' }));
-    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false });
+    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false, whtMethod: 'PAPER' });
     expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
     expect(update).toHaveBeenCalledWith({
@@ -924,6 +924,18 @@ describe('BillingService.updateTerms', () => {
       },
       select: { id: true },
     });
+  });
+
+  // ประเภท 50 ทวิ ตั้งต้นของลูกค้า (ผู้ใช้ 2026-10-06: YM / Lexus = e-WHT ที่เหลือกระดาษ)
+  it('ตั้งประเภท 50 ทวิ ตั้งต้นเป็น e-WHT ได้ และไม่ส่ง = คงเดิม ค่าอื่นห้ามรับ', async () => {
+    const { svc, update } = termsService();
+    const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: 1, whtSpecialUntil: '2026-12-31', whtMethod: 'EWHT', remark: 'ลูกค้าหักผ่านธนาคาร' }));
+    expect(terms.whtMethod).toBe('EWHT');
+    expect(update.mock.calls[0][0].data).toMatchObject({ billingWhtMethod: 'EWHT' });
+    await expect(svc.updateTerms('c1', { vat: true, whtRate: 3, whtMethod: 'CASH', remark: 'x' })).rejects.toMatchObject({ response: { error: 'ประเภท 50 ทวิ ต้องเป็นกระดาษหรือ e-WHT' } });
+    const keep = termsService();
+    await asUser(() => keep.svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: 'ไม่แตะ 50 ทวิ' }));
+    expect(keep.update.mock.calls[0][0].data).not.toHaveProperty('billingWhtMethod');
   });
 
   it('ต้องมีเหตุผล - ไม่มีแล้วไม่แตะฐานข้อมูล', async () => {

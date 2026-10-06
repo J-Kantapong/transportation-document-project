@@ -108,6 +108,8 @@ export interface BillingTerms {
   creditDays?: number | null;
   // ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น
   requiresQuotation?: boolean;
+  // ประเภท 50 ทวิ ตั้งต้นของลูกค้า (ผู้ใช้ 2026-10-06: YM / Lexus = e-WHT ที่เหลือ = กระดาษ)
+  whtMethod?: "PAPER" | "EWHT";
 }
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ออกตอนรับเงิน (ผู้ใช้ 2026-09-28) - ดู backend/src/billing/tax-invoice.service.ts
@@ -180,6 +182,8 @@ export interface TaxInvoicePreview {
   // เฉพาะหน้าใบกำกับกำหนดเอง (customPreview)
   account?: BillingAccount;
   whtRate?: number;
+  // ประเภท 50 ทวิ ตั้งต้นของลูกค้า - หน้าต่างออกใบเลือกให้ก่อน แก้รายใบได้
+  defaultWhtMethod?: "PAPER" | "EWHT";
 }
 
 export interface WhtPendingRow {

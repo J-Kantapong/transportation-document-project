@@ -144,6 +144,7 @@ export class TaxInvoiceService {
       nextNo: seriesRows.length ? formatTaxInvoiceNo(year, (current?.lastNumber ?? 0) + 1) : null,
       lastIssued: last ? { taxInvoiceNo: last.taxInvoiceNo, issueDate: iso(last.issueDate) } : null,
       replaces: replaces ? { id: replaces.id, taxInvoiceNo: replaces.taxInvoiceNo, cancelReason: replaces.cancelReason, whtCertificateId: replaces.whtCertificateId } : null,
+      defaultWhtMethod: invoice.customer.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
     };
   }
 
@@ -245,6 +246,7 @@ export class TaxInvoiceService {
       replaces: null,
       account: accountOn(toPeriods(customer.accountPeriods ?? []), dateIso),
       whtRate: effectiveWhtRate(toTerms(customer), dateIso),
+      defaultWhtMethod: customer.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
     };
   }
 

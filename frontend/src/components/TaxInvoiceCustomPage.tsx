@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
 import { billingApi, ACCOUNT_LABEL, WHT_METHOD_LABEL, type Invoice, type TaxInvoice, type TaxInvoicePreview, type WhtMethod } from "@/lib/billing-api";
 import { DateInput } from "@/components/DateInput";
@@ -45,6 +45,7 @@ export function TaxInvoiceCustomPage() {
   const [whtMethod, setWhtMethod] = useState<WhtMethod>("PAPER");
   const [notRegistered, setNotRegistered] = useState(false);
   const [preview, setPreview] = useState<TaxInvoicePreview | null>(null);
+  const methodAppliedFor = useRef(""); // ใส่ประเภท 50 ทวิ ตั้งต้นของลูกค้าครั้งเดียวต่อลูกค้า ไม่ทับที่เลือกเองเมื่อแก้วันที่
   const [replaced, setReplaced] = useState<TaxInvoice | null>(null);
   // บิลรอรับเงินในระบบ (บัญชีบริษัท + มี VAT) - ถ้าลูกค้ารายนี้มี ให้ออกใบกำกับจากบิลโดยตรง ผูกกันและปิดบิลให้ (ผู้ใช้ 2026-10-06)
   const [waitingBills, setWaitingBills] = useState<Invoice[]>([]);
@@ -93,7 +94,12 @@ export function TaxInvoiceCustomPage() {
     billingApi
       .customTaxInvoicePreview(customerId, paidIso)
       .then((p) => {
-        if (!stale) setPreview(p);
+        if (stale) return;
+        setPreview(p);
+        if (!replacesId && methodAppliedFor.current !== customerId) {
+          methodAppliedFor.current = customerId;
+          setWhtMethod(p.defaultWhtMethod === "EWHT" ? "EWHT" : "PAPER");
+        }
       })
       .catch((err) => {
         if (!stale) setError(errorText(err, "โหลดข้อมูลลูกค้าไม่สำเร็จ"));
@@ -101,7 +107,7 @@ export function TaxInvoiceCustomPage() {
     return () => {
       stale = true;
     };
-  }, [customerId, paidIso]);
+  }, [customerId, paidIso, replacesId]);
 
   const customer = customers.find((c) => c.id === customerId) ?? null;
   const items = itemRowsToItems(rows);

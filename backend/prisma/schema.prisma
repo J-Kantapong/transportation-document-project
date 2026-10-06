@@ -114,6 +114,8 @@ model Customer {
   billingWhtRate         Decimal   @default(3) @db.Decimal(5, 2) // % หัก ณ ที่จ่ายอัตราปกติ (0 = ไม่หัก)
   billingWhtSpecialRate  Decimal?  @db.Decimal(5, 2) // % อัตราพิเศษชั่วคราว เช่น 1% ถึงสิ้นปี
   billingWhtSpecialUntil DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
+  // ประเภทหนังสือรับรองหัก ณ ที่จ่ายที่ลูกค้ารายนี้ส่งมาตามปกติ (ผู้ใช้ 2026-10-06: YM และ Lexus = e-WHT ที่เหลือ = กระดาษ) - ตั้งต้นในหน้าต่างออกใบกำกับ แก้รายใบได้
+  billingWhtMethod       String    @default("PAPER") // PAPER | EWHT
   billingCreditDays      Int? // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28: มีรอบรับวางบิลแต่ใช้ค่าคร่าวๆ) - null = ไม่ได้ตั้ง
   // ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น
   billingRequiresQuotation Boolean @default(false)

@@ -244,10 +244,11 @@ export function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
 // เงื่อนไขที่ส่งให้หน้าจอ = เงื่อนไขคิดยอด + เครดิตเทอม (ไม่ใช้คิดยอดบิล จึงไม่อยู่ใน BillingTerms)
-const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean }) => ({
+const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean; billingWhtMethod?: string }) => ({
   ...toTerms(c),
   creditDays: c.billingCreditDays,
   requiresQuotation: c.billingRequiresQuotation ?? false,
+  whtMethod: c.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
 });
 
 // ลูกค้าที่ตั้ง "ต้องมีใบเสนอราคาก่อนวางบิล" (ผู้ใช้ 2026-10-01, YM) ออกบิลได้จากใบเสนอราคาที่อนุมัติแล้วเท่านั้น
@@ -517,7 +518,7 @@ export class BillingService {
   // ประวัติแสดงรวมกับการแก้ข้อมูลลูกค้าในหน้าลูกค้า (entity Customer) · บิลที่ออกไปแล้วไม่เปลี่ยน
   async updateTerms(
     customerId: string,
-    dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; requiresQuotation?: unknown; remark?: unknown },
+    dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; requiresQuotation?: unknown; whtMethod?: unknown; remark?: unknown },
   ) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้เงื่อนไขวางบิล');
     if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
@@ -533,6 +534,11 @@ export class BillingService {
       const c = dto.creditDays;
       if (c !== null && (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c > 365)) throw bad('เครดิตเทอมต้องเป็นจำนวนวันเต็ม 0 ถึง 365');
       data.billingCreditDays = c;
+    }
+    // ประเภท 50 ทวิ ตั้งต้นของลูกค้า (ผู้ใช้ 2026-10-06): ไม่ส่ง = คงเดิม
+    if (dto.whtMethod !== undefined) {
+      if (dto.whtMethod !== 'PAPER' && dto.whtMethod !== 'EWHT') throw bad('ประเภท 50 ทวิ ต้องเป็นกระดาษหรือ e-WHT');
+      data.billingWhtMethod = dto.whtMethod;
     }
     // ต้องมีใบเสนอราคาก่อนวางบิล (ผู้ใช้ 2026-10-01): ไม่ส่ง = คงเดิม
     if (dto.requiresQuotation !== undefined) {
