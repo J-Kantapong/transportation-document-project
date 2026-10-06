@@ -170,7 +170,7 @@ export function ExecutiveOverview() {
               </>
             )}
             <br />
-            <Change pct={spend.changeVsYesterday} suffix="จากวันก่อน" invert />
+            <Change pct={spend.changeVsYesterday} suffix="จากวันก่อน (ไม่รวมเงินเดือน/ค่าจ้าง)" invert />
           </div>
         </div>
         <div className="stat">
@@ -194,7 +194,7 @@ export function ExecutiveOverview() {
           <div className="foot">
             รับ {baht(cash.collected30)} − ใช้ {baht(spend.last30.total)}
             <br />
-            <Change pct={spend.changeVs30} suffix="ใช้เงินเทียบ 30 วันก่อน" invert />
+            <Change pct={spend.changeVs30} suffix="ใช้เงินเทียบ 30 วันก่อน (ไม่รวมเงินเดือน/ค่าจ้าง)" invert />
           </div>
         </div>
         <div className="stat">

@@ -546,6 +546,10 @@ export class OverviewService {
       month: [`${asOf.slice(0, 8)}01`, asOf],
     } as const;
     const spendBy = (w: readonly [string, string]) => sumEvents(w[0], w[1]);
+    const runningCost = (w: readonly [string, string]) => {
+      const x = spendBy(w);
+      return round2(x.total - x.overhead);
+    };
     const moneyBy = (rows: Array<{ date: string; amount: number }>, w: readonly [string, string]) => sumMoney(rows, w[0], w[1]);
 
     const daily = Array.from({ length: SERIES_DAYS }, (_, i) => {
@@ -1045,9 +1049,10 @@ export class OverviewService {
         last30: spendBy(windows.last30),
         prev30: spendBy(windows.prev30),
         month: spendBy(windows.month),
-        changeVsYesterday: pctChange(spendBy(windows.today).total, spendBy(windows.yesterday).total),
-        changeVs7: pctChange(spendBy(windows.last7).total, spendBy(windows.prev7).total),
-        changeVs30: pctChange(spendBy(windows.last30).total, spendBy(windows.prev30).total),
+        // เปลี่ยนแปลงเทียบช่วงก่อนหน้าไม่รวมเงินเดือน/ค่าจ้าง (ผู้ใช้ 2026-10-06): จ่ายเดือนละครั้งทำให้ % รายวันกระโดด ยอดรวมยังรวมไว้ตามเดิม
+        changeVsYesterday: pctChange(runningCost(windows.today), runningCost(windows.yesterday)),
+        changeVs7: pctChange(runningCost(windows.last7), runningCost(windows.prev7)),
+        changeVs30: pctChange(runningCost(windows.last30), runningCost(windows.prev30)),
         categories,
       },
       cash: {
