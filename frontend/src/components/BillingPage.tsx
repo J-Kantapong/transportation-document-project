@@ -100,7 +100,9 @@ function mergeRow(prev: RowState | undefined, v: BillingVehicle): RowState {
 // ชื่อราคาหลักที่ขึ้นต้นด้วยชื่องานบนบิลตัดส่วนนั้นออก ("จดทะเบียนรถจักรยานยนต์ 300-799 cc" -> "300-799 cc")
 function autoServiceLabel(base: ServiceFeeRate | undefined, addOns: ServiceFeeRate[], jobLabel: string, showBase: boolean): string {
   const baseText = showBase && base ? (base.label.startsWith(jobLabel) ? base.label.slice(jobLabel.length).trim() : base.label) : "";
-  const parts = [baseText, ...addOns.map((a) => a.label)].filter(Boolean);
+  // ชื่อที่ใส่วงเล็บมาเองแล้ว เช่น "(รถใหญ่)" ตัดวงเล็บนอกออกก่อน กันบนบิลเป็น "((รถใหญ่))" (ผู้ใช้ 2026-10-07)
+  const unwrap = (s: string) => s.trim().replace(/^\((.*)\)$/, "$1").trim();
+  const parts = [baseText, ...addOns.map((a) => a.label)].map(unwrap).filter(Boolean);
   return parts.length ? `(${parts.join(" + ")})` : "";
 }
 
@@ -322,7 +324,7 @@ export function BillingPage() {
         const row = rows[v.id];
         const fee = serviceFeeOf(v);
         const rate = rateById.get(row.rateId);
-        const name = row.rateId === CUSTOM_RATE ? "กำหนดเอง" : [rate?.label ?? "—", ...addOnsOf(row).map((a) => a.label)].join(" + ");
+        const name = row.rateId === CUSTOM_RATE ? "กำหนดเอง" : [rate?.label || "(ไม่มีชื่อ)", ...addOnsOf(row).map((a) => a.label)].join(" + ");
         const text = `${name}${row.deduct ? ` − ${PLATE_REQUEST_DEDUCTION}` : ""} = ${fee === null ? "—" : formatMoney(fee)}`;
         return m.set(text, (m.get(text) ?? 0) + 1);
       }, new Map<string, number>())
@@ -753,7 +755,7 @@ export function BillingPage() {
                               <select value={row.rateId} onChange={(e) => patchRow(v.id, { rateId: e.target.value })} aria-label={`ราคา ${name}`}>
                                 {ratesFor(v, "BASE").map((r) => (
                                   <option key={r.id} value={r.id}>
-                                    {r.label} · {formatMoney(r.amount)}
+                                    {r.label || "(ไม่มีชื่อ)"} · {formatMoney(r.amount)}
                                     {r.includesReceipt ? " รวมใบเสร็จ" : ""}
                                   </option>
                                 ))}

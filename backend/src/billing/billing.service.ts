@@ -633,8 +633,8 @@ export class BillingService {
   async replaceRates(customerId: string, dto: { rates?: unknown }) {
     if (!Array.isArray(dto?.rates)) throw bad('rates ต้องเป็นรายการ');
     const rows = (dto.rates as Array<Record<string, unknown>>).map((r, i) => {
-      const label = optionalText(r?.label, 'ชื่อรายการ');
-      if (!label) throw bad(`แถวที่ ${i + 1}: ต้องใส่ชื่อรายการ`);
+      // ชื่อรายการเว้นว่างได้ (ผู้ใช้ 2026-10-07, MC Superbike ML: ไม่ต้องมีข้อความต่อท้ายบนบิล) - เก็บเป็น '' ไม่ใช่ null เพราะคอลัมน์ NOT NULL
+      const label = optionalText(r?.label, `แถวที่ ${i + 1}: ชื่อรายการ`) ?? '';
       const kind = r.kind === undefined || r.kind === null ? 'BASE' : (RATE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as string) : null;
       if (!kind) throw bad(`แถวที่ ${i + 1}: ประเภทราคาต้องเป็น BASE, OTHER_PROVINCE, URGENT, PLATE_REQUEST, TRANSFER_NOTICE, PLATE_SWAP หรือ PLATE_SWAP_GIVEN`);
       const vehicleKind = typeof r.vehicleKind === 'string' && VEHICLE_KINDS.includes(r.vehicleKind) ? r.vehicleKind : null;
