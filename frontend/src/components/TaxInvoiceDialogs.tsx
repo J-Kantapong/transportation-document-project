@@ -266,7 +266,7 @@ export function TaxInvoiceRemarkDialog({
   onDone,
 }: {
   kind: "cancel" | "replacement";
-  taxInvoice: { id: string; taxInvoiceNo: string; invoiceNo?: string };
+  taxInvoice: { id: string; taxInvoiceNo: string; invoiceNo?: string | null };
   onClose: () => void;
   onDone: (tv: TaxInvoice, notice: string) => void;
 }) {
@@ -282,7 +282,12 @@ export function TaxInvoiceRemarkDialog({
     try {
       if (kind === "cancel") {
         const { taxInvoice: tv } = await billingApi.cancelTaxInvoice(taxInvoice.id, remark.trim());
-        onDone(tv, `ยกเลิก ${tv.taxInvoiceNo} แล้ว - บิล ${tv.invoiceNo} กลับเป็นรอรับเงิน แก้บิลแล้วกด "รับเงิน + ออกใบกำกับ" เพื่อออกใบใหม่`);
+        onDone(
+          tv,
+          tv.invoiceNo
+            ? `ยกเลิก ${tv.taxInvoiceNo} แล้ว - บิล ${tv.invoiceNo} กลับเป็นรอรับเงิน แก้บิลแล้วกด "รับเงิน + ออกใบกำกับ" เพื่อออกใบใหม่`
+            : `ยกเลิก ${tv.taxInvoiceNo} แล้ว - ถ้าต้องออกใหม่ กด "ออกใหม่แทน" ที่รายการนี้`,
+        );
       } else {
         const { taxInvoice: tv } = await billingApi.replacementTaxInvoice(taxInvoice.id, remark.trim());
         printTaxInvoice(tv, "replacement");
@@ -304,7 +309,7 @@ export function TaxInvoiceRemarkDialog({
       <h2>{kind === "cancel" ? `ยกเลิกใบกำกับ ${taxInvoice.taxInvoiceNo}` : `ออกใบแทน ${taxInvoice.taxInvoiceNo}`}</h2>
       {kind === "cancel" ? (
         <p className="customer-message" style={{ fontSize: 13 }}>
-          {taxInvoice.taxInvoiceNo} จะเป็น &quot;ยกเลิก&quot; ถาวร (ยังอยู่ในรายงานภาษีขาย เลขนี้ไม่ใช้ซ้ำ) และบิล{taxInvoice.invoiceNo ? ` ${taxInvoice.invoiceNo}` : ""} กลับเป็นรอรับเงิน
+          {taxInvoice.taxInvoiceNo} จะเป็น &quot;ยกเลิก&quot; ถาวร (ยังอยู่ในรายงานภาษีขาย เลขนี้ไม่ใช้ซ้ำ) {taxInvoice.invoiceNo ? ` และบิล ${taxInvoice.invoiceNo} กลับเป็นรอรับเงิน` : " (ใบกำกับกำหนดเองไม่มีบิลให้ย้อนสถานะ)"}
           <br />
           ถ้าลูกค้าได้ต้นฉบับไปแล้ว ให้ขอคืนมาเก็บคู่กับสำเนา
         </p>

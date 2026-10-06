@@ -293,6 +293,17 @@ This private repository is the shared development surface for the user, Claude C
   `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
   the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
   per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
+  Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
+  ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
+  quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT
+  is always 7% (FEE lines have none), COMPANY-account customers only, buyer data from the customer row (same missing-field
+  check); `billingRequiresQuotation` does not apply here (user 2026-10-06: the quote already covers it). The WHT
+  amount is typed (suggested from the customer's rate). Cancelling one touches no bill and logs to AuditLog entity
+  'TaxInvoice'; "ออกใหม่แทน" = `replacesId` (cancelled custom TV only, one replacement, 50 ทวิ carried if same customer).
+  API: `GET /api/billing/tax-invoices/custom-preview?customerId&date` (buyer, missing, nextNo, account, whtRate) and
+  `POST /api/billing/tax-invoices/custom` { customerId, issueDate (= paid date), items, whtAmount, whtMethod,
+  buyerNotVatRegistered?, replacesId? }; TaxInvoice reads now return `invoiceNo` / `invoiceId` null for these. Page
+  `/accounting/tax-invoices/new` (`?replaces=<id>`), button on `/accounting/tax-invoices`; `InvoiceItemsEditor` has `hideCost`.
   `ISSUED` -> `APPROVED` | `REJECTED`, plus `CANCELLED` and `SUPERSEDED`; the screen groups by `stage` (`stageOf`:
   WAITING / EXPIRED by `validUntil`, DONE once billed or applied as rates). Number `QT{year}-{3 digits}` from
   `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; an issued

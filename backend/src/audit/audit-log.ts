@@ -19,6 +19,7 @@ export type AuditEntity =
   | 'User'
   | 'CustomerPayment'
   | 'TaxInvoiceSeries'
+  | 'TaxInvoice'
   | 'WhtCertificate'
   | 'Quotation';
 

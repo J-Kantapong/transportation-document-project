@@ -9,7 +9,9 @@ import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storag
 import type { UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { detectAttachmentType } from '../yamaha-relocation/yamaha-relocation.service.js';
-import { round2 } from './billing-calculator.js';
+import { accountOn } from './billing-account.js';
+import { computeInvoiceTotals, effectiveWhtRate, round2 } from './billing-calculator.js';
+import { parseItems, toPeriods, toTerms } from './billing.service.js';
 import { daysBetween, formatTaxInvoiceNo, missingBuyerFields, taxInvoiceAmounts, WHT_METHODS, type WhtMethod } from './tax-invoice-calc.js';
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) + หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) - ผู้ใช้ 2026-09-28
@@ -18,6 +20,8 @@ import { daysBetween, formatTaxInvoiceNo, missingBuyerFields, taxInvoiceAmounts,
 // - ออกแล้วแก้ไม่ได้: ยกเลิก (เหตุผลบังคับ เลขเดิมเก็บไว้ บิลกลับเป็นรอรับเงิน) แล้วออกใบใหม่ที่อ้างใบเดิม
 // - ลูกค้าทำต้นฉบับหาย = ใบแทน (เลขเดิม บันทึกวันที่และเหตุผล)
 // - 50 ทวิ ใบเดียวครอบคลุมหลายใบกำกับได้ (บางลูกค้าส่งรวม) · ได้ใบเป็นกระดาษ -> แนบรูป/PDF · e-WHT -> เลขอ้างอิง
+// - ใบกำกับกำหนดเอง (ผู้ใช้ 2026-10-05): งานนอกระบบที่ไม่มีใบวางบิล (invoiceId null) พิมพ์บรรทัดเอง ออกตอนรับเงินเหมือนกัน
+//   เลขชุดเดียวกับใบที่ออกจากบิล · ยกเลิกแล้วออกใหม่แทนได้ (replacesId) · ไม่มีบิลให้ย้อนสถานะ
 // สิทธิ์: ADMIN + ACCOUNTANT (/api/billing) ยกเว้นตั้งเลขเริ่ม = ADMIN (access-policy.ts)
 
 const bad = (error: string) => new BadRequestException({ error });
@@ -48,6 +52,13 @@ const optionalText = (raw: unknown, max = 200): string | null => {
   return t || null;
 };
 
+function parseWht(dto: { whtAmount?: unknown; whtMethod?: unknown }): { whtAmount: number; whtMethod: WhtMethod } {
+  const whtAmount = parseMoney(dto.whtAmount ?? 0, 'ภาษีหัก ณ ที่จ่าย');
+  const whtMethod = (whtAmount > 0 ? dto.whtMethod : 'NONE') as WhtMethod;
+  if (!WHT_METHODS.includes(whtMethod) || (whtAmount > 0 && whtMethod === 'NONE')) throw bad('ลูกค้าหัก ณ ที่จ่าย ต้องเลือกว่าเป็น 50 ทวิ กระดาษ หรือ e-WHT');
+  return { whtAmount, whtMethod };
+}
+
 type CustomerSnapshot = { name: string; branch: string | null; address: string | null; taxId: string | null };
 
 const TV_INCLUDE = {
@@ -55,6 +66,7 @@ const TV_INCLUDE = {
   whtCertificate: { select: { id: true, method: true, certificateNo: true, certificateDate: true, amount: true, storageKey: true, cancelledAt: true } },
   replaces: { select: { taxInvoiceNo: true } },
   replacedBy: { select: { taxInvoiceNo: true } },
+  items: true,
 } as const;
 
 type TvRow = Prisma.TaxInvoiceGetPayload<{ include: typeof TV_INCLUDE }>;
@@ -141,9 +153,7 @@ export class TaxInvoiceService {
     const paidDate = parseIsoDate(dto?.paidDate, 'วันที่รับเงิน');
     const paidIso = iso(paidDate)!;
     if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
-    const whtAmount = parseMoney(dto.whtAmount ?? 0, 'ภาษีหัก ณ ที่จ่าย');
-    const whtMethod = (whtAmount > 0 ? dto.whtMethod : 'NONE') as WhtMethod;
-    if (!WHT_METHODS.includes(whtMethod) || (whtAmount > 0 && whtMethod === 'NONE')) throw bad('ลูกค้าหัก ณ ที่จ่าย ต้องเลือกว่าเป็น 50 ทวิ กระดาษ หรือ e-WHT');
+    const { whtAmount, whtMethod } = parseWht(dto);
     const buyerNotVatRegistered = dto.buyerNotVatRegistered === true;
     const expectedUpdatedAt = typeof dto.expectedUpdatedAt === 'string' ? dto.expectedUpdatedAt : null;
     const year = Number(paidIso.slice(0, 4));
@@ -171,17 +181,7 @@ export class TaxInvoiceService {
         const amounts = taxInvoiceAmounts({ feeTotal: fee, serviceTotal: service, goodsTotal: goods, vatAmount: vat }, whtAmount);
         if (whtAmount > round2(service + goods)) throw bad('ภาษีหัก ณ ที่จ่ายมากกว่ามูลค่าค่าบริการ - ตรวจยอดอีกครั้ง');
 
-        // เลขถัดไปของปี - ล็อกแถวปีนั้น ออกพร้อมกัน 2 หน้าจอได้เลขต่อกันไม่ซ้ำไม่ข้าม
-        if ((await tx.taxInvoiceSeries.count()) === 0) throw bad('ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มก่อน');
-        await tx.$executeRaw`INSERT INTO "TaxInvoiceSeries" ("year", "lastNumber", "updatedAt") VALUES (${year}, 0, NOW()) ON CONFLICT DO NOTHING`;
-        const [series] = await tx.$queryRaw<Array<{ lastNumber: number }>>`SELECT "lastNumber" FROM "TaxInvoiceSeries" WHERE "year" = ${year} FOR UPDATE`;
-        const last = await tx.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
-        if (last && iso(last.issueDate)! > paidIso) {
-          throw bad(`วันที่ต้องไม่ก่อนใบกำกับล่าสุด ${last.taxInvoiceNo} (${dmy(iso(last.issueDate)!)}) - เลขใบกำกับต้องเรียงตามวันที่`);
-        }
-        const number = series.lastNumber + 1;
-        const taxInvoiceNo = formatTaxInvoiceNo(year, number);
-        await tx.taxInvoiceSeries.update({ where: { year }, data: { lastNumber: number } });
+        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso);
 
         // ออกแทนใบที่ยกเลิกไปของบิลเดียวกัน - 50 ทวิ ที่แนบไว้กับใบเดิมย้ายมาใบใหม่ (หักภาษีจากการจ่ายเดิม)
         const replaces = await this.replaceableOf(tx, invoiceId);
@@ -219,34 +219,143 @@ export class TaxInvoiceService {
     return this.get(id);
   }
 
+  // ---------- ใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล) ----------
+
+  // ข้อมูลสำหรับหน้า "ออกใบกำกับกำหนดเอง": ผู้ซื้อ ณ ตอนนี้ ข้อมูลที่ขาด เลขถัดไป บัญชีของลูกค้า ณ วันที่ และอัตราหัก ณ ที่จ่ายตั้งต้น
+  async customPreview(customerId: string, date?: string) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    const dateIso = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : bangkokToday();
+    const year = Number(dateIso.slice(0, 4));
+    const buyer = this.buyerOf(customer);
+    const [seriesRows, last] = await Promise.all([
+      this.prisma.taxInvoiceSeries.findMany(),
+      this.prisma.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } }),
+    ]);
+    const current = seriesRows.find((s) => s.year === year);
+    return {
+      enabled: seriesRows.length > 0,
+      buyer,
+      missing: missingBuyerFields(buyer, false),
+      missingIfNotRegistered: missingBuyerFields(buyer, true),
+      nextNo: seriesRows.length ? formatTaxInvoiceNo(year, (current?.lastNumber ?? 0) + 1) : null,
+      lastIssued: last ? { taxInvoiceNo: last.taxInvoiceNo, issueDate: iso(last.issueDate) } : null,
+      replaces: null,
+      account: accountOn(toPeriods(customer.accountPeriods ?? []), dateIso),
+      whtRate: effectiveWhtRate(toTerms(customer), dateIso),
+    };
+  }
+
+  // ออกใบกำกับกำหนดเอง { customerId, issueDate (= วันที่รับเงิน), items, whtAmount, whtMethod, buyerNotVatRegistered?, replacesId? }
+  // VAT 7% เสมอ (ใบกำกับภาษี) · ค่าธรรมเนียมราชการไม่มี VAT · ลูกค้าบัญชีบุคคล ณ วันนั้นออกไม่ได้เหมือนบิล
+  async issueCustom(dto: Record<string, unknown>) {
+    const paidDate = parseIsoDate(dto?.issueDate, 'วันที่รับเงิน');
+    const paidIso = iso(paidDate)!;
+    if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
+    if (typeof dto.customerId !== 'string' || !dto.customerId) throw bad('ต้องระบุลูกค้า');
+    const items = parseItems(dto.items);
+    if (items.length === 0) throw bad('ต้องมีอย่างน้อย 1 บรรทัด');
+    const { whtAmount, whtMethod } = parseWht(dto);
+    const buyerNotVatRegistered = dto.buyerNotVatRegistered === true;
+    const replacesId = typeof dto.replacesId === 'string' && dto.replacesId ? dto.replacesId : null;
+    const year = Number(paidIso.slice(0, 4));
+
+    const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
+    if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+    if (accountOn(toPeriods(customer.accountPeriods ?? []), paidIso) !== 'COMPANY') throw bad('ลูกค้ารายนี้ใช้บัญชีบุคคล ณ วันที่นี้ ไม่มีใบกำกับภาษี');
+    const buyer = this.buyerOf(customer);
+    const missing = missingBuyerFields(buyer, buyerNotVatRegistered);
+    if (missing.length) throw bad(`ข้อมูลลูกค้ายังไม่ครบ: ${missing.join(', ')} - แก้ข้อมูลลูกค้าก่อน`);
+
+    const totals = computeInvoiceTotals({ lines: [], extras: [], items, terms: { vat: true, whtRate: 0, whtSpecialRate: null, whtSpecialUntil: null }, issueDate: paidIso });
+    if (whtAmount > round2(totals.serviceTotal + totals.goodsTotal)) throw bad('ภาษีหัก ณ ที่จ่ายมากกว่ามูลค่าค่าบริการ - ตรวจยอดอีกครั้ง');
+    const amounts = taxInvoiceAmounts({ feeTotal: totals.feeTotal, serviceTotal: totals.serviceTotal, goodsTotal: totals.goodsTotal, vatAmount: totals.vatAmount }, whtAmount);
+
+    const id = await this.prisma.$transaction(
+      async (tx) => {
+        // ออกแทนใบกำกับกำหนดเองที่ยกเลิกไปแล้ว (เช่น ชื่อผู้ซื้อผิด) - 50 ทวิ ที่แนบไว้ย้ายมาใบใหม่ถ้าเป็นลูกค้าคนเดิม
+        let replaces: { id: string; whtCertificateId: string | null; customerId: string } | null = null;
+        if (replacesId) {
+          await tx.$queryRaw`SELECT "id" FROM "TaxInvoice" WHERE "id" = ${replacesId} FOR UPDATE`;
+          const old = await tx.taxInvoice.findUnique({
+            where: { id: replacesId },
+            select: { id: true, status: true, invoiceId: true, customerId: true, whtCertificateId: true, replacedBy: { select: { id: true } } },
+          });
+          if (!old) throw new NotFoundException({ error: 'ไม่พบใบกำกับที่จะออกแทน' });
+          if (old.status !== 'CANCELLED' || old.invoiceId !== null) throw conflict('ออกแทนได้เฉพาะใบกำกับกำหนดเองที่ยกเลิกแล้ว');
+          if (old.replacedBy) throw conflict('ใบนี้มีใบใหม่ออกแทนไปแล้ว');
+          replaces = old;
+        }
+        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso);
+        const carriedCert = replaces?.whtCertificateId && whtAmount > 0 && replaces.customerId === customer.id ? replaces.whtCertificateId : null;
+        const created = await tx.taxInvoice.create({
+          data: {
+            taxInvoiceNo,
+            year,
+            number,
+            invoiceId: null,
+            customerId: customer.id,
+            issueDate: paidDate,
+            customerSnapshot: buyer,
+            buyerNotVatRegistered,
+            vatRate: totals.vatRate,
+            feeTotal: totals.feeTotal,
+            serviceTotal: totals.serviceTotal,
+            goodsTotal: totals.goodsTotal,
+            vatAmount: totals.vatAmount,
+            grandTotal: amounts.grandTotal,
+            whtAmount: amounts.whtAmount,
+            receivedAmount: amounts.receivedAmount,
+            whtMethod,
+            whtCertificateId: carriedCert,
+            replacesId: replaces?.id ?? null,
+            createdById: currentUser()?.id ?? null,
+            items: { createMany: { data: items.map((it) => ({ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: it.amount, sortOrder: it.sortOrder })) } },
+          },
+        });
+        if (carriedCert) await tx.taxInvoice.update({ where: { id: replaces!.id }, data: { whtCertificateId: null } });
+        return created.id;
+      },
+      { timeout: 20_000 },
+    );
+    return this.get(id);
+  }
+
   // ยกเลิกใบกำกับ (แทน "ยกเลิกการรับเงิน" ของบิลที่มีใบกำกับในระบบ): เลขเดิมเก็บเป็น "ยกเลิก" ไม่ใช้ซ้ำ บิลกลับเป็นรอรับเงิน
   async cancel(id: string, dto: { remark?: unknown }) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่ยกเลิกใบกำกับ');
     await this.prisma.$transaction(async (tx) => {
       const tv = await tx.taxInvoice.findUnique({ where: { id }, select: { id: true, invoiceId: true } });
       if (!tv) throw new NotFoundException({ error: 'ไม่พบใบกำกับ' });
-      await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${tv.invoiceId} FOR UPDATE`;
+      // ใบกำกับกำหนดเองไม่มีบิลให้ล็อกหรือย้อนสถานะ - ล็อกแถวใบกำกับเองแทน แล้วบันทึกประวัติที่ใบกำกับ
+      if (tv.invoiceId) await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${tv.invoiceId} FOR UPDATE`;
+      else await tx.$queryRaw`SELECT "id" FROM "TaxInvoice" WHERE "id" = ${id} FOR UPDATE`;
       const current = await tx.taxInvoice.findUnique({ where: { id } });
       if (!current || current.status !== 'ISSUED') throw conflict('ใบกำกับนี้ถูกยกเลิกไปแล้ว กรุณาโหลดรายการใหม่');
-      const invoice = await tx.invoice.findUnique({ where: { id: tv.invoiceId }, select: { status: true, paidDate: true } });
+      const invoice = tv.invoiceId ? await tx.invoice.findUnique({ where: { id: tv.invoiceId }, select: { status: true, paidDate: true } }) : null;
       await tx.taxInvoice.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: remark, cancelledById: currentUser()?.id ?? null },
       });
-      if (invoice?.status === 'PAID') {
+      if (tv.invoiceId && invoice?.status === 'PAID') {
         await tx.invoice.update({ where: { id: tv.invoiceId }, data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null } });
       }
-      await writeAudit(tx, {
-        entity: 'Invoice',
-        entityId: tv.invoiceId,
-        action: 'cancel-tax-invoice',
-        remark,
-        changes: {
-          status: { from: invoice?.status ?? null, to: 'ISSUED' },
-          paidDate: { from: invoice?.paidDate ?? null, to: null },
-          taxInvoiceNo: { from: current.taxInvoiceNo, to: null },
-        },
-      });
+      await writeAudit(
+        tx,
+        tv.invoiceId
+          ? {
+              entity: 'Invoice',
+              entityId: tv.invoiceId,
+              action: 'cancel-tax-invoice',
+              remark,
+              changes: {
+                status: { from: invoice?.status ?? null, to: 'ISSUED' },
+                paidDate: { from: invoice?.paidDate ?? null, to: null },
+                taxInvoiceNo: { from: current.taxInvoiceNo, to: null },
+              },
+            }
+          : { entity: 'TaxInvoice', entityId: id, action: 'cancel', remark, changes: { status: { from: 'ISSUED', to: 'CANCELLED' }, taxInvoiceNo: { from: current.taxInvoiceNo, to: null } } },
+      );
     });
     return this.get(id);
   }
@@ -261,8 +370,8 @@ export class TaxInvoiceService {
       const now = new Date();
       await tx.taxInvoice.update({ where: { id }, data: { replacementIssuedAt: now, replacementReason: remark } });
       await writeAudit(tx, {
-        entity: 'Invoice',
-        entityId: tv.invoiceId,
+        entity: tv.invoiceId ? 'Invoice' : 'TaxInvoice',
+        entityId: tv.invoiceId ?? id,
         action: 'tax-invoice-replacement',
         remark,
         changes: { [`ใบแทน ${tv.taxInvoiceNo}`]: { from: tv.replacementIssuedAt, to: now } },
@@ -319,7 +428,7 @@ export class TaxInvoiceService {
         return {
           id: r.id,
           taxInvoiceNo: r.taxInvoiceNo,
-          invoiceNo: r.invoice.invoiceNo,
+          invoiceNo: r.invoice?.invoiceNo ?? null,
           issueDate: date,
           customerId: r.customerId,
           customerName: (r.customerSnapshot as CustomerSnapshot).name,
@@ -476,6 +585,21 @@ export class TaxInvoiceService {
 
   // ---------- ภายใน ----------
 
+  // เลขถัดไปของปี - ล็อกแถวปีนั้น ออกพร้อมกัน 2 หน้าจอได้เลขต่อกันไม่ซ้ำไม่ข้าม (ใช้ทั้งใบจากบิลและใบกำหนดเอง เลขชุดเดียวกัน)
+  private async takeNumber(tx: Prisma.TransactionClient, year: number, paidIso: string) {
+    if ((await tx.taxInvoiceSeries.count()) === 0) throw bad('ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มก่อน');
+    await tx.$executeRaw`INSERT INTO "TaxInvoiceSeries" ("year", "lastNumber", "updatedAt") VALUES (${year}, 0, NOW()) ON CONFLICT DO NOTHING`;
+    const [series] = await tx.$queryRaw<Array<{ lastNumber: number }>>`SELECT "lastNumber" FROM "TaxInvoiceSeries" WHERE "year" = ${year} FOR UPDATE`;
+    const last = await tx.taxInvoice.findFirst({ where: { year }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    if (last && iso(last.issueDate)! > paidIso) {
+      throw bad(`วันที่ต้องไม่ก่อนใบกำกับล่าสุด ${last.taxInvoiceNo} (${dmy(iso(last.issueDate)!)}) - เลขใบกำกับต้องเรียงตามวันที่`);
+    }
+    const number = series.lastNumber + 1;
+    const taxInvoiceNo = formatTaxInvoiceNo(year, number);
+    await tx.taxInvoiceSeries.update({ where: { year }, data: { lastNumber: number } });
+    return { number, taxInvoiceNo };
+  }
+
   private buyerOf(c: { name: string; company: string | null; branch: string | null; address: string | null; taxId: string | null }): CustomerSnapshot {
     return { name: c.company || c.name, branch: c.branch, address: c.address, taxId: c.taxId ? c.taxId.replace(/\D/g, '') || c.taxId : null };
   }
@@ -495,8 +619,9 @@ export class TaxInvoiceService {
       id: t.id,
       taxInvoiceNo: t.taxInvoiceNo,
       invoiceId: t.invoiceId,
-      invoiceNo: t.invoice.invoiceNo,
-      invoiceIssueDate: iso(t.invoice.issueDate),
+      // null = ใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล)
+      invoiceNo: t.invoice?.invoiceNo ?? null,
+      invoiceIssueDate: t.invoice ? iso(t.invoice.issueDate) : null,
       customerId: t.customerId,
       customer: t.customerSnapshot as CustomerSnapshot,
       buyerNotVatRegistered: t.buyerNotVatRegistered,
@@ -522,11 +647,11 @@ export class TaxInvoiceService {
       status: t.status,
       cancelledAt: t.cancelledAt?.toISOString() ?? null,
       cancelReason: t.cancelReason,
-      // บรรทัดบนหน้าใบ = บรรทัดหน้าใบวางบิลเดิม (หน้าจอคำนวณด้วย invoiceFaceLines ชุดเดียวกัน)
-      jobLabel: t.invoice.jobLabel,
-      extras: t.invoice.extras as Array<{ label: string; amount: number }>,
-      whtRate: Number(t.invoice.whtRate),
-      lines: t.invoice.lines.map((l) => ({
+      // บรรทัดบนหน้าใบ = บรรทัดหน้าใบวางบิลเดิม (หน้าจอคำนวณด้วย invoiceFaceLines ชุดเดียวกัน) · ใบกำหนดเองใช้บรรทัดของใบเอง
+      jobLabel: t.invoice?.jobLabel ?? '',
+      extras: t.invoice ? (t.invoice.extras as Array<{ label: string; amount: number }>) : [],
+      whtRate: t.invoice ? Number(t.invoice.whtRate) : Number(t.serviceTotal) > 0 ? round2((Number(t.whtAmount) / Number(t.serviceTotal)) * 100) : 0,
+      lines: (t.invoice?.lines ?? []).map((l) => ({
         receiptAmount: Number(l.receiptAmount),
         serviceFee: Number(l.serviceFee),
         serviceLabel: l.serviceLabel,
@@ -537,10 +662,10 @@ export class TaxInvoiceService {
         deduction: Number(l.deduction),
         swapReceiptAmount: l.swapReceiptAmount === null ? null : Number(l.swapReceiptAmount),
       })),
-      items: [...t.invoice.items]
+      items: [...(t.invoice?.items ?? t.items)]
         .sort((a, b) => a.sortOrder - b.sortOrder)
         .map((it) => ({ id: it.id, kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: Number(it.unitPrice), amount: Number(it.amount), cost: null })),
-      lineCount: t.invoice.lines.length,
+      lineCount: t.invoice?.lines.length ?? 0,
     };
   }
 }
