@@ -118,6 +118,14 @@ describe('OverviewService.overview', () => {
     expect(result.spend.categories.find((c) => c.key === 'payroll')!.today).toBe(37625);
   });
 
+  it('เปลี่ยนแปลงเทียบวันก่อนไม่รวมเงินเดือน/ค่าจ้าง แต่ยอดรวมยังรวมไว้', async () => {
+    const { svc, prisma } = service({ spendSubs: [sub('2026-09-26', { billFeeTotal: 200, taxAmount: 0 }), sub('2026-09-27', { billFeeTotal: 300, taxAmount: 0 })] });
+    prisma.payrollRun.findMany.mockResolvedValue([{ payDate: d('2026-09-27'), items: [{ salary: 50000, otherIncome: 0, ssoAmount: 0 }] }]);
+    const result = await svc.overview();
+    expect(result.spend.today.total).toBe(50300);
+    expect(result.spend.changeVsYesterday).toBe(50); // 300 เทียบ 200 ไม่ใช่ 50,300 เทียบ 200
+  });
+
   it('ใช้เงิน: งานที่ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จจริงแทน Bill ที่ระบบคำนวณ', async () => {
     const { svc } = service({
       spendSubs: [sub('2026-09-27', { status: 'RECEIPT_RECEIVED', receiptAmount: 2450, noBillTotal: 200 }), sub('2026-09-27')],

@@ -106,7 +106,7 @@ export interface Overview {
     last30: SpendSum;
     prev30: SpendSum;
     month: SpendSum;
-    changeVsYesterday: number | null;
+    changeVsYesterday: number | null; // % เปลี่ยนแปลง 3 ช่องนี้ไม่รวมเงินเดือน/ค่าจ้าง (overhead)
     changeVs7: number | null;
     changeVs30: number | null;
     categories: Array<{ key: string; label: string; today: number; last30: number; dutyToday: number; dutyLast30: number }>;
