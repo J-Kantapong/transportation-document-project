@@ -1,9 +1,13 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { DeliverySheetService } from './delivery-sheet.service.js';
 import { DeliveryService } from './delivery.service.js';
 
 @Controller('api/delivery')
 export class DeliveryController {
-  constructor(private readonly deliveryService: DeliveryService) {}
+  constructor(
+    private readonly deliveryService: DeliveryService,
+    private readonly deliverySheetService: DeliverySheetService,
+  ) {}
 
   @Get('queue')
   async queue() {
@@ -30,6 +34,12 @@ export class DeliveryController {
   @Get('slips')
   slips(@Query() query: { from?: string; to?: string; customerId?: string }) {
     return this.deliveryService.slips(query);
+  }
+
+  // ใบส่งงานรวมทุกประเภท (ผู้ใช้ 2026-10-05) - ?from&to&customerId= -> { rows, truncated } อ่านอย่างเดียว ดู delivery-sheet.service.ts
+  @Get('sheet')
+  sheet(@Query() query: { from?: string; to?: string; customerId?: string }) {
+    return this.deliverySheetService.sheet(query);
   }
 
   @Get('slips/:id')

@@ -293,11 +293,6 @@ This private repository is the shared development surface for the user, Claude C
   `GET /api/billing/wht-pending` (overdue after 30 days, user) + `POST .../wht-pending/remind`. Credit terms:
   `Customer.billingCreditDays` (terms editor, `creditDays` in `PATCH .../customers/:id/terms`), `Invoice.dueDate` =
   issue date + days at issue (shifted when the issue date is edited); the invoice list flags overdue / due in 7 days.
-- Quotations (ใบเสนอราคา, user 2026-10-01, migration `20261001090000_quotations`, code in
-  `backend/src/billing/quotation.*`, pages `/accounting/quotations` (list), `/new` (`?edit=<id>` = edit a draft),
-  `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
-  the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
-  per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT
@@ -309,6 +304,11 @@ This private repository is the shared development surface for the user, Claude C
   `POST /api/billing/tax-invoices/custom` { customerId, issueDate (= paid date), items, whtAmount, whtMethod,
   buyerNotVatRegistered?, replacesId? }; TaxInvoice reads now return `invoiceNo` / `invoiceId` null for these. Page
   `/accounting/tax-invoices/new` (`?replaces=<id>`), button on `/accounting/tax-invoices`; `InvoiceItemsEditor` has `hideCost`.
+- Quotations (ใบเสนอราคา, user 2026-10-01, migration `20261001090000_quotations`, code in
+  `backend/src/billing/quotation.*`, pages `/accounting/quotations` (list), `/new` (`?edit=<id>` = edit a draft),
+  `/view?id=`): YM's work must be quoted and approved (YM sends back a PO as a PDF with a number) before every bill, and
+  the same flow works for any customer. `Quotation.kind`: `JOB` = an amount for a job (lines like `InvoiceItem`), `RATE` =
+  per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
   `ISSUED` -> `APPROVED` | `REJECTED`, plus `CANCELLED` and `SUPERSEDED`; the screen groups by `stage` (`stageOf`:
   WAITING / EXPIRED by `validUntil`, DONE once billed or applied as rates). Number `QT{year}-{3 digits}` from
   `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; an issued
@@ -389,6 +389,18 @@ This private repository is the shared development surface for the user, Claude C
   `PATCH /:id/inspection-sent`, `PATCH /:id/inspection-result`, `POST /:id/inspection-undo`, `PATCH /:id/return`, `POST /:id/undo-return`,
   `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`); access = `ADMIN` / `STAFF_CAR` (cars) / `STAFF_MOTO` (motorcycles)
   write, `ACCOUNTANT` read. Not built (user did not ask): vehicle photos for the inspection, receive plate/book, Delivery, billing, executive overview.
+- Combined job sheet (ใบส่งงานรวมทุกงาน, user 2026-10-05, no migration, code in `backend/src/delivery/delivery-sheet.service.ts`, page
+  `/registration/new-vehicle/delivery/report/sheet` = second tab "ใบรวมทุกงาน" of the delivery report): read-only; pick owner (เจ้าของงาน) +
+  date range, prints / saves PDF one sheet per owner x day with a section per job type, no prices, not a DL (no DL number of its own, the
+  footer lists the DL numbers included). `GET /api/delivery/sheet?from&to&customerId` -> `{ rows, truncated }` (same access as `GET
+  /api/delivery/slips`; DELIVERY sees DL rows only, STAFF_CAR / STAFF_MOTO see their vehicle kind, plate copy is cars only). The date of a
+  row is the job's own "sent" date because only new vehicles + plate swaps have a delivery step: DL slip date (`VEHICLE`, `PLATE_SWAP`,
+  cancelled slips/items left out), `TaxRenewal.deliveredDate`, `returnedDate` for vehicle use cancellation / plate copy / vehicle transfer,
+  `YamahaRelocationEntry.date` (no owner in the data: shown under a pseudo-owner "ยามาฮ่า (แจ้งย้าย)" only when no owner is picked). A
+  wrong date is fixed from the row ("✎ แก้วันที่", reason mandatory): DL rows reuse the slip edit dialog (`PATCH /api/delivery/slips/:id`, whole
+  slip), the others call the job's own existing PATCH with just the date + `remark` (`deliveredDate` / `returnedDate` / Yamaha `date` +
+  `expectedDate`), so validation, scope and AuditLog are those of each job type; no new write route. Printing: `lib/delivery-sheet.ts`
+  (grouping, `canEditSheetRow`), `lib/delivery-sheet-print.ts` (reuses the DL slip styles exported from `lib/delivery-print.ts`).
 - HR / payroll (ฝ่ายบุคคล + เงินเดือน, user 2026-10-05, migration `20261005140000_hr_payroll`, code in `backend/src/hr/`, pages `/hr/employees`,
   `/hr/payroll`, `/hr/payroll/view?id=`): **ADMIN only, reads included** (`/api/hr` rule in `access-policy.ts`, `/hr` in `PAGE_RULES`; without the
   rule the catch-all GET rule would let every staff role read salaries). First round = employee register + monthly salary only (user's choice:

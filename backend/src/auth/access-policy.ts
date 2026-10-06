@@ -42,7 +42,7 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/customer-payments(\/|$)/, access: ['ADMIN', 'ACCOUNTANT', 'STAFF_CAR'] },
   // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN / STAFF_CAR / STAFF_MOTO เท่านั้น - DELIVERY อ่านใบได้แต่แก้ไม่ได้
   // ACCOUNTANT อ่านรายงานส่งงานได้ (ใบส่งงาน + ป้ายค้างส่ง) ไว้ตรวจก่อนวางบิล แต่ไม่เห็นคิว Delivery และบันทึก/แก้ไม่ได้ (ผู้ใช้ 2026-09-27)
-  { pattern: /^\/api\/delivery\/(slips|plate-pending)(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
+  { pattern: /^\/api\/delivery\/(slips|plate-pending|sheet)(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery\/slips(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service

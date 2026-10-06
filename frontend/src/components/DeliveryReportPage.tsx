@@ -22,6 +22,7 @@ import {
   type DeliveryReportInput,
 } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
+import { DeliveryReportTabs } from "@/components/DeliverySheetPage";
 import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialog } from "@/components/DeliverySlipDialogs";
 
 // รายงานส่งงานย้อนหลัง (ผู้ใช้ 2026-09-25): ใบส่งงานตามช่วงวันที่ส่ง แยกรายคันว่าส่งเล่ม / ป้าย (ใบเสร็จไปกับใบวางบิล ผู้ใช้ 2026-09-26)
@@ -230,6 +231,7 @@ export function DeliveryReportPage() {
       )}
       <h1 tabIndex={-1}>รายงานส่งงาน</h1>
       <p>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกเล่ม / ป้าย (ใบเสร็จส่งพร้อมใบวางบิล) พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</p>
+      <DeliveryReportTabs current="slips" />
 
       <section className="panel" style={{ marginTop: 20, padding: "18px 23px", overflow: "visible" }}>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
