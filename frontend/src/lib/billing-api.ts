@@ -117,9 +117,9 @@ export const WHT_METHOD_LABEL: Record<WhtMethod, string> = { NONE: "ไม่ห
 export interface TaxInvoice {
   id: string;
   taxInvoiceNo: string;
-  invoiceId: string;
-  invoiceNo: string;
-  invoiceIssueDate: string;
+  invoiceId: string | null; // null = ใบกำกับกำหนดเองของงานนอกระบบ (ไม่มีใบวางบิล)
+  invoiceNo: string | null;
+  invoiceIssueDate: string | null;
   customerId: string;
   customer: { name: string; branch: string | null; address: string | null; taxId: string | null };
   buyerNotVatRegistered: boolean;
@@ -165,12 +165,15 @@ export interface TaxInvoicePreview {
   nextNo: string | null;
   lastIssued: { taxInvoiceNo: string; issueDate: string } | null;
   replaces: { id: string; taxInvoiceNo: string; cancelReason: string | null; whtCertificateId: string | null } | null;
+  // เฉพาะหน้าใบกำกับกำหนดเอง (customPreview)
+  account?: BillingAccount;
+  whtRate?: number;
 }
 
 export interface WhtPendingRow {
   id: string;
   taxInvoiceNo: string;
-  invoiceNo: string;
+  invoiceNo: string | null;
   issueDate: string;
   customerId: string;
   customerName: string;
@@ -515,6 +518,18 @@ export const billingApi = {
     request<TaxInvoiceSeries>("/api/billing/tax-invoices/series/set", json("POST", data)),
   taxInvoices: (month: string) => request<{ month: string; taxInvoices: TaxInvoice[] }>(`/api/billing/tax-invoices?month=${encodeURIComponent(month)}`),
   taxInvoice: (id: string) => request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}`),
+  customTaxInvoicePreview: (customerId: string, date: string) =>
+    request<TaxInvoicePreview>(`/api/billing/tax-invoices/custom-preview?customerId=${encodeURIComponent(customerId)}&date=${encodeURIComponent(date)}`),
+  // ใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล, ผู้ใช้ 2026-10-05)
+  issueCustomTaxInvoice: (data: {
+    customerId: string;
+    issueDate: string; // = วันที่รับเงิน
+    items: Array<Pick<InvoiceItem, "kind" | "description" | "quantity" | "unitPrice">>;
+    whtAmount: number;
+    whtMethod: WhtMethod;
+    buyerNotVatRegistered: boolean;
+    replacesId?: string;
+  }) => request<{ taxInvoice: TaxInvoice }>("/api/billing/tax-invoices/custom", json("POST", data)),
   taxInvoicePreview: (invoiceId: string) => request<TaxInvoicePreview>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice-preview`),
   issueTaxInvoice: (
     invoiceId: string,

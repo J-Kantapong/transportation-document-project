@@ -25,7 +25,7 @@ function pageHtml(t: TaxInvoice, tag: string): string {
     .join("");
   const attachmentNo = `${t.invoiceNo}-A`;
   const refs = [
-    `อ้างอิงใบวางบิล ${escapeHtml(t.invoiceNo)}`,
+    t.invoiceNo ? `อ้างอิงใบวางบิล ${escapeHtml(t.invoiceNo)}` : "",
     t.lineCount ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo)}` : "",
     t.replacesNo ? `ออกแทนใบเลขที่ ${escapeHtml(t.replacesNo)} (ยกเลิก)` : "",
   ].filter(Boolean);

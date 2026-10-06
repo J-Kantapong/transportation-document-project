@@ -48,6 +48,7 @@ export interface VehicleSearchRow {
   date: string;
   kind: VehicleKind;
   customerName: string;
+  ownerName: string | null;
   brandName: string;
   chassis: string;
   engine: string | null;
@@ -55,6 +56,9 @@ export interface VehicleSearchRow {
   statuses: VehicleStatus[]; // ว่าง = จบงานแล้ว
   problem: boolean;
 }
+
+// ชื่อเจ้าของรถตามทะเบียน - ติดไฟแนนซ์แสดงผู้ครอบครอง ไม่ใช่ไฟแนนซ์ (เดียวกับ backend/src/delivery/delivery.service.ts)
+const ownerNameOf = (o: { name: string | null; hirerName: string | null } | null) => o?.hirerName || o?.name || null;
 
 export interface VehicleSearchParams {
   q?: string;
@@ -100,6 +104,7 @@ export class VehicleSearchService {
         deliveredDate: true,
         plateDeliveredDate: true,
         customer: { select: { name: true } },
+        owner: { select: { name: true, hirerName: true } },
         brand: { select: { name: true } },
         documentSubmissions: {
           orderBy: { createdAt: 'desc' },
@@ -142,6 +147,7 @@ export class VehicleSearchService {
         date: isoOf(v.date),
         kind: vehicleKindOf(v.body),
         customerName: v.customer.name,
+        ownerName: ownerNameOf(v.owner),
         brandName: v.brand.name,
         chassis: v.chassis,
         engine: v.engine,

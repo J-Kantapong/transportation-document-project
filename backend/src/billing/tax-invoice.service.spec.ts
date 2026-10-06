@@ -29,7 +29,16 @@ function invoiceRow(over: Record<string, unknown> = {}) {
 }
 
 // ฐานข้อมูลปลอมพอให้ issue / cancel ทำงาน - เก็บแถวที่สร้างไว้ตรวจ
-function fakeDb(opts: { invoice?: Record<string, unknown>; lastNumber?: number | null; lastTv?: { taxInvoiceNo: string; issueDate: Date } | null; replaceable?: Record<string, unknown> | null } = {}) {
+function fakeDb(
+  opts: {
+    invoice?: Record<string, unknown>;
+    lastNumber?: number | null;
+    lastTv?: { taxInvoiceNo: string; issueDate: Date } | null;
+    replaceable?: Record<string, unknown> | null;
+    customer?: Record<string, unknown>;
+    tv?: Record<string, unknown>;
+  } = {},
+) {
   const created: Array<Record<string, unknown>> = [];
   const invoiceUpdates: Array<Record<string, unknown>> = [];
   const seriesUpdates: Array<Record<string, unknown>> = [];
@@ -57,8 +66,9 @@ function fakeDb(opts: { invoice?: Record<string, unknown>; lastNumber?: number |
         return { id: 'tv-new', ...a.data };
       }),
       update: vi.fn(async () => ({})),
-      findUnique: vi.fn(async () => ({ id: 'tv1', invoiceId: 'i1', status: 'ISSUED', taxInvoiceNo: 'TV2026-005' })),
+      findUnique: vi.fn(async () => ({ id: 'tv1', invoiceId: 'i1', status: 'ISSUED', taxInvoiceNo: 'TV2026-005', ...opts.tv })),
     },
+    customer: { findUnique: vi.fn(async () => ({ ...customer, billingRequiresQuotation: false, accountPeriods: [], ...opts.customer })) },
     auditLog: { create: vi.fn(async (a: { data: Record<string, unknown> }) => audits.push(a.data)) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -145,5 +155,95 @@ describe('TaxInvoiceService.cancel', () => {
     await asUser(() => svc.cancel('tv1', { remark: 'ชื่อลูกค้าผิด' }));
     expect(invoiceUpdates[0]).toEqual({ status: 'ISSUED', paidDate: null, taxInvoiceNo: null });
     expect(audits[0]).toMatchObject({ entity: 'Invoice', entityId: 'i1', action: 'cancel-tax-invoice', remark: 'ชื่อลูกค้าผิด', editedById: 'u1' });
+  });
+});
+
+describe('TaxInvoiceService.issueCustom', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-20T03:00:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const ok = {
+    customerId: 'c1',
+    issueDate: '2026-10-20',
+    whtAmount: 30,
+    whtMethod: 'PAPER',
+    items: [
+      { kind: 'SERVICE', description: 'ค่าบริการงานเก่า', quantity: 2, unitPrice: 500 },
+      { kind: 'FEE', description: 'ค่าธรรมเนียม', quantity: 1, unitPrice: 340 },
+    ],
+  };
+
+  it('takes the next shared number, adds VAT 7% on service only, and has no bill', async () => {
+    const { svc, created, seriesUpdates, invoiceUpdates } = fakeDb({ lastNumber: 157 });
+    await asUser(() => svc.issueCustom(ok));
+    expect(seriesUpdates).toEqual([{ lastNumber: 158 }]);
+    expect(created[0]).toMatchObject({
+      taxInvoiceNo: 'TV2026-158',
+      invoiceId: null,
+      feeTotal: 340,
+      serviceTotal: 1000,
+      goodsTotal: 0,
+      vatRate: 7,
+      vatAmount: 70,
+      grandTotal: 1410,
+      whtAmount: 30,
+      receivedAmount: 1380,
+      whtMethod: 'PAPER',
+      createdById: 'u1',
+    });
+    expect((created[0].items as { createMany: { data: Array<Record<string, unknown>> } }).createMany.data).toEqual([
+      { kind: 'SERVICE', description: 'ค่าบริการงานเก่า', quantity: 2, unitPrice: 500, amount: 1000, sortOrder: 0 },
+      { kind: 'FEE', description: 'ค่าธรรมเนียม', quantity: 1, unitPrice: 340, amount: 340, sortOrder: 1 },
+    ]);
+    expect(invoiceUpdates).toHaveLength(0);
+  });
+
+  it('refuses before the series is enabled, with no lines, with a future date, or without a WHT method', async () => {
+    await expect(fakeDb({ lastNumber: null }).svc.issueCustom(ok)).rejects.toMatchObject({ response: { error: 'ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มก่อน' } });
+    await expect(fakeDb({ lastNumber: 1 }).svc.issueCustom({ ...ok, items: [] })).rejects.toMatchObject({ status: 400 });
+    await expect(fakeDb({ lastNumber: 1 }).svc.issueCustom({ ...ok, issueDate: '2026-10-21' })).rejects.toMatchObject({ status: 400 });
+    await expect(fakeDb({ lastNumber: 1 }).svc.issueCustom({ ...ok, whtMethod: 'NONE' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('keeps numbers in date order like the bill-based ones', async () => {
+    const { svc, created } = fakeDb({ lastNumber: 10, lastTv: { taxInvoiceNo: 'TV2026-010', issueDate: new Date('2026-10-20T00:00:00.000Z') } });
+    await expect(svc.issueCustom({ ...ok, issueDate: '2026-10-19' })).rejects.toMatchObject({ status: 400 });
+    expect(created).toHaveLength(0);
+  });
+
+  it('needs the buyer details and a company-account customer; the quotation requirement does not apply', async () => {
+    await expect(fakeDb({ lastNumber: 1, customer: { taxId: null } }).svc.issueCustom(ok)).rejects.toMatchObject({ status: 400 });
+    const { svc, created } = fakeDb({ lastNumber: 1, customer: { taxId: null } });
+    await svc.issueCustom({ ...ok, buyerNotVatRegistered: true });
+    expect(created[0]).toMatchObject({ buyerNotVatRegistered: true });
+    const personal = { accountPeriods: [{ account: 'PERSONAL', effectiveFrom: new Date('2026-01-01T00:00:00.000Z') }] };
+    await expect(fakeDb({ lastNumber: 1, customer: personal }).svc.issueCustom(ok)).rejects.toMatchObject({ status: 400 });
+    const quoted = fakeDb({ lastNumber: 1, customer: { billingRequiresQuotation: true } });
+    await quoted.svc.issueCustom(ok);
+    expect(quoted.created).toHaveLength(1);
+  });
+
+  it('WHT cannot exceed the service and goods value', async () => {
+    await expect(fakeDb({ lastNumber: 1 }).svc.issueCustom({ ...ok, whtAmount: 1000.01 })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('reissue takes over a cancelled custom invoice and its 50 ทวิ; other kinds are refused', async () => {
+    const old = { id: 'tv-old', status: 'CANCELLED', invoiceId: null, customerId: 'c1', whtCertificateId: 'cert1', replacedBy: null };
+    const { svc, created } = fakeDb({ lastNumber: 5, tv: old });
+    await svc.issueCustom({ ...ok, replacesId: 'tv-old' });
+    expect(created[0]).toMatchObject({ replacesId: 'tv-old', whtCertificateId: 'cert1', taxInvoiceNo: 'TV2026-006' });
+    await expect(fakeDb({ lastNumber: 5, tv: { ...old, status: 'ISSUED' } }).svc.issueCustom({ ...ok, replacesId: 'tv-old' })).rejects.toMatchObject({ status: 409 });
+    await expect(fakeDb({ lastNumber: 5, tv: { ...old, invoiceId: 'i1' } }).svc.issueCustom({ ...ok, replacesId: 'tv-old' })).rejects.toMatchObject({ status: 409 });
+    await expect(fakeDb({ lastNumber: 5, tv: { ...old, replacedBy: { id: 'x' } } }).svc.issueCustom({ ...ok, replacesId: 'tv-old' })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('cancelling a custom invoice touches no bill and is logged on the tax invoice', async () => {
+    const { svc, invoiceUpdates, audits } = fakeDb({ lastNumber: 5, tv: { invoiceId: null } });
+    await asUser(() => svc.cancel('tv1', { remark: 'ชื่อผู้ซื้อผิด' }));
+    expect(invoiceUpdates).toHaveLength(0);
+    expect(audits[0]).toMatchObject({ entity: 'TaxInvoice', entityId: 'tv1', action: 'cancel', remark: 'ชื่อผู้ซื้อผิด', editedById: 'u1' });
   });
 });

@@ -202,7 +202,7 @@ export function WhtFollowUpPage() {
                                 </td>
                                 <td>
                                   {r.taxInvoiceNo}
-                                  <div className="muted">บิล {r.invoiceNo}</div>
+                                  <div className="muted">{r.invoiceNo ? `บิล ${r.invoiceNo}` : "งานนอกระบบ"}</div>
                                 </td>
                                 <td>{isoToDisplayDate(r.issueDate)}</td>
                                 <td style={{ textAlign: "right" }}>{formatMoney(r.whtAmount)}</td>

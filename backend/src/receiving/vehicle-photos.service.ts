@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 // ค้นรูปทุกประเภทของรถด้วยเลขตัวถัง (ผู้ใช้ 2026-09-22: ดูรูปในระบบ ไม่ต้องเข้า Cloudflare)
@@ -48,10 +49,23 @@ export class VehiclePhotosService {
   async searchByChassis(raw: string): Promise<VehiclePhotos[]> {
     const chassis = raw.trim();
     if (!chassis) throw new BadRequestException({ error: 'กรุณาระบุเลขตัวถัง' });
+    return this.load({ chassis: { contains: chassis, mode: 'insensitive' } }, MAX_RESULTS);
+  }
+
+  // รูปของรถคันเดียว (ผู้ใช้ 2026-10-05: ปุ่ม "รูป" ในหน้าค้นหารถ) - ขอบเขตประเภทรถเดียวกับการค้นด้วยเลขตัวถัง
+  async findByVehicleId(rawId: string): Promise<VehiclePhotos> {
+    const id = rawId.trim();
+    if (!id) throw new BadRequestException({ error: 'กรุณาระบุรถ' });
+    const [vehicle] = await this.load({ id }, 1);
+    if (!vehicle) throw new NotFoundException({ error: 'ไม่พบรถคันนี้' });
+    return vehicle;
+  }
+
+  private async load(match: Prisma.VehicleWhereInput, take: number): Promise<VehiclePhotos[]> {
     const vehicles = await this.prisma.vehicle.findMany({
-      where: { deletedAt: null, chassis: { contains: chassis, mode: 'insensitive' }, ...vehicleTypeWhere() },
+      where: { deletedAt: null, ...match, ...vehicleTypeWhere() },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: MAX_RESULTS,
+      take,
       select: {
         id: true,
         chassis: true,

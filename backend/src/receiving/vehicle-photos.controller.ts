@@ -6,8 +6,10 @@ import { VehiclePhotosService } from './vehicle-photos.service.js';
 export class VehiclePhotosController {
   constructor(private readonly service: VehiclePhotosService) {}
 
+  // ?vehicleId= = รถคันเดียว (ปุ่ม "รูป" ในหน้าค้นหารถ) / ?chassis= = ค้นด้วยเลขตัวถัง
   @Get('photos')
-  async search(@Query('chassis') chassis = '') {
+  async search(@Query('chassis') chassis = '', @Query('vehicleId') vehicleId = '') {
+    if (vehicleId) return { vehicles: [await this.service.findByVehicleId(vehicleId)] };
     return { vehicles: await this.service.searchByChassis(chassis) };
   }
 }

@@ -1219,11 +1219,12 @@ model TaxInvoiceSeries {
 // ผิด = ยกเลิก (status CANCELLED + เหตุผล เลขเดิมไม่ใช้ซ้ำ บิลกลับเป็นรอรับเงิน) แล้วออกใบใหม่ที่อ้าง replacesId
 // ลูกค้าทำต้นฉบับหาย = "ใบแทน" (replacementIssuedAt/Reason) เลขเดิม ไม่ใช่ใบใหม่
 model TaxInvoice {
+// invoiceId null = ใบกำกับกำหนดเองของงานนอกระบบ (ผู้ใช้ 2026-10-05) ไม่มีใบวางบิล บรรทัดอยู่ใน TaxInvoiceItem
   id                    String    @id @default(cuid())
   taxInvoiceNo          String    @unique
   year                  Int
   number                Int
-  invoiceId             String
+  invoiceId             String?
   customerId            String
   issueDate             DateTime // = วันที่รับเงิน
   customerSnapshot      Json // { name, branch, address, taxId } ข้อมูลลูกค้าปัจจุบัน ณ วันออกใบ
@@ -1250,12 +1251,13 @@ model TaxInvoice {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  invoice        Invoice         @relation(fields: [invoiceId], references: [id])
+  invoice        Invoice?        @relation(fields: [invoiceId], references: [id])
   customer       Customer        @relation(fields: [customerId], references: [id])
   whtCertificate WhtCertificate? @relation(fields: [whtCertificateId], references: [id], onDelete: SetNull)
   replaces       TaxInvoice?     @relation("TaxInvoiceReplaces", fields: [replacesId], references: [id])
   replacedBy     TaxInvoice?     @relation("TaxInvoiceReplaces")
 
+  items          TaxInvoiceItem[]
   @@unique([year, number])
   @@index([invoiceId])
   @@index([customerId])
@@ -1264,6 +1266,23 @@ model TaxInvoice {
 }
 
 // หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่ลูกค้าส่งมา (ผู้ใช้ 2026-09-28): ใบเดียวครอบคลุมใบกำกับได้หลายใบ (บางเจ้าส่งรวม)
+// บรรทัดของใบกำกับกำหนดเอง (invoiceId ของ TaxInvoice เป็น null) - kind/จำนวน/ราคาต่อหน่วยเหมือน InvoiceItem แต่ไม่มีต้นทุน
+// amount = quantity x unitPrice คำนวณฝั่ง server เสมอ · ใบกำกับที่ออกจากใบวางบิลอ่านบรรทัดจากบิลเดิม ไม่ใช้ตารางนี้
+model TaxInvoiceItem {
+  id           String  @id @default(cuid())
+  taxInvoiceId String
+  kind         String // FEE | SERVICE | GOODS
+  description  String
+  quantity     Int     @default(1)
+  unitPrice    Decimal @db.Decimal(12, 2)
+  amount       Decimal @db.Decimal(12, 2)
+  sortOrder    Int     @default(0)
+
+  taxInvoice TaxInvoice @relation(fields: [taxInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([taxInvoiceId])
+}
+
 // PAPER = กระดาษ ต้องแนบไฟล์ · EWHT = หักผ่านธนาคาร ต้องมีเลขอ้างอิง ไฟล์ไม่บังคับ · ยกเลิก = ปลดใบกำกับกลับเป็นรอ 50 ทวิ + ล้าง contentHash
 model WhtCertificate {
   id              String    @id @default(cuid())

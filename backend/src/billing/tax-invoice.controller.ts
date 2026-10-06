@@ -25,6 +25,18 @@ export class TaxInvoiceController {
     return this.taxInvoices.list({ month });
   }
 
+  // ใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล, ผู้ใช้ 2026-10-05) - ต้องอยู่ก่อน tax-invoices/:id
+  @Get('tax-invoices/custom-preview')
+  customPreview(@Query('customerId') customerId?: string, @Query('date') date?: string) {
+    return this.taxInvoices.customPreview(customerId ?? '', date);
+  }
+
+  // { customerId, issueDate (วันที่รับเงิน), items: [{ kind, description, quantity, unitPrice }], whtAmount, whtMethod, buyerNotVatRegistered?, replacesId? }
+  @Post('tax-invoices/custom')
+  async issueCustom(@Body() body: Record<string, unknown>) {
+    return { taxInvoice: await this.taxInvoices.issueCustom(body ?? {}) };
+  }
+
   @Get('tax-invoices/:id')
   async get(@Param('id') id: string) {
     return { taxInvoice: await this.taxInvoices.get(id) };

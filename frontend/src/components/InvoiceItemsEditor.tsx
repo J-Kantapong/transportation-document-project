@@ -148,11 +148,13 @@ export function InvoiceItemsEditor({
   onChange,
   minRows = 0,
   addLabel = "+ เพิ่มบรรทัด",
+  hideCost = false,
 }: {
   rows: ItemRow[];
   onChange: (rows: ItemRow[]) => void;
   minRows?: number; // หน้าบิลกำหนดเอง = 1 (บิลต้องมีอย่างน้อย 1 บรรทัด)
   addLabel?: string;
+  hideCost?: boolean; // ใบกำกับภาษีไม่เก็บต้นทุน - ซ่อนช่องต้นทุน/กำไร
 }) {
   function patch(i: number, p: Partial<ItemRow>) {
     onChange(
@@ -263,45 +265,53 @@ export function InvoiceItemsEditor({
                   {total === null ? "—" : formatMoney(total)}
                 </div>
               </div>
-              <label style={FIELD}>
-                <span className="muted" style={small}>
-                  ต้นทุนต่อหน่วย
-                </span>
-                {r.kind === "FEE" ? (
-                  <div style={{ ...BOX, ...READONLY }} className="muted">
-                    = ยอดเรียกเก็บ
+              {!hideCost && (
+                <>
+                  <label style={FIELD}>
+                    <span className="muted" style={small}>
+                      ต้นทุนต่อหน่วย
+                    </span>
+                    {r.kind === "FEE" ? (
+                      <div style={{ ...BOX, ...READONLY }} className="muted">
+                        = ยอดเรียกเก็บ
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={r.costText}
+                        onChange={(e) => patch(i, { costText: e.target.value })}
+                        placeholder="ไม่ทราบ"
+                        style={BOX}
+                        aria-label={`ต้นทุนต่อหน่วย บรรทัดที่ ${n}`}
+                      />
+                    )}
+                  </label>
+                  <div style={FIELD}>
+                    <span className="muted" style={small}>
+                      กำไร
+                    </span>
+                    <div
+                      style={{
+                        ...BOX,
+                        ...READONLY,
+                        color:
+                          p === null
+                            ? "#bb8527"
+                            : p < 0
+                              ? "#c0392b"
+                              : undefined,
+                      }}
+                    >
+                      {p === null
+                        ? total === null
+                          ? "—"
+                          : "ไม่ทราบ"
+                        : formatMoney(p)}
+                    </div>
                   </div>
-                ) : (
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={r.costText}
-                    onChange={(e) => patch(i, { costText: e.target.value })}
-                    placeholder="ไม่ทราบ"
-                    style={BOX}
-                    aria-label={`ต้นทุนต่อหน่วย บรรทัดที่ ${n}`}
-                  />
-                )}
-              </label>
-              <div style={FIELD}>
-                <span className="muted" style={small}>
-                  กำไร
-                </span>
-                <div
-                  style={{
-                    ...BOX,
-                    ...READONLY,
-                    color:
-                      p === null ? "#bb8527" : p < 0 ? "#c0392b" : undefined,
-                  }}
-                >
-                  {p === null
-                    ? total === null
-                      ? "—"
-                      : "ไม่ทราบ"
-                    : formatMoney(p)}
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </div>
         );
@@ -317,8 +327,8 @@ export function InvoiceItemsEditor({
       {rows.length > 0 && (
         <p className="muted" style={{ fontSize: 12, margin: 0 }}>
           ค่าธรรมเนียมราชการ = ไม่มี VAT ไม่หัก ณ ที่จ่าย · ค่าบริการ = VAT 7% +
-          หัก ณ ที่จ่าย · ขายสินค้า = VAT 7% ไม่หัก ณ ที่จ่าย ·
-          ต้นทุนไม่พิมพ์บนบิล
+          หัก ณ ที่จ่าย · ขายสินค้า = VAT 7% ไม่หัก ณ ที่จ่าย
+          {hideCost ? "" : " · ต้นทุนไม่พิมพ์บนบิล"}
         </p>
       )}
     </div>

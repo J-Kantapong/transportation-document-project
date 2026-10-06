@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { getCachedUser } from "@/lib/auth";
@@ -78,6 +79,9 @@ export function TaxInvoicesPage() {
       <h1 tabIndex={-1}>ใบกำกับภาษี</h1>
       <p>ใบกำกับภาษี/ใบเสร็จรับเงินที่ออกตอนรับเงิน (บัญชีบริษัท) รายเดือน รวมใบที่ยกเลิก - พิมพ์ซ้ำ ออกใบแทน ยกเลิก และโหลดรายงานภาษีขาย</p>
       <TaxInvoiceTabs />
+      <Link href="/accounting/tax-invoices/new" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+        + ออกใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล)
+      </Link>
       {series && !series.enabled && (
         <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
           ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ตอนนี้บิลยังบันทึกรับเงินแบบเดิม (พิมพ์เลข TV จาก Google Sheet) {isAdmin ? "ตั้งเลขล่าสุดด้านล่างเพื่อเริ่มใช้" : "ให้ ADMIN ตั้งเลขเริ่ม"}
@@ -128,7 +132,7 @@ export function TaxInvoicesPage() {
                     {cancelled ? <span className="badge">ยกเลิก</span> : <span className="badge done">ปกติ</span>}
                   </div>
                   <div className="muted" style={{ fontSize: 13 }}>
-                    บิล {r.invoiceNo} · มูลค่า {formatMoney(r.serviceTotal + r.goodsTotal)} · VAT {formatMoney(r.vatAmount)} · รวม {formatMoney(r.grandTotal)}
+                    {r.invoiceNo ? `บิล ${r.invoiceNo}` : "งานนอกระบบ"} · มูลค่า {formatMoney(r.serviceTotal + r.goodsTotal)} · VAT {formatMoney(r.vatAmount)} · รวม {formatMoney(r.grandTotal)}
                     {r.whtAmount > 0 && <> · หัก ณ ที่จ่าย {formatMoney(r.whtAmount)} </>}
                     {r.whtAmount > 0 &&
                       (r.whtCertificate ? (
@@ -157,6 +161,11 @@ export function TaxInvoicesPage() {
                           ยกเลิก
                         </button>
                       </>
+                    )}
+                    {cancelled && !r.invoiceId && !r.replacedByNo && (
+                      <Link className="text-button" href={`/accounting/tax-invoices/new?replaces=${encodeURIComponent(r.id)}`}>
+                        ออกใหม่แทน
+                      </Link>
                     )}
                   </div>
                 </div>

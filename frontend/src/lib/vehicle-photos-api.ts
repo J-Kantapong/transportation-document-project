@@ -35,4 +35,7 @@ export const vehiclePhotosApi = {
   // GET /api/vehicles/receiving/photos?chassis= (contains, ไม่สนตัวพิมพ์, สูงสุด 10 คัน)
   search: (chassis: string) =>
     request<{ vehicles: VehiclePhotos[] }>(`/api/vehicles/receiving/photos?chassis=${encodeURIComponent(chassis.trim())}`),
+  // GET /api/vehicles/receiving/photos?vehicleId= - รถคันเดียว (ปุ่ม "รูป" ในหน้าค้นหารถ)
+  forVehicle: async (vehicleId: string) =>
+    (await request<{ vehicles: VehiclePhotos[] }>(`/api/vehicles/receiving/photos?vehicleId=${encodeURIComponent(vehicleId)}`)).vehicles[0],
 };
