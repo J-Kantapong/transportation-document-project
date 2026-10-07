@@ -7,6 +7,7 @@ import { api, ApiError, type Customer } from "@/lib/api";
 import {
   ACCOUNT_LABEL,
   billingApi,
+  sourceItems,
   type AccountPeriod,
   type BillingAccount,
   type BillingTerms,
@@ -27,6 +28,7 @@ import {
   itemRowsProblem,
   itemRowsProfit,
   itemRowsToItems,
+  SourceItemsNotice,
   type ItemRow,
 } from "@/components/InvoiceItemsEditor";
 import {
@@ -179,6 +181,9 @@ export function BillingCustomInvoicePage() {
     : (invoiceNoEdit ?? suggestedNo);
 
   const items = itemRowsToItems(rows);
+  // บรรทัดที่ดึงมาจากงานอื่นๆ (ผู้ใช้ 2026-10-07) แก้ที่นี่ไม่ได้ แต่นับในยอดและพิมพ์บนบิล
+  const linkedItems = editing ? sourceItems(editing.items) : [];
+  const allItems = [...linkedItems, ...items];
   const invoiceTerms: BillingTerms | null = editing
     ? {
         vat: editing.vatRate > 0,
@@ -193,7 +198,7 @@ export function BillingCustomInvoicePage() {
         [],
         invoiceTerms,
         issueForCalc,
-        items,
+        allItems,
         whtOverrideOf(whtValue),
       )
     : null;
@@ -294,7 +299,7 @@ export function BillingCustomInvoicePage() {
     if (!totals) return "กำลังโหลดเงื่อนไขวางบิลของลูกค้า";
     if (!invoiceNo.trim()) return "ใส่เลขที่บิล";
     if (!issueIso) return "วันที่ออกบิลไม่ถูกต้อง (วว/ดด/ปปปป)";
-    if (rows.length === 0) return "ต้องมีอย่างน้อย 1 บรรทัด";
+    if (rows.length === 0 && linkedItems.length === 0) return "ต้องมีอย่างน้อย 1 บรรทัด";
     const itemError = itemRowsProblem(rows);
     if (itemError) return itemError;
     const wht = whtProblem(defaultWht, whtValue, whtChecked);
@@ -366,7 +371,7 @@ export function BillingCustomInvoicePage() {
           whtAmount: totals.whtAmount,
           netTotal: totals.netTotal,
           lines: [],
-          items,
+          items: allItems,
         }
       : null;
 
@@ -604,10 +609,11 @@ export function BillingCustomInvoicePage() {
           </div>
         )}
 
+        {editing && <SourceItemsNotice items={editing.items} />}
         <InvoiceItemsEditor
           rows={rows}
           onChange={(next) => (setRows(next), setConfirming(false))}
-          minRows={1}
+          minRows={linkedItems.length > 0 ? 0 : 1}
         />
 
         {customer && terms && (
@@ -757,7 +763,7 @@ export function BillingCustomInvoicePage() {
               {ACCOUNT_LABEL[account]} · {issueDateText}
             </div>
             <div style={{ fontSize: 14 }}>
-              {rows.length} บรรทัด · VAT{" "}
+              {rows.length + linkedItems.length} บรรทัด · VAT{" "}
               {totals.vatRate ? `${totals.vatRate}%` : "ไม่มี"} ·{" "}
               <b
                 style={{

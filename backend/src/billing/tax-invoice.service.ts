@@ -63,7 +63,7 @@ function parseWht(dto: { whtAmount?: unknown; whtMethod?: unknown }): { whtAmoun
 type CustomerSnapshot = { name: string; branch: string | null; address: string | null; taxId: string | null; email?: string | null };
 
 const TV_INCLUDE = {
-  invoice: { select: { invoiceNo: true, issueDate: true, jobLabel: true, extras: true, lines: true, items: true, whtRate: true, vatRate: true } },
+  invoice: { select: { invoiceNo: true, issueDate: true, jobLabel: true, extras: true, lines: true, items: true, whtRate: true, vatRate: true, faceLayout: true } },
   whtCertificate: { select: { id: true, method: true, certificateNo: true, certificateDate: true, amount: true, storageKey: true, cancelledAt: true } },
   replaces: { select: { taxInvoiceNo: true } },
   replacedBy: { select: { taxInvoiceNo: true } },
@@ -672,8 +672,22 @@ export class TaxInvoiceService {
       })),
       items: [...(t.invoice?.items ?? t.items)]
         .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((it) => ({ id: it.id, kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: Number(it.unitPrice), amount: Number(it.amount), cost: null })),
+        .map((it) => ({
+          id: it.id,
+          kind: it.kind,
+          description: it.description,
+          quantity: it.quantity,
+          unitPrice: Number(it.unitPrice),
+          amount: Number(it.amount),
+          cost: null,
+          // บรรทัดงานอื่นๆ ของบิล (ผู้ใช้ 2026-10-07) - หน้าใบกำกับรวมเป็นค่าธรรมเนียมรวม/ค่าบริการรวมเหมือนหน้าบิล (ใบกำหนดเองไม่มี)
+          sourceType: 'sourceType' in it ? (it.sourceType ?? null) : null,
+          sourceId: 'sourceId' in it ? (it.sourceId ?? null) : null,
+          sourceSnapshot: 'sourceSnapshot' in it ? (it.sourceSnapshot ?? null) : null,
+        })),
       lineCount: t.invoice?.lines.length ?? 0,
+      // รูปแบบหน้าบิลที่ใบกำกับอ้าง - ใบกำหนดเอง (ไม่มีบิล) พิมพ์บรรทัดของตัวเองตรงๆ
+      faceLayout: t.invoice?.faceLayout ?? 'SUMMARY',
     };
   }
 }

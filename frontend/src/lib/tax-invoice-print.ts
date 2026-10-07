@@ -1,7 +1,10 @@
 import type { Invoice, TaxInvoice, TaxInvoicePreview, WhtMethod } from "@/lib/billing-api";
 import { COMPANY_PROFILE } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2 } from "@/lib/invoice";
-import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
+import { attachmentDetailText, escapeHtml, hasInvoiceAttachment, PRINT_CSS, printHtml } from "@/lib/invoice-print";
+
+// ใบกำกับอ้างใบแนบของบิลเมื่อบิลมีรถหรืองานอื่นๆ (ผู้ใช้ 2026-10-07) - lineCount ไว้กับใบเก่าที่ยังไม่มี items ใน type
+const hasAttachment = (t: Pick<TaxInvoice, "lineCount" | "items">) => t.lineCount > 0 || hasInvoiceAttachment({ lines: [], items: t.items });
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (ผู้ใช้ 2026-09-28) - หน้าตาเดียวกับใบวางบิล (CSS ชุดเดียวกัน) ต่างกันที่:
 // ชื่อเอกสาร + ป้ายต้นฉบับ/สำเนา, เลข TV + อ้างอิงเลขใบวางบิล, วันที่ = วันรับเงิน, ช่องยอดรวมก่อนหัก ณ ที่จ่ายแล้วต่อด้วย
@@ -37,7 +40,7 @@ function pageHtml(t: TaxInvoice, tag: string): string {
   const attachmentNo = `${t.invoiceNo}-A`;
   const refs = [
     t.invoiceNo ? `อ้างอิงใบวางบิล ${escapeHtml(t.invoiceNo)}` : "",
-    t.lineCount ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo)}` : "",
+    hasAttachment(t) ? `เอกสารแนบเลขที่ ${escapeHtml(attachmentNo)}` : "",
     t.replacesNo ? `ออกแทนใบเลขที่ ${escapeHtml(t.replacesNo)} (ยกเลิก)` : "",
   ].filter(Boolean);
   const replacementNote =
@@ -54,7 +57,7 @@ ${buyerHtml(t)}
 <table class="items"><colgroup><col><col style="width:12%"><col style="width:18%"><col style="width:20%"></colgroup>
 <thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th class="r">จำนวนเงิน (บาท)</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="foot"><div><span class="k">ได้รับเงินแล้ว :</span><br>${COMPANY_PROFILE.paymentLines.map(escapeHtml).join("<br>")}<br>วันที่ ${escapeHtml(isoToThaiDate(t.issueDate))}<br>
-${t.lineCount ? `<span class="k">รายละเอียดรถรายคันตามเอกสารแนบเลขที่ ${escapeHtml(attachmentNo)}</span><br>` : ""}
+${hasAttachment(t) ? `<span class="k">${attachmentDetailText(t)}เลขที่ ${escapeHtml(attachmentNo)}</span><br>` : ""}
 ${t.feeTotal > 0 ? `<span class="k">ค่าธรรมเนียมกรมการขนส่งทางบกเป็นเงินทดรองจ่าย ไม่รวมในมูลค่าที่คิดภาษีมูลค่าเพิ่มและภาษีหัก ณ ที่จ่าย</span>` : ""}</div>
 <div class="tot">${t.feeTotal > 0 ? `<div><span>ค่าธรรมเนียม (ทดรองจ่าย)<br><span class="note">ไม่คิด VAT และไม่หักภาษี ณ ที่จ่าย</span></span><span>${formatMoney(t.feeTotal)}</span></div>` : ""}
 <div><span>ค่าบริการ</span><span>${formatMoney(t.serviceTotal)}</span></div>

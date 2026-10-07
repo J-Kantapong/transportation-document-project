@@ -61,6 +61,27 @@ export class BillingController {
     return { invoice: await this.billingService.createCustomInvoice(body ?? {}) };
   }
 
+  // งานอื่นๆ ในใบวางบิล (ผู้ใช้ 2026-10-07): คิวงานโอน / ยกเลิกการใช้รถ / คัดป้าย / ย้ายออก / ต่อภาษี ที่พร้อมวางบิล + ตารางราคาต่อลูกค้า
+  @Get('other-jobs')
+  otherJobsQueue() {
+    return this.billingService.otherJobsQueue();
+  }
+
+  @Post('other-jobs/invoice')
+  async createJobInvoice(@Body() body: Record<string, unknown>) {
+    return { invoice: await this.billingService.createJobInvoice(body ?? {}) };
+  }
+
+  @Get('customers/:id/job-rates')
+  async getJobRates(@Param('id') id: string) {
+    return { rates: await this.billingService.getJobRates(id) };
+  }
+
+  @Put('customers/:id/job-rates')
+  async replaceJobRates(@Param('id') id: string, @Body() body: { rates?: unknown; remark?: unknown }) {
+    return { rates: await this.billingService.replaceJobRates(id, body ?? {}) };
+  }
+
   @Get('next-invoice-no')
   nextInvoiceNumbers() {
     return this.billingService.nextInvoiceNumbers();

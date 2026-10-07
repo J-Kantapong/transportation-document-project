@@ -124,6 +124,7 @@ model Customer {
   vehicles        Vehicle[]
   requestedCases  Case[]
   serviceFeeRates ServiceFeeRate[]
+  jobFeeRates     JobFeeRate[]
   taxRenewals     TaxRenewal[]
   invoices        Invoice[]
   deliverySlips   DeliverySlip[]
@@ -1203,6 +1204,9 @@ model Invoice {
   quotationId      String?
   quotationNo      String?
   poNumber         String?
+  // รูปแบบหน้าบิล (ผู้ใช้ 2026-10-07): SUMMARY = ค่าธรรมเนียมรวม 1 บรรทัด + ค่าบริการรวม 1 บรรทัด อ้างใบแนบ (บิลใหม่ทุกใบ)
+  // GROUPED = แบบเดิม จัดกลุ่มบรรทัดค่าบริการตามราคา (บิลที่ออกก่อนวันนี้ พิมพ์ซ้ำได้เหมือนที่ลูกค้าเคยได้รับ) - migration ตั้งแถวเก่าเป็น GROUPED
+  faceLayout       String    @default("SUMMARY")
 
   customer    Customer      @relation(fields: [customerId], references: [id])
   quotation   Quotation?    @relation(fields: [quotationId], references: [id])
@@ -1227,8 +1231,8 @@ model TaxInvoiceSeries {
 // (unique index บางส่วน TaxInvoice_invoice_active_key ใน migration) · ยอดทุกช่องเป็น snapshot ออกแล้วแก้ไม่ได้
 // ผิด = ยกเลิก (status CANCELLED + เหตุผล เลขเดิมไม่ใช้ซ้ำ บิลกลับเป็นรอรับเงิน) แล้วออกใบใหม่ที่อ้าง replacesId
 // ลูกค้าทำต้นฉบับหาย = "ใบแทน" (replacementIssuedAt/Reason) เลขเดิม ไม่ใช่ใบใหม่
-model TaxInvoice {
 // invoiceId null = ใบกำกับกำหนดเองของงานนอกระบบ (ผู้ใช้ 2026-10-05) ไม่มีใบวางบิล บรรทัดอยู่ใน TaxInvoiceItem
+model TaxInvoice {
   id                    String    @id @default(cuid())
   taxInvoiceNo          String    @unique
   year                  Int
@@ -1267,8 +1271,8 @@ model TaxInvoice {
   whtCertificate WhtCertificate? @relation(fields: [whtCertificateId], references: [id], onDelete: SetNull)
   replaces       TaxInvoice?     @relation("TaxInvoiceReplaces", fields: [replacesId], references: [id])
   replacedBy     TaxInvoice?     @relation("TaxInvoiceReplaces")
-
   items          TaxInvoiceItem[]
+
   @@unique([year, number])
   @@index([invoiceId])
   @@index([customerId])
@@ -1276,7 +1280,6 @@ model TaxInvoice {
   @@index([whtCertificateId])
 }
 
-// หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่ลูกค้าส่งมา (ผู้ใช้ 2026-09-28): ใบเดียวครอบคลุมใบกำกับได้หลายใบ (บางเจ้าส่งรวม)
 // บรรทัดของใบกำกับกำหนดเอง (invoiceId ของ TaxInvoice เป็น null) - kind/จำนวน/ราคาต่อหน่วยเหมือน InvoiceItem แต่ไม่มีต้นทุน
 // amount = quantity x unitPrice คำนวณฝั่ง server เสมอ · ใบกำกับที่ออกจากใบวางบิลอ่านบรรทัดจากบิลเดิม ไม่ใช้ตารางนี้
 model TaxInvoiceItem {
@@ -1294,6 +1297,7 @@ model TaxInvoiceItem {
   @@index([taxInvoiceId])
 }
 
+// หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่ลูกค้าส่งมา (ผู้ใช้ 2026-09-28): ใบเดียวครอบคลุมใบกำกับได้หลายใบ (บางเจ้าส่งรวม)
 // PAPER = กระดาษ ต้องแนบไฟล์ · EWHT = หักผ่านธนาคาร ต้องมีเลขอ้างอิง ไฟล์ไม่บังคับ · ยกเลิก = ปลดใบกำกับกลับเป็นรอ 50 ทวิ + ล้าง contentHash
 model WhtCertificate {
   id              String    @id @default(cuid())
@@ -1424,10 +1428,37 @@ model InvoiceItem {
   amount      Decimal  @db.Decimal(12, 2)
   cost        Decimal? @db.Decimal(12, 2)
   sortOrder   Int      @default(0)
+  // งานอื่นๆ ที่ดึงเข้าบิล (ผู้ใช้ 2026-10-07): sourceType = TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL, sourceId = id ของงานนั้น
+  // งานหนึ่งงานอยู่ในบิลที่ยังไม่ VOID ได้ใบเดียว (ตรวจใน BillingService.createJobInvoice ใต้ล็อกแถวงาน) · null = บรรทัดที่พิมพ์เอง
+  sourceType  String?
+  sourceId    String?
+  // snapshot ของงานตอนออกบิล ไว้พิมพ์ตารางในใบแนบ { chassis, plateText, brand, ownerName, receiptNo, doneDate, vehicleClass, variant } - ทั้ง 2 บรรทัดของงานเดียวกันเก็บเหมือนกัน
+  sourceSnapshot Json?
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+  @@index([sourceType, sourceId])
+}
+
+// ตารางค่าบริการต่อลูกค้า ต่อประเภทงานอื่นๆ (ผู้ใช้ 2026-10-07: "ราคาแต่ละเจ้าไม่เท่ากัน") - แยกจาก ServiceFeeRate ของรถจดใหม่ ไม่กระทบการจับคู่ราคาเดิม
+// จับคู่: jobType เท่ากัน + vehicleClass ตรง (หรือ ANY) + variant ตรง (หรือว่าง = ทุกแบบ) แถวที่ sortOrder น้อยสุดที่เข้าเงื่อนไขชนะ
+// amount = ค่าบริการก่อน VAT (ส่วนค่าธรรมเนียมราชการอ่านจากใบเสร็จของงานเอง)
+model JobFeeRate {
+  id           String   @id @default(cuid())
+  customerId   String
+  jobType      String // TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL
+  vehicleClass String   @default("ANY") // CAR | MOTO | ANY
+  variant      String? // งานโอน: OWNER | INSPECTION (ว่าง = ทุกแบบ)
+  label        String   @default("") // ข้อความต่อท้ายชื่อรายการบนบิล
+  amount       Decimal  @db.Decimal(12, 2)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
 }
 
 model InvoiceLine {

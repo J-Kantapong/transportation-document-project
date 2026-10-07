@@ -5,7 +5,18 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, receiptImageUrl } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
-import { ACCOUNT_LABEL, billingApi, type BillingAccount, type BillingCustomer, type BillingVehicle, type ClosedBillingVehicle, type ServiceFeeRate } from "@/lib/billing-api";
+import {
+  ACCOUNT_LABEL,
+  billingApi,
+  type BillingAccount,
+  type BillingCustomer,
+  type BillingVehicle,
+  type ClosedBillingVehicle,
+  type InvoiceItem,
+  type OtherJob,
+  type OtherJobsCustomer,
+  type ServiceFeeRate,
+} from "@/lib/billing-api";
 import { BillingInvoiceList } from "@/components/BillingInvoiceList";
 import { BillingAccountEditor, BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
@@ -59,6 +70,8 @@ const ROW_GRID: React.CSSProperties = {
 };
 
 const sameIds =(a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
+// งานอื่นๆ ระบุด้วย "ประเภท:id" (id ของแต่ละตารางงานซ้ำกันข้ามประเภทได้ในทางทฤษฎี)
+const jobKey = (j: Pick<OtherJob, "type" | "id">) => `${j.type}:${j.id}`;
 
 const newRow = (v: BillingVehicle): RowState => {
   const receiptText = v.receiptAmount === null ? "" : formatMoney(v.receiptAmount);
@@ -144,6 +157,11 @@ export function BillingPage() {
   const [whtValue, setWhtValue] = useState<number | null>(null);
   const [whtChecked, setWhtChecked] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  // งานอื่นๆ (โอน / ต่อภาษี / ยกเลิกใช้รถ / คัดป้าย / ย้ายออก) ของลูกค้าที่รอวางบิล พ่วงในบิลเดียวกับรถได้ (ผู้ใช้ 2026-10-07)
+  // jobPicked = "ประเภท:id" ที่ติ๊ก · jobPrices = ค่าบริการที่บัญชีพิมพ์แก้เอง (ไม่มี = ราคาจากตารางของลูกค้า)
+  const [otherJobs, setOtherJobs] = useState<OtherJobsCustomer[]>([]);
+  const [jobPicked, setJobPicked] = useState<Set<string>>(new Set());
+  const [jobPrices, setJobPrices] = useState<Record<string, string>>({});
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
@@ -158,8 +176,15 @@ export function BillingPage() {
   async function loadQueue(reset: boolean, shownId = "") {
     setRefreshing(true);
     try {
-      const q = await billingApi.billingQueue();
+      // คิวงานอื่นๆ โหลดคู่กัน - โหลดไม่ได้ก็ออกบิลรถได้ตามปกติ แค่ไม่มีงานอื่นให้พ่วง
+      const [q, jobsQueue] = await Promise.all([billingApi.billingQueue(), billingApi.otherJobsQueue().catch(() => null)]);
       setCustomers(q.customers);
+      if (jobsQueue) {
+        setOtherJobs(jobsQueue.customers);
+        // งานที่ออกบิลไปแล้ว / ถูกยกเลิก หายจากคิว - เอาออกจากที่ติ๊กไว้ด้วย
+        const live = new Set(jobsQueue.customers.flatMap((c) => c.jobs.map(jobKey)));
+        setJobPicked((prev) => new Set([...prev].filter((k) => live.has(k))));
+      }
       // เปิดจากหน้าค้นหารถ (?focus=เลขตัวถัง): เลือกลูกค้าของรถคันนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
       if (!focusApplied.current) {
         focusApplied.current = true;
@@ -190,6 +215,8 @@ export function BillingPage() {
         }
         setRows(fresh);
         setItemRows([]);
+        setJobPicked(new Set());
+        setJobPrices({});
         setJobLabelEdit(null);
         setInvoiceNos({ COMPANY: q.suggestedInvoiceNo, PERSONAL: q.suggestedPersonalInvoiceNo });
         setLastInvoiceNos({ COMPANY: q.lastInvoiceNo, PERSONAL: q.lastPersonalInvoiceNo });
@@ -199,8 +226,10 @@ export function BillingPage() {
         if (q.customers.some((c) => c.id === shownId)) {
           setCustomerId(shownId); // ลูกค้าอื่นเพิ่งเข้าคิวก็ยังอยู่ที่ลูกค้าเดิม
         } else {
-          // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องานของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
+          // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องาน/งานอื่นของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
           setItemRows([]);
+          setJobPicked(new Set());
+          setJobPrices({});
           setJobLabelEdit(null);
         }
       }
@@ -331,6 +360,25 @@ export function BillingPage() {
       .entries(),
   ];
   const draftItems = itemRowsToItems(itemRows);
+  // งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล + ที่ติ๊กพ่วงในบิลนี้ (ผู้ใช้ 2026-10-07) - ค่าบริการตามตารางของลูกค้า แก้ได้รายงาน
+  const customerJobs = useMemo(() => otherJobs.find((c) => c.id === customer?.id)?.jobs ?? [], [otherJobs, customer?.id]);
+  const jobPriceText = (j: OtherJob) => jobPrices[jobKey(j)] ?? (j.suggestedServiceFee === null ? "" : formatMoney(j.suggestedServiceFee));
+  const jobPrice = (j: OtherJob) => money(jobPriceText(j));
+  const selectedJobs = customerJobs.filter((j) => jobPicked.has(jobKey(j)));
+  // บรรทัดที่งานจะกลายเป็นบนบิล (เหมือน backend jobItems) ไว้คิดยอดและตัวอย่างเอกสาร - server สร้างของจริงเองตอนบันทึก
+  const jobDraftItems: InvoiceItem[] = selectedJobs.flatMap((j) => {
+    const snap = { chassis: j.chassis, plateText: j.plateText, brand: j.brand, ownerName: j.ownerName, receiptNo: j.receiptNo, doneDate: j.doneDate, vehicleClass: j.vehicleClass, variant: j.variant, serviceLabel: j.suggestedServiceLabel };
+    const target = j.plateText || j.chassis;
+    const price = jobPrice(j) ?? 0;
+    const out: InvoiceItem[] = [];
+    if (j.fee > 0) out.push({ kind: "FEE", description: `ค่าธรรมเนียม${j.typeLabel} ${target}`, quantity: 1, unitPrice: j.fee, amount: j.fee, cost: null, sourceType: j.type, sourceId: j.id, sourceSnapshot: snap });
+    if (price > 0) out.push({ kind: "SERVICE", description: `ค่าบริการ${j.typeLabel} ${target}`, quantity: 1, unitPrice: price, amount: price, cost: null, sourceType: j.type, sourceId: j.id, sourceSnapshot: snap });
+    return out;
+  });
+  const allDraftItems = [...jobDraftItems, ...draftItems];
+  // งานอื่นยึดบัญชีของลูกค้า ณ วันออกบิล (ไม่มีวันส่งงาน) - ต้องเป็นบัญชีเดียวกับรถในบิล (backend ตรวจอีกชั้นด้วยวันเดียวกัน)
+  // คิวส่งแค่บัญชี ณ วันนี้ จึงเทียบได้เมื่อออกบิลวันนี้ ถ้าย้อนวันออกบิล backend เป็นคนตัดสิน
+  const jobAccountMismatch = selectedJobs.length > 0 && !!customer && (issueDateIso || todayIso()) === todayIso() && customer.account !== account;
   const customerWht = customer ? effectiveWhtRate(customer.terms, issueDateIso || todayIso()) : 0;
   const totals = customer
     ? computeTotals(
@@ -338,7 +386,7 @@ export function BillingPage() {
         [],
         account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
-        draftItems,
+        allDraftItems,
         whtOverrideOf(whtValue),
       )
     : null;
@@ -360,7 +408,7 @@ export function BillingPage() {
           vatAmount: totals.vatAmount,
           whtAmount: totals.whtAmount,
           netTotal: totals.netTotal,
-          items: draftItems,
+          items: allDraftItems,
           lines: draftLines.map((l) => ({
             id: l.vehicle.id,
             vehicleId: l.vehicle.id,
@@ -393,6 +441,8 @@ export function BillingPage() {
     setChecked(vehicles.map((v) => v.id), false);
     setCustomerId(id);
     setItemRows([]);
+    setJobPicked(new Set());
+    setJobPrices({});
     setJobLabelEdit(null);
     setSettingsOpen("");
     setMessage({ text: "" });
@@ -424,6 +474,13 @@ export function BillingPage() {
     }
     const itemError = itemRowsProblem(itemRows);
     if (itemError) return fail(itemError);
+    if (jobAccountMismatch) return fail("งานอื่นๆ ที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) กับรถในบิลนี้ - ออกบิลงานอื่นแยกใบ");
+    for (const j of selectedJobs) {
+      const name = `${j.typeLabel} ${j.plateText || j.chassis}`;
+      if (jobPriceText(j).trim() === "") return fail(`ใส่ค่าบริการของ ${name} (ใส่ 0 ถ้าไม่คิดค่าบริการ)`);
+      if (jobPrice(j) === null) return fail(`ค่าบริการของ ${name} ต้องเป็นตัวเลข`);
+      if (j.fee <= 0 && (jobPrice(j) ?? 0) <= 0) return fail(`${name} ไม่มียอดให้วางบิล`);
+    }
     const whtError = whtProblem(customerWht, whtValue, whtChecked);
     if (whtError) return fail(whtError);
 
@@ -447,6 +504,7 @@ export function BillingPage() {
         })),
         extras: [],
         ...(draftItems.length ? { items: draftItems } : {}),
+        ...(selectedJobs.length ? { jobs: selectedJobs.map((j) => ({ type: j.type, id: j.id, serviceFee: jobPrice(j) ?? 0, serviceLabel: j.suggestedServiceLabel })) } : {}),
         whtRate: whtOverrideOf(whtValue) ?? undefined,
       });
       returnState.current = null; // ออกบิลแล้ว - ไม่ติ๊กคันเดิมซ้ำ
@@ -457,7 +515,8 @@ export function BillingPage() {
       setShowPreview(false);
       setExpanded(null);
       setInvoiceReload((n) => n + 1);
-      setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน ยอด ${formatMoney(invoice.netTotal)} บาท` });
+      const jobCount = selectedJobs.length;
+      setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน${jobCount ? ` + งานอื่น ${jobCount} งาน` : ""} ยอด ${formatMoney(invoice.netTotal)} บาท` });
       printInvoice(invoice);
     } catch (err) {
       fail(err instanceof ApiError ? err.message : "ออกบิลไม่สำเร็จ");
@@ -482,6 +541,10 @@ export function BillingPage() {
       {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
       <Link href="/accounting/billing/customers" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
         ตั้งราคาล่วงหน้าให้ลูกค้า →
+      </Link>
+      {/* งานโอน / ยกเลิกการใช้รถ / คัดป้าย / ย้ายออก / ต่อภาษี ที่รับใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-07) */}
+      <Link href="/accounting/billing/jobs" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
+        วางบิลงานอื่นๆ (โอน / ต่อภาษี / ยกเลิกใช้รถ ...) →
       </Link>
       {/* บิลที่ไม่มีรถในระบบ: งานเก่าจากระบบเดิม / ขายสินค้า (ผู้ใช้ 2026-09-29) */}
       <Link href="/accounting/billing/custom" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
@@ -927,7 +990,9 @@ export function BillingPage() {
 
           {confirmOpen && (
             <IssueDialog onClose={() => setConfirmOpen(false)}>
-              <h2>ยืนยันออกบิล {selected.length} คัน</h2>
+              <h2>
+                ยืนยันออกบิล {selected.length} คัน{selectedJobs.length ? ` + งานอื่น ${selectedJobs.length} งาน` : ""}
+              </h2>
               <p className="muted" style={{ marginBottom: 12 }}>
                 {customer.company || customer.name} · {ACCOUNT_LABEL[account]}
               </p>
@@ -965,6 +1030,61 @@ export function BillingPage() {
                         <span>{count} คัน</span>
                       </div>
                     ))}
+                  </div>
+                )}
+                {/* งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล พ่วงในบิลเดียวกัน (ผู้ใช้ 2026-10-07) - ค่าธรรมเนียมจากใบเสร็จของงาน ค่าบริการจากตารางของลูกค้า */}
+                {customerJobs.length > 0 && (
+                  <div style={{ display: "grid", gap: 6, fontSize: 13, background: "#f5f7fb", borderRadius: 8, padding: "8px 12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <b style={{ fontWeight: 600 }}>งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล ({customerJobs.length} งาน) - ติ๊กเพื่อรวมในบิลนี้</b>
+                      <Link href="/accounting/billing/jobs" className="text-button" style={{ fontSize: 12 }}>
+                        ออกบิลงานอื่นแยกใบ / ตั้งราคา →
+                      </Link>
+                    </div>
+                    {jobAccountMismatch && <div className="customer-message error">งานอื่นอยู่บัญชี{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถในบิลอยู่{ACCOUNT_LABEL[account]} - ออกบิลงานอื่นแยกใบ</div>}
+                    {customerJobs.map((j) => {
+                      const key = jobKey(j);
+                      const picked = jobPicked.has(key);
+                      return (
+                        <label key={key} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 8, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={picked}
+                            onChange={(e) =>
+                              setJobPicked((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(key);
+                                else next.delete(key);
+                                return next;
+                              })
+                            }
+                          />
+                          <span>
+                            {j.typeLabel} · {j.plateText || j.chassis}
+                            <span className="muted"> · {isoToDisplayDate(j.doneDate)}{j.ownerName ? ` · ${j.ownerName}` : ""}</span>
+                            {j.warnings.map((w) => (
+                              <div key={w} style={{ fontSize: 12, color: "#bb8527" }}>
+                                ⚠ {w}
+                              </div>
+                            ))}
+                          </span>
+                          <span style={{ whiteSpace: "nowrap" }}>ค่าธรรมเนียม {formatMoney(j.fee)}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                            ค่าบริการ
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={jobPriceText(j)}
+                              placeholder="ใส่ราคา"
+                              disabled={!picked}
+                              onChange={(e) => setJobPrices((prev) => ({ ...prev, [key]: e.target.value }))}
+                              style={{ width: 90, textAlign: "right", height: 32, padding: "0 8px" }}
+                              aria-label={`ค่าบริการ ${j.typeLabel} ${j.plateText || j.chassis}`}
+                            />
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
                 <InvoiceItemsEditor rows={itemRows} onChange={setItemRows} addLabel="+ เพิ่มบรรทัดอื่นในบิลนี้ (งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น)" />
