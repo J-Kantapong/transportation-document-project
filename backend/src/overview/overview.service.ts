@@ -48,6 +48,7 @@ import {
 
 const FORECAST_WEEKS = 4;
 const SERIES_DAYS = 30;
+const INSPECTION_REQUEST_FEE = 25; // ค่าใบคำขอตรวจสภาพ ต่อวันที่มีการตรวจ
 const STUCK_LIMIT = 100;
 const NOT_VOID = { invoice: { status: { not: 'VOID' } } } as const;
 const MOTO_TYPE_PREFIX = 'รย.12'; // ต่อภาษี: vehicleType ขึ้นต้น รย.12 = จักรยานยนต์ (เหมือน Vehicle.body)
@@ -132,7 +133,8 @@ export class OverviewService {
   async overview(dateRaw?: unknown) {
     const today = bangkokToday();
     const asOf = parseAsOf(dateRaw);
-    if (asOf > today) throw new BadRequestException({ error: 'เลือกวันที่หลังวันนี้ไม่ได้' });
+    // ดูล่วงหน้าได้ (พนักงานคีย์งานไว้ก่อน, ผู้บริหารขอ 2026-10-07) แต่ไม่เกิน 90 วัน
+    if (asOf > addDays(today, 90)) throw new BadRequestException({ error: 'ดูล่วงหน้าได้ไม่เกิน 90 วัน' });
 
     const day = toDate(asOf);
     const range = { gte: toDate(addDays(asOf, -(SERIES_DAYS * 2 - 1))), lte: day }; // 60 วัน: 30 วันล่าสุด + 30 วันก่อนหน้าไว้เทียบ
@@ -192,7 +194,16 @@ export class OverviewService {
         select: { paymentDate: true, vehicleType: true, billTotal: true, noBillTotal: true, noBillItems: true },
       }),
       this.prisma.yamahaRelocationEntry.findMany({
-        where: { cancelledAt: null, OR: spendWindows.map((w) => ({ date: w })) },
+        // ลงขัน (noBillFee) จ่ายวันสุดท้ายของเดือน จึงดึงทั้งเดือนของช่วงที่ดู (ใบเสร็จจ่ายทุกวัน ใช้วันที่ของรายการ)
+        where: {
+          cancelledAt: null,
+          OR: spendWindows.map((w) => ({
+            date: {
+              gte: new Date(Date.UTC(w.gte.getUTCFullYear(), w.gte.getUTCMonth(), 1)),
+              lte: new Date(Date.UTC(w.lte.getUTCFullYear(), w.lte.getUTCMonth() + 1, 0)),
+            },
+          })),
+        },
         select: { date: true, count: true, billFee: true, noBillFee: true },
       }),
       this.prisma.vehicle.findMany({
@@ -487,7 +498,12 @@ export class OverviewService {
         duty,
       });
     }
-    for (const y of yamaha) events.push({ date: isoOf(y.date), category: 'yamaha', kind: null, bill: num(y.billFee), noBill: num(y.noBillFee), other: 0 });
+    // แจ้งย้ายยามาฮ่า: ใบเสร็จ (Bill) จ่ายทุกวันตามวันที่ของรายการ · ลงขัน (No bill) จ่ายวันสุดท้ายของเดือนของรายการนั้น (ผู้ใช้ 2026-10-07)
+    for (const y of yamaha) {
+      const monthEnd = isoOf(new Date(Date.UTC(y.date.getUTCFullYear(), y.date.getUTCMonth() + 1, 0)));
+      if (inSpendWindow(y.date)) events.push({ date: isoOf(y.date), category: 'yamaha', kind: null, bill: num(y.billFee), noBill: 0, other: 0 });
+      if (inSpendWindow(toDate(monthEnd))) events.push({ date: monthEnd, category: 'yamaha', kind: null, bill: 0, noBill: num(y.noBillFee), other: 0 });
+    }
     for (const t of transfers) {
       events.push({ date: isoOf(t.transferCompletedDate!), category: 'transfer', kind: vehicleKindOf(t.body), bill: 0, noBill: 0, other: num(t.transferCost) });
     }
@@ -503,6 +519,14 @@ export class OverviewService {
         other: 0,
       });
     }
+    // ทุกวันที่มีการส่งตรวจ มีค่าใบคำขอตรวจสภาพ 25 บาท วันละ 1 ใบ (ผู้ใช้ 2026-10-07) - นับรถยนต์ถ้าวันนั้นมีรถยนต์ ไม่มีก็จักรยานยนต์
+    const inspectionDays = new Map<string, VehicleKind>();
+    for (const v of inspections) {
+      const d = isoOf(v.inspectionSentDate!);
+      const k = vehicleKindOf(v.body);
+      if (inspectionDays.get(d) !== 'car') inspectionDays.set(d, k);
+    }
+    for (const [d, k] of inspectionDays) events.push({ date: d, category: 'inspection', kind: k, bill: 0, noBill: 0, other: INSPECTION_REQUEST_FEE });
 
     // เงินเดือน = ต้นทุนบริษัท: เงินเดือน + รายได้อื่น + ประกันสังคมส่วนนายจ้าง (เท่ากับส่วนพนักงาน) · ไม่ใช่เงินสุทธิที่โอนให้พนักงาน เพราะภาษี/ประกันสังคมที่หักไว้บริษัทต้องนำส่งต่อ
     for (const r of payrollRuns) {
