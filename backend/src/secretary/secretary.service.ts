@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { bangkokToday } from '../overview/overview-calculator.js';
 import { OverviewService } from '../overview/overview.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { parseCommand, type Command } from './commands.js';
@@ -8,6 +9,7 @@ import type { LineEvent } from './line-webhook.js';
 import { NotesService } from './notes.service.js';
 import { parseNoteCommand } from './notes.js';
 import { buildMorningMessage } from './morning-message.js';
+import type { Slot } from './run-key.js';
 import { helpText, overdueText, spendText, stuckText, textMessage, withQuickReply } from './replies.js';
 
 // เลขาส่วนตัว (ผู้ใช้ 2026-10-07): ดึงตัวเลขจากภาพรวมผู้บริหารแล้วส่งการ์ดเข้าไลน์ส่วนตัวของเจ้าของ
@@ -34,6 +36,20 @@ export class SecretaryService {
     const overview = await this.overviewService.overview();
     const staff = await this.staffActivity(overview.today);
     return buildEveningMessage({ ...overview, staff }, this.baseUrl());
+  }
+
+  // ส่งตามเวลาโดยตัวตั้งเวลา (GitHub Actions) - รอบเดียวกันของวันเดียวกัน (เวลาไทย) ส่งครั้งเดียว: ถ้า retry หลังส่งสำเร็จแล้วจะข้าม
+  // จำในหน่วยความจำ (เซิร์ฟเวอร์รีสตาร์ท = ลืม) พอสำหรับกัน retry ติดกัน
+  private readonly sentSlots = new Set<string>();
+
+  async runScheduled(slot: Slot): Promise<{ sent: boolean; skipped?: 'already-sent' }> {
+    const id = `${bangkokToday()}:${slot}`;
+    if (this.sentSlots.has(id)) return { sent: false, skipped: 'already-sent' };
+    if (slot === 'morning') await this.sendMorning();
+    else await this.sendEvening();
+    this.sentSlots.clear(); // เก็บเฉพาะวันนี้ ไม่ให้โตไม่สิ้นสุด
+    this.sentSlots.add(id);
+    return { sent: true };
   }
 
   async sendMorning(): Promise<void> {
