@@ -309,9 +309,73 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
 }
 
 // รถยนต์กับมอเตอร์ไซค์แยกหน้ากัน (ผู้ใช้ 2026-09-25): /receive-receipt เป็นหน้าเลือกประเภท แล้วเข้า /car หรือ /moto
+interface PendingSave {
+  receivedDate: string;
+  entries: ReceiptCheckEntry[];
+  summary: string;
+  mismatched: string[];
+  billMismatched: string[];
+  stillReadingCount: number;
+}
+
+// หน้าต่างยืนยันก่อนบันทึกใบยื่น: รวมคำเตือนทั้งหมด (เลขตัวถังไม่ตรง / ยอดไม่ตรง Bill / AI ยังอ่านไม่เสร็จ) และสรุปจำนวนไว้ที่เดียว
+function ReceiptSaveConfirmDialog({ pending, onClose, onConfirm }: { pending: PendingSave; onClose: () => void; onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    dialogRef.current?.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(560px, 94vw)" }}>
+      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        ×
+      </button>
+      <h2>บันทึกใบยื่นนี้?</h2>
+      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <div>
+          {pending.summary.split("\n").map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </div>
+        {pending.mismatched.length > 0 && (
+          <div className="customer-message error">
+            <b>เลขตัวถังในใบเสร็จไม่ตรงกับรถ {pending.mismatched.length} คัน</b>
+            {pending.mismatched.map((m) => (
+              <div key={m}>· {m}</div>
+            ))}
+            <div>เทียบกับรูปแล้วเป็นใบเสร็จของคันนั้นจริง (AI อ่านผิด) ใช่ไหม?</div>
+          </div>
+        )}
+        {pending.billMismatched.length > 0 && (
+          <div className="customer-message error">
+            <b>ยอดใบเสร็จไม่ตรง Bill {pending.billMismatched.length} คัน</b>
+            {pending.billMismatched.map((m) => (
+              <div key={m}>· {m}</div>
+            ))}
+            <div>ตรวจกับใบเสร็จจริงแล้ว ยอดที่กรอกถูกต้องใช่ไหม? (ถ้าจังหวัดเจ้าของรถผิด ให้แก้ข้อมูลรถด้วย ไม่งั้นค่าบริการตอนวางบิลจะผิด)</div>
+          </div>
+        )}
+        {pending.stillReadingCount > 0 && (
+          <div className="customer-message">
+            ⏳ AI ยังอ่านใบเสร็จไม่เสร็จ {pending.stillReadingCount} คัน - ถ้าบันทึกตอนนี้จะใช้ค่าที่กรอกไว้ (รอสักครู่ระบบจะเติมให้)
+          </div>
+        )}
+      </div>
+      <div className="form-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()}>
+          กลับไปแก้
+        </button>
+        <button type="button" className="primary" onClick={onConfirm} autoFocus>
+          ยืนยันบันทึก
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
   const tab = kind;
   // ACCOUNTANT / คนที่แก้ประเภทรถนี้ไม่ได้ = ดูอย่างเดียว ซ่อนปุ่มบันทึก/แนบ/ลบ (พบ 2026-09-27: เดิมกดได้แล้วขึ้น 403)
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
   const canEditState = useCanEditReceipts(kind);
   const canEdit = canEditState === true;
   const [sheetRows, setSheetRows] = useState<DocumentSubmission[]>([]); // ทุกคันของวันที่ที่มีใบยื่นค้างตรวจ
@@ -633,32 +697,15 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
       return setMessage({ text: `แก้ไข ${Object.keys(errors).length} คันที่ขึ้นสีแดงก่อนบันทึก`, error: true });
     }
     if (entries.length === 0) return setMessage({ text: "ยังไม่มีอะไรให้บันทึก - แนบรูปใบเสร็จหรือเลือกสาเหตุก่อน", error: true });
-    if (
-      mismatched.length > 0 &&
-      !window.confirm(
-        `เลขตัวถังในใบเสร็จไม่ตรงกับรถ ${mismatched.length} คัน:\n\n${mismatched.join("\n")}\n\nเทียบกับรูปแล้วเป็นใบเสร็จของคันนั้นจริง (AI อ่านผิด) ใช่ไหม?`,
-      )
-    )
-      return;
-
-    if (
-      billMismatched.length > 0 &&
-      !window.confirm(
-        `ยอดใบเสร็จไม่ตรง Bill ${billMismatched.length} คัน:\n\n${billMismatched.join("\n")}\n\nตรวจกับใบเสร็จจริงแล้ว ยอดที่กรอกถูกต้องใช่ไหม?\n(ถ้าจังหวัดเจ้าของรถผิด ให้แก้ข้อมูลรถด้วย ไม่งั้นค่าบริการตอนวางบิลจะผิด)`,
-      )
-    )
-      return;
-
     const got = entries.filter((e) => e.action === "RECEIVED").length;
     const failed = entries.filter((e) => e.action === "FAILED").length;
     const carry = entries.filter((e) => e.action === "CARRY").length;
     const summary = [`ได้ใบเสร็จ ${got} คัน`, failed ? `ยื่นไม่สำเร็จ ${failed} คัน (กลับไป Step 4)` : "", carry ? `ยังขาด (ค้างไว้ในใบนี้) ${carry} คัน` : ""].filter(Boolean).join("\n");
-    // AI ยังอ่านไม่เสร็จ = ค่าในแถวยังไม่ได้มาจากใบเสร็จ - บอกก่อนบันทึก ให้รอได้
-    const readingNote = stillReading.length
-      ? `\n\n⏳ AI ยังอ่านใบเสร็จไม่เสร็จ ${stillReading.length} คัน - ถ้าบันทึกตอนนี้จะใช้ค่าที่กรอกไว้ (รอสักครู่ระบบจะเติมให้)`
-      : "";
-    if (!window.confirm(`บันทึกใบยื่นนี้?\n\n${summary}${readingNote}`)) return;
+    // ยืนยันด้วยหน้าต่างในหน้าเว็บ (เดิมใช้ window.confirm: เบราว์เซอร์/แอปที่บล็อกกล่องจะตอบยกเลิกเอง กดบันทึกแล้วเงียบ - พบ 2026-10-07)
+    setPendingSave({ receivedDate, entries, summary, mismatched, billMismatched, stillReadingCount: stillReading.length });
+  }
 
+  async function submitSave({ receivedDate, entries, summary }: PendingSave) {
     generation.current++; // ผลโหลดเบื้องหลังที่ค้างอยู่ใช้ไม่ได้แล้ว
     setSaving(true);
     setMessage({ text: "กำลังบันทึก…" });
@@ -686,6 +733,17 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
 
   return (
     <section className="content content-wide">
+      {pendingSave && (
+        <ReceiptSaveConfirmDialog
+          pending={pendingSave}
+          onClose={() => setPendingSave(null)}
+          onConfirm={() => {
+            const pending = pendingSave;
+            setPendingSave(null);
+            void submitSave(pending);
+          }}
+        />
+      )}
       <Link href="/registration/new-vehicle/receive-receipt" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← เลือกประเภทรถ
       </Link>
