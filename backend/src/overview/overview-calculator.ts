@@ -48,6 +48,35 @@ export function agingBuckets(items: Array<{ date: string; amount: number }>, tod
   return out.map((b) => ({ ...b, amount: round2(b.amount) }));
 }
 
+// บิลที่เลยกำหนดชำระตามเครดิตของลูกค้า (Invoice.dueDate) รวมต่อลูกค้า - ใช้ในสรุปเช้าของเลขา
+// บิลที่ไม่มี dueDate (ลูกค้าไม่ได้ตั้งเครดิต) ไม่นับ เพราะไม่มีวันครบกำหนดให้เทียบ
+export interface DueItem {
+  customerId: string;
+  customerName: string;
+  dueDate: string | null;
+  amount: number;
+}
+
+export function overdueByCustomer(items: DueItem[], today: string) {
+  const late = items.filter((i) => i.dueDate !== null && i.dueDate < today);
+  const byCustomer = new Map<string, { customerId: string; customerName: string; count: number; amount: number; maxDaysOver: number }>();
+  for (const item of late) {
+    const over = daysBetween(item.dueDate!, today);
+    const row = byCustomer.get(item.customerId) ?? { customerId: item.customerId, customerName: item.customerName, count: 0, amount: 0, maxDaysOver: 0 };
+    row.count += 1;
+    row.amount += item.amount;
+    row.maxDaysOver = Math.max(row.maxDaysOver, over);
+    byCustomer.set(item.customerId, row);
+  }
+  return {
+    count: late.length,
+    amount: round2(late.reduce((a, i) => a + i.amount, 0)),
+    customers: [...byCustomer.values()]
+      .map((c) => ({ ...c, amount: round2(c.amount) }))
+      .sort((a, b) => b.maxDaysOver - a.maxDaysOver || b.amount - a.amount),
+  };
+}
+
 // --- ยอดเงินของงานยื่นเอกสาร ------------------------------------------------------------
 
 export interface SubmissionMoney {

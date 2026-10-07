@@ -10,7 +10,8 @@ try {
 } catch {}
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: webhook ของ LINE ต้องตรวจลายเซ็นจาก body ดิบ (ก่อน parse เป็น JSON) - ดู secretary/line-webhook.ts
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   // เปิด AsyncLocalStorage ให้ทุกคำขอ - AuthGuard ใส่ผู้ใช้ลงไป แล้ว service อ่านผ่าน currentUser()
   app.use((_req: unknown, _res: unknown, next: () => void) => runWithRequestContext(next));
   // Batch vehicle imports (up to 100 rows) exceed Express's 100kb JSON default.

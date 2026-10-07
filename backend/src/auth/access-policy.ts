@@ -26,6 +26,10 @@ interface Rule {
 const RULES: Rule[] = [
   { pattern: /^\/api\/auth\/(login|register)$/, access: 'PUBLIC' },
   { pattern: /^\/api\/auth(\/|$)/, access: 'ANY_USER' },
+  // เลขาส่วนตัว (ผู้ใช้ 2026-10-07): webhook ของ LINE เปิดสาธารณะเพราะ LINE ไม่มี token ของระบบ - ตรวจลายเซ็นใน SecretaryController
+  // (ไม่ผ่านลายเซ็นตอบ 401 ก่อนแตะข้อมูล) · route อื่นใน /api/secretary ถ้ามีในอนาคต = ADMIN เท่านั้น
+  { pattern: /^\/api\/secretary\/webhook$/, access: 'PUBLIC' },
+  { pattern: /^\/api\/secretary(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/admin(\/|$)/, access: ['ADMIN'] },
   // ภาพรวมผู้บริหาร (ยอดเงินทั้งบริษัท) - ADMIN เท่านั้น บทบาทอื่นจะมีภาพรวมของตัวเองตามมาทีหลัง (ผู้ใช้ 2026-09-24)
   { pattern: /^\/api\/overview(\/|$)/, access: ['ADMIN'] },

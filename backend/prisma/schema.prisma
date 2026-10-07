@@ -1881,3 +1881,14 @@ model VehicleMoveOut {
   @@index([submitDate])
   @@index([returnedDate])
 }
+
+// เลขาส่วนตัว: ตู้ข้อความของเจ้าของ (ผู้ใช้ 2026-10-07) เช่น ที่อยู่บริษัท เลขผู้เสียภาษี - จำ/ขอ/ลืมผ่านแชตไลน์
+// เจ้าของคนเดียว (ตอบเฉพาะ LINE_USER_ID) ห้ามเก็บรหัสผ่าน/เลขบัตรประชาชน · key = ชื่อที่ตัดช่องว่างและทำเป็นตัวพิมพ์เล็ก ใช้ค้นหาแบบตรงตัว
+model SecretaryNote {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  title     String // ชื่อตามที่พิมพ์ไว้ (ใช้แสดง)
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
