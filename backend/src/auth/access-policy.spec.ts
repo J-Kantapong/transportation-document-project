@@ -170,3 +170,17 @@ describe('access policy HR / payroll', () => {
     expect(isAllowed(accessFor('/api/hr/payslip-signature', 'PUT'), ['ADMIN'])).toBe(true);
   });
 });
+
+// เลขาส่วนตัว (ผู้ใช้ 2026-10-07): webhook ของ LINE เปิดสาธารณะ (ตรวจลายเซ็นใน controller) route อื่นใต้ /api/secretary = ADMIN
+describe('access policy secretary (LINE webhook)', () => {
+  it('opens only the signed LINE webhook to the public', () => {
+    expect(accessFor('/api/secretary/webhook', 'POST')).toBe('PUBLIC');
+    expect(accessFor('/API/Secretary/Webhook/', 'POST')).toBe('PUBLIC');
+    expect(accessFor('/api/secretary/webhook/extra', 'POST')).toEqual(['ADMIN']);
+    expect(accessFor('/api/secretary/run', 'POST')).toBe('PUBLIC'); // ตัวตั้งเวลา GitHub Actions - ตรวจกุญแจใน controller
+    expect(accessFor('/api/secretary/run/x', 'POST')).toEqual(['ADMIN']);
+    expect(accessFor('/api/secretary/anything', 'POST')).toEqual(['ADMIN']);
+    expect(isAllowed(accessFor('/api/secretary/anything', 'POST'), ['STAFF_ENTRY'])).toBe(false);
+    expect(isAllowed(accessFor('/api/secretary/anything', 'GET'), ['ACCOUNTANT'])).toBe(false);
+  });
+});

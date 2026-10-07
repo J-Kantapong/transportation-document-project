@@ -6,6 +6,7 @@ import {
   buildForecast,
   daysBetween,
   inProcessMoney,
+  overdueByCustomer,
   paymentBehaviour,
   pctChange,
   type PaidSample,
@@ -46,6 +47,35 @@ describe('agingBuckets', () => {
     );
     expect(b.map((x) => x.amount)).toEqual([100, 200, 300, 400]);
     expect(b.map((x) => x.count)).toEqual([1, 1, 1, 1]);
+  });
+});
+
+describe('overdueByCustomer (สรุปเช้าของเลขา)', () => {
+  const item = (customerId: string, dueDate: string | null, amount: number) => ({ customerId, customerName: `ลูกค้า ${customerId}`, dueDate, amount });
+
+  it('นับเฉพาะบิลที่เลยกำหนด (วันครบกำหนดไม่นับ) และไม่นับบิลที่ไม่มีวันครบกำหนด', () => {
+    const r = overdueByCustomer(
+      [item('a', '2026-09-23', 100), item('a', '2026-09-24', 999), item('b', null, 999), item('b', '2026-09-25', 999)],
+      '2026-09-24',
+    );
+    expect(r.count).toBe(1);
+    expect(r.amount).toBe(100);
+    expect(r.customers).toEqual([{ customerId: 'a', customerName: 'ลูกค้า a', count: 1, amount: 100, maxDaysOver: 1 }]);
+  });
+
+  it('รวมต่อลูกค้า เรียงเกินกำหนดนานสุดก่อน แล้วยอดมากก่อน', () => {
+    const r = overdueByCustomer(
+      [item('a', '2026-09-20', 100.5), item('a', '2026-09-23', 200), item('b', '2026-09-10', 50), item('c', '2026-09-20', 900)],
+      '2026-09-24',
+    );
+    expect(r.count).toBe(4);
+    expect(r.amount).toBe(1250.5);
+    expect(r.customers.map((c) => c.customerId)).toEqual(['b', 'c', 'a']);
+    expect(r.customers[2]).toMatchObject({ count: 2, amount: 300.5, maxDaysOver: 4 });
+  });
+
+  it('ไม่มีบิลเลยกำหนด', () => {
+    expect(overdueByCustomer([], '2026-09-24')).toEqual({ count: 0, amount: 0, customers: [] });
   });
 });
 

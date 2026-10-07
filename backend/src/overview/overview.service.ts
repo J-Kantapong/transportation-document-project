@@ -13,6 +13,7 @@ import {
   FORECAST_SPEND_DAYS,
   inProcessMoney,
   isoOf,
+  overdueByCustomer,
   paymentBehaviour,
   pctChange,
   round2,
@@ -1072,6 +1073,7 @@ export class OverviewService {
         advance, // คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ยังไม่ได้จ่าย - ไม่นับรวมใน total
         unbilled: { amount: unbilledTotal, count: unbilledItems.length }, // ส่งงานแล้ว ยังไม่วางบิล (ยอดตามใบเสร็จ ไม่รวมค่าดำเนินการ)
         receivable: { amount: receivableTotal, count: receivableItems.length }, // วางบิลแล้ว รอรับเงิน
+        overdue: overdueByCustomer(receivableItems, today), // เลยกำหนดเครดิตแล้ว (ใช้ในสรุปเช้า/เย็นของเลขา)
         total: round2(inProcessTotal + unbilledTotal + receivableTotal),
         aging: agingBuckets(receivableItems.map((r) => ({ date: r.issueDate, amount: r.amount })), today),
         unbilledAging: agingBuckets(unbilledItems.map((u) => ({ date: u.deliveredDate, amount: u.amount })), today),
