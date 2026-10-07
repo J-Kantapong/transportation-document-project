@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { isoToDisplayDate } from "@/lib/date";
+import { DateInput } from "./DateInput";
+import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { overviewApi, type AgingBucket, type Overview, type OverviewAlert } from "@/lib/overview-api";
 import { ChartLegend, GroupedBarChart, type ChartSeries } from "./OverviewCharts";
 import { ProcessBoard, StuckList } from "./OverviewProcess";
@@ -74,6 +75,7 @@ function AgingBars({ buckets }: { buckets: AgingBucket[] }) {
 
 export function ExecutiveOverview() {
   const [date, setDate] = useState<string | null>(null); // null = วันนี้
+  const [dateText, setDateText] = useState<string | null>(null); // ข้อความที่กำลังพิมพ์ในช่องวันที่
   const [nonce, setNonce] = useState(0); // กดรีเฟรช = โหลดใหม่ด้วยวันที่เดิม
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState("");
@@ -119,7 +121,9 @@ export function ExecutiveOverview() {
 
   const { spend, cash, workingCapital: wc, forecast, process, stuck, alerts } = data;
   const isToday = data.asOf === data.today;
-  const dayWord = isToday ? "วันนี้" : `วันที่ ${isoToDisplayDate(data.asOf)}`;
+  const isFuture = data.asOf > data.today;
+  const maxAsOf = addDays(data.today, 90);
+  const dayWord = isToday ? "วันนี้" : `วันที่ ${isoToDisplayDate(data.asOf)}${isFuture ? " (ล่วงหน้า)" : ""}`;
   // ดูวันย้อนหลัง: ตัวเลขรายวัน/เดือนเป็นของวันที่เลือก แต่เงินจมและประมาณการเป็นข้อมูลสดเสมอ จึงบอกกำกับไว้ (พบ 2026-09-27)
   const monthWord = isToday ? "เดือนนี้" : `เดือน ${data.asOf.slice(5, 7)}/${data.asOf.slice(0, 4)} `;
   const liveNote = isToday ? "" : "ข้อมูล ณ ตอนนี้";
@@ -140,8 +144,23 @@ export function ExecutiveOverview() {
           <button type="button" aria-label="วันก่อนหน้า" onClick={() => setDate(addDays(data.asOf, -1))}>
             ‹
           </button>
-          <span>{isoToDisplayDate(data.asOf)}</span>
-          <button type="button" aria-label="วันถัดไป" disabled={isToday} onClick={() => setDate(addDays(data.asOf, 1))}>
+          <DateInput
+            key={data.asOf}
+            aria-label="วันที่ของสรุปรายวัน"
+            style={{ width: 110 }}
+            value={dateText ?? isoToDisplayDate(data.asOf)}
+            onChange={(v) => {
+              const text = formatDateDigitsCe(v.replace(/\D/g, ""));
+              setDateText(text);
+              const iso = displayDateToIso(text.replace(/\D/g, ""));
+              if (iso && iso !== data.asOf) {
+                setDateText(null);
+                setDate(iso);
+              }
+            }}
+            onBlur={() => setDateText(null)}
+          />
+          <button type="button" aria-label="วันถัดไป" disabled={data.asOf >= maxAsOf} onClick={() => setDate(addDays(data.asOf, 1))}>
             ›
           </button>
           <button type="button" className="exec-date-today" disabled={loading} onClick={() => (isToday ? refresh() : setDate(null))}>
@@ -150,6 +169,11 @@ export function ExecutiveOverview() {
         </div>
       </div>
       {error && <p className="customer-message error">{error}</p>}
+      {isFuture && (
+        <p className="customer-message">
+          กำลังดูล่วงหน้า: ตัวเลขรายวันคือยอดของงานที่พนักงานคีย์ไว้แล้วโดยลงวันที่ {isoToDisplayDate(data.asOf)} ยังไม่ใช่เงินที่จ่ายจริง · เงินจมและประมาณการเป็นข้อมูล ณ ตอนนี้
+        </p>
+      )}
 
       {/* ---------- ตัวเลขหลัก ---------- */}
       <section className="stats exec-kpis" aria-label="ตัวเลขหลัก">
