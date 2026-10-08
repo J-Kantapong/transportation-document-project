@@ -186,6 +186,6 @@ describe('BookPhotosService.getImage - ขอบเขตประเภทร�
     const { svc, findFirstPhoto } = setup();
     await asUser(['STAFF_MOTO'], () => svc.getImage('b9'));
     const where = findFirstPhoto.mock.calls[0][0].where;
-    expect(where.OR).toEqual([{ vehicles: { none: {} } }, { vehicles: { some: { AND: [{ body: { startsWith: 'รย.12-' } }] } } }]);
+    expect(where.OR).toEqual([{ vehicles: { none: {} } }, { vehicles: { some: { AND: [{ OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] }] } } }]);
   });
 });

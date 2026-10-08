@@ -72,7 +72,22 @@ describe('VehiclesService - คิวยื่นเอกสาร ณ วั�
     const { service, findMany } = setup([vehicleRow()]);
     const queue = await service.findSubmissionQueue('2026-08-25');
     expect(queue.map((v) => v.id)).toEqual(['v1']);
-    expect(findMany.mock.calls[0][0].where.inspectionResultDate).toEqual({ gte: day('2026-05-28'), lte: day('2026-08-25') });
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.AND[0].OR[0]).toEqual({ inspectionResult: 'ผ่าน', inspectionResultDate: { gte: day('2026-05-28'), lte: day('2026-08-25') } });
+  });
+
+  // ผู้ใช้ 2026-10-08: จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ ส่งซับจด - แจ้งย้ายเสร็จแล้วเข้าคิวยื่นเลย ไม่ต้องตรวจรถ
+  it('รถที่ส่งซับจดต่างจังหวัดอยู่ในคิวโดยไม่มีผลตรวจ ส่วนรถกรุงเทพฯ ที่ยังไม่ตรวจไม่อยู่', async () => {
+    const notInspected = { inspectionSentDate: null, inspectionResult: null, inspectionResultDate: null, transferCompletedDate: day('2026-06-01') };
+    const { service, findMany } = setup([
+      vehicleRow({ id: 'supplier', chassis: 'CH2', registrationProvince: 'เชียงใหม่', ...notInspected }),
+      vehicleRow({ id: 'bangkok', chassis: 'CH3', ...notInspected }),
+    ]);
+    const queue = await service.findSubmissionQueue('2026-06-10');
+    expect(queue.map((v) => v.id)).toEqual(['supplier']);
+    expect(findMany.mock.calls[0][0].where.AND[0].OR[1]).toEqual({
+      AND: [{ registrationProvince: { not: null } }, { registrationProvince: { notIn: ['กรุงเทพมหานคร', 'สมุทรปราการ'] } }],
+    });
   });
 
   it('ค้นเลขตัวถัง: บอกเหตุผลตามวันที่ยื่นที่ส่งมา', async () => {

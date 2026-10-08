@@ -66,6 +66,7 @@ export interface BillableJob {
   brand: string | null; // ต่อภาษีไม่มียี่ห้อ ใช้ประเภทรถแทน
   ownerName: string | null;
   doneDate: string; // วันที่รับใบเสร็จกลับ (ต่อภาษี = วันที่คืนเอกสาร)
+  deliveredDate: string; // วันที่ส่งงานลูกค้า (ใบ DL) - วางบิลได้หลังจากนี้ (ผู้ใช้ 2026-10-08)
   receiptNo: string | null;
   receiptAmount: number | null; // ยอดบนใบเสร็จจริง (ต่อภาษีไม่มี)
   billTotal: number; // ยอด Bill ที่ระบบคิดไว้ตอนยื่น

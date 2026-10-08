@@ -1,3 +1,4 @@
+import { isMotorcycleType } from '../vehicles/vehicle-reference-data.js';
 // ใบคำนวณภาษีรถประจำปีสำหรับงานต่อภาษี (ต่อภาษี) - ภาษีรถ + เงินเพิ่มกรณีล่าช้า + ค่าใช้จ่ายอื่น
 //
 // อัตราภาษีตามกฎหมาย (ตาราง cc / น้ำหนัก / จักรยานยนต์เหมาจ่าย / มาตรการ EV) ไม่ได้เขียนไว้ในไฟล์นี้
@@ -439,7 +440,7 @@ export function calculateVehicleTax(
 
 function classifyFamily(body: string | null | undefined): GovTaxVehicleFamily | null {
   if (!body) return null;
-  if (body.startsWith('รย.12-') || body === 'รย.12') return GovTaxVehicleFamily.RY12;
+  if (isMotorcycleType(body) || body === 'รย.12' || body === 'รย.17') return GovTaxVehicleFamily.RY12;
   if (body.startsWith('รย.1-') || body === 'รย.1') return GovTaxVehicleFamily.RY1;
   if (body.startsWith('รย.2-') || body === 'รย.2') return GovTaxVehicleFamily.RY2;
   if (body.startsWith('รย.3-') || body === 'รย.3') return GovTaxVehicleFamily.RY3;

@@ -1,3 +1,4 @@
+import { isMotorcycleType } from '../vehicles/vehicle-reference-data.js';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { addDays, bangkokToday, billValueOf, dutyOfItems, round2, toDate } from '../overview/overview-calculator.js';
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
@@ -121,9 +122,9 @@ export class ActivityService {
       newVehicles, submissions, receipts, plates, books, slips, invoices, paidInvoices, taxInvoices,
       plateSwaps, taxRenewals, yamaha, transfers, useCancels, plateCopies, moveOuts, vehicleLogs, auditLogs,
     ] = await Promise.all([
-      p.vehicle.findMany({ where: { createdAt: range, deletedAt: null }, select: { ...vehicleSel, createdAt: true } }),
-      p.documentSubmission.findMany({ where: { createdAt: range }, select: { id: true, vehicleId: true, createdAt: true, urgent: true, status: true, noBillItems: true, noBillTotal: true, billFeeTotal: true, taxAmount: true, receiptAmount: true } }),
-      p.documentSubmission.findMany({ where: { receiptReceivedDate: exact, status: 'RECEIPT_RECEIVED' }, select: { id: true, vehicleId: true, status: true, receiptNo: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, receipts: { select: { createdAt: true }, orderBy: { createdAt: 'asc' } } } }),
+      p.vehicle.findMany({ where: { createdAt: range, deletedAt: null }, select: { ...vehicleSel, createdAt: true, createdBy: userSel } }),
+      p.documentSubmission.findMany({ where: { createdAt: range }, select: { id: true, vehicleId: true, createdAt: true, urgent: true, status: true, noBillItems: true, noBillTotal: true, billFeeTotal: true, taxAmount: true, receiptAmount: true, createdBy: userSel } }),
+      p.documentSubmission.findMany({ where: { receiptReceivedDate: exact, status: 'RECEIPT_RECEIVED' }, select: { id: true, vehicleId: true, status: true, receiptNo: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, receivedBy: userSel, receipts: { select: { createdAt: true }, orderBy: { createdAt: 'asc' } } } }),
       p.vehicle.findMany({ where: { plateReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, platePhoto: { select: { createdAt: true } } } }),
       p.vehicle.findMany({ where: { bookReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, bookPhoto: { select: { createdAt: true } } } }),
       p.deliverySlip.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, slipNo: true, customerId: true, recipient: true, createdAt: true, items: { where: { cancelledAt: null }, select: { id: true, vehicleKind: true, body: true } }, createdBy: userSel } }),
@@ -172,7 +173,7 @@ export class ActivityService {
 
     // --- จดทะเบียนรถใหม่ ---
     for (const v of newVehicles) {
-      add({ id: `veh-${v.id}`, at: v.createdAt, type: 'vehicle-entry', group: 'new', kind: vehicleKindOf(v.body), title: 'บันทึกรถใหม่เข้าระบบ', ref: v.chassis, customer: cname(v.customerId), href: vehicleHref(v.chassis) });
+      add({ id: `veh-${v.id}`, at: v.createdAt, type: 'vehicle-entry', group: 'new', kind: vehicleKindOf(v.body), title: 'บันทึกรถใหม่เข้าระบบ', ref: v.chassis, customer: cname(v.customerId), actor: person(v.createdBy), href: vehicleHref(v.chassis) });
     }
     for (const s of submissions) {
       const v = vehicles.get(s.vehicleId);
@@ -181,7 +182,7 @@ export class ActivityService {
         id: `sub-${s.id}`, at: s.createdAt, type: 'submit', group: 'new', kind: v ? vehicleKindOf(v.body) : null, title: 'ยื่นเอกสาร', ref: v?.chassis ?? null, customer: cname(v?.customerId),
         detail: [s.urgent ? 'งานด่วน' : null, s.status === 'FAILED' ? 'ยื่นไม่สำเร็จ' : null].filter(Boolean).join(' · ') || null,
         ...money(billValueOf(s), num(s.noBillTotal) - duty, duty),
-        href: '/registration/new-vehicle/submit-documents/records',
+        actor: person(s.createdBy), href: '/registration/new-vehicle/submit-documents/records',
       });
     }
     for (const s of receipts) {
@@ -189,7 +190,7 @@ export class ActivityService {
       add({
         id: `rec-${s.id}`, at: inDay(s.receipts[0]?.createdAt), type: 'receipt', group: 'new', kind: v ? vehicleKindOf(v.body) : null, title: 'ได้รับใบเสร็จ', ref: v?.chassis ?? null, customer: cname(v?.customerId),
         detail: s.receiptNo ? `เลขที่ ${s.receiptNo}` : null, amount: s.receiptAmount === null ? null : round2(num(s.receiptAmount)),
-        href: '/registration/new-vehicle/receive-receipt',
+        actor: person(s.receivedBy), href: '/registration/new-vehicle/receive-receipt',
       });
     }
     for (const v of plates) add({ id: `plate-${v.id}`, at: inDay(v.platePhoto?.createdAt), type: 'plate', group: 'new', kind: vehicleKindOf(v.body), title: 'รับป้ายทะเบียน', ref: v.chassis, customer: cname(v.customerId), detail: plate(v.plateCategory, v.plateNumber), href: '/registration/new-vehicle/receive-plate' });
@@ -197,7 +198,7 @@ export class ActivityService {
     for (const s of slips) {
       add({
         id: `slip-${s.id}`, at: s.createdAt, type: 'delivery', group: 'new', kind: slipKind(s.items), title: 'ส่งงานให้ลูกค้า', ref: `DL-${String(s.slipNo).padStart(5, '0')}`, customer: cname(s.customerId),
-        detail: `${s.items.length} คัน · ผู้รับ ${s.recipient}`, actor: person(s.createdBy), href: '/registration/new-vehicle/delivery/report',
+        detail: `${s.items.length} คัน · ผู้รับ ${s.recipient}`, actor: person(s.createdBy), href: '/delivery/report',
       });
     }
 
@@ -217,7 +218,7 @@ export class ActivityService {
     }
     for (const r of taxRenewals) {
       const duty = dutyOfItems(r.noBillItems);
-      add({ id: `tax-${r.id}`, at: r.createdAt, type: 'tax-renewal', group: 'other', kind: r.vehicleType.startsWith('รย.12') ? 'moto' : 'car', title: 'ต่อภาษี', ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), href: '/registration/tax-renewal' });
+      add({ id: `tax-${r.id}`, at: r.createdAt, type: 'tax-renewal', group: 'other', kind: isMotorcycleType(r.vehicleType) ? 'moto' : 'car', title: 'ต่อภาษี', ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), href: '/registration/tax-renewal' });
     }
     for (const y of yamaha) {
       add({ id: `ymh-${y.id}`, at: y.createdAt, type: 'yamaha', group: 'other', title: `แจ้งย้ายยามาฮ่า (${y.size === 'SMALL' ? 'เล็ก' : 'ใหญ่'})`, customer: 'ยามาฮ่า', detail: `${y.count} คัน`, ...money(y.billFee, y.noBillFee, 0), href: '/registration/yamaha-relocation' });

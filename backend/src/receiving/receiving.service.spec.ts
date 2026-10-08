@@ -5,8 +5,8 @@ import { ReceivingController } from './receiving.controller.js';
 import { COMPLETED_PAGE_SIZE, ReceivingService } from './receiving.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-const MOTO_ONLY = { AND: [{ body: { startsWith: 'รย.12-' } }] };
-const CAR_ONLY = { AND: [{ OR: [{ body: null }, { NOT: { body: { startsWith: 'รย.12-' } } }] }] };
+const MOTO_ONLY = { AND: [{ OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] }] };
+const CAR_ONLY = { AND: [{ OR: [{ body: null }, { NOT: { OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] } }] }] };
 const asUser = <T>(roles: UserRole[], fn: () => T) => requestContext.run({ user: { id: 'u1', roles, customerId: null, name: 'ทดสอบ' } }, fn);
 
 function vehicle(overrides: Record<string, unknown> = {}) {

@@ -135,13 +135,15 @@ export const FIT_SCRIPT = `<script>
 // blankRecipient (PDF, ผู้ใช้ 2026-09-30): ไม่พิมพ์ชื่อผู้รับงานล่วงหน้า ให้ผู้รับเขียนชื่อเอง
 function slipHtml(slip: DeliverySlip, blankRecipient = false): string {
   const c = countItems(slip.items);
-  const platePending = slip.items.filter((i) => !i.plate).length;
+  // ป้ายค้าง = คันที่ส่งเล่มแล้วป้ายยังไม่ออก - งานอื่น (ใบเสร็จอย่างเดียว) ไม่ใช่ป้ายค้าง (ผู้ใช้ 2026-10-08)
+  const platePending = slip.items.filter((i) => i.book && !i.plate).length;
   const hidden = hiddenItemsOf(slip);
   const customer = slip.customer;
   const customerName = customer.displayName + (customer.branch ? ` (สาขา ${customer.branch})` : "");
   const rows = slip.items
     .map(
-      (i, n) => `<tr><td class="c no">${n + 1}</td>${fitCell(i.chassis)}${fitCell(i.plateText || "—")}${fitCell(i.brandName)}
+      // งานอื่น (ผู้ใช้ 2026-10-08): ช่องยี่ห้อบอกชื่องานด้วย เช่น "Toyota · โอนตรวจรถ" - ผู้รับเห็นว่าเซ็นรับใบเสร็จของงานอะไร
+      (i, n) => `<tr><td class="c no">${n + 1}</td>${fitCell(i.chassis)}${fitCell(i.plateText || "—")}${fitCell(i.jobDetail ? `${i.brandName} · ${i.jobDetail}` : i.brandName)}
 ${fitCell(i.ownerName || "—")}<td class="tick">${tick(i.receipt)}</td><td class="tick">${tick(i.book)}</td><td class="tick">${tick(i.plate)}</td></tr>`,
     )
     .join("");

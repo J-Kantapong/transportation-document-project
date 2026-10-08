@@ -9,9 +9,10 @@ import { DeliveryService } from './delivery.service.js';
 // วันที่ของแต่ละประเภท (งานที่ยังไม่มีขั้นส่งงานใช้วันที่ที่ถือว่างานนั้นเสร็จ):
 // - รถจดใหม่ / สลับเลข   = วันที่บนใบ DL (รายการที่ยังไม่ยกเลิก)
 // - ต่อภาษี              = วันที่คืนเอกสารให้ลูกค้า (deliveredDate)
-// - ยกเลิกการใช้รถ / คัดป้าย / งานโอน = วันที่รับเอกสารกลับ (returnedDate)
+// - ยกเลิกการใช้รถ / คัดป้าย / งานโอน / ย้ายออก = ตั้งแต่ 2026-10-08 ส่งงานผ่านใบ DL (แถวมาจากใบ DL ข้างบน) - งานที่ส่งก่อนมีใบ DL
+//   (deliveredDate ที่ migration เติมให้งานที่วางบิลแล้ว / ต่อภาษีที่กรอกมือ) ยังขึ้นด้วยวันที่ส่งนั้น แต่แก้วันที่ไม่ได้จากหน้านี้
 // - แจ้งย้ายยามาฮ่า       = วันที่แจ้งย้าย (ไม่มีเจ้าของงานในข้อมูล จึงขึ้นเป็นเจ้าของ "ยามาฮ่า" และไม่ออกเมื่อเลือกเจ้าของงานเฉพาะราย)
-export type SheetSource = 'VEHICLE' | 'PLATE_SWAP' | 'TAX_RENEWAL' | 'USE_CANCEL' | 'PLATE_COPY' | 'TRANSFER' | 'YAMAHA';
+export type SheetSource = 'VEHICLE' | 'PLATE_SWAP' | 'TAX_RENEWAL' | 'USE_CANCEL' | 'PLATE_COPY' | 'TRANSFER' | 'MOVE_OUT' | 'YAMAHA';
 
 export interface SheetCustomer {
   id: string;
@@ -43,7 +44,7 @@ export interface SheetRow {
 
 export const YAMAHA_CUSTOMER: SheetCustomer = { id: 'YAMAHA', name: 'ยามาฮ่า (แจ้งย้าย)', company: null, branch: null };
 
-const MOTO_PREFIX = 'รย.12-';
+import { motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
 const PER_SOURCE_LIMIT = 1000;
 // บทบาทที่อ่านงานนอกใบ DL ได้ (ตรงกับกฎ GET ของ plate-swaps / tax-renewals / plate-copies ... ใน access-policy.ts) - DELIVERY เห็นเฉพาะใบ DL
 const JOB_READERS = ['ADMIN', 'STAFF_CAR', 'STAFF_MOTO', 'ACCOUNTANT'];
@@ -105,7 +106,8 @@ export class DeliverySheetService {
           plateText: item.plateText,
           brand: item.brandName,
           ownerName: item.ownerName,
-          detail: [item.book ? 'เล่ม' : '', item.plate ? 'ป้าย' : ''].filter(Boolean).join(' + ') || '-',
+          // งานอื่นในใบ DL (ผู้ใช้ 2026-10-08): รายการ = ชื่องานตอนส่ง (ใบเสร็จ + ป้ายถ้าเป็นคัดป้าย)
+          detail: item.jobDetail ?? ([item.book ? 'เล่ม' : '', item.plate ? 'ป้าย' : ''].filter(Boolean).join(' + ') || '-'),
           book: item.book,
           plate: item.plate,
           slipId: slip.id,
@@ -120,16 +122,16 @@ export class DeliverySheetService {
     const customerWhere = customerId ? { customerId } : {};
     const take = PER_SOURCE_LIMIT + 1;
 
-    const [renewals, cancellations, plateCopies, transfers, yamaha] = await Promise.all([
+    const [renewals, cancellations, plateCopies, transfers, moveOuts, yamaha] = await Promise.all([
       this.prisma.taxRenewal.findMany({
         where: {
           cancelledAt: null,
           deliveredDate: dateWhere ?? { not: null },
           ...customerWhere,
           ...(scope === 'MOTO'
-            ? { vehicleType: { startsWith: MOTO_PREFIX } }
+            ? motorcycleTypeWhere('vehicleType')
             : scope === 'CAR'
-              ? { NOT: { vehicleType: { startsWith: MOTO_PREFIX } } }
+              ? { NOT: motorcycleTypeWhere('vehicleType') }
               : {}),
         },
         include: { customer: CUSTOMER_SELECT },
@@ -137,24 +139,30 @@ export class DeliverySheetService {
         take,
       }),
       this.prisma.vehicleUseCancellation.findMany({
-        where: { cancelledAt: null, returnedDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
+        where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
         include: { customer: CUSTOMER_SELECT },
-        orderBy: { returnedDate: 'desc' },
+        orderBy: { deliveredDate: 'desc' },
         take,
       }),
       // คัดป้ายเป็นรถยนต์เท่านั้น - บัญชีที่ดูแลแต่มอเตอร์ไซค์ไม่เห็น
       scope === 'MOTO'
         ? Promise.resolve([])
         : this.prisma.plateCopy.findMany({
-            where: { cancelledAt: null, returnedDate: dateWhere ?? { not: null }, ...customerWhere },
+            where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere },
             include: { customer: CUSTOMER_SELECT },
-            orderBy: { returnedDate: 'desc' },
+            orderBy: { deliveredDate: 'desc' },
             take,
           }),
       this.prisma.vehicleTransfer.findMany({
-        where: { cancelledAt: null, returnedDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
+        where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
         include: { customer: CUSTOMER_SELECT },
-        orderBy: { returnedDate: 'desc' },
+        orderBy: { deliveredDate: 'desc' },
+        take,
+      }),
+      this.prisma.vehicleMoveOut.findMany({
+        where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
+        include: { customer: CUSTOMER_SELECT },
+        orderBy: { deliveredDate: 'desc' },
         take,
       }),
       // ยามาฮ่าไม่มีเจ้าของงานในข้อมูล - ไม่ออกเมื่อเลือกเจ้าของงานเฉพาะราย
@@ -166,15 +174,27 @@ export class DeliverySheetService {
             take,
           }),
     ]);
-    for (const list of [renewals, cancellations, plateCopies, transfers, yamaha]) if (list.length > PER_SOURCE_LIMIT) truncated = true;
+    for (const list of [renewals, cancellations, plateCopies, transfers, moveOuts, yamaha]) if (list.length > PER_SOURCE_LIMIT) truncated = true;
+
+    // งานที่ส่งผ่านใบ DL แล้วขึ้นจากใบ DL ข้างบน - ตัดออกจากส่วนรายประเภท ไม่ให้ซ้ำ (เหลือเฉพาะงานที่ส่งก่อนมีใบ DL)
+    const inSlip = new Set(
+      (
+        await this.prisma.deliverySlipItem.findMany({
+          where: { cancelledAt: null, jobType: { not: null }, jobId: { in: [...renewals, ...cancellations, ...plateCopies, ...transfers, ...moveOuts].map((r) => r.id) } },
+          select: { jobType: true, jobId: true },
+        })
+      ).map((i) => `${i.jobType}:${i.jobId}`),
+    );
+    const LEGACY_LABEL = 'วันที่ส่งงาน (ลงไว้ก่อนมีใบ DL - แก้ไม่ได้จากหน้านี้)';
 
     for (const r of renewals.slice(0, PER_SOURCE_LIMIT)) {
+      if (inSlip.has(`TAX_RENEWAL:${r.id}`)) continue;
       rows.push({
         key: `TAX_RENEWAL:${r.id}`,
         source: 'TAX_RENEWAL',
         jobId: r.id,
         date: isoDay(r.deliveredDate!),
-        dateLabel: 'วันที่คืนเอกสารให้ลูกค้า',
+        dateLabel: 'วันที่คืนเอกสารให้ลูกค้า (กรอกมือ)',
         customer: r.customer,
         kind: vehicleKindOf(r.vehicleType),
         chassis: r.chassis,
@@ -190,12 +210,13 @@ export class DeliverySheetService {
       });
     }
     for (const r of cancellations.slice(0, PER_SOURCE_LIMIT)) {
+      if (inSlip.has(`USE_CANCEL:${r.id}`)) continue;
       rows.push({
         key: `USE_CANCEL:${r.id}`,
         source: 'USE_CANCEL',
         jobId: r.id,
-        date: isoDay(r.returnedDate!),
-        dateLabel: 'วันที่รับเอกสารกลับ',
+        date: isoDay(r.deliveredDate!),
+        dateLabel: LEGACY_LABEL,
         customer: r.customer,
         kind: r.vehicleClass === 'MOTO' ? 'moto' : 'car',
         chassis: r.chassis,
@@ -211,12 +232,13 @@ export class DeliverySheetService {
       });
     }
     for (const r of plateCopies.slice(0, PER_SOURCE_LIMIT)) {
+      if (inSlip.has(`PLATE_COPY:${r.id}`)) continue;
       rows.push({
         key: `PLATE_COPY:${r.id}`,
         source: 'PLATE_COPY',
         jobId: r.id,
-        date: isoDay(r.returnedDate!),
-        dateLabel: 'วันที่รับเอกสารกลับ',
+        date: isoDay(r.deliveredDate!),
+        dateLabel: LEGACY_LABEL,
         customer: r.customer,
         kind: 'car',
         chassis: r.chassis,
@@ -232,12 +254,13 @@ export class DeliverySheetService {
       });
     }
     for (const r of transfers.slice(0, PER_SOURCE_LIMIT)) {
+      if (inSlip.has(`TRANSFER:${r.id}`)) continue;
       rows.push({
         key: `TRANSFER:${r.id}`,
         source: 'TRANSFER',
         jobId: r.id,
-        date: isoDay(r.returnedDate!),
-        dateLabel: 'วันที่รับเอกสารกลับ',
+        date: isoDay(r.deliveredDate!),
+        dateLabel: LEGACY_LABEL,
         customer: r.customer,
         kind: r.vehicleClass === 'MOTO' ? 'moto' : 'car',
         chassis: r.chassis,
@@ -246,6 +269,28 @@ export class DeliverySheetService {
         // งานโอนมี 2 ฝ่าย - แสดงผู้รับโอน (ชื่อเต็มของทั้งคู่อยู่ในหน้างานโอน)
         ownerName: r.transfereeName,
         detail: TRANSFER_LABEL[r.transferType] ?? 'งานโอน',
+        book: null,
+        plate: null,
+        slipId: null,
+        slipNo: null,
+        updatedAt: r.updatedAt.toISOString(),
+      });
+    }
+    for (const r of moveOuts.slice(0, PER_SOURCE_LIMIT)) {
+      if (inSlip.has(`MOVE_OUT:${r.id}`)) continue;
+      rows.push({
+        key: `MOVE_OUT:${r.id}`,
+        source: 'MOVE_OUT',
+        jobId: r.id,
+        date: isoDay(r.deliveredDate!),
+        dateLabel: LEGACY_LABEL,
+        customer: r.customer,
+        kind: r.vehicleClass === 'MOTO' ? 'moto' : 'car',
+        chassis: r.chassis,
+        plateText: plateOf(r.plateCategory, r.plateNumber),
+        brand: r.brand,
+        ownerName: r.ownerName,
+        detail: 'ย้ายออก',
         book: null,
         plate: null,
         slipId: null,
@@ -279,7 +324,7 @@ export class DeliverySheetService {
 }
 
 // วันที่ล่าสุดก่อน แล้วลำดับประเภทงาน ทะเบียน เลขตัวถัง - หน้าเว็บจัดกลุ่มตามเจ้าของงาน + วันที่ต่อเอง
-const SOURCE_ORDER: SheetSource[] = ['VEHICLE', 'PLATE_SWAP', 'TAX_RENEWAL', 'USE_CANCEL', 'PLATE_COPY', 'TRANSFER', 'YAMAHA'];
+const SOURCE_ORDER: SheetSource[] = ['VEHICLE', 'PLATE_SWAP', 'TAX_RENEWAL', 'USE_CANCEL', 'PLATE_COPY', 'TRANSFER', 'MOVE_OUT', 'YAMAHA'];
 function sortRows(rows: SheetRow[]): SheetRow[] {
   return rows.sort(
     (a, b) =>

@@ -41,14 +41,15 @@ describe('access policy step 4-8 rules', () => {
   });
 
   // ผู้ใช้ 2026-09-27: บัญชีอ่านรายงานส่งงาน (ใบส่งงาน + ป้ายค้างส่ง) ได้ แต่ไม่เห็นคิว Delivery และบันทึก/แก้/ยกเลิกไม่ได้
-  it('lets accounting read the delivery report but not the Delivery queue or any change', () => {
+  // ผู้ใช้ 2026-10-08 (ตัวช่วยกันลืม ชั้น 2): บัญชีอ่านคิวส่งงานและบันทึกส่งงานที่พนักงานลืมได้จากหน้าวางบิล แต่แก้/ยกเลิกใบไม่ได้
+  it('lets accounting read the delivery report, read the queue and record a delivery, but not change a slip', () => {
     const accountant: ['ACCOUNTANT'] = ['ACCOUNTANT'];
     expect(isAllowed(accessFor('/api/delivery/slips', 'GET'), accountant)).toBe(true);
     expect(isAllowed(accessFor('/api/delivery/slips/s1', 'GET'), accountant)).toBe(true);
     expect(isAllowed(accessFor('/api/delivery/plate-pending', 'GET'), accountant)).toBe(true);
-    expect(isAllowed(accessFor('/api/delivery/queue', 'GET'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery/queue', 'GET'), accountant)).toBe(true);
     expect(isAllowed(accessFor('/api/delivery/recent', 'GET'), accountant)).toBe(false);
-    expect(isAllowed(accessFor('/api/delivery', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/delivery', 'POST'), accountant)).toBe(true);
     expect(isAllowed(accessFor('/api/delivery/slips/s1', 'PATCH'), accountant)).toBe(false);
     expect(isAllowed(accessFor('/api/delivery/slips/s1/cancel', 'POST'), accountant)).toBe(false);
     expect(isAllowed(accessFor('/api/delivery/slips/s1/add-plate', 'POST'), accountant)).toBe(false);

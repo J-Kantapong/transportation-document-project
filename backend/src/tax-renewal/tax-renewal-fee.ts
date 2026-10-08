@@ -1,3 +1,4 @@
+import { isMotorcycleType } from '../vehicles/vehicle-reference-data.js';
 // ค่าใช้จ่ายงานต่อภาษี - ตัวเลขจากผู้ใช้ 2026-09-23
 // ไม่มีสำเนาฝั่ง frontend (ต่างจาก plate-swap-fee.ts): ฟอร์มขอยอดสดจาก POST /api/tax-renewals/preview
 // เพราะยอดภาษีต้องใช้ตารางอัตราในฐานข้อมูลอยู่แล้ว คิดเองฝั่ง client ไม่ได้
@@ -19,7 +20,7 @@ export const TAX_RENEWAL_CONTRIBUTION_MOTO = 10;
 export type TaxRenewalVehicleClass = 'CAR' | 'MOTO';
 
 export function vehicleClassOf(vehicleType: string | null | undefined): TaxRenewalVehicleClass {
-  return vehicleType?.startsWith('รย.12-') ? 'MOTO' : 'CAR';
+  return isMotorcycleType(vehicleType) ? 'MOTO' : 'CAR';
 }
 
 export function contributionAmountFor(vehicleClass: TaxRenewalVehicleClass): number {

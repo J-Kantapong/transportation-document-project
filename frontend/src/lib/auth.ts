@@ -1,3 +1,4 @@
+import { isMotorcycleBody } from './vehicle-kind';
 // ระบบล็อกอิน (ฝั่งเว็บ): token JWT จาก backend เก็บใน cookie "td_token" ของโดเมนเว็บเอง (ตั้งด้วย JS) เพราะ
 // frontend (Vercel) กับ backend (Render) อยู่คนละโดเมน cookie httpOnly จาก backend จะไม่ถึง proxy.ts ของ Next
 // - ทุก API call แนบ "Authorization: Bearer" (ดู api.ts request) - proxy.ts อ่าน cookie เพื่อกันเข้าหน้าโดยไม่ล็อกอิน
@@ -152,7 +153,7 @@ export function homeFor(roles: UserRole[]): string {
   if (entry) return '/registration/new-vehicle/entry';
   if (submit) return '/registration/new-vehicle/submit-documents';
   if (roles.includes('ACCOUNTANT')) return '/accounting/billing';
-  if (roles.includes('DELIVERY')) return '/registration/new-vehicle/delivery';
+  if (roles.includes('DELIVERY')) return '/delivery';
   return '/';
 }
 
@@ -175,8 +176,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/activity', roles: ['ADMIN'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
   // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
-  { prefix: '/registration/new-vehicle/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },
-  { prefix: '/registration/new-vehicle/delivery', roles: [...SUBMIT_STAFF, 'DELIVERY'] },
+  { prefix: '/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },
+  { prefix: '/delivery', roles: [...SUBMIT_STAFF, 'DELIVERY'] },
   // ขั้นตอนยื่นเอกสาร 4 หน้า (/submit...) เป็นงานบันทึกล้วน - ACCOUNTANT ดูได้แค่รายการที่ยื่นแล้ว (พบ 2026-09-27)
   { prefix: '/registration/new-vehicle/submit-documents/submit', roles: SUBMIT_STAFF },
   { prefix: '/registration/new-vehicle/submit-documents', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
@@ -249,7 +250,7 @@ export function submitWriteScopeFor(roles: UserRole[]): VehicleScope {
 // สำเนาของ canEditTransferNotice ใน backend/src/auth/vehicle-scope.ts
 export function canEditTransferNotice(roles: UserRole[], body: string | null): boolean {
   if (canEditEntrySteps(roles)) return true;
-  return roles.includes('STAFF_MOTO') && Boolean(body?.startsWith('รย.12-'));
+  return roles.includes('STAFF_MOTO') && isMotorcycleBody(body);
 }
 
 export function canAccessPage(pathname: string, roles: UserRole[]): boolean {

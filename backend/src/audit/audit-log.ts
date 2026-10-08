@@ -27,7 +27,8 @@ export type AuditEntity =
   | 'PayslipSignature'
   | 'IssuedWhtCertificate'
   | 'IssuedWhtSeries'
-  | 'Supplier';
+  | 'Supplier'
+  | 'SupplierProvinceRate';
 
 export interface AuditEntry {
   entity: AuditEntity;

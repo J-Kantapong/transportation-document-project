@@ -85,6 +85,9 @@ type LineAmounts = {
   // งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28) - ทั้งคู่มีหรือไม่มีพร้อมกันเสมอ
   plateSwapId: string | null;
   swapReceiptAmount: number | null;
+  // ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย (ขั้น 2, ผู้ใช้ 2026-10-08) - ระบบอ่านจาก Vehicle.transferBillCost ตอนออกบิลเอง หน้าจอส่งมาไม่ได้
+  // รวมอยู่ในยอดค่าธรรมเนียมของบิล (computeInvoiceTotals) เก็บแยกจาก receiptAmount เพื่อให้ย้อนตรวจได้ · แก้ที่หน้าแก้บิลไม่ได้
+  transferReceiptAmount: number | null;
 };
 const LINE_FIELDS = ['receiptAmount', 'serviceFee', 'serviceLabel', 'deduction', 'deductionNote'] as const;
 
@@ -156,6 +159,7 @@ function parseLineAmounts(l: Record<string, unknown>): LineAmounts {
     deductionNote: deduction > 0 ? optionalText(l.deductionNote, 'เหตุผลที่หัก') : null,
     plateSwapId,
     swapReceiptAmount,
+    transferReceiptAmount: null, // createInvoice ใส่จากข้อมูลรถใต้ล็อก / updateInvoice คงค่าเดิมของบรรทัด
   };
 }
 
@@ -254,6 +258,7 @@ const lineAmountsOf = (l: {
   deductionNote: string | null;
   plateSwapId?: string | null;
   swapReceiptAmount?: unknown;
+  transferReceiptAmount?: unknown;
 }): LineAmounts => ({
   receiptAmount: Number(l.receiptAmount),
   serviceFee: Number(l.serviceFee),
@@ -263,6 +268,7 @@ const lineAmountsOf = (l: {
   // บรรทัดที่ออกก่อนมีงานสลับเลขในบิลเป็น null ทั้งคู่ คิดเหมือนเดิมทุกประการ
   plateSwapId: l.plateSwapId ?? null,
   swapReceiptAmount: l.swapReceiptAmount === null || l.swapReceiptAmount === undefined ? null : Number(l.swapReceiptAmount),
+  transferReceiptAmount: l.transferReceiptAmount === null || l.transferReceiptAmount === undefined ? null : Number(l.transferReceiptAmount),
 });
 
 type CustomerTermsRow = { billingVat: boolean; billingWhtRate: unknown; billingWhtSpecialRate: unknown; billingWhtSpecialUntil: Date | null };
@@ -349,6 +355,7 @@ function currentBillEstimate(
         urgent: sub.urgent,
       },
       rules,
+      { billOnly: true }, // ใช้แค่ยอด Bill - รถที่ส่งซับจดไม่ต้องโหลดตารางราคาซับ
     );
     return round2(fee.billTotal + Number(sub.taxAmount));
   } catch {
@@ -559,6 +566,9 @@ export class BillingService {
               urgent,
               otherProvince,
               transferNotice,
+              // ส่วนของคันนี้ในใบเสร็จแจ้งย้าย (ขั้น 2) - ระบบบวกเข้าค่าธรรมเนียมของบิลเองตอนออกบิล (ผู้ใช้ 2026-10-08)
+              transferReceiptAmount: num(v.transferBillCost),
+              transferReceiptId: v.transferReceiptId,
               // งานสลับเลขของรถคันนี้ - swapReceiptAmount ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ หน้าจอจะไม่ให้ติ๊กวางบิล
               plateSwap: swap,
               // จับคู่ราคาอัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ราคาหลักตามชนิดรถ/CC + ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนตามการยื่นล่าสุด
@@ -825,7 +835,9 @@ export class BillingService {
               if (!swap || swap.newVehicleId !== v.id) throw bad(`งานสลับเลขของรถ ${v.chassis} ไม่ถูกต้อง กรุณาโหลดรายการใหม่`);
               if (swap.invoiceNo) throw bad(`งานสลับเลขของรถ ${v.chassis} อยู่ในบิล ${swap.invoiceNo} แล้ว`);
             }
-            return { ...l, ...lineSnapshotOf(v), deliveredDate: v.deliveredDate };
+            // ใบเสร็จแจ้งย้ายของคันนี้ (ขั้น 2) รวมเข้าค่าธรรมเนียมของบิล - อ่านจากรถใต้ล็อก ไม่รับจากหน้าจอ
+            const transferReceiptAmount = num(v.transferBillCost);
+            return { ...l, transferReceiptAmount, ...lineSnapshotOf(v), deliveredDate: v.deliveredDate };
           });
 
           // บัญชีของบิล = บัญชีของลูกค้า ณ วันส่งงานของรถ - บิลเดียวต้องอยู่บัญชีเดียว (ช่วงย้ายบัญชีต้องแยกบิล)
@@ -936,12 +948,13 @@ export class BillingService {
   }
 
   // --- งานอื่นๆ ในใบวางบิล (ผู้ใช้ 2026-10-07) ---------------------------------------------------------------
-  // งานที่พร้อมวางบิล: งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก เมื่อรับใบเสร็จกลับแล้ว (returnedDate) และต่อภาษีเมื่อคืนเอกสารให้ลูกค้าแล้ว
+  // งานที่พร้อมวางบิล: งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก เมื่อรับใบเสร็จกลับแล้ว (returnedDate) และส่งงานลูกค้าแล้ว (deliveredDate -
+  // ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) และต่อภาษีเมื่อคืนเอกสารให้ลูกค้าแล้ว
   // (deliveredDate) - ต้องมีเจ้าของงาน (customerId) ไม่ถูกยกเลิก และไม่อยู่ในบิลที่ยังไม่ VOID (บิลที่ VOID แล้วงานกลับเข้าคิวเอง)
   private async loadJobs(db: Prisma.TransactionClient, opts: { customerId?: string; ids?: Map<JobType, string[]> }) {
     const idsOf = (t: JobType) => (opts.ids ? { id: { in: opts.ids.get(t) ?? [] } } : {});
     const owner = opts.customerId ? { customerId: opts.customerId } : { customerId: { not: null } };
-    const done = { ...owner, cancelledAt: null, returnedDate: { not: null } };
+    const done = { ...owner, cancelledAt: null, returnedDate: { not: null }, deliveredDate: { not: null } };
     const shape = {
       id: true,
       customerId: true,
@@ -951,6 +964,7 @@ export class BillingService {
       plateCategory: true,
       plateNumber: true,
       returnedDate: true,
+      deliveredDate: true,
       receiptNo: true,
       receiptAmount: true,
       billTotal: true,
@@ -966,6 +980,7 @@ export class BillingService {
       plateCategory: string;
       plateNumber: string;
       returnedDate: Date | null;
+      deliveredDate: Date | null;
       receiptNo: string | null;
       receiptAmount: unknown;
       billTotal: unknown;
@@ -983,6 +998,7 @@ export class BillingService {
       brand: r.brand,
       ownerName,
       doneDate: iso(r.returnedDate)!,
+      deliveredDate: iso(r.deliveredDate)!,
       receiptNo: r.receiptNo,
       receiptAmount: num(r.receiptAmount),
       billTotal: Number(r.billTotal),
@@ -1021,6 +1037,7 @@ export class BillingService {
           brand: r.vehicleType.split('-')[0].trim(),
           ownerName: r.ownerName,
           doneDate: iso(r.deliveredDate)!,
+          deliveredDate: iso(r.deliveredDate)!,
           receiptNo: null,
           receiptAmount: null,
           billTotal: Number(r.billTotal ?? 0),
@@ -1451,11 +1468,12 @@ export class BillingService {
             // ผิดต้องยกเลิกบิลแล้วออกใหม่ เพราะยอดนี้ผูกกับงานสลับเลขซึ่งต้องกันวางบิลซ้ำ
             after.plateSwapId = before.plateSwapId;
             after.swapReceiptAmount = before.swapReceiptAmount;
+            after.transferReceiptAmount = before.transferReceiptAmount; // ใบเสร็จแจ้งย้ายก็เช่นกัน - ผิดต้องยกเลิกบิลแล้วออกใหม่
             const diff = diffChanges(before, after, LINE_FIELDS);
             if (Object.keys(diff).length) {
               for (const [field, change] of Object.entries(diff)) changes[`${lineLabel(l)} · ${field}`] = change;
               // ไม่เขียนสองช่องของงานสลับเลขซ้ำ - ค่าเท่าเดิมเสมอ (บรรทัดเก่าก่อนมีฟีเจอร์นี้จะได้ไม่ถูกแตะ)
-              const { plateSwapId: _swapId, swapReceiptAmount: _swapAmount, ...writable } = after;
+              const { plateSwapId: _swapId, swapReceiptAmount: _swapAmount, transferReceiptAmount: _transferAmount, ...writable } = after;
               lineWrites.set(l.id, writable);
             }
           }
@@ -1760,6 +1778,7 @@ export class BillingService {
       deductionNote: string | null;
       plateSwapId: string | null;
       swapReceiptAmount: unknown;
+      transferReceiptAmount: unknown;
       vehicle?: { documentSubmissions: Array<{ submitDate: Date; urgent: boolean; createdAt: Date }> } | null;
     }>;
   }, historyCount?: number) {
@@ -1828,6 +1847,7 @@ export class BillingService {
         deductionNote: l.deductionNote,
         plateSwapId: l.plateSwapId,
         swapReceiptAmount: l.swapReceiptAmount === null ? null : Number(l.swapReceiptAmount),
+        transferReceiptAmount: l.transferReceiptAmount === null ? null : Number(l.transferReceiptAmount),
         // ใบยื่นของรถคันนี้ (อ่านสด) - ใบแนบเรียงตาม วันที่ยื่น > กลุ่มใบส่งงาน > ทะเบียน
         submitDate: iso(l.vehicle?.documentSubmissions[0]?.submitDate ?? null),
         submitUrgent: l.vehicle?.documentSubmissions[0]?.urgent ?? null,

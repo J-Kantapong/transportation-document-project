@@ -21,6 +21,8 @@ import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type Norma
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
+import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 
 type Tab = "single" | "batch";
@@ -1029,6 +1031,7 @@ export default function VehicleEntryPage() {
                   <span className="status-badge" role="status">
                     สถานะ: {getVehicleStatus(single.registrationProvince)}
                   </span>
+                  <SupplierRouteHint province={single.registrationProvince} />
                 </div>
                 <span className="muted">* จำเป็นต้องกรอก</span>
               </div>
@@ -1444,7 +1447,7 @@ export default function VehicleEntryPage() {
             <EditImpactWarning
               warning={editWarning}
               roles={roles}
-              isMotorcycle={editRow.body.startsWith("รย.12-")}
+              isMotorcycle={isMotorcycleBody(editRow.body)}
               chassis={editRow.chassis}
               saving={editSaving}
               onConfirm={() => handleEditSubmit(undefined, editWarning)}

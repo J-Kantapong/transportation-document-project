@@ -192,9 +192,12 @@ export async function searchJobs(
     plateCategory: string;
     plateNumber: string;
     returnedDate: Date | null;
+    deliveredDate: Date | null;
     cancelledAt: Date | null;
     customer: { name: string } | null;
   };
+  // ส่งงานลูกค้าแล้ว (ใบ DL, ผู้ใช้ 2026-10-08) = เสร็จ / ใบเสร็จกลับแล้วแต่ยังไม่ส่ง = รอส่งงาน
+  const delivered = (j: { deliveredDate: Date | null }) => (j.deliveredDate ? `ส่งงานลูกค้าแล้ว ${dmy(j.deliveredDate)}` : null);
   const simple = (type: JobType, rows: SimpleRow[], path: string) => {
     for (const j of cut(rows)) {
       const cls = classKind(j.vehicleClass);
@@ -210,10 +213,10 @@ export async function searchJobs(
         engine: j.engine,
         plate: plateText(j.plateCategory, j.plateNumber),
         brandName: j.brand,
-        status: j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)}` : 'รอรับใบเสร็จ',
-        done: !!j.returnedDate,
+        status: delivered(j) ?? (j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)} รอส่งงาน` : 'รอรับใบเสร็จ'),
+        done: !!j.deliveredDate,
         cancelled: !!j.cancelledAt,
-        href: path.replace('{cls}', cls),
+        href: j.returnedDate && !j.deliveredDate ? '/delivery' : path.replace('{cls}', cls),
       });
     }
   };
@@ -234,10 +237,10 @@ export async function searchJobs(
       engine: j.engine,
       plate: plateText(j.plateCategory, j.plateNumber),
       brandName: j.brand,
-      status: !j.returnedDate ? 'รอรับใบเสร็จ' : waitingPlate ? 'รับใบเสร็จแล้ว รอรับป้าย' : `รับป้ายแล้ว ${dmy(j.plateReceivedDate!)}`,
-      done: !!j.returnedDate && !waitingPlate,
+      status: delivered(j) ?? (!j.returnedDate ? 'รอรับใบเสร็จ' : waitingPlate ? 'รับใบเสร็จแล้ว รอรับป้าย' : `รับป้ายแล้ว ${dmy(j.plateReceivedDate!)} รอส่งงาน`),
+      done: !!j.deliveredDate,
       cancelled: !!j.cancelledAt,
-      href: !j.returnedDate ? '/registration/other/plate-copy/return' : '/registration/other/plate-copy/receive-plate',
+      href: !j.returnedDate ? '/registration/other/plate-copy/return' : waitingPlate ? '/registration/other/plate-copy/receive-plate' : '/delivery',
     });
   }
 
@@ -255,8 +258,11 @@ export async function searchJobs(
     } else if (inspection && j.inspectionResult === 'FAIL') {
       status = 'ตรวจไม่ผ่าน';
       href = '/registration/transfer/inspection/inspect';
+    } else if (j.deliveredDate) {
+      status = delivered(j)!;
     } else {
-      status = j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)}` : 'รอรับใบเสร็จ';
+      status = j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)} รอส่งงาน` : 'รอรับใบเสร็จ';
+      if (j.returnedDate) href = '/delivery';
     }
     jobs.push({
       ...base('TRANSFER'),
@@ -271,7 +277,7 @@ export async function searchJobs(
       plate: plateText(j.plateCategory, j.plateNumber),
       brandName: j.brand,
       status: `${inspection ? 'โอนตรวจรถ' : 'โอนตามผู้ถือกรรมสิทธิ์'} · ${status}`,
-      done: !!j.returnedDate,
+      done: !!j.deliveredDate,
       cancelled: !!j.cancelledAt,
       href,
     });

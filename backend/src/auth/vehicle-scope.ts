@@ -4,15 +4,15 @@ import { currentUser } from './request-context.js';
 
 // ขอบเขตประเภทรถของขั้น 4-8 (ยื่นเอกสาร -> Delivery) ตามบทบาท (ผู้ใช้ 2026-09-22):
 // STAFF_CAR เห็น/แก้เฉพาะรถยนต์, STAFF_MOTO เฉพาะจักรยานยนต์, ถือทั้งคู่หรือ ADMIN/ACCOUNTANT/DELIVERY = ทุกคัน
-// ประเภทรถดูจาก Vehicle.body ขึ้นต้น "รย.12-" = จักรยานยนต์ (กฎเดียวกับ document-fee-calculator.isMotorcycle
+// ประเภทรถดูจาก Vehicle.body ขึ้นต้น "รย.12-" หรือ "รย.17-" (จักรยานยนต์สาธารณะ) = จักรยานยนต์ (กฎเดียวกับ document-fee-calculator.isMotorcycle
 // และ frontend lib/vehicle-kind.ts isMotorcycleBody) - body ว่างนับเป็นรถยนต์
 export type VehicleKind = 'car' | 'moto';
 export type VehicleScope = 'ALL' | 'CAR' | 'MOTO' | 'NONE';
 
-const MOTO_PREFIX = 'รย.12-';
+import { isMotorcycleType, motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
 
 export function vehicleKindOf(body: string | null | undefined): VehicleKind {
-  return body?.startsWith(MOTO_PREFIX) ? 'moto' : 'car';
+  return isMotorcycleType(body) ? 'moto' : 'car';
 }
 
 export function vehicleScopeFor(roles: UserRole[]): VehicleScope {
@@ -60,8 +60,8 @@ export function currentDeliveryScope(): VehicleScope {
 // ใช้ AND เพื่อไม่ชนกับ OR/NOT ที่ where เดิมอาจมีอยู่แล้ว
 export function vehicleTypeWhere(scope: VehicleScope = currentVehicleScope()) {
   if (scope === 'ALL') return {};
-  if (scope === 'MOTO') return { AND: [{ body: { startsWith: MOTO_PREFIX } }] };
-  if (scope === 'CAR') return { AND: [{ OR: [{ body: null }, { NOT: { body: { startsWith: MOTO_PREFIX } } }] }] };
+  if (scope === 'MOTO') return { AND: [motorcycleTypeWhere('body')] };
+  if (scope === 'CAR') return { AND: [{ OR: [{ body: null }, { NOT: motorcycleTypeWhere('body') }] }] };
   return { AND: [{ id: { in: [] as string[] } }] }; // NONE: ไม่เห็นคันไหนเลย
 }
 

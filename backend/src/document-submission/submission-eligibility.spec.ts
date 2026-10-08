@@ -40,3 +40,34 @@ describe('งานสลับเลขที่ยังเปิดอยู�
     expect(getSubmitBlockReason({ ...PASSED, plateSwap: { returnedDate: '2026-06-05' } }, day('2026-06-10'))).toBeNull();
   });
 });
+
+// ผู้ใช้ 2026-10-08: จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ ส่งซับจด - แจ้งย้ายเสร็จแล้วส่งได้เลย ไม่ดูผลตรวจรถ
+describe('ส่งซับจดต่างจังหวัด', () => {
+  const NOT_INSPECTED = {
+    transferDone: true,
+    transferCompletedDate: day('2026-06-01'),
+    inspectionSentDate: null,
+    inspectionResult: null,
+    inspectionResultDate: null,
+    activeSubmissionStatus: null,
+  };
+
+  it('จังหวัดที่ส่งซับ: ยังไม่ตรวจรถก็ส่งได้ ตั้งแต่วันที่แจ้งย้ายเสร็จ', () => {
+    const v = { ...NOT_INSPECTED, registrationProvince: 'เชียงใหม่' };
+    expect(getSubmitBlockReason(v, day('2026-06-01'))).toBeNull();
+    expect(getSubmitBlockReason(v, day('2026-12-31'))).toBeNull(); // ไม่มีอายุ 90 วัน
+    expect(getSubmitBlockReason(v, day('2026-05-31'))).toContain('ก่อนวันที่แจ้งย้ายเสร็จ');
+  });
+
+  it('กรุงเทพฯ และสมุทรปราการ ออฟฟิศจดเอง: ยังต้องตรวจรถผ่านก่อน', () => {
+    expect(getSubmitBlockReason({ ...NOT_INSPECTED, registrationProvince: 'กรุงเทพมหานคร' }, day('2026-06-10'))).toBe('ยังไม่ได้ตรวจรถ');
+    expect(getSubmitBlockReason({ ...NOT_INSPECTED, registrationProvince: 'สมุทรปราการ' }, day('2026-06-10'))).toBe('ยังไม่ได้ตรวจรถ');
+  });
+
+  it('จังหวัดที่ส่งซับยังต้องแจ้งย้ายก่อน และติดกฎยื่นซ้ำ/สลับเลขเหมือนเดิม', () => {
+    const v = { ...NOT_INSPECTED, registrationProvince: 'เชียงใหม่' };
+    expect(getSubmitBlockReason({ ...v, transferDone: false }, day('2026-06-10'))).toBe('ยังไม่ผ่านขั้นตอนแจ้งย้าย/ตัดบัญชี');
+    expect(getSubmitBlockReason({ ...v, activeSubmissionStatus: 'PENDING' }, day('2026-06-10'))).toContain('ยื่นซ้ำไม่ได้');
+    expect(getSubmitBlockReason({ ...v, plateSwap: { returnedDate: null } }, day('2026-06-10'))).toBe(PLATE_SWAP_PENDING_REASON);
+  });
+});

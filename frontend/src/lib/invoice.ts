@@ -34,7 +34,7 @@ export function effectiveWhtRate(terms: BillingTerms, issueDate: string): number
 // whtOverride = อัตราหัก ณ ที่จ่ายที่เลือกให้บิลนี้ (ผู้ใช้ 2026-09-29) null = ตามเงื่อนไขลูกค้า
 // items = บรรทัดกำหนดเอง: FEE ไม่มี VAT ไม่หัก · SERVICE VAT + หัก · GOODS VAT ไม่หัก
 export function computeTotals(
-  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>,
+  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null; transferReceiptAmount?: number | null }>,
   extras: Array<{ amount: number }>,
   terms: BillingTerms,
   issueDate: string,
@@ -43,7 +43,8 @@ export function computeTotals(
 ) {
   const itemSum = (kind: InvoiceItemKind) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i.amount, 0);
   // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลขรวมอยู่ในยอดค่าธรรมเนียมด้วย (ผู้ใช้ 2026-09-28)
-  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0) + itemSum("FEE"));
+  // ใบเสร็จแจ้งย้ายของรถ (ขั้น 2) ก็รวมอยู่ในยอดค่าธรรมเนียม (ผู้ใช้ 2026-10-08) - ตรงกับ backend computeInvoiceTotals
+  const feeTotal = round2(lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0) + (l.transferReceiptAmount ?? 0), 0) + itemSum("FEE"));
   const serviceTotal = round2(lines.reduce((s, l) => s + l.serviceFee, 0) + extras.reduce((s, e) => s + e.amount, 0) + itemSum("SERVICE"));
   const goodsTotal = round2(itemSum("GOODS"));
   const vatRate = terms.vat ? VAT_RATE : 0;

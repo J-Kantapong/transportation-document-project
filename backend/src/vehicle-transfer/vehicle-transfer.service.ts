@@ -65,6 +65,9 @@ export interface VehicleTransferRow {
   inspectionResult: InspectionResult | null;
   inspectionResultDate: string | null;
   returnedDate: string | null; // YYYY-MM-DD
+  // ส่งงานลูกค้า (ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08) - ส่งแล้วจึงวางบิลได้
+  deliveredDate: string | null;
+  deliveryRecipient: string | null;
   receipts: { id: string; createdAt: string }[];
   receiptNo: string | null;
   receiptDate: string | null; // YYYY-MM-DD
@@ -211,6 +214,8 @@ const transferInclude = {
 } satisfies Prisma.VehicleTransferInclude;
 
 interface TransferRecord {
+  deliveredDate?: Date | null; // ส่งงานลูกค้าแล้ว (ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08)
+  deliveryRecipient?: string | null;
   id: string;
   transferType: string;
   vehicleClass: string;
@@ -266,6 +271,8 @@ export function serializeTransfer(row: TransferRecord): VehicleTransferRow {
     inspectionResult: row.inspectionResult === 'PASS' || row.inspectionResult === 'FAIL' ? row.inspectionResult : null,
     inspectionResultDate: isoDate(row.inspectionResultDate),
     returnedDate: isoDate(row.returnedDate),
+    deliveredDate: isoDate(row.deliveredDate ?? null),
+    deliveryRecipient: row.deliveryRecipient ?? null,
     receipts: row.receipts.map((r) => ({ id: r.id, createdAt: r.createdAt.toISOString() })),
     receiptNo: row.receiptNo ?? null,
     receiptDate: isoDate(row.receiptDate ?? null),
@@ -650,6 +657,8 @@ export class VehicleTransferService {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกรับเอกสารกลับ');
     const existing = await this.findOrThrow(id);
     if (!existing.returnedDate) throw new BadRequestException({ error: 'งานนี้ยังไม่รับเอกสารกลับ' });
+    // ส่งงานลูกค้าแล้ว (ใบ DL) - ต้องยกเลิกใบส่งงานก่อน ไม่งั้นใบ DL ค้างชี้งานที่ย้อนสถานะ/ยกเลิกไปแล้ว (ผู้ใช้ 2026-10-08)
+    if (existing.deliveredDate) throw new BadRequestException({ error: 'งานนี้ส่งงานลูกค้าแล้ว - ยกเลิกใบส่งงาน (DL) ที่หน้ารายงานส่งงานก่อน' });
     await this.prisma.$transaction(async (tx) => {
       await tx.vehicleTransfer
         .update({ where: { id, cancelledAt: null, returnedDate: existing.returnedDate }, data: { returnedDate: null } })
@@ -670,6 +679,8 @@ export class VehicleTransferService {
   async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกงานโอน');
     const existing = await this.findOrThrow(id);
+    // ส่งงานลูกค้าแล้ว (ใบ DL) - ต้องยกเลิกใบส่งงานก่อน ไม่งั้นใบ DL ค้างชี้งานที่ย้อนสถานะ/ยกเลิกไปแล้ว (ผู้ใช้ 2026-10-08)
+    if (existing.deliveredDate) throw new BadRequestException({ error: 'งานนี้ส่งงานลูกค้าแล้ว - ยกเลิกใบส่งงาน (DL) ที่หน้ารายงานส่งงานก่อน' });
     await this.prisma.$transaction(async (tx) => {
       await tx.vehicleTransfer
         .update({ where: { id, cancelledAt: null }, data: { cancelledAt: new Date(), cancelReason: remark, cancelledById: currentUser()?.id ?? null } })

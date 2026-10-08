@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import type { DocumentSubmission } from "@/lib/api";
 import { ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate } from "@/lib/date";
@@ -23,7 +24,7 @@ type Family = "car1" | "car23" | "moto" | "unknown";
 
 export function classify(body: string | null): Family {
   if (!body) return "unknown";
-  if (body.startsWith("รย.12-")) return "moto";
+  if (isMotorcycleBody(body)) return "moto";
   if (body.startsWith("รย.1-")) return "car1";
   if (body.startsWith("รย.2-") || body.startsWith("รย.3-")) return "car23";
   return "unknown";

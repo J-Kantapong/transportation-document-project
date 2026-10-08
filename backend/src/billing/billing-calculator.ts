@@ -125,7 +125,8 @@ export type ItemKind = (typeof ITEM_KINDS)[number];
 
 export function computeInvoiceTotals(input: {
   // swapReceiptAmount = ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข เก็บแยกแต่รวมอยู่ในยอดค่าธรรมเนียม (ผู้ใช้ 2026-09-28)
-  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null }>;
+  // transferReceiptAmount = ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย (ขั้น 2) รวมอยู่ในยอดค่าธรรมเนียมเช่นกัน (ผู้ใช้ 2026-10-08)
+  lines: Array<{ receiptAmount: number; serviceFee: number; swapReceiptAmount?: number | null; transferReceiptAmount?: number | null }>;
   extras: Array<{ amount: number }>;
   items?: Array<{ kind: string; amount: number }>;
   terms: BillingTerms;
@@ -133,7 +134,9 @@ export function computeInvoiceTotals(input: {
 }): InvoiceTotals {
   const items = input.items ?? [];
   const itemSum = (kind: ItemKind) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i.amount, 0);
-  const feeTotal = round2(input.lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0), 0) + itemSum('FEE'));
+  const feeTotal = round2(
+    input.lines.reduce((s, l) => s + l.receiptAmount + (l.swapReceiptAmount ?? 0) + (l.transferReceiptAmount ?? 0), 0) + itemSum('FEE'),
+  );
   const serviceTotal = round2(input.lines.reduce((s, l) => s + l.serviceFee, 0) + input.extras.reduce((s, e) => s + e.amount, 0) + itemSum('SERVICE'));
   const goodsTotal = round2(itemSum('GOODS'));
   const vatRate = input.terms.vat ? VAT_RATE : 0;

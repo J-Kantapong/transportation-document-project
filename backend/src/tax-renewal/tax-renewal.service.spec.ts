@@ -274,7 +274,7 @@ describe('TaxRenewalService - ค้นรถมาต่อภาษีใช�
     const { svc, vehicleFindMany } = setup();
     await asUser(['STAFF_CAR', 'ACCOUNTANT'], () => svc.searchVehicles('1234'));
     const { where } = vehicleFindMany.mock.calls[0][0];
-    expect(where.AND).toEqual([{ OR: [{ body: null }, { NOT: { body: { startsWith: 'รย.12-' } } }] }]);
+    expect(where.AND).toEqual([{ OR: [{ body: null }, { NOT: { OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] } }] }]);
   });
 
   it('รถที่เลือกด้วย id ตรงๆ ยังโดนกันตอนคิดยอด (403 ข้อความขอบเขต)', async () => {

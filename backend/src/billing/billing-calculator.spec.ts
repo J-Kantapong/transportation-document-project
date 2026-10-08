@@ -224,6 +224,17 @@ describe('ค่าเพิ่มงานสลับเลข', () => {
     expect(totals.grossTotal).toBe(2970);
   });
 
+  // ผู้ใช้ 2026-10-08: ใบเสร็จแจ้งย้ายของรถ (ขั้น 2) รวมอยู่ในค่าธรรมเนียมของบิล ไม่คิด VAT / ไม่เป็นฐานหัก ณ ที่จ่าย
+  it('ใบเสร็จแจ้งย้ายรวมเข้าค่าธรรมเนียม ไม่กระทบ VAT และหัก ณ ที่จ่าย', () => {
+    const base = { extras: [], terms: terms(), issueDate: '2026-10-08' };
+    const without = computeInvoiceTotals({ ...base, lines: [{ receiptAmount: 240, serviceFee: 500 }] });
+    const withTransfer = computeInvoiceTotals({ ...base, lines: [{ receiptAmount: 240, serviceFee: 500, transferReceiptAmount: 5 }] });
+    expect(withTransfer.feeTotal).toBe(245);
+    expect(withTransfer.vatAmount).toBe(without.vatAmount);
+    expect(withTransfer.whtAmount).toBe(without.whtAmount);
+    expect(withTransfer.netTotal).toBe(without.netTotal + 5);
+  });
+
   it('บรรทัดเก่าที่ไม่มีงานสลับเลข คิดเหมือนเดิม', () => {
     const totals = computeInvoiceTotals({
       lines: [{ receiptAmount: 1000, serviceFee: 100 }],
