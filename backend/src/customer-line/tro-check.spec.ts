@@ -84,11 +84,9 @@ describe('replyFor', () => {
     expect(textOf('ตรอ 15/03/256')).toContain('วันจดทะเบียนไม่ถูกต้อง');
   });
 
-  it('ข้อความอื่นและ postback อื่นไม่ตอบ ปล่อยให้เจ้าหน้าที่/ข้อความอัตโนมัติของ LINE ตอบ', () => {
-    expect(replyFor({ type: 'message', message: { type: 'text', text: 'เอกสาร' } }, today)).toBeNull();
+  it('รูป สติกเกอร์ และ postback อื่นไม่ตอบ', () => {
     expect(replyFor({ type: 'message', message: { type: 'image' } }, today)).toBeNull();
     expect(replyFor({ type: 'postback', postback: { data: 'menu:1' } }, today)).toBeNull();
-    expect(replyFor({ type: 'follow' }, today)).toBeNull();
   });
 
   it('postback ของ ตรอ. ที่ไม่มีวันที่ = บอกให้เริ่มใหม่', () => {

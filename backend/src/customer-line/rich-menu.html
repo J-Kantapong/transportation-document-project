@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- ต้นฉบับรูปแถบเมนูไลน์ลูกค้า (rich-menu.png, 2500x1686) - แก้แล้วถ่ายใหม่ด้วย Chrome:
+     chrome --headless --hide-scrollbars --force-device-scale-factor=1 --window-size=2500,1686 --screenshot=rich-menu.png rich-menu.html
+     ตำแหน่งช่องต้องตรงกับ COLUMNS / ROWS ใน rich-menu.ts แล้วเปลี่ยน RICH_MENU_VERSION ด้วย -->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 2500px; height: 1686px; overflow: hidden; }
+  body { font-family: "Leelawadee UI", "Leelawadee", Tahoma, sans-serif; background: #123D30; position: relative; }
+  .tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .job { color: #fff; border-right: 3px solid rgba(217, 192, 138, .45); border-bottom: 3px solid rgba(217, 192, 138, .45); }
+  .job svg { width: 210px; height: 210px; stroke: #D9C08A; stroke-width: 2.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .job b { font-size: 104px; font-weight: 700; margin-top: 34px; line-height: 1.15; }
+  .job span { font-size: 54px; color: #D9C08A; margin-top: 12px; }
+  .tool { background: #F4EDDC; color: #123D30; flex-direction: row; gap: 40px; border-right: 3px solid rgba(18, 61, 48, .25); }
+  .tool svg { width: 150px; height: 150px; stroke: #123D30; stroke-width: 2.8; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .tool b { font-size: 84px; font-weight: 700; line-height: 1.15; text-align: left; }
+  .last { border-right: 0; }
+</style>
+</head>
+<body>
+  <div class="tile job" style="left:0;top:0;width:833px;height:600px">
+    <svg viewBox="0 0 64 64"><path d="M8 40v-8l6-12h28l8 12h4a4 4 0 0 1 4 4v4h-6"/><path d="M14 40h-6"/><path d="M24 40h18"/><circle cx="19" cy="41" r="5"/><circle cx="47" cy="41" r="5"/><path d="M14 32h36"/><path d="M52 8v12M46 14h12"/></svg>
+    <b>จดทะเบียนใหม่</b><span>รถป้ายแดง</span>
+  </div>
+  <div class="tile job" style="left:833px;top:0;width:834px;height:600px">
+    <svg viewBox="0 0 64 64"><circle cx="16" cy="18" r="7"/><path d="M4 40c0-7 5-12 12-12s12 5 12 12"/><circle cx="48" cy="30" r="7"/><path d="M36 54c0-7 5-12 12-12s12 5 12 12"/><path d="M32 14h14l-5-5M46 14l-5 5"/></svg>
+    <b>โอนรถ</b><span>เปลี่ยนชื่อเจ้าของ</span>
+  </div>
+  <div class="tile job" style="left:1667px;top:0;width:833px;height:600px">
+    <svg viewBox="0 0 64 64"><rect x="6" y="8" width="34" height="16" rx="3"/><rect x="24" y="40" width="34" height="16" rx="3"/><path d="M50 14v14l-5-5M50 28l5-5"/><path d="M14 50V36l-5 5M14 36l5 5"/></svg>
+    <b>สลับเลข</b><span>สลับเลขทะเบียน</span>
+  </div>
+  <div class="tile job" style="left:0;top:600px;width:833px;height:600px">
+    <svg viewBox="0 0 64 64"><rect x="8" y="8" width="38" height="14" rx="3"/><path d="M46 15h8v14H30v8"/><rect x="26" y="37" width="8" height="20" rx="2"/></svg>
+    <b>เปลี่ยนสี</b><span>แจ้งเปลี่ยนสีรถ</span>
+  </div>
+  <div class="tile job" style="left:833px;top:600px;width:834px;height:600px">
+    <svg viewBox="0 0 64 64"><rect x="8" y="12" width="48" height="44" rx="4"/><path d="M8 24h48M20 6v12M44 6v12"/><path d="M22 40l7 7 13-14"/></svg>
+    <b>ต่อภาษี</b><span>ต่อภาษีประจำปี</span>
+  </div>
+  <div class="tile job" style="left:1667px;top:600px;width:833px;height:600px">
+    <svg viewBox="0 0 64 64"><rect x="4" y="16" width="56" height="32" rx="4"/><path d="M14 28h10M14 37h10M32 27v11M40 27v11M48 27v11"/></svg>
+    <b>คัดป้าย</b><span>ป้ายหาย / ชำรุด</span>
+  </div>
+  <div class="tile tool" style="left:0;top:1200px;width:833px;height:486px">
+    <svg viewBox="0 0 64 64"><path d="M14 6h24l12 12v40H14z"/><path d="M38 6v12h12"/><path d="M32 28v18M24 39l8 8 8-8"/></svg>
+    <b>แบบฟอร์ม</b>
+  </div>
+  <div class="tile tool" style="left:833px;top:1200px;width:834px;height:486px">
+    <svg viewBox="0 0 64 64"><circle cx="27" cy="27" r="18"/><path d="M41 41l16 16"/><path d="M19 27l6 6 10-11"/></svg>
+    <b>เช็กภาษี<br>ตรอ.</b>
+  </div>
+  <div class="tile tool last" style="left:1667px;top:1200px;width:833px;height:486px">
+    <svg viewBox="0 0 64 64"><path d="M14 6h10l5 14-7 5c3 7 8 12 15 15l5-7 14 5v10c0 3-2 5-5 5C27 53 11 37 9 11c0-3 2-5 5-5z"/></svg>
+    <b>ติดต่อ<br>เจ้าหน้าที่</b>
+  </div>
+</body>
+</html>
