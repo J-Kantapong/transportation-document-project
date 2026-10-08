@@ -6,7 +6,7 @@ import { api, fetchAuthedBlob, plateCopyPlatePhotoImageUrl } from "@/lib/api";
 import { getCachedUser, getToken, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
-import { PLATE_COPY_DUTY_FEE, PLATE_COPY_EXPECTED_DAYS, PLATE_COPY_NO_BILL_FEE, type PlateCopyType, plateCopyBillFee } from "@/lib/plate-copy-fee";
+import { PLATE_COPY_DUTY_FEE, PLATE_COPY_EXPECTED_DAYS, PLATE_COPY_NO_BILL_FEE, PLATE_COPY_REQUEST_FEE, type PlateCopyType, plateCopyBillFee, plateCopyPlateFee } from "@/lib/plate-copy-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   plateCopyApi,
@@ -92,8 +92,9 @@ interface FormState {
 }
 
 const COPY_TYPE_LABELS: Record<PlateCopyType, string> = {
-  BOTH: "คัดทั้งคู่ (หน้า-หลัง)",
+  BOTH: "คัดคู่ (หน้า-หลัง) · เลขขาวดำปกติ",
   SINGLE_NORMAL: "คัดใบเดียว · เลขขาวดำปกติ",
+  BOTH_AUCTION: "คัดคู่ (หน้า-หลัง) · ประมูล",
   SINGLE_AUCTION: "คัดใบเดียว · ประมูล",
 };
 
@@ -237,6 +238,9 @@ function VehicleFormFields({
         <div>
           <strong>Bill (ใบเสร็จ)</strong>
           <div>{formatBaht(plateCopyBillFee(form.copyType))} บาท</div>
+          <div className="muted">
+            คำขอ {formatBaht(PLATE_COPY_REQUEST_FEE)} + ค่าแผ่นป้าย {formatBaht(plateCopyPlateFee(form.copyType))}
+          </div>
         </div>
         <div>
           <strong>No Bill</strong>

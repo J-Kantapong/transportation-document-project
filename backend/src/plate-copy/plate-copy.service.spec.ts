@@ -131,10 +131,16 @@ describe('PlateCopyService.create', () => {
   it('คัดป้ายใบเดียว: เลขขาวดำปกติ Bill 100 / ประมูล Bill 600 ส่วน No Bill และค่าอากรเท่าเดิม และชนิดที่ไม่รู้จักถูกปฏิเสธ', async () => {
     const a = service(null);
     await a.svc.create({ ...validDto, copyType: 'SINGLE_NORMAL' });
-    expect(a.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_NORMAL', billTotal: 100, noBillTotal: 100, dutyAmount: 10 });
+    expect(a.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_NORMAL', billTotal: 105, noBillTotal: 100, dutyAmount: 10 });
     const b = service(null);
     await b.svc.create({ ...validDto, copyType: 'SINGLE_AUCTION' });
-    expect(b.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_AUCTION', billTotal: 600 });
+    expect(b.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_AUCTION', billTotal: 605 });
+    const c = service(null);
+    await c.svc.create({ ...validDto, copyType: 'BOTH_AUCTION' });
+    expect(c.create.mock.calls[0][0].data).toMatchObject({ copyType: 'BOTH_AUCTION', billTotal: 1205 });
+    const d = service(null);
+    await d.svc.create({ ...validDto, copyType: 'BOTH' });
+    expect(d.create.mock.calls[0][0].data).toMatchObject({ copyType: 'BOTH', billTotal: 205 });
     await expect(service(null).svc.create({ ...validDto, copyType: 'X' })).rejects.toThrow();
   });
 
