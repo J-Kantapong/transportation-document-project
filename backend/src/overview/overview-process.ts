@@ -256,6 +256,9 @@ export interface StuckItem extends StuckSubject {
 // ปัญหาเหล่านี้เสียเงิน/เสียเวลาถ้าปล่อยไว้ จึงเป็น "ด่วน" แม้ยังไม่เกินกำหนด
 const HIGH_FLAGS: Flag[] = ['INSPECTION_EXPIRING', 'INSPECTION_EXPIRED', 'SUBMISSION_FAILED', 'INSPECTION_FAILED'];
 
+// "ส่งตรวจรถ 14 วัน" อ่านเหมือนส่งไปแล้ว 14 วัน รายการติดขัดจึงขึ้นต้นด้วย "รอ" (ชื่อขั้นที่มีคำว่ารออยู่แล้วไม่เติมซ้ำ)
+export const waitingLabel = (label: string) => (label.includes('รอ') ? label : `รอ${label}`);
+
 // หนึ่งคันแสดงแถวเดียว: เลือกรายการรอที่หนักที่สุด (มีปัญหาด่วน > เกินกำหนดนานสุด)
 export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string): StuckItem | null {
   let best: StuckItem | null = null;
@@ -266,7 +269,7 @@ export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string
     if (overdueDays === 0 && w.flags.length === 0) continue;
     const severity = w.flags.some((f) => HIGH_FLAGS.includes(f)) ? 'high' : 'medium';
     const reason = w.reason ?? `ค้างที่ขั้น${stage.label}เกินกำหนด ${stage.sla} วัน`;
-    const item: StuckItem = { ...subject, stage: w.stage, stageLabel: stage.label, href: subject.href ?? stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags };
+    const item: StuckItem = { ...subject, stage: w.stage, stageLabel: waitingLabel(stage.label), href: subject.href ?? stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags };
     if (!best || rank(item) > rank(best)) best = item;
   }
   return best;
