@@ -92,6 +92,9 @@ export interface OverviewAlert {
   title: string;
   detail: string;
   href: string;
+  // เรื่องที่เป็นรายคัน (ผู้ใช้ 2026-10-09): คันที่ด่วนที่สุดไม่เกิน 50 รายการ + จำนวนจริงทั้งหมด - เรื่องอื่น (บิล ใบเสนอราคา ฯลฯ) ไม่มี
+  items?: StuckItem[];
+  itemTotal?: number;
 }
 
 export interface Overview {

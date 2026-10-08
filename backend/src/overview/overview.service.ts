@@ -26,8 +26,9 @@ import {
   sortStuck,
   plateCopyWaits,
   jobDeliveryWait,
+  mostUrgent,
+  problemItemsFor,
   receiptWait,
-  stuckItemFor,
   summarizeBacklog,
   transferWaits,
   vehicleKindOf,
@@ -37,7 +38,9 @@ import {
   type KindCount,
   type StageKey,
   type StuckItem,
+  type StuckSubject,
   type VehicleKind,
+  type Wait,
 } from './overview-process.js';
 
 // ภาพรวมผู้บริหาร (ADMIN เท่านั้น - ดู access-policy.ts): สรุปการใช้เงินรายวัน งานแต่ละขั้นตอน (แยกรถยนต์/จักรยานยนต์)
@@ -51,6 +54,7 @@ const FORECAST_WEEKS = 4;
 const SERIES_DAYS = 30;
 const INSPECTION_REQUEST_FEE = 25; // ค่าใบคำขอตรวจสภาพ ต่อวันที่มีการตรวจ
 const STUCK_LIMIT = 100;
+const ALERT_ITEM_LIMIT = 50; // รายคันที่ส่งไปกับ "สิ่งที่ควรจัดการ" แต่ละเรื่อง (คันที่ด่วนที่สุดก่อน) - จำนวนจริงอยู่ใน itemTotal
 const NOT_VOID = { invoice: { status: { not: 'VOID' } } } as const;
 const MOTO_TYPE_PREFIX = 'รย.12'; // ต่อภาษี: vehicleType ขึ้นต้น รย.12 = จักรยานยนต์ (เหมือน Vehicle.body)
 
@@ -679,7 +683,14 @@ export class OverviewService {
     // ---------- งานค้าง + คันที่ติดขัด ----------
     const backlogItems: BacklogItem[] = [];
     const stuck: StuckItem[] = [];
-    const flagCount = new Map<Flag, number>();
+    // ทุกรายการรอที่เกินกำหนด/มีปัญหา (คันเดียวมีได้หลายรายการ) - "สิ่งที่ควรจัดการ" นับและแสดงรายคันจากชุดนี้
+    const problems: StuckItem[] = [];
+    const addStuck = (subject: StuckSubject, waits: Wait[]) => {
+      const items = problemItemsFor(subject, waits, today);
+      problems.push(...items);
+      const item = mostUrgent(items); // รายการติดขัด: หนึ่งคันหนึ่งแถว
+      if (item) stuck.push(item);
+    };
     for (const v of openVehicles) {
       const kind = vehicleKindOf(v.body);
       const sub = v.documentSubmissions[0] ?? null;
@@ -693,11 +704,8 @@ export class OverviewService {
         },
         today,
       );
-      for (const w of waits) {
-        backlogItems.push({ stage: w.stage, kind, since: w.since });
-        for (const f of w.flags) flagCount.set(f, (flagCount.get(f) ?? 0) + 1);
-      }
-      const item = stuckItemFor(
+      for (const w of waits) backlogItems.push({ stage: w.stage, kind, since: w.since });
+      addStuck(
         {
           id: v.id,
           source: 'vehicle',
@@ -708,15 +716,13 @@ export class OverviewService {
           plate: plateText(v.plateCategory, v.plateNumber),
         },
         waits,
-        today,
       );
-      if (item) stuck.push(item);
     }
     for (const s of openSwaps) {
       const since = isoOf(s.submitDate);
       const swapKind = classKind(s.vehicleClass);
       backlogItems.push({ stage: 'plateSwap', kind: swapKind, since });
-      const item = stuckItemFor(
+      addStuck(
         {
           id: s.id,
           source: 'plateSwap',
@@ -727,16 +733,14 @@ export class OverviewService {
           plate: plateText(s.oldPlateCategory, s.oldPlateNumber),
         },
         [{ stage: 'plateSwap', since, flags: [], reason: null }],
-        today,
       );
-      if (item) stuck.push(item);
     }
     for (const r of openRenewals) {
       const kind = renewalKind(r.vehicleType);
       // ชำระแล้ว + รับป้ายภาษีแล้ว = รอลงส่งงาน (นับจากวันรับ) / ยังไม่ชำระ = รอชำระ (นับจากวันยื่น)
       const renewalWait = r.paymentDate && r.receivedDate ? jobDeliveryWait(r.receivedDate) : { stage: 'taxRenewal' as const, since: isoOf(r.submitDate), flags: [], reason: null };
       backlogItems.push({ stage: renewalWait.stage, kind, since: renewalWait.since });
-      const item = stuckItemFor(
+      addStuck(
         {
           id: r.id,
           source: 'taxRenewal',
@@ -747,9 +751,7 @@ export class OverviewService {
           plate: plateText(r.plateCategory, r.plateNumber),
         },
         [renewalWait],
-        today,
       );
-      if (item) stuck.push(item);
     }
     // งานอื่นๆ: เข้าคิวค้างเหมือนงานข้างบน หนึ่งงานแสดงแถวเดียวในรายการติดขัด (ขั้นที่หนักที่สุด)
     // "ไปจัดการ" พาไปหน้ารับใบเสร็จ/รับป้ายของงานนั้นตรงๆ (หน้างานแยกรถยนต์/จักรยานยนต์ตามที่มี)
@@ -765,7 +767,7 @@ export class OverviewService {
     const addJob = (job: OtherJob, name: string, waits: ReturnType<typeof transferWaits>, href: string) => {
       const kind = classKind(job.vehicleClass);
       for (const w of waits) backlogItems.push({ stage: w.stage, kind, since: w.since });
-      const item = stuckItemFor(
+      addStuck(
         {
           id: job.id,
           source: 'otherJob',
@@ -777,9 +779,7 @@ export class OverviewService {
           href,
         },
         waits,
-        today,
       );
-      if (item) stuck.push(item);
     };
     // ใบเสร็จกลับแล้ว (ของครบ) แต่ยังไม่ลงส่งงาน = รอส่งงานลูกค้า ไปหน้า Delivery (ผู้ใช้ 2026-10-08)
     const deliveryHref = STAGES.jobDelivery.href;
@@ -959,8 +959,14 @@ export class OverviewService {
         s.taxAmount === null &&
         !(s.status === 'RECEIPT_RECEIVED' && s.receiptAmount !== null),
     ).length;
-    const flags = (f: Flag) => flagCount.get(f) ?? 0;
-    const late = (key: StageKey) => backlog[key].lateCount;
+    // รายคันของแต่ละเรื่อง (ผู้ใช้ 2026-10-09: กดแล้วไปถึงคันที่มีปัญหา) - จำนวนบนหัวข้อนับจากรายการชุดเดียวกับที่กางให้ดู
+    // ธงปัญหานับเฉพาะรถจดใหม่ (งานโอนตรวจไม่ผ่านอยู่ในรายการติดขัด ไม่อยู่ในเรื่องเหล่านี้) · เกินกำหนด = ค้างขั้นนั้นเกิน SLA
+    const sortedProblems = sortStuck(problems);
+    const flagged = (...fs: Flag[]) => sortedProblems.filter((p) => p.source === 'vehicle' && p.flags.some((f) => fs.includes(f)));
+    const lateAt = (...keys: StageKey[]) => sortedProblems.filter((p) => p.overdueDays > 0 && keys.includes(p.stage));
+    const flags = (f: Flag) => flagged(f).length;
+    const late = (key: StageKey) => lateAt(key).length;
+    const withItems = (list: StuckItem[]) => ({ items: list.slice(0, ALERT_ITEM_LIMIT), itemTotal: list.length });
 
     const alerts = [
       overdueAr.length && {
@@ -1018,6 +1024,7 @@ export class OverviewService {
         title: `ผลตรวจรถใกล้หมดอายุ (ภายใน ${INSPECTION_WARN_DAYS} วัน)`,
         detail: `${flags('INSPECTION_EXPIRING')} คัน ยังไม่ยื่นเอกสาร - หมดอายุแล้วต้องตรวจใหม่และเสียค่าตรวจซ้ำ`,
         href: STAGES.submit.href,
+        ...withItems(flagged('INSPECTION_EXPIRING')),
       },
       flags('SUBMISSION_FAILED') && {
         key: 'submission-failed',
@@ -1025,6 +1032,7 @@ export class OverviewService {
         title: 'ยื่นเอกสารไม่สำเร็จ ยังไม่ได้ยื่นใหม่',
         detail: `${flags('SUBMISSION_FAILED')} คัน`,
         href: STAGES.submit.href,
+        ...withItems(flagged('SUBMISSION_FAILED')),
       },
       flags('INSPECTION_FAILED') + flags('INSPECTION_EXPIRED') && {
         key: 'inspection-redo',
@@ -1032,6 +1040,7 @@ export class OverviewService {
         title: 'ต้องส่งตรวจรถใหม่',
         detail: `ตรวจไม่ผ่าน ${flags('INSPECTION_FAILED')} คัน · ผลตรวจหมดอายุ ${flags('INSPECTION_EXPIRED')} คัน`,
         href: STAGES.inspectSend.href,
+        ...withItems(flagged('INSPECTION_FAILED', 'INSPECTION_EXPIRED')),
       },
       flags('RECEIPT_UNKNOWN') && {
         key: 'receipt-unknown',
@@ -1039,6 +1048,7 @@ export class OverviewService {
         title: 'ยื่นแล้วยังไม่ได้ใบเสร็จ ไม่ทราบสาเหตุ',
         detail: `${flags('RECEIPT_UNKNOWN')} คัน (ยังขาดใบเสร็จในใบยื่น) - ควรตามที่ขนส่ง`,
         href: STAGES.receipt.href,
+        ...withItems(flagged('RECEIPT_UNKNOWN')),
       },
       late('receipt') && {
         key: 'receipt-late',
@@ -1046,6 +1056,7 @@ export class OverviewService {
         title: `รอใบเสร็จนานเกิน ${STAGES.receipt.sla} วัน`,
         detail: `${late('receipt')} คัน (นานสุด ${backlog.receipt.oldestDays} วัน) - เงินทดรองจ่ายจมอยู่`,
         href: STAGES.receipt.href,
+        ...withItems(lateAt('receipt')),
       },
       // ตัวช่วยกันลืมลงวันส่งงาน (ผู้ใช้ 2026-10-08): ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่มีใบ DL เกินกำหนด
       // ค้างนานกว่า 7 วัน = ด่วน (น่าจะส่งไปแล้วแต่ไม่ได้ลง จึงวางบิลไม่ได้) - ขึ้นทั้งหน้าภาพรวม สรุปเช้า และสรุปเย็นใน LINE
@@ -1055,6 +1066,7 @@ export class OverviewService {
         title: 'ของพร้อมส่งแล้ว แต่ยังไม่ได้ลงส่งงาน (ใบ DL)',
         detail: `รถจดใหม่/สลับเลข ${late('delivery')} คัน · งานอื่น ${late('jobDelivery')} งาน เกิน ${STAGES.delivery.sla} วัน (นานสุด ${Math.max(backlog.delivery.oldestDays ?? 0, backlog.jobDelivery.oldestDays ?? 0)} วัน) - พนักงานอาจลืมลงวันส่ง วางบิลไม่ได้จนกว่าจะลง`,
         href: STAGES.delivery.href,
+        ...withItems(lateAt('delivery', 'jobDelivery')),
       },
       late('billing') && {
         key: 'billing-late',
@@ -1062,6 +1074,7 @@ export class OverviewService {
         title: `ส่งงานแล้วแต่ยังไม่วางบิลเกิน ${STAGES.billing.sla} วัน`,
         detail: `${late('billing')} คัน - เงินยังไม่ถูกเรียกเก็บ`,
         href: STAGES.billing.href,
+        ...withItems(lateAt('billing')),
       },
       late('plateDelivery') && {
         key: 'plate-owed',
@@ -1069,6 +1082,7 @@ export class OverviewService {
         title: 'รับป้ายแล้วแต่ยังไม่ได้ส่งป้ายตามให้ลูกค้า',
         detail: `${late('plateDelivery')} คัน (นานสุด ${backlog.plateDelivery.oldestDays} วัน)`,
         href: STAGES.plateDelivery.href,
+        ...withItems(lateAt('plateDelivery')),
       },
       variance.length && {
         key: 'receipt-variance',
@@ -1091,7 +1105,7 @@ export class OverviewService {
         detail: `${pendingUsers} บัญชี`,
         href: '/admin/users',
       },
-    ].filter(Boolean) as Array<{ key: string; severity: 'high' | 'medium' | 'info'; title: string; detail: string; href: string }>;
+    ].filter(Boolean) as Array<{ key: string; severity: 'high' | 'medium' | 'info'; title: string; detail: string; href: string; items?: StuckItem[]; itemTotal?: number }>;
     const severityRank = { high: 0, medium: 1, info: 2 } as const;
     alerts.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]); // เรียงตามความเร่งด่วน (sort เสถียร คงลำดับเดิมในระดับเดียวกัน)
 

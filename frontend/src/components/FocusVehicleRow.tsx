@@ -8,10 +8,16 @@ import { focusChassis } from "@/lib/vehicle-focus";
 // รายการโหลดช้า/หน้าเปิดแท็บหรือใบให้เองทีหลัง จึงคอยดู DOM ไปเรื่อยๆ จนเจอหรือครบเวลา
 const WAIT_MS = 15_000;
 
+// แถวของรถ = แถวตาราง หรือกล่องที่หน้านั้นติด data-focus-row ไว้ (คิววางบิลเป็นรายการ div ไม่ใช่ตาราง - พบ 2026-10-09:
+// เดิมหาไม่เจอแล้วขึ้น "ไม่พบรถ" ทั้งที่รถอยู่ในหน้า)
+// หน้าที่ติด data-focus-row = บอกเองว่าแถวงานของหน้านั้นคืออันไหน จึงหาที่นั่นก่อนตาราง: หน้าวางบิลมีตาราง
+// "ของพร้อมส่งยังไม่ลงส่งงาน" อยู่เหนือคิว ซึ่งอาจมีเลขตัวถังเดียวกัน (ป้ายค้างส่ง) ไม่ใช่แถวที่ต้องการ
 function findRow(chassis: string): HTMLElement | null {
   const needle = chassis.toUpperCase();
-  for (const row of document.querySelectorAll<HTMLElement>("main tbody tr")) {
-    if (row.offsetParent !== null && (row.textContent ?? "").toUpperCase().includes(needle)) return row;
+  for (const selector of ["main [data-focus-row]", "main tbody tr"]) {
+    for (const row of document.querySelectorAll<HTMLElement>(selector)) {
+      if (row.offsetParent !== null && (row.textContent ?? "").toUpperCase().includes(needle)) return row;
+    }
   }
   return null;
 }

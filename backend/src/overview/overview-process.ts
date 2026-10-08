@@ -284,9 +284,10 @@ const HIGH_FLAGS: Flag[] = ['INSPECTION_EXPIRING', 'INSPECTION_EXPIRED', 'SUBMIS
 // "ส่งตรวจรถ 14 วัน" อ่านเหมือนส่งไปแล้ว 14 วัน รายการติดขัดจึงขึ้นต้นด้วย "รอ" (ชื่อขั้นที่มีคำว่ารออยู่แล้วไม่เติมซ้ำ)
 export const waitingLabel = (label: string) => (label.includes('รอ') ? label : `รอ${label}`);
 
-// หนึ่งคันแสดงแถวเดียว: เลือกรายการรอที่หนักที่สุด (มีปัญหาด่วน > เกินกำหนดนานสุด)
-export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string): StuckItem | null {
-  let best: StuckItem | null = null;
+// ทุกรายการรอของคันนี้ที่เกินกำหนดหรือมีปัญหา (คันเดียวมีได้หลายรายการ เช่น รอป้าย + รอเล่ม)
+// "สิ่งที่ควรจัดการ" นับและแสดงรายคันจากรายการชุดนี้ จำนวนบนหัวข้อจึงตรงกับรายชื่อที่กางออกเสมอ (ผู้ใช้ 2026-10-09)
+export function problemItemsFor(subject: StuckSubject, waits: Wait[], today: string): StuckItem[] {
+  const items: StuckItem[] = [];
   for (const w of waits) {
     const stage = STAGES[w.stage];
     const days = Math.max(0, daysBetween(w.since, today));
@@ -294,7 +295,19 @@ export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string
     if (overdueDays === 0 && w.flags.length === 0) continue;
     const severity = w.flags.some((f) => HIGH_FLAGS.includes(f)) ? 'high' : 'medium';
     const reason = w.reason ?? `ค้างที่ขั้น${stage.label}เกินกำหนด ${stage.sla} วัน`;
-    const item: StuckItem = { ...subject, stage: w.stage, stageLabel: waitingLabel(stage.label), href: subject.href ?? stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags };
+    items.push({ ...subject, stage: w.stage, stageLabel: waitingLabel(stage.label), href: subject.href ?? stage.href, since: w.since, days, overdueDays, severity, reason, flags: w.flags });
+  }
+  return items;
+}
+
+// หนึ่งคันแสดงแถวเดียว: เลือกรายการรอที่หนักที่สุด (มีปัญหาด่วน > เกินกำหนดนานสุด)
+export function stuckItemFor(subject: StuckSubject, waits: Wait[], today: string): StuckItem | null {
+  return mostUrgent(problemItemsFor(subject, waits, today));
+}
+
+export function mostUrgent(items: StuckItem[]): StuckItem | null {
+  let best: StuckItem | null = null;
+  for (const item of items) {
     if (!best || rank(item) > rank(best)) best = item;
   }
   return best;

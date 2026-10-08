@@ -7,7 +7,7 @@ import { DateInput } from "./DateInput";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { overviewApi, type AgingBucket, type Overview, type OverviewAlert } from "@/lib/overview-api";
 import { ChartLegend, GroupedBarChart, type ChartSeries } from "./OverviewCharts";
-import { ProcessBoard, StuckList } from "./OverviewProcess";
+import { AlertItems, ProcessBoard, StuckList, stuckHref } from "./OverviewProcess";
 
 // ภาพรวมผู้บริหาร (ADMIN) - ผู้ใช้ขอ 2026-09-24: สรุปใช้เงินรายวัน งานค้าง กระแสเงินสด ประมาณการ
 // ข้อมูลทั้งหมดมาจาก GET /api/overview (คำนวณที่ backend) หน้านี้แค่จัดวางและวาดกราฟ
@@ -53,6 +53,42 @@ const SEVERITY: Record<OverviewAlert["severity"], { label: string; icon: string 
   medium: { label: "ควรดู", icon: "•" },
   info: { label: "แจ้งให้ทราบ", icon: "i" },
 };
+
+// เรื่องที่เป็นรายคัน (ผู้ใช้ 2026-10-09): คันเดียว = "ไปจัดการ" พาไปที่คันนั้นเลย · หลายคัน = กดกางรายชื่อ แต่ละคันมีลิงก์ของตัวเอง
+// เรื่องอื่น (บิล ใบเสนอราคา ผู้ใช้รออนุมัติ ฯลฯ) ยังไปหน้าของเรื่องนั้นเหมือนเดิม
+function AlertRow({ alert: a }: { alert: OverviewAlert }) {
+  const [open, setOpen] = useState(false);
+  const items = a.items ?? [];
+  const total = a.itemTotal ?? items.length;
+  const only = total === 1 ? items[0] : undefined;
+  return (
+    <li className={`exec-alert exec-alert--${a.severity}`}>
+      <span className="exec-alert-chip">
+        <b aria-hidden="true">{SEVERITY[a.severity].icon}</b>
+        {SEVERITY[a.severity].label}
+      </span>
+      <div>
+        <strong>{a.title}</strong>
+        <div className="sub">{a.detail}</div>
+        {only && <div className="sub">{[only.brandName, only.plate, only.chassis, only.customerName].filter(Boolean).join(" · ")}</div>}
+      </div>
+      {only ? (
+        <Link href={stuckHref(only)} className="text-button">
+          ไปที่คันนี้ →
+        </Link>
+      ) : items.length > 0 ? (
+        <button type="button" className="text-button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          {open ? "ซ่อนรายการ ▴" : `ดู ${total} รายการ ▾`}
+        </button>
+      ) : (
+        <Link href={a.href} className="text-button">
+          ไปจัดการ →
+        </Link>
+      )}
+      {open && !only && items.length > 0 && <AlertItems items={items} total={total} queueHref={a.href} />}
+    </li>
+  );
+}
 
 function AgingBars({ buckets }: { buckets: AgingBucket[] }) {
   const max = Math.max(1, ...buckets.map((b) => b.amount));
@@ -246,19 +282,7 @@ export function ExecutiveOverview() {
         ) : (
           <ul className="exec-alerts">
             {alerts.map((a) => (
-              <li key={a.key} className={`exec-alert exec-alert--${a.severity}`}>
-                <span className="exec-alert-chip">
-                  <b aria-hidden="true">{SEVERITY[a.severity].icon}</b>
-                  {SEVERITY[a.severity].label}
-                </span>
-                <div>
-                  <strong>{a.title}</strong>
-                  <div className="sub">{a.detail}</div>
-                </div>
-                <Link href={a.href} className="text-button">
-                  ไปจัดการ →
-                </Link>
-              </li>
+              <AlertRow key={a.key} alert={a} />
             ))}
           </ul>
         )}
