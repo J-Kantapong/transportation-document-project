@@ -230,6 +230,32 @@ export interface VehicleSearchRow {
   problem: boolean;
 }
 
+// งานอื่นๆ ที่ตรงกับคำค้นในหน้าค้นหารถ (ผู้ใช้ 2026-10-08) - backend/src/vehicle-search/job-search.ts
+export interface JobSearchRow {
+  key: string;
+  type: 'PLATE_SWAP' | 'USE_CANCEL' | 'MOVE_OUT' | 'PLATE_COPY' | 'TRANSFER' | 'TAX_RENEWAL';
+  typeLabel: string;
+  id: string;
+  date: string;
+  kind: 'car' | 'moto';
+  customerName: string | null;
+  ownerName: string | null;
+  chassis: string;
+  engine: string | null;
+  plate: string | null;
+  brandName: string | null;
+  status: string;
+  done: boolean;
+  cancelled: boolean;
+  href: string;
+}
+
+export interface JobSearchResult {
+  jobs: JobSearchRow[];
+  truncated: boolean;
+  allowed: boolean;
+}
+
 export interface VehicleSearchResult {
   vehicles: VehicleSearchRow[];
   total: number; // ตรงเงื่อนไขทั้งหมด (รวมสถานะ)
@@ -842,6 +868,12 @@ export const api = {
     if (offset) search.set('offset', String(offset));
     const qs = search.toString();
     return request<VehicleSearchResult>(`/api/vehicle-search${qs ? `?${qs}` : ''}`);
+  },
+  // งานอื่นๆ (สลับเลข / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / งานโอน / ต่อภาษี) ที่ตรงกับคำค้น - ต้องมี q
+  searchJobs: (params: { q?: string; from?: string; to?: string; kind?: string }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
+    return request<JobSearchResult>(`/api/vehicle-search/jobs?${search.toString()}`);
   },
   // ทีละ 100 คัน - q ค้นจากเลขตัวถัง/เลขเครื่อง/ทะเบียน/ชื่อลูกค้า/เจ้าของ, from/to กรองวันที่ (ค.ศ. YYYY-MM-DD)
   listVehicles: (params: { q?: string; from?: string; to?: string; offset?: number; limit?: number } = {}) => {

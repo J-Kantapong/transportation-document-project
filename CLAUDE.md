@@ -159,6 +159,16 @@ This private repository is the shared development surface for the user, Claude C
   ACCOUNTANT, so STAFF_ENTRY does not see the button) and "✎ แก้ไข" (ADMIN / STAFF_ENTRY) opens the entry page's edit form
   with `?focus=<chassis>&edit=1&returnTo=/vehicles?<current filters>`; saving returns to the search with the same filters
   (`returnToAfterEdit` accepts only `/vehicles` and `/accounting/billing`).
+- Other jobs in the vehicle search (user 2026-10-08 "รวมทุกงาน", no migration, `backend/src/vehicle-search/job-search.ts`): the search page
+  also lists jobs that live in their own tables (plate swap, vehicle use cancellation, move out, plate copy, transfer, tax
+  renewal) when a search text is typed, in a second table "งานอื่นๆ ที่ตรงกับคำค้น" under the vehicles (hidden while a
+  new-vehicle status chip is active; counts and chips stay vehicle-only). `GET /api/vehicle-search/jobs?q=&from=&to=&kind=` ->
+  `{ jobs[{ type, typeLabel, date (submit date), kind, customerName, ownerName, chassis, engine, plate, brandName, status, done,
+  cancelled, href }], truncated, allowed }`; `q` is required, 30 newest per type, same matching as vehicles (chassis, engine,
+  plate incl. "ตค 8772", names, customer; plate swap also the new plate and the linked new vehicle's chassis), `from`/`to` filter
+  the submit date, cancelled jobs are listed as "ยกเลิกแล้ว". Access = `SUBMIT_READ` roles (ADMIN / STAFF_CAR / STAFF_MOTO /
+  ACCOUNTANT; others get `allowed: false`), vehicle kind by `vehicleScopeFor`. Yamaha relocation is not searchable (daily counts,
+  no vehicle data). "ไปที่งาน →" opens the job's page with `?focus=<chassis>` (best effort, those pages do not all scroll to it).
 - Date inputs (user's choice 2026-09-25): every วว/ดด/ปปปป box is `components/DateInput.tsx`, which keeps typing
   (each caller still formats / converts a Buddhist year as before) and adds a calendar button that opens a hidden
   native `<input type="date">` via `showPicker()` and hands back "วว/ดด/ปปปป". Use it for any new date field.

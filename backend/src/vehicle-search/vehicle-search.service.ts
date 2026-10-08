@@ -5,6 +5,7 @@ import { bangkokToday, daysBetween } from '../overview/overview-calculator.js';
 import { STAGES, waitsFor, type Flag, type StageKey } from '../overview/overview-process.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
+import { searchJobs } from './job-search.js';
 
 // หน้าค้นหารถ (ผู้ใช้ 2026-09-25): ค้นรถจดใหม่ทั้งฐานข้อมูล พร้อมสถานะว่าตอนนี้ค้างอยู่ขั้นไหน ค้างมากี่วัน และมีปัญหาอะไร
 // สถานะคำนวณด้วย waitsFor() ตัวเดียวกับภาพรวมผู้บริหาร จึงตรงกับคิวจริงของแต่ละหน้า - อ่านอย่างเดียว
@@ -174,6 +175,11 @@ export class VehicleSearchService {
       hasMore: matched.length > offset + PAGE_SIZE,
       counts,
     };
+  }
+
+  // งานอื่นๆ ที่ตรงกับคำค้น (สลับเลข / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / งานโอน / ต่อภาษี) - ดู job-search.ts
+  searchOtherJobs(params: { q?: string; from?: string; to?: string; kind?: string }) {
+    return searchJobs(this.prisma, params);
   }
 
   // STAFF_ENTRY ทำขั้น 1-3 ของรถทุกประเภท จึงค้นได้ทุกคัน - นอกนั้นใช้ขอบเขตขั้น 4-8 ตามปกติ (vehicle-scope.ts)
