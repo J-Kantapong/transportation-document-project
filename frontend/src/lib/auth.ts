@@ -211,6 +211,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/customers', roles: ALL_STAFF },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25) - backend: /api/vehicle-search
   { prefix: '/vehicles', roles: ALL_STAFF },
+  // จัดรูปลง A4 (ผู้ใช้ 2026-10-09) - ทำในเบราว์เซอร์ทั้งหมด ไม่มี backend
+  { prefix: '/tools/photo-sheet', roles: ALL_STAFF },
   { prefix: '/registration', roles: ALL_STAFF },
   { prefix: '/', exact: true, roles: ['ADMIN', 'ACCOUNTANT'] },
 ];

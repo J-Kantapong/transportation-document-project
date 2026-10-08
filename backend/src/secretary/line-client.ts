@@ -10,9 +10,14 @@ const TIMEOUT_MS = 15_000;
 const MAX_MESSAGES_PER_PUSH = 5; // ข้อจำกัดของ LINE ต่อหนึ่งคำขอ
 const MAX_TEXT_LENGTH = 5000;
 
-// ปุ่มลัดใต้ข้อความ (กดแล้วส่งข้อความนั้นเข้าแชตเหมือนพิมพ์เอง)
+// ปุ่มลัดใต้ข้อความ: message = กดแล้วส่งข้อความนั้นเข้าแชตเหมือนพิมพ์เอง · datetimepicker = กดแล้วเปิดปฏิทิน
+// วันที่ที่เลือกกลับมาเป็น postback พร้อม data (ใช้ในบอทไลน์ลูกค้า)
+export type QuickReplyAction =
+  | { type: 'message'; label: string; text: string }
+  | { type: 'datetimepicker'; label: string; data: string; mode: 'date'; max?: string };
+
 export interface QuickReply {
-  items: Array<{ type: 'action'; action: { type: 'message'; label: string; text: string } }>;
+  items: Array<{ type: 'action'; action: QuickReplyAction }>;
 }
 
 export type LineMessage =

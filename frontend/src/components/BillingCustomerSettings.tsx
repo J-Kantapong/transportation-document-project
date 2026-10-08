@@ -5,6 +5,17 @@ import { ApiError } from "@/lib/api";
 import { ACCOUNT_LABEL, billingApi, type AccountPeriod, type BillingAccount, type BillingTerms, type RateKind, type RateVehicleKind, type ServiceFeeRate, type ServiceFeeRateInput } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { PROVINCES } from "@/lib/vehicle-reference-data";
+
+// ประเภทรถที่แถวราคาจำกัดได้ (เทียบ Vehicle.body ขึ้นต้น) - ผู้ใช้ 2026-10-09: ป้ายเหลือง รย.17 ราคาต่างจาก รย.12
+const BODY_PREFIX_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "ทุกประเภท" },
+  { value: "รย.12-", label: "รย.12 จักรยานยนต์" },
+  { value: "รย.17-", label: "รย.17 จักรยานยนต์สาธารณะ (ป้ายเหลือง)" },
+  { value: "รย.1-", label: "รย.1 รถยนต์นั่ง" },
+  { value: "รย.2-", label: "รย.2" },
+  { value: "รย.3-", label: "รย.3 กระบะ/ตู้" },
+];
 
 // ตั้งค่าวางบิลของลูกค้าหนึ่งราย (แสดงในหน้าวางบิล): เงื่อนไข VAT/หัก ณ ที่จ่าย และตารางค่าดำเนินการ
 // ราคาในตารางเป็นแค่ราคาเริ่มต้นที่ระบบเสนอให้รายคัน - บัญชีแก้ราคารายคันตอนออกบิลได้เสมอ
@@ -297,6 +308,8 @@ interface RateState {
   ccMinText: string;
   ccMaxText: string;
   chassisPrefixText: string; // ราคาแยกตามเลขตัวถังขึ้นต้น (ผู้ใช้ 2026-09-28, MC Superbike) - เว้นว่าง = ไม่จำกัด
+  registrationProvince: string; // "" = ทุกจังหวัด (ผู้ใช้ 2026-10-09)
+  bodyPrefix: string; // "" = ทุกประเภท
   amountText: string;
   vatInclusive: boolean;
   includesReceipt: boolean;
@@ -320,6 +333,8 @@ const toState = (r: ServiceFeeRate): RateState => ({
   ccMinText: ccText(r.ccMin),
   ccMaxText: ccText(r.ccMax),
   chassisPrefixText: r.chassisPrefix ?? "",
+  registrationProvince: r.registrationProvince ?? "",
+  bodyPrefix: r.bodyPrefix ?? "",
   amountText: String(r.amount),
   vatInclusive: r.vatInclusive,
   includesReceipt: r.includesReceipt,
@@ -349,6 +364,8 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
         ccMin,
         ccMax,
         chassisPrefix: r.chassisPrefixText.trim() || null,
+        registrationProvince: r.registrationProvince || null,
+        bodyPrefix: r.bodyPrefix || null,
         amount,
         vatInclusive: r.vatInclusive,
         includesReceipt: r.includesReceipt,
@@ -384,6 +401,8 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                 <th>CC ตั้งแต่</th>
                 <th>CC น้อยกว่า</th>
                 <th>เลขตัวถังขึ้นต้น</th>
+                <th>จังหวัดที่จด</th>
+                <th>ประเภทรถ</th>
                 <th>ราคา (บาท)</th>
                 <th>ราคารวม VAT</th>
                 <th>ราคารวมใบเสร็จ</th>
@@ -432,6 +451,26 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
                     />
                   </td>
                   <td>
+                    {/* ราคาแยกตามจังหวัดที่จดทะเบียน (ผู้ใช้ 2026-10-09, บางบ่อ: จดสมุทรปราการ 935) - แถวที่ระบุชนะแถวทั่วไปเอง */}
+                    <select value={r.registrationProvince} onChange={(e) => patch(i, { registrationProvince: e.target.value })} aria-label="จังหวัดที่จดทะเบียน" style={{ maxWidth: 140 }}>
+                      <option value="">ทุกจังหวัด</option>
+                      {PROVINCES.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select value={r.bodyPrefix} onChange={(e) => patch(i, { bodyPrefix: e.target.value })} aria-label="ประเภทรถ" style={{ maxWidth: 170 }}>
+                      {BODY_PREFIX_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
                     <input type="text" inputMode="decimal" value={r.amountText} onChange={(e) => patch(i, { amountText: e.target.value })} style={{ width: 100, textAlign: "right" }} aria-label="ราคา" />
                   </td>
                   <td>
@@ -457,7 +496,7 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
           onClick={() =>
             setRows((prev) => [
               ...prev,
-              { label: "", vehicleKind: "ANY", ccMinText: "", ccMaxText: "", chassisPrefixText: "", amountText: "", vatInclusive: false, includesReceipt: false, kind: "BASE" },
+              { label: "", vehicleKind: "ANY", ccMinText: "", ccMaxText: "", chassisPrefixText: "", registrationProvince: "", bodyPrefix: "", amountText: "", vatInclusive: false, includesReceipt: false, kind: "BASE" },
             ])
           }
         >

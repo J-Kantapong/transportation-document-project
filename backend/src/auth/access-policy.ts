@@ -30,6 +30,9 @@ const RULES: Rule[] = [
   // (ไม่ผ่านลายเซ็นตอบ 401 ก่อนแตะข้อมูล) · route อื่นใน /api/secretary ถ้ามีในอนาคต = ADMIN เท่านั้น
   { pattern: /^\/api\/secretary\/(webhook|run)$/, access: 'PUBLIC' },
   { pattern: /^\/api\/secretary(\/|$)/, access: ['ADMIN'] },
+  // บอทไลน์ลูกค้า (ผู้ใช้ 2026-10-09): webhook เปิดสาธารณะ ตรวจลายเซ็นใน CustomerLineController · route อื่น = ADMIN
+  { pattern: /^\/api\/customer-line\/webhook$/, access: 'PUBLIC' },
+  { pattern: /^\/api\/customer-line(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/admin(\/|$)/, access: ['ADMIN'] },
   // ภาพรวมผู้บริหาร (ยอดเงินทั้งบริษัท) - ADMIN เท่านั้น บทบาทอื่นจะมีภาพรวมของตัวเองตามมาทีหลัง (ผู้ใช้ 2026-09-24)
   { pattern: /^\/api\/overview(\/|$)/, access: ['ADMIN'] },

@@ -266,6 +266,10 @@ export interface ServiceFeeRate {
   // ราคาแยกตามรุ่น/ยี่ห้อผู้ผลิตที่ CC ทับซ้อนกัน (ผู้ใช้ 2026-09-28, MC Superbike: เลขตัวถังขึ้นต้น ML=885 / JH=2685
   // ทั้งคู่อยู่ในช่วง 300-799cc) - เทียบไม่สนตัวพิมพ์ใหญ่เล็ก null/ว่าง = ไม่จำกัด
   chassisPrefix: string | null;
+  // ราคาแยกตามจังหวัดที่จดทะเบียน / ประเภทรถ (ผู้ใช้ 2026-10-09, บางบ่อ: จดสมุทรปราการ 935, ป้ายเหลือง รย.17 1,400)
+  // แถวที่ระบุไว้ชนะแถวทั่วไป - registrationProvince = ชื่อจังหวัดเต็ม, bodyPrefix = ประเภทรถขึ้นต้น เช่น "รย.17-", null = ไม่จำกัด
+  registrationProvince: string | null;
+  bodyPrefix: string | null;
   amount: number;
   vatInclusive: boolean;
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จกรมขนส่งแล้ว (ผู้ใช้ 2026-09-27, YMAC)
@@ -294,6 +298,8 @@ export interface BillingVehicle {
   receiptAmountSource: "RECEIPT" | "BILL_ESTIMATE" | "NONE"; // BILL_ESTIMATE = พนักงานไม่ได้กรอกยอดใบเสร็จ ใช้ยอด Bill ที่ระบบคำนวณแทน
   receiptImageIds: string[]; // รูปใบเสร็จของการยื่นล่าสุด (ใหม่สุดก่อน) - แสดงในช่อง "แก้" ให้เทียบยอด
   receiptEstimate: number | null; // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ - ไม่ตรงกับใบเสร็จจริง = หน้าวางบิลเตือน (ผู้ใช้ 2026-09-28)
+  // ยอด Bill ถ้าเรื่องขอใช้เป็นตรงข้ามกับข้อมูลรถ - ใบเสร็จตรงกับยอดนี้ = เสนอปุ่ม "ใช้ตามใบเสร็จ" (ผู้ใช้ 2026-10-09)
+  receiptEstimateFlipped?: number | null;
   requestedPlateNumber: boolean;
   suggestedRateId: string | null;
   suggestedServiceFee: number | null; // ราคาหลัก + ค่าเพิ่มที่ระบบเลือก (ก่อนหักยอด)

@@ -26,6 +26,7 @@ import { PlateCopyModule } from './plate-copy/plate-copy.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ReceiptsModule } from './receipts/receipts.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
+import { CustomerLineModule } from './customer-line/customer-line.module.js';
 import { SecretaryModule } from './secretary/secretary.module.js';
 import { TaxModule } from './tax/tax.module.js';
 import { TaxRenewalModule } from './tax-renewal/tax-renewal.module.js';
@@ -66,6 +67,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     HrModule,
     VehicleSearchModule,
     SecretaryModule,
+    CustomerLineModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -13,6 +13,7 @@ import {
 import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
 import {
   computeInvoiceTotals,
@@ -302,6 +303,8 @@ type RateDbRow = {
   ccMin: unknown;
   ccMax: unknown;
   chassisPrefix: string | null;
+  registrationProvince?: string | null;
+  bodyPrefix?: string | null;
   amount: unknown;
   vatInclusive: boolean;
   includesReceipt: boolean;
@@ -329,6 +332,12 @@ const feeRows = (rows: Array<{ key: string; amount: unknown }>) => rows.map((r) 
 
 // ยอด Bill ที่ควรเป็นจากข้อมูลรถ "ล่าสุด" + ตัวเลือกตอนยื่น (ผู้ใช้ 2026-09-28): แก้จังหวัดหลังยื่นแล้ว ยอดที่ใช้เทียบใบเสร็จตามไปด้วย
 // คำนวณแบบเดียวกับตอนยื่น (computeDocumentFees) + ภาษีที่ยื่นไว้ - คำนวณไม่ได้ (ไม่มีภาษี / ไม่มีตารางอัตรา) = null ให้ใช้ยอดตอนยื่นแทน
+// ข้อมูลรถชุดเดียวกันแต่เรื่องขอใช้ (จังหวัดที่จด ≠ จังหวัดเจ้าของรถ) กลับเป็นตรงข้าม - จังหวัดเจ้าของรถใช้ตัดสินแค่เรื่องนี้
+// (document-fee-calculator) จึงสลับที่ช่องนั้น ไม่แตะจังหวัดที่จดซึ่งมีผลกับค่าตรวจสภาพ/ซับ · ไม่เขียนกลับฐานข้อมูล
+export function flipOtherProvince<T extends { registrationProvince: string | null; ownerProvince: string | null }>(vehicle: T, otherProvince: boolean): T {
+  return { ...vehicle, ownerProvince: otherProvince ? vehicle.registrationProvince : `ไม่ใช่ ${vehicle.registrationProvince ?? ''}` };
+}
+
 function currentBillEstimate(
   vehicle: { body: string | null; registrationProvince: string | null; ownerProvince: string | null },
   sub: {
@@ -371,6 +380,8 @@ function toRate(r: RateDbRow): RateRow {
     ccMin: num(r.ccMin),
     ccMax: num(r.ccMax),
     chassisPrefix: r.chassisPrefix,
+    registrationProvince: r.registrationProvince ?? null,
+    bodyPrefix: r.bodyPrefix ?? null,
     amount: Number(r.amount),
     vatInclusive: r.vatInclusive,
     includesReceipt: r.includesReceipt,
@@ -523,7 +534,7 @@ export class BillingService {
             const sub = v.documentSubmissions[0];
             const isMoto = isMotorcycle(v.body);
             const cc = num(v.cc);
-            const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis });
+            const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis, registrationProvince: v.registrationProvince, body: v.body });
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
             const estimate = sub && sub.taxAmount !== null ? round2(Number(sub.billFeeTotal) + Number(sub.taxAmount)) : null;
@@ -560,6 +571,9 @@ export class BillingService {
               // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ (ค่าธรรมเนียม + ภาษี) - หน้าวางบิลเทียบกับยอดใบเสร็จจริง ไม่ตรง = เตือน
               // (ผู้ใช้ 2026-09-28: พบรถ 2 คันที่ใบเสร็จเป็นขอใช้แต่จังหวัดในข้อมูลรถบอกไม่ใช่ ค่าบริการเลยผิดคันละ 100)
               receiptEstimate: currentBillEstimate(v, sub, feeRules) ?? estimate,
+              // ยอด Bill ถ้าเรื่องขอใช้เป็นตรงข้ามกับข้อมูลรถ (ผู้ใช้ 2026-10-09 "ใบเสร็จถูกเสมอ"): ใบเสร็จจริงตรงกับยอดนี้
+              // = ใบเสร็จบอกว่าขอใช้/ไม่ขอใช้ต่างจากข้อมูลรถ หน้าวางบิลเสนอปุ่ม "ใช้ตามใบเสร็จ" · คำนวณไม่ได้ = null (ไม่เสนอ)
+              receiptEstimateFlipped: currentBillEstimate(flipOtherProvince(v, otherProvince), sub, feeRules),
               receiptImageIds: sub?.receipts?.map((r) => r.id) ?? [],
               // ขอใช้เลขทะเบียน - เผื่อเคสลูกค้าชำระค่าขอใช้เลขเอง; SWAP_* (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข (ผู้ใช้ 2026-09-27)
               requestedPlateNumber,
@@ -756,6 +770,10 @@ export class BillingService {
       if (ccMin !== null && ccMax !== null && ccMin >= ccMax) throw bad(`แถวที่ ${i + 1}: ช่วง CC ไม่ถูกต้อง`);
       // ราคาแยกตามเลขตัวถังขึ้นต้น (ผู้ใช้ 2026-09-28, MC Superbike) - เว้นว่างได้ ไม่จำกัดชนิด/ความยาว
       const chassisPrefix = optionalText(r.chassisPrefix, `แถวที่ ${i + 1}: เลขตัวถังขึ้นต้น`);
+      // ราคาแยกตามจังหวัดที่จดทะเบียน / ประเภทรถ (ผู้ใช้ 2026-10-09) - จังหวัดต้องเป็นชื่อในรายการ 77 จังหวัด, ประเภทรถ = body ขึ้นต้น เช่น "รย.17-"
+      const registrationProvince = optionalText(r.registrationProvince, `แถวที่ ${i + 1}: จังหวัดที่จดทะเบียน`);
+      if (registrationProvince && !(PROVINCES as readonly string[]).includes(registrationProvince)) throw bad(`แถวที่ ${i + 1}: ไม่รู้จักจังหวัด ${registrationProvince}`);
+      const bodyPrefix = optionalText(r.bodyPrefix, `แถวที่ ${i + 1}: ประเภทรถ`);
       return {
         customerId,
         label,
@@ -763,6 +781,8 @@ export class BillingService {
         ccMin,
         ccMax,
         chassisPrefix,
+        registrationProvince,
+        bodyPrefix,
         amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`),
         vatInclusive: r.vatInclusive === true,
         includesReceipt: r.includesReceipt === true,
