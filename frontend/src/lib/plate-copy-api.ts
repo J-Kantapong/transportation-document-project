@@ -1,8 +1,8 @@
 import { request } from "@/lib/api";
 
-// คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - รถยนต์เท่านั้น ดู backend/src/plate-copy/
-// GET    /api/plate-copies?status=pending|returned|all&month=YYYY-MM   (งานที่ยกเลิกแล้วไม่แสดง)
-// POST   /api/plate-copies             ยื่นงาน (customerId = เจ้าของงาน, ข้อมูลรถ, submitDate - ค่าใช้จ่ายตายตัว Bill 205 / No Bill 100 / ค่าอากร 10 backend กำหนดเอง)
+// คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - รถยนต์ + มอเตอร์ไซค์ (ผู้ใช้ 2026-10-09) ดู backend/src/plate-copy/
+// GET    /api/plate-copies?status=pending|returned|all&month=YYYY-MM   (งานที่ยกเลิกแล้วไม่แสดง / ได้ทุกประเภทรถที่ผู้ใช้อ่านได้)
+// POST   /api/plate-copies             ยื่นงาน (vehicleClass, customerId = เจ้าของงาน, ข้อมูลรถ, copyType, urgent, submitDate - ค่าใช้จ่ายตายตัว backend คิดเองจาก plate-copy-fee)
 // PATCH  /api/plate-copies/:id {…, remark, expectedUpdatedAt}  แก้งาน (remark บังคับ / expectedUpdatedAt ไม่ตรง = 409)
 // POST   /api/plate-copies/:id/receipts (multipart: file, remark?)  แนบรูปใบเสร็จ - อ่าน OCR เติมเลขที่/วันที่/ยอดเงินเมื่อช่องว่างทั้ง 3
 // DELETE /api/plate-copies/:id/receipts/:receiptId {remark?}        (remark บังคับหลังรับกลับ และต้องเหลืออย่างน้อย 1 รูป)
@@ -25,10 +25,13 @@ export interface PlateCopyCustomer {
   company: string | null;
 }
 
-import type { PlateCopyType } from "@/lib/plate-copy-fee";
+import type { PlateCopyType, PlateCopyVehicleClass } from "@/lib/plate-copy-fee";
+
+export type { PlateCopyVehicleClass };
 
 export interface PlateCopy {
   id: string;
+  vehicleClass: PlateCopyVehicleClass; // เปลี่ยนหลังสร้างไม่ได้
   customer: PlateCopyCustomer | null;
   ownerName: string;
   engine: string;
@@ -37,7 +40,8 @@ export interface PlateCopy {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
-  copyType: PlateCopyType;
+  copyType: PlateCopyType; // มอเตอร์ไซค์ = SINGLE_NORMAL เสมอ
+  urgent: boolean; // งานด่วน (ลงขันด่วนเพิ่มใน No Bill)
   billTotal: string;
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม
@@ -53,6 +57,7 @@ export interface PlateCopy {
 }
 
 export interface CreatePlateCopyInput {
+  vehicleClass: PlateCopyVehicleClass;
   customerId: string;
   ownerName: string;
   engine: string;
@@ -61,6 +66,7 @@ export interface CreatePlateCopyInput {
   plateCategory: string;
   plateNumber: string;
   copyType: PlateCopyType;
+  urgent: boolean;
   submitDate: string;
 }
 
@@ -73,6 +79,7 @@ export interface UpdatePlateCopyInput {
   plateCategory: string;
   plateNumber: string;
   copyType: PlateCopyType;
+  urgent: boolean;
   submitDate: string;
   returnedDate?: string;
   remark: string;

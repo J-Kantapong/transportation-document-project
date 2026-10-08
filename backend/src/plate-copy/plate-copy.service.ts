@@ -23,17 +23,25 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-ex
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
-import { PLATE_COPY_DUTY_FEE, PLATE_COPY_NO_BILL_FEE, PLATE_COPY_TYPES, type PlateCopyType, plateCopyBillFee } from './plate-copy-fee.js';
+import {
+  PLATE_COPY_MOTO_TYPE,
+  PLATE_COPY_TYPES,
+  type PlateCopyType,
+  type PlateCopyVehicleClass,
+  calculatePlateCopyFees,
+  plateCopyBillFee,
+  plateCopyNoBillFee,
+} from './plate-copy-fee.js';
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - ทำเหมือนยกเลิกการใช้รถ: กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่)
-// แต่ "รถยนต์เท่านั้น" (จักรยานยนต์ยังไม่เปิด) และมีขั้นรับป้ายต่อท้าย
+// รถยนต์ + มอเตอร์ไซค์ (ผู้ใช้ 2026-10-09 เปิดมอเตอร์ไซค์ - ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนภายหลังไม่ได้) และมีขั้นรับป้ายต่อท้าย
 // ขั้นตอน: ยื่น (POST) -> รับใบเสร็จกลับ (วันที่ + รูปใบเสร็จอย่างน้อย 1 รูป, อ่าน OCR เติมเลขที่/วันที่/ยอดเงินให้)
 //          -> รับป้าย (แนบรูปป้ายที่ได้รับ + วันที่รับ บันทึกทันที - ไม่ผูกกับรับใบเสร็จ ไม่ใช้ AI เหมือนรับป้ายอื่นของระบบ)
-// ค่าใช้จ่ายตายตัว Bill 205 / No Bill 100 / ค่าอากร 10 แยกต่างหาก (plate-copy-fee.ts) - ยังไม่ผูกกับการวางบิล/ภาพรวม
-// สิทธิ์: กลุ่มยื่นเอกสารรถยนต์ (STAFF_CAR) เหมือนงานสลับเลข - ดู access-policy.ts
+// ค่าใช้จ่ายตายตัวตามประเภทรถ / ชนิดการคัดป้าย / งานด่วน ค่าอากร 10 แยกต่างหาก (plate-copy-fee.ts)
+// สิทธิ์: กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO) เหมือนงานโอน / ย้ายออก - ดู access-policy.ts
 // แก้/ยกเลิกต้องระบุเหตุผลเสมอ บันทึกประวัติลง AuditLog ('PlateCopy') และยกเลิกแบบไม่ลบแถว (cancelledAt)
 
-export type PlateCopyVehicleClass = 'CAR'; // ตอนนี้รถยนต์เท่านั้น (ผู้ใช้ 2026-10-02) - ค่า MOTO ถูกปฏิเสธใน parseVehicleClass
+export type { PlateCopyVehicleClass };
 
 export interface PlateCopyCustomer {
   id: string;
@@ -52,9 +60,10 @@ export interface PlateCopyRow {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
-  copyType: PlateCopyType;
+  copyType: PlateCopyType; // มอเตอร์ไซค์ = SINGLE_NORMAL เสมอ (มีป้ายใบเดียว)
+  urgent: boolean; // งานด่วน (ลงขันด่วนเพิ่มใน No Bill)
   billTotal: string;
-  noBillTotal: string;
+  noBillTotal: string; // ไม่รวมค่าอากร
   dutyAmount: string; // ค่าอากร - แยกต่างหากจาก billTotal / noBillTotal
   returnedDate: string | null; // YYYY-MM-DD
   // ส่งงานลูกค้า (ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08) - ส่งแล้วจึงวางบิลได้
@@ -73,7 +82,7 @@ export interface PlateCopyRow {
 
 // Wire shape - ทุกช่องมาจาก JSON ที่ยังไม่ตรวจ จึงเป็น unknown ให้ service ตรวจเอง
 export interface CreatePlateCopyDto {
-  vehicleClass?: unknown; // CAR (ค่าเริ่มต้น) - จักรยานยนต์ยังไม่เปิด
+  vehicleClass?: unknown; // CAR (ค่าเริ่มต้น) | MOTO - เปลี่ยนภายหลังไม่ได้
   customerId?: unknown; // เจ้าของงาน (บังคับ)
   ownerName?: unknown;
   engine?: unknown;
@@ -81,7 +90,8 @@ export interface CreatePlateCopyDto {
   brand?: unknown;
   plateCategory?: unknown;
   plateNumber?: unknown;
-  copyType?: unknown; // BOTH (ค่าเริ่มต้น = คัดคู่ปกติ) | SINGLE_NORMAL | BOTH_AUCTION | SINGLE_AUCTION
+  copyType?: unknown; // รถยนต์: BOTH (ค่าเริ่มต้น = คัดคู่ปกติ) | SINGLE_NORMAL | BOTH_AUCTION | SINGLE_AUCTION - มอเตอร์ไซค์: SINGLE_NORMAL เท่านั้น
+  urgent?: unknown; // งานด่วน
   submitDate?: unknown;
 }
 
@@ -94,6 +104,7 @@ export interface UpdatePlateCopyDto {
   plateCategory?: unknown;
   plateNumber?: unknown;
   copyType?: unknown;
+  urgent?: unknown;
   submitDate?: unknown;
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
   remark?: unknown;
@@ -107,11 +118,24 @@ export function parseCopyType(value: unknown): PlateCopyType {
   throw new BadRequestException({ error: 'ชนิดการคัดป้ายต้องเป็น BOTH, SINGLE_NORMAL, BOTH_AUCTION หรือ SINGLE_AUCTION' });
 }
 
+// ชนิดการคัดป้ายตามประเภทรถ: มอเตอร์ไซค์มีป้ายใบเดียว = SINGLE_NORMAL เสมอ (ไม่ส่งมา = ใส่ให้ / ส่งชนิดอื่นมา = 400 กันยอดผิด)
+export function copyTypeFor(vehicleClass: PlateCopyVehicleClass, value: unknown): PlateCopyType {
+  if (vehicleClass !== 'MOTO') return parseCopyType(value);
+  if (value === undefined || value === null || value === '' || value === PLATE_COPY_MOTO_TYPE) return PLATE_COPY_MOTO_TYPE;
+  throw new BadRequestException({ error: 'คัดแผ่นป้ายมอเตอร์ไซค์มีป้ายใบเดียว เลือกชนิดการคัดป้ายอื่นไม่ได้' });
+}
+
 export function parseVehicleClass(value: unknown): PlateCopyVehicleClass {
   if (value === undefined || value === null || value === '') return 'CAR';
-  if (value === 'CAR') return value;
-  if (value === 'MOTO') throw new BadRequestException({ error: 'คัดแผ่นป้ายทะเบียนใช้ได้เฉพาะรถยนต์ (จักรยานยนต์ยังไม่เปิดให้ใช้)' });
-  throw new BadRequestException({ error: 'พารามิเตอร์ vehicleClass ต้องเป็น CAR' });
+  if (value === 'CAR' || value === 'MOTO') return value;
+  throw new BadRequestException({ error: 'พารามิเตอร์ vehicleClass ต้องเป็น CAR หรือ MOTO' });
+}
+
+// ติ๊ก (boolean) จาก JSON - ไม่ส่ง/ว่าง = false / ค่าอื่นที่ไม่ใช่ true/false = 400
+function parseFlag(value: unknown, label: string): boolean {
+  if (value === undefined || value === null || value === '' || value === false || value === 'false') return false;
+  if (value === true || value === 'true') return true;
+  throw new BadRequestException({ error: `${label} ต้องเป็น true หรือ false` });
 }
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
@@ -139,6 +163,7 @@ interface PlateCopyRecord {
   plateNumber: string;
   submitDate: Date;
   copyType?: string;
+  urgent?: boolean;
   billTotal: Prisma.Decimal | number;
   noBillTotal: Prisma.Decimal | number;
   dutyAmount: Prisma.Decimal | number;
@@ -166,6 +191,7 @@ export function serializePlateCopy(row: PlateCopyRecord): PlateCopyRow {
     plateNumber: row.plateNumber,
     submitDate: row.submitDate.toISOString().slice(0, 10),
     copyType: parseCopyType(row.copyType),
+    urgent: row.urgent ?? false,
     billTotal: String(row.billTotal),
     noBillTotal: String(row.noBillTotal),
     dutyAmount: String(row.dutyAmount),
@@ -203,16 +229,25 @@ export class PlateCopyService {
     @Inject(RECEIPT_EXTRACTOR) private readonly extractor: ReceiptExtractor,
   ) {}
 
-  // รถยนต์เท่านั้น - แก้ได้เฉพาะกลุ่มยื่นรถยนต์ (STAFF_CAR / ADMIN) เหมือนงานสลับเลขรถยนต์
-  private assertCarScope() {
-    assertKindInScope('car');
+  // ขอบเขตการแก้ตามประเภทรถของงาน (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO) - เหมือนงานโอน / ย้ายออก
+  private assertClassScope(vehicleClass: PlateCopyVehicleClass) {
+    assertKindInScope(vehicleClass === 'MOTO' ? 'moto' : 'car');
   }
 
   // ดูรายการใช้ขอบเขตการอ่าน - ACCOUNTANT ที่ถือ STAFF_MOTO ด้วยยังอ่านงานรถยนต์ได้ (แก้ไม่ได้)
-  private assertCarReadable() {
+  private assertClassReadable(vehicleClass: PlateCopyVehicleClass) {
     const scope = currentVehicleScope();
-    if (scope === 'ALL' || scope === 'CAR') return;
-    this.assertCarScope();
+    if (scope === 'ALL' || scope === vehicleClass) return;
+    this.assertClassScope(vehicleClass);
+  }
+
+  // ประเภทรถของรายการ: ระบุมา = ต้องอ่านประเภทนั้นได้ / ไม่ระบุ = ทุกประเภทที่ผู้ใช้มีสิทธิ์อ่าน (undefined = ไม่กรอง)
+  private listClass(classParam: unknown): PlateCopyVehicleClass | undefined {
+    const requested = classParam === undefined || classParam === null || classParam === '' ? undefined : parseVehicleClass(classParam);
+    if (requested) this.assertClassReadable(requested);
+    const scope = currentVehicleScope();
+    if (scope === 'NONE') this.assertClassScope('CAR'); // ไม่มีสิทธิ์ทั้งสองประเภท = 403
+    return requested ?? (scope === 'CAR' || scope === 'MOTO' ? scope : undefined);
   }
 
   // เจ้าของงานเลือกจาก dropdown ลูกค้าในฐานข้อมูล - บังคับกรอก
@@ -234,7 +269,7 @@ export class PlateCopyService {
 
   async create(dto: CreatePlateCopyDto): Promise<{ plateCopy: PlateCopyRow }> {
     const vehicleClass = parseVehicleClass(dto?.vehicleClass);
-    this.assertCarScope();
+    this.assertClassScope(vehicleClass);
     const customerId = await this.resolveCustomerId(dto?.customerId);
     const ownerName = requiredText(dto?.ownerName, 'ชื่อเจ้าของรถ');
     const engine = requiredText(dto?.engine, 'เลขเครื่อง', 100);
@@ -242,23 +277,24 @@ export class PlateCopyService {
     const brand = await this.resolveBrandName(dto?.brand);
     const plateCategory = requiredText(dto?.plateCategory, 'หมวดทะเบียน', 10);
     const plateNumber = requiredText(dto?.plateNumber, 'เลขทะเบียน', 10);
-    const copyType = parseCopyType(dto?.copyType);
+    const copyType = copyTypeFor(vehicleClass, dto?.copyType);
+    const urgent = parseFlag(dto?.urgent, 'งานด่วน');
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
 
-    // ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02: Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ และแก้ภายหลังไม่ได้
+    // ค่าใช้จ่ายตายตัวตามประเภทรถ / ชนิดการคัดป้าย / งานด่วน (plate-copy-fee.ts) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ
+    const fees = calculatePlateCopyFees(vehicleClass, copyType, urgent);
     const row = await this.prisma.plateCopy.create({
-      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, copyType, billTotal: plateCopyBillFee(copyType), noBillTotal: PLATE_COPY_NO_BILL_FEE, dutyAmount: PLATE_COPY_DUTY_FEE },
+      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, copyType, urgent, ...fees },
       include: plateCopyInclude,
     });
     return { plateCopy: serializePlateCopy(row) };
   }
 
   // status: pending = ยังไม่รับเอกสารกลับ | returned = รับกลับแล้ว | all - month (YYYY-MM) กรองตามวันที่ยื่น
-  // งานที่ยกเลิกแล้วไม่แสดง
+  // งานที่ยกเลิกแล้วไม่แสดง / ไม่ระบุประเภทรถ = ทุกประเภทที่ผู้ใช้มีสิทธิ์อ่าน
   async list(statusParam = 'all', monthParam?: string, classParam?: unknown): Promise<{ plateCopies: PlateCopyRow[] }> {
-    const vehicleClass = parseVehicleClass(classParam);
-    this.assertCarReadable();
+    const vehicleClass = this.listClass(classParam);
     if (!['pending', 'returned', 'all'].includes(statusParam)) {
       throw new BadRequestException({ error: 'พารามิเตอร์ status ต้องเป็น pending, returned หรือ all' });
     }
@@ -270,7 +306,7 @@ export class PlateCopyService {
     }
     const rows = await this.prisma.plateCopy.findMany({
       where: {
-        vehicleClass,
+        ...(vehicleClass ? { vehicleClass } : {}),
         cancelledAt: null,
         ...(statusParam === 'pending' ? { returnedDate: null } : statusParam === 'returned' ? { returnedDate: { not: null } } : {}),
         ...(submitDate ? { submitDate } : {}),
@@ -286,8 +322,8 @@ export class PlateCopyService {
   private async findOrThrow(id: string): Promise<PlateCopyRecord> {
     const row = await this.prisma.plateCopy.findUnique({ where: { id }, include: plateCopyInclude });
     if (!row) throw new NotFoundException({ error: 'ไม่พบงานคัดแผ่นป้ายทะเบียน' });
-    // รถยนต์เท่านั้น - STAFF_MOTO แก้ไม่ได้
-    this.assertCarScope();
+    // เช็คสิทธิ์ตามประเภทรถของงานนั้นจริงๆ (อ่านแถวก่อน) - STAFF_MOTO แก้ได้เฉพาะงานมอเตอร์ไซค์ และกลับกัน
+    this.assertClassScope(parseVehicleClass(row.vehicleClass));
     if (row.cancelledAt) throw new ConflictException({ error: 'งานคัดแผ่นป้ายทะเบียนนี้ถูกยกเลิกแล้ว - โหลดรายการใหม่' });
     return row;
   }
@@ -356,6 +392,9 @@ export class PlateCopyService {
       throw new BadRequestException({ error: 'วันที่ยื่นต้องไม่หลังวันที่รับเอกสารกลับ' });
     }
 
+    const vehicleClass = parseVehicleClass(existing.vehicleClass);
+    const oldCopyType = parseCopyType(existing.copyType);
+    const oldUrgent = existing.urgent ?? false;
     const next = {
       customerId: has('customerId') ? await this.resolveCustomerId(dto.customerId) : (existing.customerId ?? null),
       ownerName: has('ownerName') ? requiredText(dto.ownerName, 'ชื่อเจ้าของรถ') : existing.ownerName,
@@ -364,13 +403,21 @@ export class PlateCopyService {
       brand: has('brand') ? await this.resolveBrandName(dto.brand) : existing.brand,
       plateCategory: has('plateCategory') ? requiredText(dto.plateCategory, 'หมวดทะเบียน', 10) : existing.plateCategory,
       plateNumber: has('plateNumber') ? requiredText(dto.plateNumber, 'เลขทะเบียน', 10) : existing.plateNumber,
-      copyType: has('copyType') ? parseCopyType(dto.copyType) : parseCopyType(existing.copyType),
+      // ประเภทรถเปลี่ยนไม่ได้ - ชนิดการคัดป้ายตรวจตามประเภทรถของงานเดิม (มอเตอร์ไซค์ = ใบเดียวเลขปกติเท่านั้น)
+      copyType: has('copyType') ? copyTypeFor(vehicleClass, dto.copyType) : oldCopyType,
+      urgent: has('urgent') ? parseFlag(dto.urgent, 'งานด่วน') : oldUrgent,
       submitDate,
       returnedDate,
     };
-    // เปลี่ยนชนิดการคัดป้าย = คิด Bill ใหม่ตามชนิด (ชนิดเดิมคง snapshot เดิม)
-    const billTotal = next.copyType !== parseCopyType(existing.copyType) ? plateCopyBillFee(next.copyType) : Number(existing.billTotal);
-    const changes: AuditChanges = diffChanges({ ...existing, copyType: parseCopyType(existing.copyType), billTotal: Number(existing.billTotal) }, { ...next, billTotal });
+    // เปลี่ยนชนิดการคัดป้าย = คิด Bill ใหม่ / เปลี่ยนติ๊กด่วน = คิด No Bill ใหม่ - แก้อย่างอื่นคงยอด snapshot เดิม (กันอัตราใหม่ในอนาคตทำให้งานเก่าเปลี่ยน)
+    const fees = {
+      ...(next.copyType !== oldCopyType ? { billTotal: plateCopyBillFee(next.copyType) } : {}),
+      ...(next.urgent !== oldUrgent ? { noBillTotal: plateCopyNoBillFee(vehicleClass, next.urgent) } : {}),
+    };
+    const changes: AuditChanges = diffChanges(
+      { ...existing, copyType: oldCopyType, urgent: oldUrgent, billTotal: Number(existing.billTotal), noBillTotal: Number(existing.noBillTotal) },
+      { ...next, ...fees },
+    );
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
 
     await this.prisma.$transaction(async (tx) => {
@@ -378,7 +425,7 @@ export class PlateCopyService {
         .update({
           // เงื่อนไข updatedAt ที่ฟอร์มโหลดมา: อีกคนแก้/รับกลับไปก่อน -> 409 ไม่ทับของเขา
           where: { id, cancelledAt: null, updatedAt: expectedUpdatedAt ?? existing.updatedAt },
-          data: billTotal === Number(existing.billTotal) ? next : { ...next, billTotal },
+          data: { ...next, ...fees },
         })
         .catch(staleIfMissing);
       await writeAudit(tx, { entity: 'PlateCopy', entityId: id, action: 'update', remark, changes });
@@ -432,7 +479,9 @@ export class PlateCopyService {
           ownerName: existing.ownerName,
           chassis: existing.chassis,
           plate: `${existing.plateCategory} ${existing.plateNumber}`,
+          vehicleClass: existing.vehicleClass,
           submitDate: existing.submitDate,
+          urgent: existing.urgent ?? false,
           returnedDate: existing.returnedDate,
           plateReceivedDate: existing.plateReceivedDate,
           billTotal: existing.billTotal,
@@ -595,7 +644,7 @@ export class PlateCopyService {
           data: {
             storageKey,
             contentHash,
-            kind: 'car',
+            kind: existing.vehicleClass === 'MOTO' ? 'moto' : 'car',
             mimeType: type.mimeType,
             sizeBytes: file.size,
             originalName: file.originalname ? file.originalname.slice(0, 200) : null,
@@ -680,10 +729,10 @@ export class PlateCopyService {
   async getPlatePhotoImage(id: string): Promise<{ data: Buffer; mimeType: string }> {
     const row = await this.prisma.plateCopy.findFirst({
       where: { id, platePhotoId: { not: null } },
-      select: { platePhoto: { select: { storageKey: true, mimeType: true } } },
+      select: { vehicleClass: true, platePhoto: { select: { storageKey: true, mimeType: true } } },
     });
     if (!row?.platePhoto) throw new NotFoundException({ error: 'ไม่พบรูปป้ายทะเบียน' });
-    this.assertCarReadable();
+    this.assertClassReadable(parseVehicleClass(row.vehicleClass));
     try {
       return { data: await this.storage.get(row.platePhoto.storageKey), mimeType: row.platePhoto.mimeType };
     } catch {
@@ -694,14 +743,13 @@ export class PlateCopyService {
   // รายการสำหรับหน้ารับป้าย - status: pending = ยังไม่รับป้าย | received = รับป้ายแล้ว | all (ไม่มี month เหมือนหน้ารับใบเสร็จ)
   // รอรับป้ายเรียงงานเก่าก่อน (ป้ายปกติออกภายใน 15 วัน - งานที่ค้างนานต้องอยู่บน)
   async listByPlateStatus(statusParam = 'all', classParam?: unknown): Promise<{ plateCopies: PlateCopyRow[] }> {
-    parseVehicleClass(classParam);
-    this.assertCarReadable();
+    const vehicleClass = this.listClass(classParam);
     if (!['pending', 'received', 'all'].includes(statusParam)) {
       throw new BadRequestException({ error: 'พารามิเตอร์ status ต้องเป็น pending, received หรือ all' });
     }
     const rows = await this.prisma.plateCopy.findMany({
       where: {
-        vehicleClass: 'CAR',
+        ...(vehicleClass ? { vehicleClass } : {}),
         cancelledAt: null,
         ...(statusParam === 'pending' ? { plateReceivedDate: null } : statusParam === 'received' ? { plateReceivedDate: { not: null } } : {}),
       },

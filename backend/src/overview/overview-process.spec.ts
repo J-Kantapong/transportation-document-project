@@ -268,10 +268,10 @@ describe('plateCopyWaits', () => {
     expect(plateCopyWaits({ ...j, returnedDate: d('2026-09-05'), plateReceivedDate: d('2026-09-10') })).toEqual([]);
   });
 
-  it('รอรับป้ายเกิน 15 วันถึงนับว่าติดขัด', () => {
+  it('รอรับป้ายเกิน 15 วันทำการ (21 วันปฏิทิน) ถึงนับว่าติดขัด', () => {
     const waits = plateCopyWaits({ submitDate: d('2026-09-10'), returnedDate: d('2026-09-11'), plateReceivedDate: null });
     const subject = { id: 'p', source: 'otherJob' as const, kind: 'car' as const, customerName: 'x', brandName: null, chassis: 'C', plate: null };
-    expect(stuckItemFor(subject, waits, '2026-09-24')).toBeNull(); // 14 วัน
-    expect(stuckItemFor(subject, waits, '2026-09-26')).toMatchObject({ stage: 'plateCopyPlate', overdueDays: 1 }); // 16 วัน
+    expect(stuckItemFor(subject, waits, '2026-10-01')).toBeNull(); // 21 วัน = ครบ 15 วันทำการพอดี
+    expect(stuckItemFor(subject, waits, '2026-10-02')).toMatchObject({ stage: 'plateCopyPlate', overdueDays: 1 }); // 22 วัน
   });
 });

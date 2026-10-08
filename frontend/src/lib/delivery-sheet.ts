@@ -110,15 +110,14 @@ export function groupSheetRows(rows: SheetRow[], labels: Map<string, string>): S
   return list.sort((a, b) => a.ownerLabel.localeCompare(b.ownerLabel, "th") || a.date.localeCompare(b.date));
 }
 
-// สิทธิ์แก้วันที่ (ตรงกับ backend: ใบ DL / ต่อภาษี / ยกเลิกการใช้รถ / งานโอน = ADMIN, STAFF_CAR รถยนต์, STAFF_MOTO จักรยานยนต์;
-// คัดป้าย = รถยนต์เท่านั้น; ยามาฮ่า = ADMIN / STAFF_ENTRY) - DELIVERY / ACCOUNTANT ดูอย่างเดียว backend ตรวจซ้ำ
+// สิทธิ์แก้วันที่ (ตรงกับ backend: ใบ DL / ต่อภาษี / ยกเลิกการใช้รถ / คัดป้าย / งานโอน = ADMIN, STAFF_CAR รถยนต์, STAFF_MOTO จักรยานยนต์;
+// ยามาฮ่า = ADMIN / STAFF_ENTRY) - DELIVERY / ACCOUNTANT ดูอย่างเดียว backend ตรวจซ้ำ
 export function canEditSheetRow(row: SheetRow, roles: UserRole[]): boolean {
   if (row.source === "YAMAHA") return roles.includes("ADMIN") || roles.includes("STAFF_ENTRY");
   // งานอื่นที่ส่งก่อนมีใบ DL (ผู้ใช้ 2026-10-08): วันที่ส่งไม่มีใบให้แก้ - ยกเว้นต่อภาษีที่ยังแก้วันที่คืนลูกค้าที่กรอกมือได้
   if (row.slipId === null && ["USE_CANCEL", "PLATE_COPY", "TRANSFER", "MOVE_OUT"].includes(row.source)) return false;
   const scope: VehicleScope = submitWriteScopeFor(roles);
   if (scope === "NONE") return false;
-  if (row.source === "PLATE_COPY") return scope === "ALL" || scope === "CAR";
   return scope === "ALL" || (scope === "MOTO") === (row.kind === "moto");
 }
 

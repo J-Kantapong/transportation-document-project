@@ -866,7 +866,6 @@ export class OverviewService {
     };
 
     // งานอื่นๆ: แถวสรุปของงานที่ยื่นในวันที่เลือก (done = ยื่นกี่งาน, spend/duty = ค่าใช้จ่ายของงานที่ยื่นวันนั้น, pending = ค้างตามขั้น stage)
-    // carOnly = งานนี้มีแต่รถยนต์ (คัดป้าย) ช่องจักรยานยนต์เป็น null เหมือนสลับเลขตอนก่อนมีรถจักรยานยนต์
     const returnedNote = (rows: Array<{ returnedDate: Date | null }>) => {
       const n = rows.filter((r) => on(r.returnedDate)).length;
       return n ? `รับใบเสร็จกลับ ${n}` : null;
@@ -877,10 +876,9 @@ export class OverviewService {
       label: string,
       rows: Array<{ submitDate: Date; vehicleClass: string }>,
       note: string | null,
-      carOnly = false,
     ): ProcessRow => {
       const row = stageRow(stage, 'other', tally(rows.filter((r) => isoOf(r.submitDate) === asOf), (r) => classKind(r.vehicleClass)), daySpend(category), note, dayDuty(category));
-      return carOnly ? { ...row, label, done: { ...row.done, moto: null }, spend: row.spend && { ...row.spend, moto: null }, duty: row.duty && { ...row.duty, moto: null }, pending: { car: backlog[stage].pending.car, moto: null } } : { ...row, label };
+      return { ...row, label };
     };
     // ส่งตรวจ / ผลตรวจของงานโอนตรวจรถ - ไม่มีค่าใช้จ่ายของตัวเอง (ค่าใช้จ่ายรวมอยู่ที่แถว "งานโอน (ยื่น)")
     const transferStageRow = (stage: StageKey, label: string, rows: Array<{ vehicleClass: string }>, note: string | null): ProcessRow => ({
@@ -955,11 +953,11 @@ export class OverviewService {
         })(),
       ),
       jobRow('useCancel', 'useCancel', 'ยกเลิกการใช้รถ (ยื่น)', useCancels, returnedNote(useCancels)),
-      jobRow('plateCopy', 'plateCopy', 'คัดแผ่นป้ายทะเบียน (ยื่น)', plateCopies, returnedNote(plateCopies), true),
+      // คัดป้ายมีทั้งรถยนต์และมอเตอร์ไซค์ (ผู้ใช้ 2026-10-09) - แยกตาม vehicleClass ของแต่ละงานเหมือนงานอื่น
+      jobRow('plateCopy', 'plateCopy', 'คัดแผ่นป้ายทะเบียน (ยื่น)', plateCopies, returnedNote(plateCopies)),
       {
-        ...stageRow('plateCopyPlate', 'other', { car: plateCopies.filter((j) => on(j.plateReceivedDate)).length, moto: null }, null),
+        ...stageRow('plateCopyPlate', 'other', tally(plateCopies.filter((j) => on(j.plateReceivedDate)), (j) => classKind(j.vehicleClass)), null),
         label: 'คัดแผ่นป้ายทะเบียน (รับป้าย)',
-        pending: { car: backlog.plateCopyPlate.pending.car, moto: null },
       },
       jobRow('moveOut', 'moveOut', 'ย้ายออก (ยื่น)', moveOuts, returnedNote(moveOuts)),
     ];

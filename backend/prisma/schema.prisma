@@ -919,7 +919,7 @@ model VehicleUseCancellation {
 // cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap)
 model PlateCopy {
   id           String @id @default(cuid())
-  vehicleClass String @default("CAR") // ตอนนี้รับเฉพาะ CAR (ผู้ใช้ 2026-10-02: รถยนต์ก่อน)
+  vehicleClass String @default("CAR") // CAR | MOTO (ผู้ใช้ 2026-10-09 เปิดมอเตอร์ไซค์) - เปลี่ยนหลังสร้างไม่ได้
 
   // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับ ownerName) - บังคับกรอกที่ชั้น service
   customerId String?
@@ -933,10 +933,11 @@ model PlateCopy {
 
   submitDate DateTime // วันที่ยื่น
 
-  copyType String @default("BOTH") // BOTH = คัดทั้งคู่ (Bill 205) | SINGLE_NORMAL = ใบเดียวเลขขาวดำปกติ (Bill 100) | SINGLE_AUCTION = ใบเดียวประมูล (Bill 600)
+  copyType String @default("BOTH") // BOTH = คัดทั้งคู่ (Bill 205) | SINGLE_NORMAL = ใบเดียวเลขขาวดำปกติ (Bill 100) | SINGLE_AUCTION = ใบเดียวประมูล (Bill 600) - มอเตอร์ไซค์ = SINGLE_NORMAL เสมอ
+  urgent   Boolean @default(false) // งานด่วน (ผู้ใช้ 2026-10-09) - ลงขันด่วนเพิ่มใน noBillTotal: รถยนต์ +100 / มอเตอร์ไซค์ +50
 
-  billTotal   Decimal @default(0) @db.Decimal(12, 2) // Bill - ตายตัว 205 บาท (snapshot ตอนยื่น)
-  noBillTotal Decimal @default(0) @db.Decimal(12, 2) // No Bill - ตายตัว 100 บาท (ไม่รวมค่าอากร)
+  billTotal   Decimal @default(0) @db.Decimal(12, 2) // Bill - ตามชนิดการคัดป้าย (รถยนต์คัดคู่ปกติ 205 / มอเตอร์ไซค์ 105) snapshot ตอนยื่น
+  noBillTotal Decimal @default(0) @db.Decimal(12, 2) // No Bill - ลงขัน รถยนต์ 100 / มอเตอร์ไซค์ 60 + ลงขันด่วนเพิ่ม (ไม่รวมค่าอากร)
   dutyAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าอากร 10 บาท แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม
 
   // รับใบเสร็จกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปผ่าน ReceiptImage.plateCopyId)

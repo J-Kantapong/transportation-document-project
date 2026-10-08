@@ -230,7 +230,7 @@ export async function searchJobs(
       key: `PLATE_COPY:${j.id}`,
       id: j.id,
       date: isoOf(j.submitDate),
-      kind: 'car',
+      kind: classKind(j.vehicleClass),
       customerName: j.customer?.name ?? null,
       ownerName: j.ownerName,
       chassis: j.chassis,

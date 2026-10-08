@@ -19,6 +19,8 @@ function row(overrides: Record<string, unknown> = {}) {
     plateCategory: 'กข',
     plateNumber: '1234',
     submitDate: new Date('2026-09-20T00:00:00.000Z'),
+    copyType: 'BOTH',
+    urgent: false,
     billTotal: 205,
     noBillTotal: 100,
     dutyAmount: 10,
@@ -158,27 +160,80 @@ describe('PlateCopyService.create', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('รถยนต์เท่านั้น: STAFF_CAR บันทึกได้ STAFF_MOTO บันทึกไม่ได้ และ MOTO ถูกปฏิเสธ', async () => {
+  it('สิทธิ์ตามประเภทรถ: STAFF_CAR บันทึกได้เฉพาะรถยนต์ STAFF_MOTO เฉพาะมอเตอร์ไซค์ ADMIN ทั้งคู่', async () => {
     const { svc, create } = service(null);
-    await expect(asUser(['STAFF_MOTO'], () => svc.create(validDto))).rejects.toBeDefined();
+    await expect(asUser(['STAFF_MOTO'], () => svc.create(validDto))).rejects.toMatchObject({ status: 403 });
+    await expect(asUser(['STAFF_CAR'], () => svc.create({ ...validDto, vehicleClass: 'MOTO' }))).rejects.toMatchObject({ status: 403 });
+    await expect(asUser(['ACCOUNTANT', 'STAFF_MOTO'], () => svc.create(validDto))).rejects.toMatchObject({ status: 403 });
     expect(create).not.toHaveBeenCalled();
     await asUser(['STAFF_CAR'], () => svc.create(validDto));
-    expect(create).toHaveBeenCalledTimes(1);
-    await expect(asUser(['STAFF_CAR'], () => svc.create({ ...validDto, vehicleClass: 'MOTO' }))).rejects.toMatchObject({
-      response: { error: 'คัดแผ่นป้ายทะเบียนใช้ได้เฉพาะรถยนต์ (จักรยานยนต์ยังไม่เปิดให้ใช้)' },
-    });
-    expect(create).toHaveBeenCalledTimes(1);
+    await asUser(['STAFF_MOTO'], () => svc.create({ ...validDto, vehicleClass: 'MOTO' }));
+    await asUser(['ADMIN'], () => svc.create({ ...validDto, vehicleClass: 'MOTO' }));
+    expect(create.mock.calls.map((c) => c[0].data.vehicleClass)).toEqual(['CAR', 'MOTO', 'MOTO']);
+  });
+
+  it('มอเตอร์ไซค์: Bill 105 / ลงขัน 60 / ค่าอากร 10 แยก - ชนิดการคัดป้ายเป็นใบเดียวเลขปกติเสมอ', async () => {
+    const { svc, create } = service(null);
+    const { plateCopy } = await svc.create({ ...validDto, vehicleClass: 'MOTO' });
+    expect(create.mock.calls[0][0].data).toMatchObject({ vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL', urgent: false, billTotal: 105, noBillTotal: 60, dutyAmount: 10 });
+    expect(plateCopy).toMatchObject({ vehicleClass: 'MOTO', urgent: false, billTotal: '105', noBillTotal: '60', dutyAmount: '10' });
+    await svc.create({ ...validDto, vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL', billTotal: 1, noBillTotal: 1 } as never);
+    expect(create.mock.calls[1][0].data).toMatchObject({ copyType: 'SINGLE_NORMAL', billTotal: 105, noBillTotal: 60, dutyAmount: 10 });
+  });
+
+  it('มอเตอร์ไซค์งานด่วน: Bill 105 / No Bill 110 (ลงขัน 60 + ด่วนเพิ่ม 50) / ค่าอากร 10', async () => {
+    const { svc, create } = service(null);
+    await svc.create({ ...validDto, vehicleClass: 'MOTO', urgent: true });
+    expect(create.mock.calls[0][0].data).toMatchObject({ urgent: true, billTotal: 105, noBillTotal: 110, dutyAmount: 10 });
+  });
+
+  it('มอเตอร์ไซค์เลือกชนิดการคัดป้ายอื่นไม่ได้ (คัดคู่ / ประมูล = 400)', async () => {
+    const { svc, create } = service(null);
+    for (const copyType of ['BOTH', 'BOTH_AUCTION', 'SINGLE_AUCTION']) {
+      await expect(svc.create({ ...validDto, vehicleClass: 'MOTO', copyType })).rejects.toMatchObject({
+        status: 400,
+        response: { error: 'คัดแผ่นป้ายมอเตอร์ไซค์มีป้ายใบเดียว เลือกชนิดการคัดป้ายอื่นไม่ได้' },
+      });
+    }
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('รถยนต์งานด่วน: No Bill 200 (ลงขัน 100 + ด่วนเพิ่ม 100) Bill ตามชนิดเดิม / ค่า urgent ที่ไม่ใช่ true/false ถูกปฏิเสธ', async () => {
+    const { svc, create } = service(null);
+    await svc.create({ ...validDto, urgent: true });
+    expect(create.mock.calls[0][0].data).toMatchObject({ vehicleClass: 'CAR', copyType: 'BOTH', urgent: true, billTotal: 205, noBillTotal: 200, dutyAmount: 10 });
+    await svc.create({ ...validDto, copyType: 'SINGLE_AUCTION', urgent: true });
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 605, noBillTotal: 200, dutyAmount: 10 });
+    await expect(svc.create({ ...validDto, urgent: 'yes' })).rejects.toMatchObject({ status: 400 });
   });
 
   it('ค่า vehicleClass ที่ไม่รู้จักถูกปฏิเสธ', async () => {
     const { svc } = service(null);
     await expect(svc.create({ ...validDto, vehicleClass: 'BUS' })).rejects.toMatchObject({
-      response: { error: 'พารามิเตอร์ vehicleClass ต้องเป็น CAR' },
+      response: { error: 'พารามิเตอร์ vehicleClass ต้องเป็น CAR หรือ MOTO' },
     });
   });
 });
 
 describe('PlateCopyService.list', () => {
+  it('ไม่ระบุประเภทรถ = ทุกประเภทที่อ่านได้: STAFF_CAR เห็นเฉพาะรถยนต์ STAFF_MOTO เฉพาะมอเตอร์ไซค์ ADMIN / ACCOUNTANT ทุกประเภท', async () => {
+    const { svc, prisma } = service(null);
+    const whereOf = (i: number) => prisma.plateCopy.findMany.mock.calls[i][0].where;
+    await asUser(['STAFF_CAR'], () => svc.list('all'));
+    expect(whereOf(0).vehicleClass).toBe('CAR');
+    await asUser(['STAFF_MOTO'], () => svc.list('all'));
+    expect(whereOf(1).vehicleClass).toBe('MOTO');
+    await asUser(['ACCOUNTANT'], () => svc.list('all'));
+    expect(whereOf(2)).not.toHaveProperty('vehicleClass');
+    await asUser(['ADMIN'], () => svc.listByPlateStatus('pending'));
+    expect(whereOf(3)).not.toHaveProperty('vehicleClass');
+    await asUser(['STAFF_MOTO'], () => svc.listByPlateStatus('pending'));
+    expect(whereOf(4).vehicleClass).toBe('MOTO');
+    // ขอประเภทที่ตัวเองอ่านไม่ได้ / ไม่มีสิทธิ์ทั้งสองประเภท = 403
+    await expect(asUser(['STAFF_MOTO'], () => svc.list('all', undefined, 'CAR'))).rejects.toMatchObject({ status: 403 });
+    await expect(asUser(['STAFF_ENTRY'], () => svc.list('all'))).rejects.toMatchObject({ status: 403 });
+  });
+
   it('กรองตามประเภทรถ สถานะ และไม่แสดงงานที่ยกเลิกแล้ว', async () => {
     const { svc, prisma } = service(null);
     await svc.list('pending', '2026-09', 'CAR');
@@ -236,6 +291,37 @@ describe('PlateCopyService.update', () => {
     const { svc } = service(row());
     await expect(svc.update('x1', { ownerName: 'สมชาย', remark: 'x' })).rejects.toMatchObject({ response: { error: 'ไม่มีข้อมูลที่เปลี่ยน' } });
     await expect(svc.update('x1', { ownerName: 'อื่น', remark: 'x', expectedUpdatedAt: '2026-09-19T00:00:00.000Z' })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('เปลี่ยนติ๊กด่วน = คิด No Bill ใหม่ตามประเภทรถ (Bill คงเดิม) / เปลี่ยนชนิดการคัดป้ายรถยนต์ = คิด Bill ใหม่', async () => {
+    const moto = service(row({ vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL', billTotal: 105, noBillTotal: 60 }));
+    await moto.svc.update('x1', { urgent: true, remark: 'ลูกค้าขอด่วน' });
+    expect(moto.update.mock.calls[0][0].data).toMatchObject({ urgent: true, noBillTotal: 110 });
+    expect(moto.update.mock.calls[0][0].data).not.toHaveProperty('billTotal');
+    expect(Object.keys(auditOf(moto.prisma)[0].changes as object).sort()).toEqual(['noBillTotal', 'urgent']);
+
+    const car = service(row({ urgent: true, noBillTotal: 200 }));
+    await car.svc.update('x1', { urgent: false, copyType: 'SINGLE_NORMAL', remark: 'ติ๊กผิด' });
+    expect(car.update.mock.calls[0][0].data).toMatchObject({ urgent: false, noBillTotal: 100, copyType: 'SINGLE_NORMAL', billTotal: 105 });
+  });
+
+  it('มอเตอร์ไซค์แก้ชนิดการคัดป้ายเป็นชนิดอื่นไม่ได้ / ประเภทรถที่ส่งมาตอนแก้ถูกเมิน', async () => {
+    const { svc, update } = service(row({ vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL', billTotal: 105, noBillTotal: 60 }));
+    await expect(svc.update('x1', { copyType: 'BOTH', remark: 'x' })).rejects.toMatchObject({ status: 400 });
+    await svc.update('x1', { ownerName: 'สมหญิง', vehicleClass: 'CAR', remark: 'พิมพ์ชื่อผิด' } as never);
+    expect(update.mock.calls[0][0].data).not.toHaveProperty('vehicleClass');
+    expect(update.mock.calls[0][0].data).not.toHaveProperty('noBillTotal');
+  });
+
+  it('สิทธิ์แก้ตามประเภทรถของงาน: STAFF_CAR แก้งานมอเตอร์ไซค์ไม่ได้ และ STAFF_MOTO แก้งานรถยนต์ไม่ได้', async () => {
+    const moto = service(row({ vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL' }));
+    await expect(asUser(['STAFF_CAR'], () => moto.svc.update('x1', { ownerName: 'ใหม่', remark: 'x' }))).rejects.toMatchObject({ status: 403 });
+    await expect(asUser(['STAFF_CAR'], () => moto.svc.cancel('x1', 'x'))).rejects.toMatchObject({ status: 403 });
+    await asUser(['STAFF_MOTO'], () => moto.svc.update('x1', { ownerName: 'ใหม่', remark: 'x' }));
+    expect(moto.update).toHaveBeenCalledTimes(1);
+    const car = service(row());
+    await expect(asUser(['STAFF_MOTO'], () => car.svc.update('x1', { ownerName: 'ใหม่', remark: 'x' }))).rejects.toMatchObject({ status: 403 });
+    expect(car.update).not.toHaveBeenCalled();
   });
 
   it('วันที่รับกลับแก้ได้เฉพาะงานที่รับกลับแล้ว', async () => {
@@ -364,11 +450,14 @@ describe('PlateCopyService รับป้าย (แนบรูปป้าย
     expect(storage.delete).toHaveBeenCalled();
   });
 
-  it('งานที่ยกเลิกแล้วแนบป้ายไม่ได้ / MOTO แก้ไม่ได้', async () => {
+  it('งานที่ยกเลิกแล้วแนบป้ายไม่ได้ / STAFF_MOTO แนบป้ายงานรถยนต์ไม่ได้ แต่แนบงานมอเตอร์ไซค์ได้ (รูปเก็บเป็น kind moto)', async () => {
     const cancelled = service(row({ cancelledAt: new Date() }));
     await expect(cancelled.svc.attachPlatePhoto('x1', file, '2026-09-22')).rejects.toMatchObject({ status: 409 });
     const { svc } = service(row());
-    await expect(asUser(['STAFF_MOTO'], () => svc.attachPlatePhoto('x1', file, '2026-09-22'))).rejects.toBeDefined();
+    await expect(asUser(['STAFF_MOTO'], () => svc.attachPlatePhoto('x1', file, '2026-09-22'))).rejects.toMatchObject({ status: 403 });
+    const moto = service(row({ vehicleClass: 'MOTO', copyType: 'SINGLE_NORMAL' }));
+    await asUser(['STAFF_MOTO'], () => moto.svc.attachPlatePhoto('x1', file, '2026-09-22'));
+    expect(moto.prisma.platePhoto.create.mock.calls[0][0].data).toMatchObject({ kind: 'moto' });
   });
 
   it('แก้วันที่รับป้าย: ต้องมีเหตุผล วันที่ต้องเปลี่ยนจริง และเขียนประวัติ', async () => {
@@ -399,7 +488,7 @@ describe('PlateCopyService รับป้าย (แนบรูปป้าย
     const { svc, prisma } = service(null);
     await svc.listByPlateStatus('pending');
     expect(prisma.plateCopy.findMany.mock.calls[0][0]).toMatchObject({
-      where: { vehicleClass: 'CAR', cancelledAt: null, plateReceivedDate: null },
+      where: { cancelledAt: null, plateReceivedDate: null },
       orderBy: [{ submitDate: 'asc' }, { createdAt: 'desc' }],
     });
     await svc.listByPlateStatus('received');

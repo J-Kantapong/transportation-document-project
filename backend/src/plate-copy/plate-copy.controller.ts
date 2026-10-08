@@ -12,7 +12,7 @@ import {
 export class PlateCopyController {
   constructor(private readonly service: PlateCopyService) {}
 
-  // GET /api/plate-copies?status=pending|returned|all&month=YYYY-MM&vehicleClass=CAR
+  // GET /api/plate-copies?status=pending|returned|all&month=YYYY-MM&vehicleClass=CAR|MOTO (ไม่ระบุประเภทรถ = ทุกประเภทที่ผู้ใช้อ่านได้)
   @Get()
   list(@Query('status') status = 'all', @Query('month') month?: string, @Query('vehicleClass') vehicleClass?: string) {
     return this.service.list(status, month || undefined, vehicleClass);
@@ -23,7 +23,7 @@ export class PlateCopyController {
     return this.service.create(body);
   }
 
-  // แก้เจ้าของงาน / ข้อมูลรถ / วันที่ยื่น / วันที่รับกลับ - remark บังคับ
+  // แก้เจ้าของงาน / ข้อมูลรถ / ชนิดการคัดป้าย (รถยนต์) / งานด่วน / วันที่ยื่น / วันที่รับกลับ - remark บังคับ (ประเภทรถเปลี่ยนไม่ได้)
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: UpdatePlateCopyDto) {
     return this.service.update(id, body ?? {});

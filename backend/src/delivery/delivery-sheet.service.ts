@@ -144,15 +144,13 @@ export class DeliverySheetService {
         orderBy: { deliveredDate: 'desc' },
         take,
       }),
-      // คัดป้ายเป็นรถยนต์เท่านั้น - บัญชีที่ดูแลแต่มอเตอร์ไซค์ไม่เห็น
-      scope === 'MOTO'
-        ? Promise.resolve([])
-        : this.prisma.plateCopy.findMany({
-            where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere },
-            include: { customer: CUSTOMER_SELECT },
-            orderBy: { deliveredDate: 'desc' },
-            take,
-          }),
+      // คัดป้ายมีทั้งรถยนต์และมอเตอร์ไซค์ (ผู้ใช้ 2026-10-09) - กรองตามประเภทรถของงานเหมือนงานอื่น
+      this.prisma.plateCopy.findMany({
+        where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
+        include: { customer: CUSTOMER_SELECT },
+        orderBy: { deliveredDate: 'desc' },
+        take,
+      }),
       this.prisma.vehicleTransfer.findMany({
         where: { cancelledAt: null, deliveredDate: dateWhere ?? { not: null }, ...customerWhere, ...classWhere },
         include: { customer: CUSTOMER_SELECT },
@@ -240,7 +238,7 @@ export class DeliverySheetService {
         date: isoDay(r.deliveredDate!),
         dateLabel: LEGACY_LABEL,
         customer: r.customer,
-        kind: 'car',
+        kind: r.vehicleClass === 'MOTO' ? 'moto' : 'car',
         chassis: r.chassis,
         plateText: plateOf(r.plateCategory, r.plateNumber),
         brand: r.brand,

@@ -149,13 +149,13 @@ describe('DeliverySheetService.sheet', () => {
     expect(rows[1].dateLabel).toContain('แก้ไม่ได้');
   });
 
-  it('STAFF_MOTO เห็นเฉพาะมอเตอร์ไซค์ และไม่เห็นคัดป้าย (รถยนต์เท่านั้น)', async () => {
+  it('STAFF_MOTO เห็นเฉพาะมอเตอร์ไซค์ (รวมคัดป้ายมอเตอร์ไซค์)', async () => {
     const { svc, prisma } = build();
     await asUser(['STAFF_MOTO'], () => svc.sheet({}));
     expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.vehicleClass).toBe('MOTO');
     expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.vehicleClass).toBe('MOTO');
     expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.OR).toEqual([{ vehicleType: { startsWith: 'รย.12-' } }, { vehicleType: { startsWith: 'รย.17-' } }]);
-    expect(prisma.plateCopy.findMany).not.toHaveBeenCalled();
+    expect(prisma.plateCopy.findMany.mock.calls[0][0].where.vehicleClass).toBe('MOTO');
   });
 
   it('STAFF_CAR เห็นเฉพาะรถยนต์', async () => {
@@ -163,7 +163,7 @@ describe('DeliverySheetService.sheet', () => {
     await asUser(['STAFF_CAR'], () => svc.sheet({}));
     expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.vehicleClass).toBe('CAR');
     expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.NOT).toEqual({ OR: [{ vehicleType: { startsWith: 'รย.12-' } }, { vehicleType: { startsWith: 'รย.17-' } }] });
-    expect(prisma.plateCopy.findMany).toHaveBeenCalled();
+    expect(prisma.plateCopy.findMany.mock.calls[0][0].where.vehicleClass).toBe('CAR');
   });
 
   it('DELIVERY เห็นเฉพาะใบ DL ไม่เห็นงานประเภทอื่น', async () => {

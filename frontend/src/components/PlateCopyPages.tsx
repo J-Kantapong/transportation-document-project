@@ -6,7 +6,19 @@ import { api, fetchAuthedBlob, plateCopyPlatePhotoImageUrl } from "@/lib/api";
 import { getCachedUser, getToken, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
-import { PLATE_COPY_DUTY_FEE, PLATE_COPY_EXPECTED_DAYS, PLATE_COPY_NO_BILL_FEE, PLATE_COPY_REQUEST_FEE, type PlateCopyType, plateCopyBillFee, plateCopyPlateFee } from "@/lib/plate-copy-fee";
+import {
+  PLATE_COPY_DUTY_FEE,
+  PLATE_COPY_EXPECTED_DAYS,
+  plateCopyDueDate,
+  PLATE_COPY_MOTO_TYPE,
+  PLATE_COPY_REQUEST_FEE,
+  type PlateCopyType,
+  type PlateCopyVehicleClass,
+  calculatePlateCopyFees,
+  plateCopyBaseNoBillFee,
+  plateCopyPlateFee,
+  plateCopyUrgentFee,
+} from "@/lib/plate-copy-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   plateCopyApi,
@@ -16,7 +28,8 @@ import {
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
-// หน้ายื่น (PlateCopySubmitPage): เจ้าของงาน + ข้อมูลรถ + วันที่ยื่น (ค่าใช้จ่ายตายตัว Bill 25 / No Bill 100 ไม่ต้องกรอก)
+// (มอเตอร์ไซค์เปิดใช้ 2026-10-09: ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนหลังบันทึกไม่ได้ / มอเตอร์ไซค์มีป้ายใบเดียวจึงไม่มีชนิดการคัดป้าย)
+// หน้ายื่น (PlateCopySubmitPage): ประเภทรถ + เจ้าของงาน + ข้อมูลรถ + วันที่ยื่น + งานด่วน (ค่าใช้จ่ายตายตัวตาม lib/plate-copy-fee ไม่ต้องกรอก)
 // หน้ารับใบเสร็จ (PlateCopyReturnPage): แนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่าน OCR เติมเลขที่/วันที่/ยอดเงินให้ แก้เองได้)
 // แล้วยืนยันวันที่รับเอกสารกลับ - เหมือนขั้นรับใบเสร็จของงานสลับเลข
 // แก้/ยกเลิก: ต้องระบุเหตุผลเสมอ (เก็บประวัติ) - ไม่มีการลบงาน งานที่ยกเลิกหายจากรายการแต่ยังอยู่ในฐานข้อมูล
@@ -24,20 +37,27 @@ import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog,
 
 export const PLATE_COPY_HOME = "/registration/other/plate-copy";
 
-// บันทึกได้เฉพาะกลุ่มยื่นเอกสารของประเภทรถนั้น (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO, ADMIN ทุกประเภท) - backend กันอีกชั้น
-// บัญชี (ACCOUNTANT) อ่านอย่างเดียว จึงซ่อนฟอร์ม/ปุ่มบันทึก
-function useCanWrite(): boolean | null {
-  const [canWrite, setCanWrite] = useState<boolean | null>(null);
+const CLASS_LABEL: Record<PlateCopyVehicleClass, string> = { CAR: "รถยนต์", MOTO: "รถจักรยานยนต์" };
+
+// ประเภทรถที่บันทึกได้ = ตามบทบาท (STAFF_CAR = รถยนต์, STAFF_MOTO = มอเตอร์ไซค์, ADMIN/ถือทั้งคู่ = ทั้งสอง) - backend กันอีกชั้น
+// บัญชี (ACCOUNTANT) อ่านอย่างเดียว จึงว่าง = ซ่อนฟอร์ม/ปุ่มบันทึก / null = ยังไม่อ่านบทบาท
+function useWritableClasses(): PlateCopyVehicleClass[] | null {
+  const [classes, setClasses] = useState<PlateCopyVehicleClass[] | null>(null);
   useEffect(() => {
     const scope = submitWriteScopeFor(getCachedUser()?.roles ?? []);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
-    setCanWrite(scope === "ALL" || scope === "CAR"); // รถยนต์เท่านั้น
+    setClasses(scope === "ALL" ? ["CAR", "MOTO"] : scope === "CAR" || scope === "MOTO" ? [scope] : []);
   }, []);
-  return canWrite;
+  return classes;
 }
+
+// ปุ่มบันทึก/แก้ของงานหนึ่งงาน - ตามประเภทรถของงานนั้น (คนที่ถือบัญชี + ยื่นรถยนต์ เห็นงานมอเตอร์ไซค์ได้แต่แก้ไม่ได้)
+const canWriteItem = (classes: PlateCopyVehicleClass[] | null, item: PlateCopy) => Boolean(classes?.includes(item.vehicleClass));
 
 const plateText = (c: PlateCopy) => `${c.plateCategory} ${c.plateNumber}`;
 const vehicleText = (c: PlateCopy) => `${c.brand} · เครื่อง ${c.engine} · ตัวถัง ${c.chassis}`;
+// ประเภทรถของงาน (+ งานด่วน) - แสดงในทุกรายการ/การ์ด
+const classText = (c: PlateCopy) => `${CLASS_LABEL[c.vehicleClass]}${c.urgent ? " · งานด่วน" : ""}`;
 // รวม = Bill + No Bill - ค่าอากรแยกต่างหาก ไม่รวมใน No Bill และไม่นับในยอดรวม (ผู้ใช้ 2026-10-02)
 const totalOf = (c: PlateCopy) => Number(c.billTotal) + Number(c.noBillTotal);
 
@@ -56,7 +76,9 @@ function Summary({ item }: { item: PlateCopy }) {
   return (
     <div style={{ padding: "10px 12px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 8, fontSize: 14 }}>
       <strong>{item.ownerName}</strong> · ทะเบียน {plateText(item)}
-      <div className="muted">{vehicleText(item)}</div>
+      <div className="muted">
+        {classText(item)} · {vehicleText(item)}
+      </div>
     </div>
   );
 }
@@ -81,6 +103,7 @@ function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCanc
 // ---------------------------------------------------------------------------------------------
 
 interface FormState {
+  vehicleClass: PlateCopyVehicleClass | ""; // "" = ยังไม่เลือก (เฉพาะฟอร์มยื่นของคนที่บันทึกได้ทั้งสองประเภท)
   customerId: string;
   ownerName: string;
   chassis: string;
@@ -88,7 +111,8 @@ interface FormState {
   brand: string;
   plateCategory: string;
   plateNumber: string;
-  copyType: PlateCopyType;
+  copyType: PlateCopyType; // รถยนต์เท่านั้น - มอเตอร์ไซค์ส่ง SINGLE_NORMAL เสมอ
+  urgent: boolean; // งานด่วน (ลงขันด่วนเพิ่มใน No Bill)
 }
 
 const COPY_TYPE_LABELS: Record<PlateCopyType, string> = {
@@ -99,6 +123,7 @@ const COPY_TYPE_LABELS: Record<PlateCopyType, string> = {
 };
 
 const EMPTY_FORM: FormState = {
+  vehicleClass: "",
   customerId: "",
   ownerName: "",
   chassis: "",
@@ -107,7 +132,11 @@ const EMPTY_FORM: FormState = {
   plateCategory: "",
   plateNumber: "",
   copyType: "BOTH",
+  urgent: false,
 };
+
+// ชนิดการคัดป้ายที่ส่งให้ backend - มอเตอร์ไซค์มีป้ายใบเดียว (backend ปฏิเสธชนิดอื่น)
+const copyTypeOf = (form: FormState): PlateCopyType => (form.vehicleClass === "MOTO" ? PLATE_COPY_MOTO_TYPE : form.copyType);
 
 type Option = { id: string; label: string };
 
@@ -140,9 +169,12 @@ function VehicleFormFields({
   brandNames,
   customerOptions,
   customerPlaceholder = "เลือกลูกค้า",
+  classOptions,
 }: {
   form: FormState;
   onChange: (patch: Partial<FormState>) => void;
+  // ประเภทรถที่เลือกได้ (ฟอร์มยื่น - ตามสิทธิ์บันทึกของผู้ใช้) / ไม่ส่ง = ป๊อปอัปแก้ ประเภทรถเปลี่ยนไม่ได้
+  classOptions?: PlateCopyVehicleClass[];
   submitDateText: string;
   onSubmitDateChange: (text: string) => void;
   returnedDateText?: string;
@@ -152,8 +184,27 @@ function VehicleFormFields({
   customerPlaceholder?: string;
 }) {
   const text = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ [key]: e.target.value });
+  const vehicleClass = form.vehicleClass;
+  const fees = vehicleClass ? calculatePlateCopyFees(vehicleClass, form.copyType, form.urgent) : null;
   return (
     <>
+      {/* ประเภทรถ: ฟอร์มยื่นเลือกได้เฉพาะที่ผู้ใช้บันทึกได้ (มีประเภทเดียว = ล็อกไว้) / ป๊อปอัปแก้เปลี่ยนไม่ได้ */}
+      <label className="field" style={{ maxWidth: 420 }}>
+        ประเภทรถ *
+        {classOptions && classOptions.length > 1 ? (
+          <select value={vehicleClass} onChange={(e) => onChange({ vehicleClass: e.target.value as PlateCopyVehicleClass | "" })}>
+            <option value="">เลือกประเภทรถ</option>
+            {classOptions.map((c) => (
+              <option key={c} value={c}>
+                {CLASS_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={vehicleClass ? CLASS_LABEL[vehicleClass] : ""} readOnly disabled title={classOptions ? undefined : "ประเภทรถเปลี่ยนไม่ได้หลังบันทึก"} />
+        )}
+      </label>
+
       {/* เจ้าของงาน = ลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ - ไม่ใช่เจ้าของรถตามทะเบียน (ช่อง "ชื่อเจ้าของรถ" ข้างล่าง) */}
       <label className="field" style={{ maxWidth: 420 }}>
         เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
@@ -219,51 +270,69 @@ function VehicleFormFields({
         </div>
       </div>
 
-      <div className="customer-grid" style={{ marginTop: 14 }}>
-        <label className="field">
-          ชนิดการคัดป้าย *
-          <select value={form.copyType} onChange={(e) => onChange({ copyType: e.target.value as PlateCopyType })}>
-            {(Object.keys(COPY_TYPE_LABELS) as PlateCopyType[]).map((t) => (
-              <option key={t} value={t}>
-                {COPY_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {/* มอเตอร์ไซค์มีป้ายใบเดียว - ไม่มีชนิดการคัดป้ายให้เลือก (ผู้ใช้ 2026-10-09) */}
+      {vehicleClass !== "MOTO" && (
+        <div className="customer-grid" style={{ marginTop: 14 }}>
+          <label className="field">
+            ชนิดการคัดป้าย *
+            <select value={form.copyType} onChange={(e) => onChange({ copyType: e.target.value as PlateCopyType })}>
+              {(Object.keys(COPY_TYPE_LABELS) as PlateCopyType[]).map((t) => (
+                <option key={t} value={t}>
+                  {COPY_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
-      {/* ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02) - ไม่ต้องกรอก ระบบเก็บยอดตามอัตรานี้ตอนบันทึก */}
-      <div className="customer-grid">
-        <div>
-          <strong>Bill (ใบเสร็จ)</strong>
-          <div>{formatBaht(plateCopyBillFee(form.copyType))} บาท</div>
-          <div className="muted">
-            คำขอ {formatBaht(PLATE_COPY_REQUEST_FEE)} + ค่าแผ่นป้าย {formatBaht(plateCopyPlateFee(form.copyType))}
+      {/* ค่าใช้จ่ายตายตัวตามประเภทรถ (รถยนต์ 2026-10-02 / มอเตอร์ไซค์ + งานด่วน 2026-10-09) - ไม่ต้องกรอก backend เก็บยอดตามอัตรานี้ตอนบันทึก */}
+      {!vehicleClass || !fees ? (
+        <p className="muted">เลือกประเภทรถก่อน ระบบจะแสดงค่าใช้จ่ายตามประเภทรถ</p>
+      ) : (
+        <>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+            <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
+            งานด่วน (ลงขันด่วนเพิ่ม {formatBaht(plateCopyUrgentFee(vehicleClass))} ใน No Bill)
+          </label>
+          <div className="customer-grid">
+            <div>
+              <strong>Bill (ใบเสร็จ)</strong>
+              <div>{formatBaht(fees.billTotal)} บาท</div>
+              <div className="muted">
+                คำขอ {formatBaht(PLATE_COPY_REQUEST_FEE)} + ค่าแผ่นป้าย {formatBaht(plateCopyPlateFee(copyTypeOf(form)))}
+              </div>
+            </div>
+            <div>
+              <strong>No Bill</strong>
+              <div>{formatBaht(fees.noBillTotal)} บาท</div>
+              <div className="muted">
+                ลงขัน {formatBaht(plateCopyBaseNoBillFee(vehicleClass))}
+                {form.urgent ? ` + ลงขันด่วนเพิ่ม ${formatBaht(plateCopyUrgentFee(vehicleClass))}` : ""}
+              </div>
+            </div>
+            <div>
+              <strong>ค่าอากร</strong>
+              <div>{formatBaht(PLATE_COPY_DUTY_FEE)} บาท (แยกต่างหาก ไม่รวมใน No Bill)</div>
+            </div>
+            <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
+              <strong>รวม (Bill + No Bill)</strong>
+              <span style={{ textAlign: "right" }}>
+                <strong>{formatBaht(fees.billTotal + fees.noBillTotal)} บาท</strong>
+                <div className="muted">แยกค่าอากร {formatBaht(PLATE_COPY_DUTY_FEE)} บาท</div>
+              </span>
+            </div>
           </div>
-        </div>
-        <div>
-          <strong>No Bill</strong>
-          <div>{formatBaht(PLATE_COPY_NO_BILL_FEE)} บาท</div>
-        </div>
-        <div>
-          <strong>ค่าอากร</strong>
-          <div>{formatBaht(PLATE_COPY_DUTY_FEE)} บาท (แยกต่างหาก ไม่รวมใน No Bill)</div>
-        </div>
-        <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
-          <strong>รวม (Bill + No Bill)</strong>
-          <span style={{ textAlign: "right" }}>
-            <strong>{formatBaht(plateCopyBillFee(form.copyType) + PLATE_COPY_NO_BILL_FEE)} บาท</strong>
-            <div className="muted">แยกค่าอากร {formatBaht(PLATE_COPY_DUTY_FEE)} บาท</div>
-          </span>
-        </div>
-      </div>
+        </>
+      )}
     </>
   );
 }
 
 // ตรวจฟอร์มฝั่งหน้าเว็บ (backend ตรวจซ้ำ) - คืนข้อความผิดพลาดข้อแรก หรือ "" ถ้าผ่าน
 function validateForm(form: FormState, requireCustomer: boolean): string {
+  if (!form.vehicleClass) return "กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)";
   if (requireCustomer && !form.customerId) return "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)";
   if (!form.ownerName.trim()) return "กรุณากรอกชื่อเจ้าของรถ";
   if (!form.chassis.trim()) return "กรุณากรอกเลขตัวถัง";
@@ -288,6 +357,8 @@ function EditDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [form, setForm] = useState<FormState>({
+    vehicleClass: item.vehicleClass,
+    urgent: item.urgent,
     customerId: item.customer?.id ?? "",
     ownerName: item.ownerName,
     chassis: item.chassis,
@@ -328,7 +399,8 @@ function EditDialog({
         brand: form.brand,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
-        copyType: form.copyType,
+        copyType: copyTypeOf(form),
+        urgent: form.urgent, // เปลี่ยนติ๊กด่วน = backend คิด No Bill ใหม่
         // ส่งเฉพาะตอนเลือกไว้จริง - งานที่ไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
         ...(form.customerId ? { customerId: form.customerId } : {}),
         submitDate,
@@ -415,8 +487,12 @@ function CancelDialog({ item, onClose, onCancelled }: { item: PlateCopy; onClose
 type RowDialog = { kind: "edit" | "cancel"; item: PlateCopy } | null;
 
 export function PlateCopySubmitPage() {
-  const canWrite = useCanWrite();
+  const writable = useWritableClasses();
+  const canWrite = Boolean(writable?.length);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // บันทึกได้ประเภทเดียว = ใช้ประเภทนั้นเลย ไม่ต้องเลือก
+  const classValue: PlateCopyVehicleClass | "" = form.vehicleClass || (writable?.length === 1 ? writable[0] : "");
+  const liveForm: FormState = { ...form, vehicleClass: classValue };
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
@@ -450,12 +526,13 @@ export function PlateCopySubmitPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!submitDate) return setMessage({ text: "กรุณากรอกวันที่ยื่นให้ถูกต้อง", error: true });
-    const invalid = validateForm(form, true);
-    if (invalid) return setMessage({ text: invalid, error: true });
+    const invalid = validateForm(liveForm, true);
+    if (invalid || !classValue) return setMessage({ text: invalid, error: true });
     setSaving(true);
     setMessage({ text: "กำลังบันทึก…" });
     try {
       await plateCopyApi.create({
+        vehicleClass: classValue,
         customerId: form.customerId,
         ownerName: form.ownerName,
         engine: form.engine,
@@ -463,11 +540,13 @@ export function PlateCopySubmitPage() {
         brand: form.brand,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
-        copyType: form.copyType,
+        copyType: copyTypeOf(liveForm),
+        urgent: form.urgent,
         submitDate,
       });
       setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
-      setForm((prev) => ({ ...EMPTY_FORM, customerId: prev.customerId })); // เจ้าของงานคนเดิมมักส่งมาหลายคัน - คงไว้ให้
+      // เจ้าของงานคนเดิมมักส่งมาหลายคัน (ประเภทรถเดิม) - คงไว้ให้ / งานด่วนกลับเป็นไม่ติ๊ก กันติดไปคันถัดไป
+      setForm((prev) => ({ ...EMPTY_FORM, customerId: prev.customerId, vehicleClass: prev.vehicleClass }));
       if (submitDate.slice(0, 7) === month) await load(month);
       else setMonth(submitDate.slice(0, 7));
     } catch (err) {
@@ -489,13 +568,14 @@ export function PlateCopySubmitPage() {
       <Link href={PLATE_COPY_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← คัดแผ่นป้ายทะเบียน
       </Link>
-      <h1>ยื่นงานคัดแผ่นป้ายทะเบียน (รถยนต์)</h1>
+      <h1>ยื่นงานคัดแผ่นป้ายทะเบียน</h1>
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
             <VehicleFormFields
-              form={form}
+              form={liveForm}
+              classOptions={writable ?? []}
               onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
               submitDateText={submitDateText}
               onSubmitDateChange={setSubmitDateText}
@@ -539,6 +619,7 @@ export function PlateCopySubmitPage() {
                     <th>วันที่ยื่น</th>
                     <th>เจ้าของงาน</th>
                     <th>รถ</th>
+                    <th>ประเภทรถ</th>
                     <th>ทะเบียน</th>
                     <th>Bill</th>
                     <th>No Bill</th>
@@ -560,8 +641,12 @@ export function PlateCopySubmitPage() {
                         <div className="sub">{vehicleText(item)}</div>
                       </td>
                       <td>
+                        {CLASS_LABEL[item.vehicleClass]}
+                        {item.urgent && <div className="sub">งานด่วน</div>}
+                      </td>
+                      <td>
                         {plateText(item)}
-                        {item.copyType !== "BOTH" && <div className="sub">{COPY_TYPE_LABELS[item.copyType]}</div>}
+                        {item.vehicleClass === "CAR" && item.copyType !== "BOTH" && <div className="sub">{COPY_TYPE_LABELS[item.copyType]}</div>}
                       </td>
                       <td>{formatBaht(Number(item.billTotal))}</td>
                       <td>{formatBaht(Number(item.noBillTotal))}</td>
@@ -578,7 +663,9 @@ export function PlateCopySubmitPage() {
                       </td>
                       {canWrite && (
                         <td>
-                          <RowActions onEdit={() => setDialog({ kind: "edit", item })} onCancel={() => setDialog({ kind: "cancel", item })} />
+                          {canWriteItem(writable, item) && (
+                            <RowActions onEdit={() => setDialog({ kind: "edit", item })} onCancel={() => setDialog({ kind: "cancel", item })} />
+                          )}
                         </td>
                       )}
                     </tr>
@@ -721,7 +808,8 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: PlateCopy; canW
 type ReturnDialog = { kind: "edit" | "cancel" | "undo"; item: PlateCopy } | null;
 
 export function PlateCopyReturnPage() {
-  const canWrite = useCanWrite();
+  const writable = useWritableClasses();
+  const canWrite = Boolean(writable?.length);
   const [status, setStatus] = useState<Exclude<PlateCopyStatusFilter, "all">>("pending");
   const [items, setItems] = useState<PlateCopy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -817,6 +905,7 @@ export function PlateCopyReturnPage() {
                   <th>วันที่ยื่น</th>
                   <th>เจ้าของงาน</th>
                   <th>รถ</th>
+                  <th>ประเภทรถ</th>
                   <th>ทะเบียน</th>
                   <th>รูปใบเสร็จ</th>
                   <th>ข้อมูลใบเสร็จ</th>
@@ -829,7 +918,8 @@ export function PlateCopyReturnPage() {
                   <ReturnRow
                     key={item.id}
                     item={item}
-                    canWrite={!!canWrite}
+                    showActions={canWrite}
+                    canWrite={canWriteItem(writable, item)}
                     onChange={replace}
                     onConfirm={confirmReturn}
                     onMessage={(text, error) => setMessage({ text, error })}
@@ -877,6 +967,7 @@ export function PlateCopyReturnPage() {
 
 function ReturnRow({
   item,
+  showActions,
   canWrite,
   onChange,
   onConfirm,
@@ -884,7 +975,8 @@ function ReturnRow({
   onDialog,
 }: {
   item: PlateCopy;
-  canWrite: boolean;
+  showActions: boolean; // ตารางมีคอลัมน์ปุ่มแก้ (ผู้ใช้บันทึกได้อย่างน้อยหนึ่งประเภทรถ)
+  canWrite: boolean; // บันทึกงานนี้ได้ (ตามประเภทรถของงาน)
   onChange: (item: PlateCopy) => void;
   onConfirm: (item: PlateCopy) => void;
   onMessage: (text: string, error?: boolean) => void;
@@ -934,6 +1026,10 @@ function ReturnRow({
       <td>
         <div className="job">{item.ownerName}</div>
         <div className="sub">{vehicleText(item)}</div>
+      </td>
+      <td>
+        {CLASS_LABEL[item.vehicleClass]}
+        {item.urgent && <div className="sub">งานด่วน</div>}
       </td>
       <td>{plateText(item)}</td>
       <td>
@@ -1024,15 +1120,17 @@ function ReturnRow({
           </button>
         ) : null}
       </td>
-      {canWrite && (
+      {showActions && (
         <td>
-          <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
-            {returned && (
-              <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
-                ยกเลิกรับกลับ
-              </button>
-            )}
-          </RowActions>
+          {canWrite && (
+            <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
+              {returned && (
+                <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
+                  ยกเลิกรับกลับ
+                </button>
+              )}
+            </RowActions>
+          )}
         </td>
       )}
     </tr>
@@ -1043,15 +1141,9 @@ function ReturnRow({
 // หน้ารับป้าย (ผู้ใช้ 2026-10-02: คัดแผ่นป้ายต้องมีรับป้ายกลับมาด้วย และถ่ายรูปป้ายในการ์ดยืนยันรับป้าย)
 // การ์ดละงาน: ถ่าย/เลือกรูปป้ายที่ได้รับ + วันที่รับ -> ดูตัวอย่างรูป -> กด "ยืนยันรับป้าย" จึงบันทึก (รูปจำเป็นเสมอ)
 // ไม่ใช้ AI ไม่ผูกกับ returnedDate (แนบได้แม้ยังไม่รับใบเสร็จ) เหมือนรับป้ายงานสลับเลข
-// ปกติป้ายออกภายใน 15 วันนับจากวันที่ยื่น: การ์ดบอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน (ไม่ได้บังคับขั้นตอนใด)
+// ปกติป้ายออกภายใน 15 วันทำการนับจากวันที่ยื่น: การ์ดบอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน (ไม่ได้บังคับขั้นตอนใด)
 // ---------------------------------------------------------------------------------------------
 
-// วันที่ ISO (YYYY-MM-DD) บวกจำนวนวัน - คิดเป็น UTC ล้วนไม่ให้เขตเวลาเลื่อนวัน
-const addDaysIso = (iso: string, days: number) => {
-  const d = new Date(`${iso}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
 const daysBetweenIso = (fromIso: string, toIso: string) => Math.round((Date.parse(`${toIso}T00:00:00.000Z`) - Date.parse(`${fromIso}T00:00:00.000Z`)) / 86400000);
 
 async function openPlatePhoto(plateCopyId: string) {
@@ -1087,7 +1179,7 @@ function ReceivePlateCard({
   const [dialog, setDialog] = useState<"date" | "detach" | null>(null);
   const received = Boolean(item.plateReceivedDate);
 
-  const dueIso = addDaysIso(item.submitDate, PLATE_COPY_EXPECTED_DAYS);
+  const dueIso = plateCopyDueDate(item.submitDate);
   const overdueDays = !received ? daysBetweenIso(dueIso, todayIso()) : 0;
 
   // ตัวอย่างรูปที่เลือก - คืนหน่วยความจำของ object URL เมื่อเปลี่ยนรูป/ออกจากการ์ด
@@ -1137,7 +1229,9 @@ function ReceivePlateCard({
           <div className="job">
             <strong>{item.ownerName}</strong> · ทะเบียน {plateText(item)}
           </div>
-          <div className="sub">{vehicleText(item)}</div>
+          <div className="sub">
+            {classText(item)} · {vehicleText(item)}
+          </div>
           <div className="sub">
             เจ้าของงาน: {item.customer ? (item.customer.company ?? item.customer.name) : "ยังไม่ระบุ"} · ยื่น {isoToDisplayDate(item.submitDate)}
           </div>
@@ -1148,7 +1242,7 @@ function ReceivePlateCard({
           ) : (
             <>
               <div className="sub">
-                คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วัน)
+                คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
               </div>
               {overdueDays > 0 && (
                 <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>
@@ -1268,7 +1362,7 @@ function ReceivePlateCard({
 }
 
 export function PlateCopyReceivePlatePage() {
-  const canWrite = useCanWrite();
+  const writable = useWritableClasses();
   const [status, setStatus] = useState<"pending" | "received">("pending");
   const [items, setItems] = useState<PlateCopy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1330,7 +1424,7 @@ export function PlateCopyReceivePlatePage() {
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับป้าย" : "ยังไม่มีงานที่รับป้ายแล้ว"}</div>
         ) : (
           items.map((item) => (
-            <ReceivePlateCard key={item.id} item={item} canWrite={!!canWrite} onMessage={(text, error) => setMessage({ text, error })} onDone={() => load(status)} />
+            <ReceivePlateCard key={item.id} item={item} canWrite={canWriteItem(writable, item)} onMessage={(text, error) => setMessage({ text, error })} onDone={() => load(status)} />
           ))
         )}
       </div>
