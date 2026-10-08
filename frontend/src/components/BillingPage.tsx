@@ -705,7 +705,7 @@ export function BillingPage() {
                     const name = plateText(v) || v.chassis;
                     const notNormal = addOnsOf(row).length > 0 || row.rateId === CUSTOM_RATE || row.deduct;
                     return (
-                      <div key={v.id} style={{ borderTop: "1px solid #f0f2f6" }}>
+                      <div key={v.id} data-focus-row style={{ borderTop: "1px solid #f0f2f6" }}>
                         {/* หนึ่งคันหนึ่งแถว (ผู้ใช้ 2026-09-28): เลขตัวถัง · ทะเบียน · cc · ราคาใบเสร็จ · ค่าบริการ */}
                         {/* ไม่ใช่จดปกติ (มีค่าเพิ่ม ขอใช้/ด่วน, ราคากำหนดเอง, หักยอด) = แถวสีเหลือง ให้เห็นทันที (ผู้ใช้ 2026-09-28) */}
                         <div style={{ ...ROW_GRID, padding: "8px 23px", fontSize: 13, background: notNormal ? "#fff6dd" : undefined }}>

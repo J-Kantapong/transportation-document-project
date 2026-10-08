@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import { isoToDisplayDate } from "@/lib/date";
-import type { ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
+import type { AlertDoc, ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 
 // ภาพรวมผู้บริหาร - งานแต่ละขั้นตอน + คันที่ติดขัด แยกรถยนต์/จักรยานยนต์ (ผู้ใช้ขอ 2026-09-24)
@@ -167,9 +167,123 @@ type KindFilter = "all" | VehicleKind;
 
 // "ไปจัดการ" พาไปหน้าที่มีรถคันนั้นจริงพร้อม ?focus= แบบเดียวกับหน้าค้นหารถ (พบ 2026-09-27: เดิมไปหน้าเมนู/หน้าเลือกประเภทรถ)
 // ต่อภาษีไม่แสดงเลขตัวถังในตาราง จึงเปิดหน้าอย่างเดียว
-function stuckHref(s: StuckItem): string {
+export function stuckHref(s: StuckItem): string {
+  // งานอื่นที่รอลงส่งงาน: หน้า Delivery กางใบของงานนั้นจากเลขตัวถังได้เหมือนรถจดใหม่
+  if (s.stage === "jobDelivery") return focusHref(s.href, s.chassis);
   if (s.source !== "vehicle" && s.source !== "plateSwap") return s.href; // ต่อภาษีและงานอื่นๆ: href จาก backend (งานอื่นๆ พาไปหน้ารับใบเสร็จ/รับป้ายตรงๆ)
   return focusHref(workPageFor(s.stage, s.kind, s.flags, s.href), s.chassis);
+}
+
+// ตารางรายคัน ใช้ร่วมกันทั้ง "รถที่ติดขัด" (หนึ่งคันหนึ่งแถว มีช่องความเร่งด่วน) และรายคันของ "สิ่งที่ควรจัดการ" แต่ละเรื่อง
+function StuckTable({ items, linkLabel, showSeverity }: { items: StuckItem[]; linkLabel: string; showSeverity?: boolean }) {
+  return (
+    <div className="table-wrap">
+      <table className="exec-table stuck-table">
+        <thead>
+          <tr>
+            {showSeverity && <th>ความเร่งด่วน</th>}
+            <th>ประเภท</th>
+            <th>รถ</th>
+            <th>ลูกค้า</th>
+            <th>ติดที่ขั้น</th>
+            <th className="num-col">ค้างมา</th>
+            <th>สาเหตุ</th>
+            <th aria-label="ลิงก์" />
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={`${s.source}-${s.id}-${s.stage}`}>
+              {showSeverity && (
+                <td>
+                  <span className={`exec-alert-chip exec-alert-chip--${s.severity}`}>
+                    <b aria-hidden="true">{s.severity === "high" ? "!" : "•"}</b>
+                    {s.severity === "high" ? "ด่วน" : "ควรดู"}
+                  </span>
+                </td>
+              )}
+              <td>
+                <span className={`kind-badge kind-${s.kind}`}>{KIND_LABEL[s.kind]}</span>
+              </td>
+              <td>
+                <div className="job">{[s.brandName, s.plate].filter(Boolean).join(" · ") || "-"}</div>
+                <div className="sub">{s.chassis}</div>
+              </td>
+              <td className="exec-wrap">{s.customerName}</td>
+              <td>{s.stageLabel}</td>
+              <td className="num-col">
+                {s.days} วัน
+                {s.overdueDays > 0 && <div className="sub exec-neg">เกิน {s.overdueDays} วัน</div>}
+                <div className="sub">ตั้งแต่ {isoToDisplayDate(s.since)}</div>
+              </td>
+              <td className="stuck-reason">{s.reason}</td>
+              <td>
+                <Link href={stuckHref(s)} className="text-button">
+                  {linkLabel}
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// รายใบของเรื่องที่ไม่ใช่รถติดขัด (บิล ใบกำกับที่รอ 50 ทวิ ใบเสนอราคา ใบเสร็จที่ยอดไม่ตรง) - ลิงก์ของแต่ละใบมาจาก backend
+const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function DocTable({ docs }: { docs: AlertDoc[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="exec-table stuck-table">
+        <thead>
+          <tr>
+            <th>รายการ</th>
+            <th>ลูกค้า</th>
+            <th className="num-col">ยอด (บาท)</th>
+            <th>วันที่</th>
+            <th>หมายเหตุ</th>
+            <th aria-label="ลิงก์" />
+          </tr>
+        </thead>
+        <tbody>
+          {docs.map((doc) => (
+            <tr key={doc.id}>
+              <td className="job">{doc.title}</td>
+              <td className="exec-wrap">{doc.customerName}</td>
+              <td className="num-col">{doc.amount === null ? "–" : money(doc.amount)}</td>
+              <td>{doc.date ? `${doc.dateLabel} ${isoToDisplayDate(doc.date)}` : "–"}</td>
+              <td className="stuck-reason">{doc.note}</td>
+              <td>
+                <Link href={doc.href} className="text-button">
+                  ไปที่รายการนี้ →
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// รายคันของ "สิ่งที่ควรจัดการ" หนึ่งเรื่อง (ผู้ใช้ 2026-10-09: กดแล้วไปถึงคันที่มีปัญหา ไม่ต้องไปหาเองในหน้าคิว)
+// คันเดียวอยู่ได้หลายเรื่อง (เช่น ยังไม่วางบิล + ป้ายยังไม่ส่งตาม) แต่ละเรื่องจึงลิงก์ไปหน้าของขั้นนั้นเอง
+export function AlertItems({ items, docs, total, queueHref }: { items: StuckItem[]; docs: AlertDoc[]; total: number; queueHref: string }) {
+  const shown = items.length + docs.length;
+  return (
+    <div className="exec-alert-items">
+      {items.length > 0 && <StuckTable items={items} linkLabel="ไปที่คันนี้ →" />}
+      {docs.length > 0 && <DocTable docs={docs} />}
+      <p className="exec-note">
+        {total > shown && `แสดง ${shown} รายการแรก จากทั้งหมด ${total} รายการ · `}
+        <Link href={queueHref} className="text-button">
+          เปิดหน้าคิวทั้งหมด →
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 export function StuckList({
@@ -217,54 +331,7 @@ export function StuckList({
       {shown.length === 0 ? (
         <div className="exec-empty">✓ ไม่มีรถติดขัด{filter === "all" ? "" : `ในกลุ่ม${KIND_LABEL[filter]}`}</div>
       ) : (
-        <div className="table-wrap">
-          <table className="exec-table stuck-table">
-            <thead>
-              <tr>
-                <th>ความเร่งด่วน</th>
-                <th>ประเภท</th>
-                <th>รถ</th>
-                <th>ลูกค้า</th>
-                <th>ติดที่ขั้น</th>
-                <th className="num-col">ค้างมา</th>
-                <th>สาเหตุ</th>
-                <th aria-label="ลิงก์" />
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((s) => (
-                <tr key={`${s.source}-${s.id}`}>
-                  <td>
-                    <span className={`exec-alert-chip exec-alert-chip--${s.severity}`}>
-                      <b aria-hidden="true">{s.severity === "high" ? "!" : "•"}</b>
-                      {s.severity === "high" ? "ด่วน" : "ควรดู"}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`kind-badge kind-${s.kind}`}>{KIND_LABEL[s.kind]}</span>
-                  </td>
-                  <td>
-                    <div className="job">{[s.brandName, s.plate].filter(Boolean).join(" · ") || "-"}</div>
-                    <div className="sub">{s.chassis}</div>
-                  </td>
-                  <td className="exec-wrap">{s.customerName}</td>
-                  <td>{s.stageLabel}</td>
-                  <td className="num-col">
-                    {s.days} วัน
-                    {s.overdueDays > 0 && <div className="sub exec-neg">เกิน {s.overdueDays} วัน</div>}
-                    <div className="sub">ตั้งแต่ {isoToDisplayDate(s.since)}</div>
-                  </td>
-                  <td className="stuck-reason">{s.reason}</td>
-                  <td>
-                    <Link href={stuckHref(s)} className="text-button">
-                      ไปจัดการ →
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <StuckTable items={shown} linkLabel="ไปจัดการ →" showSeverity />
       )}
       {count > shown.length && (
         <p className="exec-note stuck-more">

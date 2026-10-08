@@ -252,6 +252,12 @@ aside{overflow-y:auto}
 .exec-alert--info .exec-alert-chip{background:#eef3ff;color:#3c5fb8}
 .exec-alert--info .exec-alert-chip b{background:#4a70c7}
 .exec-alert .text-button{white-space:nowrap;text-decoration:none}
+/* รายคันของเรื่องที่กดกาง (AlertItems) - กินเต็มความกว้างใต้แถวของเรื่อง */
+.exec-alert-items{grid-column:1/-1;border:1px solid #eef1f6;border-radius:10px;margin-top:2px;overflow:hidden}
+.exec-alert-items .exec-note{padding:10px 14px;margin:0}
+/* ลิงก์ "ไปที่คันนี้" อยู่คอลัมน์ท้าย ต้องเห็นเสมอโดยไม่ต้องเลื่อนขวา - ให้ช่องสาเหตุหดได้ */
+.exec-alert-items .stuck-table th,.exec-alert-items .stuck-table td{padding-left:10px;padding-right:10px}
+.exec-alert-items .stuck-reason{min-width:120px}
 .exec-chart{position:relative;padding:0 23px 20px}
 .chart{position:relative;width:100%}
 .chart-svg{display:block;width:auto;height:auto;fill:none;stroke:none;overflow:visible}
@@ -365,6 +371,7 @@ th.num-col{text-align:right}
 .status-done{font-size:13px;color:#46526a;margin-bottom:4px}
 /* แถวของรถที่เปิดมาจากหน้าค้นหารถ (?focus=) - ดู components/FocusVehicleRow.tsx */
 tr.row-focus,tr.row-focus:hover{background:#fff1b8;box-shadow:inset 4px 0 0 #e0a800}
+[data-focus-row].row-focus{background:#fff1b8;outline:2px solid #e0a800;outline-offset:-2px}
 .focus-missing{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px);background:#18243c;color:white;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #18243c33}
 .focus-missing .text-button{color:#dfe7ff;font-size:18px}
 /* ยื่นเอกสาร 3 ขั้น (submit-documents/submit, review, done) */

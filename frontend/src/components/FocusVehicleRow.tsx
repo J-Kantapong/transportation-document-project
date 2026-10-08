@@ -8,10 +8,32 @@ import { focusChassis } from "@/lib/vehicle-focus";
 // รายการโหลดช้า/หน้าเปิดแท็บหรือใบให้เองทีหลัง จึงคอยดู DOM ไปเรื่อยๆ จนเจอหรือครบเวลา
 const WAIT_MS = 15_000;
 
-function findRow(chassis: string): HTMLElement | null {
-  const needle = chassis.toUpperCase();
-  for (const row of document.querySelectorAll<HTMLElement>("main tbody tr")) {
-    if (row.offsetParent !== null && (row.textContent ?? "").toUpperCase().includes(needle)) return row;
+// แถวของรถ = แถวตาราง หรือกล่องที่หน้านั้นติด data-focus-row ไว้ (คิววางบิลเป็นรายการ div ไม่ใช่ตาราง - พบ 2026-10-09:
+// เดิมหาไม่เจอแล้วขึ้น "ไม่พบรถ" ทั้งที่รถอยู่ในหน้า)
+// หน้าที่ติด data-focus-row = บอกเองว่าแถวงานของหน้านั้นคืออันไหน จึงหาที่นั่นก่อนตาราง: หน้าวางบิลมีตาราง
+// "ของพร้อมส่งยังไม่ลงส่งงาน" อยู่เหนือคิว ซึ่งอาจมีเลขตัวถังเดียวกัน (ป้ายค้างส่ง) ไม่ใช่แถวที่ต้องการ
+//
+// ค่าที่หาเป็นเลขตัวถัง หรือเลขที่ใบ (IV / TV จาก "สิ่งที่ควรจัดการ" ของภาพรวม, ผู้ใช้ 2026-10-09) จึงต้องตรงทั้งคำ:
+// IV2026-12 ต้องไม่ไปไฮไลต์แถวของ IV2026-121 · เทียบทีละข้อความ เพราะ textContent ของแถวต่อช่องติดกันไม่มีช่องว่าง
+function hasToken(row: HTMLElement, needle: string): boolean {
+  if (!(row.textContent ?? "").toUpperCase().includes(needle)) return false; // ตัดแถวส่วนใหญ่ทิ้งเร็วๆ
+  const wordChar = /[A-Z0-9-]/; // ขีดนับเป็นส่วนของเลขที่ (IV2026-121-A = ใบแนบ ไม่ใช่ตัวบิล)
+  const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.textContent ?? "").toUpperCase();
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+      if (!wordChar.test(text[at - 1] ?? "") && !wordChar.test(text[at + needle.length] ?? "")) return true;
+    }
+  }
+  return false;
+}
+
+function findRow(focus: string): HTMLElement | null {
+  const needle = focus.toUpperCase();
+  for (const selector of ["main [data-focus-row]", "main tbody tr"]) {
+    for (const row of document.querySelectorAll<HTMLElement>(selector)) {
+      if (row.offsetParent !== null && hasToken(row, needle)) return row;
+    }
   }
   return null;
 }
@@ -64,7 +86,7 @@ export function FocusVehicleRow() {
   if (!missing || missing.path !== pathname) return null;
   return (
     <div className="focus-missing" role="status">
-      ไม่พบรถเลขตัวถัง {missing.chassis} ในหน้านี้ (อาจผ่านขั้นนี้ไปแล้ว หรือถูกกรองออก)
+      ไม่พบ {missing.chassis} ในหน้านี้ (อาจผ่านขั้นนี้ไปแล้ว หรือถูกกรองออก)
       <button type="button" className="text-button" onClick={() => setMissing(null)} aria-label="ปิด">
         ×
       </button>

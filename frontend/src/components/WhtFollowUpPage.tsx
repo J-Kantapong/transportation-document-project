@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, fetchAuthedBlob } from "@/lib/api";
 import { billingApi, WHT_METHOD_LABEL, whtCertificateFilePath, type WhtCertificate, type WhtPendingRow } from "@/lib/billing-api";
 import { isoToDisplayDate, timestampToDisplayDate } from "@/lib/date";
 import { formatMoney, isoToThaiDate, round2 } from "@/lib/invoice";
 import { WhtCertificateDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
+import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 
 // ติดตาม 50 ทวิ (ผู้ใช้ 2026-09-28): ใบกำกับที่ลูกค้าหัก ณ ที่จ่ายแต่เรายังไม่ได้หนังสือรับรอง จัดกลุ่มตามลูกค้า เก่าสุดก่อน
 // ค้างเกิน 1 เดือน = แดง · ติ๊กหลายใบแล้วแนบ 50 ทวิ ใบเดียว (ลูกค้าที่ส่งรวม) · คัดลอกข้อความทวงไปวางใน LINE/อีเมล
@@ -50,11 +51,19 @@ export function WhtFollowUpPage() {
   const [attaching, setAttaching] = useState<Group | null>(null);
   const [cancelling, setCancelling] = useState<WhtCertificate | null>(null);
   const [cancelRemark, setCancelRemark] = useState("");
+  const focusApplied = useRef(false);
 
   async function reload() {
     try {
       const [p, c] = await Promise.all([billingApi.whtPending(), billingApi.whtCertificates()]);
       setPending(p.pending);
+      // เปิดจากภาพรวม (?focus=เลขที่ใบกำกับ): กางลูกค้าของใบนั้นให้ - ครั้งแรกที่โหลดเท่านั้น (lib/vehicle-focus.ts)
+      if (!focusApplied.current) {
+        focusApplied.current = true;
+        const focus = focusChassis();
+        const target = focus ? p.pending.find((r) => sameChassis(r.taxInvoiceNo, focus)) : undefined;
+        if (target) setOpen(new Set([target.customerId]));
+      }
       setOverdueDays(p.overdueDays);
       setCertificates(c.certificates);
       setSelected((prev) => new Set([...prev].filter((id) => p.pending.some((r) => r.id === id))));

@@ -463,6 +463,9 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
         const chassis = focusChassis();
         const target = chassis ? p.submissions.find((s) => sheetGroup(s).tab === tab && sameChassis(s.vehicle.chassis, chassis)) : undefined;
         if (target) setOpenKey(sheetKey(target));
+        // ไม่อยู่ในใบที่รอ = ได้ใบเสร็จแล้ว (เช่น ลิงก์ "ใบเสร็จไม่ตรง" จากภาพรวม): ค้นในตาราง "ได้ใบเสร็จแล้ว" ให้
+        // ตารางนั้นโหลดแค่ 100 ใบล่าสุด คันที่เก่ากว่าจึงต้องค้นถึงจะขึ้น
+        else if (chassis) setCompletedQuery(chassis);
       }
     } catch (err) {
       if (!quiet) setError(err instanceof ApiError ? err.message : "โหลดรายการไม่สำเร็จ");

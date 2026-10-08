@@ -8,13 +8,14 @@ import { OverviewService } from './overview.service.js';
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
 const sub = (submitDate: string, o: Record<string, unknown> = {}) => ({
+  id: `s-${submitDate}`,
   submitDate: d(submitDate),
   status: 'PENDING',
   receiptAmount: null,
   billFeeTotal: 250,
   taxAmount: 2150,
   noBillTotal: 0,
-  vehicle: { body: 'รย.1-เก๋ง 2 ตอน' },
+  vehicle: { body: 'รย.1-เก๋ง 2 ตอน', chassis: `CH-${submitDate}`, customer: { name: 'ลูกค้า' } },
   ...o,
 });
 
@@ -174,7 +175,12 @@ describe('OverviewService.overview', () => {
       ],
     });
     const result = await svc.overview();
-    expect(result.alerts.find((a) => a.key === 'tax-missing')?.detail).toMatch(/^1 คัน/);
+    const taxMissing = result.alerts.find((a) => a.key === 'tax-missing')!;
+    expect(taxMissing.detail).toMatch(/^1 คัน/);
+    // รายคัน: ลิงก์ไปหน้ารายการที่ยื่นของวันนั้น แท็บตามประเภทรถ พร้อมไฮไลต์คันนั้น
+    expect(taxMissing.itemTotal).toBe(1);
+    expect(taxMissing.docs).toMatchObject([{ title: 'CH-2026-09-20', customerName: 'ลูกค้า', date: '2026-09-20' }]);
+    expect(taxMissing.docs![0].href).toBe('/registration/new-vehicle/submit-documents/records?date=2026-09-20&tab=car&focus=CH-2026-09-20');
     const { svc: none } = service({ inProcessSubs: [sub('2026-09-22')] });
     expect((await none.overview()).alerts.some((a) => a.key === 'tax-missing')).toBe(false);
     const { svc: advanceOnly } = service({ inProcessSubs: [sub('2026-09-28', { taxAmount: null })] });
@@ -215,6 +221,124 @@ describe('OverviewService.overview', () => {
     // รถที่ยังไม่จบงาน: ทางค้างวางบิลตัดรถที่ปิดงานออก
     const open = wheres.find((w) => w.OR?.some((c) => 'plateDeliveredDate' in c && c.plateDeliveredDate === null))!;
     expect(open.OR).toContainEqual(expect.objectContaining({ billingClosedAt: null }));
+  });
+
+  // ผู้ใช้ 2026-10-09: "สิ่งที่ควรจัดการ" แต่ละเรื่องส่งรายคันมาด้วย กดแล้วไปถึงคันที่มีปัญหา - จำนวนบนหัวข้อต้องตรงกับรายการ
+  it('สิ่งที่ควรจัดการ: แต่ละเรื่องมีรายคันของตัวเอง จำนวนตรงกับหัวข้อ และตัดที่ 50 คันที่ด่วนสุด', async () => {
+    const failed = (id: string) => ({
+      ...openVehicle(id, 'รย.1-เก๋ง 2 ตอน', '2026-09-01'),
+      transferDone: true,
+      transferCompletedDate: d('2026-09-02'),
+      inspectionSentDate: d('2026-09-03'),
+      inspectionResult: 'ผ่าน',
+      inspectionResultDate: d('2026-09-26'),
+      documentSubmissions: [{ status: 'FAILED', submitDate: d('2026-09-26'), receiptDate: null, receiptReceivedDate: null, failRemark: 'เอกสารไม่ครบ', receiptCarriedAt: null, _count: { receipts: 0 } }],
+    });
+    // ส่งงานแล้วยังไม่วางบิล + ป้ายมาแล้วยังไม่ส่งตาม = คันเดียวอยู่ได้สองเรื่อง
+    const unbilled = (id: string, deliveredDate: string) => ({
+      ...openVehicle(id, 'รย.12-จักรยานยนต์', '2026-08-01'),
+      transferDone: true,
+      plateReceivedDate: d('2026-09-01'),
+      bookReceivedDate: d('2026-08-10'),
+      deliveredDate: d(deliveredDate),
+      documentSubmissions: [{ status: 'RECEIPT_RECEIVED', submitDate: d('2026-08-05'), receiptDate: d('2026-08-05'), receiptReceivedDate: d('2026-08-06'), failRemark: null, receiptCarriedAt: null, _count: { receipts: 1 } }],
+    });
+    const many = Array.from({ length: 51 }, (_, i) => unbilled(`u${i}`, '2026-09-10'));
+    const { svc } = service({ openVehicles: [failed('f1'), ...many, unbilled('oldest', '2026-08-11')] });
+    const alerts = (await svc.overview()).alerts;
+    const alert = (key: string) => alerts.find((a) => a.key === key)!;
+
+    expect(alert('submission-failed').detail).toBe('1 คัน');
+    expect(alert('submission-failed').itemTotal).toBe(1);
+    expect(alert('submission-failed').items).toMatchObject([{ id: 'f1', chassis: 'CHf1', stage: 'submit', flags: ['SUBMISSION_FAILED'] }]);
+
+    expect(alert('billing-late').detail).toMatch(/^52 คัน/);
+    expect(alert('billing-late').itemTotal).toBe(52);
+    expect(alert('billing-late').items).toHaveLength(50);
+    expect(alert('billing-late').items![0]).toMatchObject({ id: 'oldest', stage: 'billing' }); // ค้างนานสุดขึ้นก่อน
+    expect(alert('billing-late').items!.every((i) => i.stage === 'billing')).toBe(true);
+
+    expect(alert('plate-owed').itemTotal).toBe(52);
+    expect(alert('plate-owed').items!.every((i) => i.stage === 'plateDelivery')).toBe(true);
+    // เรื่องที่ไม่ใช่รายคัน (เช่น ผู้ใช้รออนุมัติ) ไม่มีรายการ
+    expect(alerts.filter((a) => !['submission-failed', 'billing-late', 'plate-owed'].includes(a.key)).every((a) => a.items === undefined)).toBe(true);
+  });
+
+  it('สิ่งที่ควรจัดการ: ยังไม่ลงส่งงานรวมรถจดใหม่กับงานอื่นไว้ในเรื่องเดียว จำนวนในข้อความตรงกับรายการ', async () => {
+    const ready = {
+      ...openVehicle('v1', 'รย.1-เก๋ง 2 ตอน', '2026-08-01'),
+      transferDone: true,
+      plateReceivedDate: d('2026-09-10'),
+      bookReceivedDate: d('2026-09-10'),
+      documentSubmissions: [{ status: 'RECEIPT_RECEIVED', submitDate: d('2026-09-01'), receiptDate: d('2026-09-01'), receiptReceivedDate: d('2026-09-02'), failRemark: null, receiptCarriedAt: null, _count: { receipts: 1 } }],
+    };
+    const job = (id: string, returnedDate: string) => ({
+      id,
+      vehicleClass: 'MOTO',
+      submitDate: d('2026-09-01'),
+      returnedDate: d(returnedDate),
+      ownerName: 'เจ้าของ',
+      chassis: `JOB${id}`,
+      brand: 'Honda',
+      plateCategory: '1กก',
+      plateNumber: '1',
+      customer: { name: 'ลูกค้างาน' },
+      billTotal: 25,
+      noBillTotal: 100,
+      dutyAmount: 10,
+    });
+    const { svc, prisma } = service({ openVehicles: [ready] });
+    // j2 เพิ่งได้ใบเสร็จเมื่อวาน ยังไม่เกินกำหนด จึงไม่อยู่ในเรื่องนี้
+    prisma.vehicleUseCancellation.findMany.mockResolvedValue([job('j1', '2026-09-05'), job('j2', '2026-09-26')]);
+    const alert = (await svc.overview()).alerts.find((a) => a.key === 'delivery-pending')!;
+    expect(alert.detail).toMatch(/^รถจดใหม่\/สลับเลข 1 คัน · งานอื่น 1 งาน/);
+    expect(alert.itemTotal).toBe(2);
+    expect(alert.items!.map((i) => [i.id, i.source, i.stage])).toEqual([
+      ['j1', 'otherJob', 'jobDelivery'],
+      ['v1', 'vehicle', 'delivery'],
+    ]);
+  });
+
+  // ผู้ใช้ 2026-10-09 รอบสอง: เรื่องบิล / 50 ทวิ / ใบเสนอราคา ส่งรายใบพร้อมลิงก์ไปถึงใบนั้น จำนวนตรงกับข้อความ
+  it('สิ่งที่ควรจัดการ: บิล 50 ทวิ และใบเสนอราคามีรายใบพร้อมลิงก์ของแต่ละใบ', async () => {
+    const { svc, prisma } = service();
+    const inv = (invoiceNo: string, issueDate: string, dueDate: string | null, netTotal: number) => ({
+      id: `id-${invoiceNo}`,
+      invoiceNo,
+      issueDate: d(issueDate),
+      dueDate: dueDate ? d(dueDate) : null,
+      customerId: 'c1',
+      netTotal,
+      customerSnapshot: { name: 'ลูกค้า ก' },
+    });
+    prisma.invoice.findMany.mockImplementation(async ({ where }: { where: { status?: unknown; issueDate?: unknown; paidDate?: unknown } }) =>
+      where.status === 'ISSUED'
+        ? [inv('IV2026-012', '2026-07-01', null, 1000), inv('IV2026-121', '2026-09-01', '2026-09-20', 500), inv('IV2026-130', '2026-09-20', '2026-09-30', 300), inv('IV2026-090', '2026-08-20', '2026-09-10', 200)]
+        : [],
+    );
+    prisma.taxInvoice.findMany.mockResolvedValue([
+      { id: 't1', taxInvoiceNo: 'TV2026-005', issueDate: d('2026-08-01'), whtAmount: 30, customerSnapshot: { name: 'ลูกค้า ข' } },
+      { id: 't2', taxInvoiceNo: 'TV2026-020', issueDate: d('2026-09-20'), whtAmount: 10, customerSnapshot: { name: 'ลูกค้า ข' } },
+    ]);
+    const quote = (id: string, o: Record<string, unknown>) => ({ id, quotationNo: `QT-${id}`, customerSnapshot: { name: 'YM' }, netTotal: 9000, approvedDate: null, status: 'ISSUED', kind: 'JOB', validUntil: d('2026-10-10'), ratesAppliedAt: null, _count: { invoices: 0 }, ...o });
+    prisma.quotation.findMany.mockResolvedValue([quote('q1', { status: 'APPROVED', approvedDate: d('2026-09-25') }), quote('q2', { validUntil: d('2026-09-20') }), quote('q3', {})]);
+
+    const alerts = (await svc.overview()).alerts;
+    const alert = (key: string) => alerts.find((a) => a.key === key)!;
+
+    expect(alert('ar-overdue').docs).toMatchObject([{ title: 'IV2026-012', amount: 1000, note: 'ค้าง 88 วัน', href: '/accounting/billing?focus=IV2026-012' }]);
+    // เลยกำหนด: ใบที่ครบกำหนดก่อนขึ้นก่อน
+    expect(alert('ar-past-due').detail).toMatch(/^2 ใบ/);
+    expect(alert('ar-past-due').itemTotal).toBe(2);
+    expect(alert('ar-past-due').docs!.map((x) => [x.title, x.note])).toEqual([
+      ['IV2026-090', 'เลยกำหนด 17 วัน'],
+      ['IV2026-121', 'เลยกำหนด 7 วัน'],
+    ]);
+    expect(alert('ar-due-soon').docs).toMatchObject([{ title: 'IV2026-130', date: '2026-09-30', note: 'อีก 3 วัน' }]);
+    expect(alert('wht-overdue').docs).toMatchObject([{ title: 'TV2026-005', customerName: 'ลูกค้า ข', amount: 30, href: '/accounting/tax-invoices/wht?focus=TV2026-005' }]);
+    expect(alert('quotation-approved-open').docs).toMatchObject([{ title: 'QT-q1', note: 'รอออกใบวางบิล', date: '2026-09-25', href: '/accounting/quotations/view?id=q1' }]);
+    expect(alert('quotation-expired').docs).toMatchObject([{ title: 'QT-q2', note: 'หมดอายุมา 7 วัน' }]);
+    expect(alerts.some((a) => a.key === 'quotation-waiting')).toBe(false); // มีใบหมดอายุแล้ว เรื่องรอตอบรวมอยู่ในข้อความของเรื่องนั้น
   });
 
   // ผู้ใช้ 2026-09-27: งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอดในภาพรวม
