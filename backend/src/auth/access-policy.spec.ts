@@ -181,6 +181,8 @@ describe('access policy secretary (LINE webhook)', () => {
     expect(accessFor('/api/secretary/run', 'POST')).toBe('PUBLIC'); // ตัวตั้งเวลา GitHub Actions - ตรวจกุญแจใน controller
     expect(accessFor('/api/secretary/run/x', 'POST')).toEqual(['ADMIN']);
     expect(accessFor('/api/secretary/anything', 'POST')).toEqual(['ADMIN']);
+    expect(accessFor('/api/customer-line/webhook', 'POST')).toBe('PUBLIC'); // บอทไลน์ลูกค้า - ตรวจลายเซ็นใน controller
+    expect(accessFor('/api/customer-line/anything', 'POST')).toEqual(['ADMIN']);
     expect(isAllowed(accessFor('/api/secretary/anything', 'POST'), ['STAFF_ENTRY'])).toBe(false);
     expect(isAllowed(accessFor('/api/secretary/anything', 'GET'), ['ACCOUNTANT'])).toBe(false);
   });

@@ -31,6 +31,9 @@ export interface RateRow {
   ccMin: number | null;
   ccMax: number | null;
   chassisPrefix: string | null; // ราคาแยกตามรุ่น/ยี่ห้อผู้ผลิตที่ CC ทับซ้อนกัน (ผู้ใช้ 2026-09-28, MC Superbike)
+  // ราคาแยกตามจังหวัดที่จดทะเบียน / ประเภทรถ (ผู้ใช้ 2026-10-09, บางบ่อ: จดสมุทรปราการ 935, ป้ายเหลือง รย.17 1,400) - null = ไม่จำกัด
+  registrationProvince?: string | null;
+  bodyPrefix?: string | null;
   amount: number;
   vatInclusive: boolean;
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จแล้ว (YMAC)
@@ -89,13 +92,21 @@ export function rateAmountExVat(rate: Pick<RateRow, 'amount' | 'vatInclusive'>):
 // แถวราคาแรก (เรียงตาม sortOrder) ที่ชนิดรถ ช่วง CC และเลขตัวถังขึ้นต้นตรงกับรถ - ccMin <= cc < ccMax
 // แถวที่กำหนดช่วง CC จะไม่จับคู่กับรถที่ไม่มีข้อมูล CC (ให้บัญชีเลือกเอง ดีกว่าเดาราคาผิด)
 // chassisPrefix (ผู้ใช้ 2026-09-28, MC Superbike: ML=885/JH=2685 ทับซ้อนกันในช่วง 300-799cc) เทียบไม่สนตัวพิมพ์ใหญ่เล็ก
-export function suggestRate(rates: RateRow[], vehicle: { isMoto: boolean; cc: number | null; chassis?: string | null }): RateRow | null {
+// registrationProvince / bodyPrefix (ผู้ใช้ 2026-10-09): แถวที่ระบุจังหวัด/ประเภทรถจับคู่เฉพาะรถที่ตรง และชนะแถวทั่วไปเสมอ
+// (เรียงความเจาะจงก่อน แล้วค่อย sortOrder) - บัญชีไม่ต้องเรียงแถวสมุทรปราการไว้บนสุดเอง
+const specificity = (r: RateRow) => (r.registrationProvince ? 2 : 0) + (r.bodyPrefix ? 1 : 0);
+export function suggestRate(
+  rates: RateRow[],
+  vehicle: { isMoto: boolean; cc: number | null; chassis?: string | null; registrationProvince?: string | null; body?: string | null },
+): RateRow | null {
   const kind = vehicle.isMoto ? 'MOTO' : 'CAR';
   const chassis = (vehicle.chassis ?? '').toUpperCase();
-  const sorted = [...rates].sort((a, b) => a.sortOrder - b.sortOrder);
+  const sorted = [...rates].sort((a, b) => specificity(b) - specificity(a) || a.sortOrder - b.sortOrder);
   for (const r of sorted) {
     if (r.kind !== 'BASE') continue; // ค่าเพิ่มไม่ใช่ราคาหลัก
     if (r.vehicleKind !== 'ANY' && r.vehicleKind !== kind) continue;
+    if (r.registrationProvince && r.registrationProvince !== (vehicle.registrationProvince ?? '')) continue;
+    if (r.bodyPrefix && !(vehicle.body ?? '').startsWith(r.bodyPrefix)) continue;
     if (r.ccMin !== null || r.ccMax !== null) {
       if (vehicle.cc === null) continue;
       if (r.ccMin !== null && vehicle.cc < r.ccMin) continue;

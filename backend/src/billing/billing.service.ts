@@ -13,6 +13,7 @@ import {
 import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
 import {
   computeInvoiceTotals,
@@ -302,6 +303,8 @@ type RateDbRow = {
   ccMin: unknown;
   ccMax: unknown;
   chassisPrefix: string | null;
+  registrationProvince?: string | null;
+  bodyPrefix?: string | null;
   amount: unknown;
   vatInclusive: boolean;
   includesReceipt: boolean;
@@ -377,6 +380,8 @@ function toRate(r: RateDbRow): RateRow {
     ccMin: num(r.ccMin),
     ccMax: num(r.ccMax),
     chassisPrefix: r.chassisPrefix,
+    registrationProvince: r.registrationProvince ?? null,
+    bodyPrefix: r.bodyPrefix ?? null,
     amount: Number(r.amount),
     vatInclusive: r.vatInclusive,
     includesReceipt: r.includesReceipt,
@@ -529,7 +534,7 @@ export class BillingService {
             const sub = v.documentSubmissions[0];
             const isMoto = isMotorcycle(v.body);
             const cc = num(v.cc);
-            const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis });
+            const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis, registrationProvince: v.registrationProvince, body: v.body });
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
             const estimate = sub && sub.taxAmount !== null ? round2(Number(sub.billFeeTotal) + Number(sub.taxAmount)) : null;
@@ -765,6 +770,10 @@ export class BillingService {
       if (ccMin !== null && ccMax !== null && ccMin >= ccMax) throw bad(`แถวที่ ${i + 1}: ช่วง CC ไม่ถูกต้อง`);
       // ราคาแยกตามเลขตัวถังขึ้นต้น (ผู้ใช้ 2026-09-28, MC Superbike) - เว้นว่างได้ ไม่จำกัดชนิด/ความยาว
       const chassisPrefix = optionalText(r.chassisPrefix, `แถวที่ ${i + 1}: เลขตัวถังขึ้นต้น`);
+      // ราคาแยกตามจังหวัดที่จดทะเบียน / ประเภทรถ (ผู้ใช้ 2026-10-09) - จังหวัดต้องเป็นชื่อในรายการ 77 จังหวัด, ประเภทรถ = body ขึ้นต้น เช่น "รย.17-"
+      const registrationProvince = optionalText(r.registrationProvince, `แถวที่ ${i + 1}: จังหวัดที่จดทะเบียน`);
+      if (registrationProvince && !(PROVINCES as readonly string[]).includes(registrationProvince)) throw bad(`แถวที่ ${i + 1}: ไม่รู้จักจังหวัด ${registrationProvince}`);
+      const bodyPrefix = optionalText(r.bodyPrefix, `แถวที่ ${i + 1}: ประเภทรถ`);
       return {
         customerId,
         label,
@@ -772,6 +781,8 @@ export class BillingService {
         ccMin,
         ccMax,
         chassisPrefix,
+        registrationProvince,
+        bodyPrefix,
         amount: parseMoney(r.amount, `แถวที่ ${i + 1}: ราคา`),
         vatInclusive: r.vatInclusive === true,
         includesReceipt: r.includesReceipt === true,

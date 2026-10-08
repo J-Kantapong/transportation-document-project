@@ -82,6 +82,20 @@ describe('suggestRate', () => {
   it('รถที่ไม่มี CC ไม่จับคู่กับแถวที่กำหนดช่วง CC', () => {
     expect(suggestRate(rates, { isMoto: true, cc: null })).toBeNull();
   });
+  // ผู้ใช้ 2026-10-09 (บางบ่ออารียนต์): จดสมุทรปราการ 935 / ป้ายเหลือง รย.17 1,400 ชนะราคาหลักทั่วไป แม้แถวอยู่ท้ายตาราง
+  it('แถวที่ระบุจังหวัด/ประเภทรถชนะแถวทั่วไป และจับคู่เฉพาะรถที่ตรง', () => {
+    const withProvince = [
+      ...rates,
+      rate({ id: 'sp', vehicleKind: 'MOTO', ccMax: 300, registrationProvince: 'สมุทรปราการ', amount: 935, sortOrder: 9 }),
+      rate({ id: 'yellow', vehicleKind: 'MOTO', registrationProvince: 'สมุทรปราการ', bodyPrefix: 'รย.17-', amount: 1400, sortOrder: 10 }),
+    ];
+    const bkk = { isMoto: true, cc: 125, registrationProvince: 'กรุงเทพมหานคร', body: 'รย.12-น้อยกว่า 300cc' };
+    expect(suggestRate(withProvince, bkk)?.id).toBe('small');
+    expect(suggestRate(withProvince, { ...bkk, registrationProvince: 'สมุทรปราการ' })?.id).toBe('sp');
+    expect(suggestRate(withProvince, { ...bkk, registrationProvince: 'สมุทรปราการ', body: 'รย.17-จักรยานยนต์สาธารณะ' })?.id).toBe('yellow');
+    // ไม่ทราบจังหวัด = ไม่เข้าแถวที่ระบุจังหวัด
+    expect(suggestRate(withProvince, { ...bkk, registrationProvince: null })?.id).toBe('small');
+  });
 });
 
 describe('rateAmountExVat / nextInvoiceNo', () => {

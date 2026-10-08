@@ -62,6 +62,7 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/activity")) return [{ label: "ภาพรวมการทำงาน", href: "/activity" }];
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
   if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
+  if (within(pathname, "/tools/photo-sheet")) return [{ label: "จัดรูปลง A4", href: "/tools/photo-sheet" }];
   if (within(pathname, "/delivery/report")) return [{ label: "ส่งงานลูกค้า", href: "/delivery" }, { label: "รายงานส่งงาน", href: "/delivery/report" }];
   if (within(pathname, "/delivery")) return [{ label: "ส่งงานลูกค้า", href: "/delivery" }, { label: "Delivery", href: "/delivery" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
@@ -215,6 +216,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <>
                 <NavLink href="/customers" icon="card" label="ฐานข้อมูลลูกค้า" pathname={pathname} onClick={close} />
                 <NavLink href="/vehicles" icon="search" label="ค้นหารถ" pathname={pathname} onClick={close} />
+                <NavLink href="/tools/photo-sheet" icon="stack" label="จัดรูปลง A4" pathname={pathname} onClick={close} />
               </>
             )}
             {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (

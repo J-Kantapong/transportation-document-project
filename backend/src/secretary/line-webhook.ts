@@ -7,6 +7,7 @@ export interface LineEvent {
   replyToken?: string;
   source?: { type?: string; userId?: string };
   message?: { type?: string; text?: string };
+  postback?: { data?: string; params?: { date?: string } };
   deliveryContext?: { isRedelivery?: boolean };
 }
 
