@@ -30,6 +30,7 @@ const SWAP_GUIDE = DRIVE('1MpMPVL6bflaxL28a7tdU4-bMtroMWCfD');
 const TO_DOCUMENTS: CardButton = { label: 'เมนูเอกสาร', text: 'เอกสาร' };
 const TO_FORMS: CardButton = { label: 'ดาวน์โหลดแบบฟอร์ม', text: 'แบบฟอร์ม' };
 const TO_INSPECTION_GUIDE: CardButton = { label: 'วิธีตรวจนอก', text: 'ตรวจนอก' };
+const TO_RUBBING: CardButton = { label: 'วิธีลอกลาย', text: 'ลอกลาย' };
 const TO_STAFF: CardButton = { label: 'ติดต่อเจ้าหน้าที่', text: 'ติดต่อเจ้าหน้าที่' };
 
 const COPY_NOTE = '* สำเนาทุกใบเซ็นรับรองสำเนาถูกต้อง';
@@ -91,10 +92,11 @@ export const MENU_CARDS: MenuCard[] = [
       '2. พ.ร.บ.',
       '3. สำเนาบัตรประชาชนเจ้าของรถ',
       '4. หนังสือมอบอำนาจ (เซ็นแล้ว)',
+      '5. ลอกลายเลขตัวถัง 2 ลาย',
       '',
       COPY_NOTE,
     ),
-    buttons: [TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
+    buttons: [TO_RUBBING, TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
   },
   {
     id: 'new-company-cash',
@@ -107,11 +109,12 @@ export const MENU_CARDS: MenuCard[] = [
       '3. หนังสือรับรองบริษัท (อายุไม่เกิน 1 ปี)',
       '4. สำเนาบัตรประชาชนกรรมการผู้มีอำนาจ',
       '5. หนังสือมอบอำนาจ',
+      '6. ลอกลายเลขตัวถัง 2 ลาย',
       '',
       COPY_NOTE,
       SEAL_NOTE,
     ),
-    buttons: [TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
+    buttons: [TO_RUBBING, TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
   },
   {
     id: 'new-person-finance',
@@ -123,10 +126,11 @@ export const MENU_CARDS: MenuCard[] = [
       '2. พ.ร.บ.',
       '3. ชุดเอกสารจากไฟแนนซ์ (หนังสือรับรอง + หนังสือมอบอำนาจของไฟแนนซ์)',
       '4. สำเนาบัตรประชาชนผู้เช่าซื้อ',
+      '5. ลอกลายเลขตัวถัง 2 ลาย',
       '',
       COPY_NOTE,
     ),
-    buttons: [TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
+    buttons: [TO_RUBBING, TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
   },
   {
     id: 'new-company-finance',
@@ -139,11 +143,12 @@ export const MENU_CARDS: MenuCard[] = [
       '3. ชุดเอกสารจากไฟแนนซ์ (หนังสือรับรอง + หนังสือมอบอำนาจของไฟแนนซ์)',
       '4. หนังสือรับรองบริษัทผู้เช่าซื้อ (อายุไม่เกิน 1 ปี)',
       '5. สำเนาบัตรประชาชนกรรมการผู้มีอำนาจ',
+      '6. ลอกลายเลขตัวถัง 2 ลาย',
       '',
       COPY_NOTE,
       SEAL_NOTE,
     ),
-    buttons: [TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
+    buttons: [TO_RUBBING, TO_FORMS, { label: 'เลือกกรณีอื่น', text: 'จดใหม่' }],
   },
   {
     id: 'transfer',
@@ -248,7 +253,7 @@ export const MENU_CARDS: MenuCard[] = [
   },
   {
     id: 'outside-inspection',
-    keywords: ['ตรวจนอก', 'ถ่ายรูปรถ', 'ลอกลาย'],
+    keywords: ['ตรวจนอก', 'ถ่ายรูปรถ'],
     title: 'ตรวจนอก',
     subtitle: 'ลูกค้าเตรียม 2 อย่าง',
     body: lines(
@@ -259,6 +264,23 @@ export const MENU_CARDS: MenuCard[] = [
       '',
       '2. ลอกลายเลขตัวถัง 2 ชุด',
       'ใช้เทปกระดาษ Nitto No.720 ติดทับเลขตัวถัง ใช้ดินสอฝนจนเลขขึ้นชัด แล้วลอกมาติดบนกระดาษขาว',
+      '',
+      '* ลอกเฉพาะเลขตัวถัง ไม่ต้องลอกเลขเครื่อง',
+    ),
+    buttons: [TO_DOCUMENTS],
+  },
+  // วิธีลอกลายอย่างเดียว - ใช้กับงานจดทะเบียนใหม่ ซึ่งไม่ต้องถ่ายรูปรถ (ผู้ใช้ 2026-10-09)
+  {
+    id: 'rubbing',
+    keywords: ['ลอกลาย', 'วิธีลอกลาย', 'ลอกลายเลขตัวถัง'],
+    title: 'วิธีลอกลายเลขตัวถัง',
+    subtitle: 'ทำ 2 ลาย',
+    body: lines(
+      '1. เช็ดบริเวณเลขตัวถังให้สะอาดและแห้ง',
+      '2. ติดเทปกระดาษ Nitto No.720 ทับเลขตัวถังให้เรียบ คลุมตัวเลขครบทุกตัว',
+      '3. ใช้ดินสอฝนบนเทปจนตัวเลขขึ้นชัด',
+      '4. ลอกออก แล้วติดลงบนกระดาษขาว',
+      '5. ทำซ้ำอีก 1 ครั้ง ให้ได้ 2 ลาย',
       '',
       '* ลอกเฉพาะเลขตัวถัง ไม่ต้องลอกเลขเครื่อง',
     ),
