@@ -157,7 +157,8 @@ export class TaxRenewalService {
 
     return {
       vehicleId: vehicle.id,
-      customerId: vehicle.customerId,
+      // เจ้าของงานเลือกเองได้ (ผู้ใช้ 2026-10-08) - ไม่ส่งมา = ลูกค้าของรถ
+      customerId: body.customerId ? await this.resolveCustomerId(body.customerId) : vehicle.customerId,
       // รถในระบบมีเลขตัวถังเสมอ ส่วนทะเบียนอาจยังว่างถ้ายังไม่ได้รับป้าย - หน้าเว็บจะให้กรอกเพิ่มเอง
       chassis: vehicle.chassis,
       engine: vehicle.engine ?? parseText(body.engine, 'เลขเครื่อง', false, 50),
@@ -283,6 +284,7 @@ export class TaxRenewalService {
         cc: true,
         weight: true,
         firstRegistrationDate: true,
+        customerId: true,
         customer: { select: { name: true, company: true } },
         owner: { select: { name: true, hirerName: true, ownerType: true } },
       },
@@ -305,6 +307,7 @@ export class TaxRenewalService {
       ownerType: v.owner?.ownerType ?? null,
       ownerName: v.owner?.name ?? null,
       hirerName: v.owner?.hirerName ?? null,
+      customerId: v.customerId,
       customerName: v.customer?.company || v.customer?.name || null,
     }));
   }

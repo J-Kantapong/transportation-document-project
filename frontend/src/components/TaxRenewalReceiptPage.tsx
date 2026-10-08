@@ -8,6 +8,7 @@ import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
+import { useCustomerOptions } from "@/components/TaxRenewalPage";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
 
 // หน้ารับใบเสร็จของงานต่อภาษี (ผู้ใช้ 2026-10-08, แบบเดียวกับหน้ารับใบเสร็จรถจดใหม่/ย้ายออก)
@@ -140,6 +141,7 @@ export function TaxRenewalReceiptPage() {
                     onChange={replace}
                     onConfirm={confirm}
                     onUndo={() => setUndoRow(row)}
+                    onReload={load}
                     onMessage={(text, error) => setMessage({ text, error })}
                   />
                 ))}
@@ -275,6 +277,7 @@ function ReceiptRow({
   onChange,
   onConfirm,
   onUndo,
+  onReload,
   onMessage,
 }: {
   row: TaxRenewal;
@@ -282,9 +285,11 @@ function ReceiptRow({
   onChange: (row: TaxRenewal) => void;
   onConfirm: (row: TaxRenewal) => void;
   onUndo: () => void;
+  onReload: () => Promise<void>;
   onMessage: (text: string, error?: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const customerOptions = useCustomerOptions();
   const [busy, setBusy] = useState(false);
   const received = Boolean(row.receivedDate);
   const receipts = row.receipts ?? [];
@@ -311,6 +316,24 @@ function ReceiptRow({
     }
   }
 
+  // เจ้าของงาน (ผู้ใช้ 2026-10-08): เติมจากว่างได้เลย / เปลี่ยนคนเดิมต้องมีเหตุผล (เก็บประวัติ)
+  async function changeCustomer(customerId: string) {
+    if (!customerId || customerId === row.customerId) return;
+    let remark: string | undefined;
+    if (row.customerId) {
+      const answer = window.prompt("เปลี่ยนเจ้าของงาน - กรุณาระบุเหตุผล");
+      if (!answer?.trim()) return;
+      remark = answer.trim();
+    }
+    try {
+      await api.updateTaxRenewal(row.id, { customerId, ...(remark ? { remark } : {}), expectedUpdatedAt: row.updatedAt });
+      await onReload();
+      onMessage(`เปลี่ยนเจ้าของงานแล้ว: ${plateText(row)}`);
+    } catch (err) {
+      onMessage(errorText(err, "เปลี่ยนเจ้าของงานไม่สำเร็จ"), true);
+    }
+  }
+
   async function removeReceipt(receiptId: string) {
     if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
     try {
@@ -324,7 +347,20 @@ function ReceiptRow({
     <tr>
       <td>{day(row.paymentDate)}</td>
       <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        {row.customer ? row.customer.company || row.customer.name : <span className="muted">ยังไม่ระบุ</span>}
+        {canWrite ? (
+          <select value={row.customerId ?? ""} onChange={(e) => void changeCustomer(e.target.value)} aria-label="เจ้าของงาน">
+            <option value="">ยังไม่ระบุ - เลือกลูกค้า</option>
+            {customerOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        ) : row.customer ? (
+          row.customer.company || row.customer.name
+        ) : (
+          <span className="muted">ยังไม่ระบุ</span>
+        )}
       </td>
       <td>
         <div className="job">{plateText(row)}</div>

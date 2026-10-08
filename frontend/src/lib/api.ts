@@ -754,6 +754,7 @@ export interface TaxRenewalVehicleHit {
   ownerType: "INDIVIDUAL" | "JURISTIC" | null;
   ownerName: string | null; // ผู้ถือกรรมสิทธิ์ - ติดไฟแนนซ์ = ชื่อไฟแนนซ์
   hirerName: string | null; // ผู้ครอบครอง - null เมื่อไม่มีไฟแนนซ์
+  customerId?: string | null;
   customerName: string | null;
 }
 

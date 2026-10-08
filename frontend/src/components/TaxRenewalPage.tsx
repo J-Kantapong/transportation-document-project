@@ -94,6 +94,7 @@ function toInput(form: FormState): TaxRenewalInput {
     return {
       ...shared,
       vehicleId: form.vehicleId,
+      customerId: form.customerId || undefined,
       firstRegistrationDate: toIso(form.firstRegistrationDate),
       fuel: form.fuel || undefined,
       cc: form.cc || null,
@@ -351,8 +352,22 @@ export function TaxRenewalPage() {
                     onSelect={(v) => {
                       setSelectedVehicle(v);
                       set("vehicleId", v?.id ?? "");
+                      set("customerId", v?.customerId ?? "");
                     }}
                   />
+                  {selectedVehicle && (
+                    <label className="field" style={{ marginTop: 12, maxWidth: 420 }}>
+                      <span>เจ้าของงาน (ลูกค้าที่ส่งงานมา)</span>
+                      <select value={form.customerId} onChange={(e) => set("customerId", e.target.value)}>
+                        <option value="">ไม่ระบุ</option>
+                        {customerOptions.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {missing.length > 0 && (
                     <p className="sub" style={{ marginTop: 10 }}>
                       รถคันนี้ยังไม่มีข้อมูลที่ต้องใช้คำนวณภาษี กรุณากรอกเพิ่ม
