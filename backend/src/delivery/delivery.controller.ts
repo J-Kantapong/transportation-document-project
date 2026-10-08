@@ -12,9 +12,10 @@ export class DeliveryController {
   @Get('queue')
   async queue() {
     const vehicles = await this.deliveryService.queue();
-    // lotVehicles = คันอื่นในใบยื่นเดียวกันที่ยังไม่พร้อมส่งหรือส่งครบแล้ว (แสดงอย่างเดียว ติ๊กไม่ได้)
+    // lotVehicles = คันอื่นในใบยื่นเดียวกันที่ยังไม่พร้อมส่งหรือส่งครบแล้ว (แสดงอย่างเดียว ติ๊กไม่ได้) - เฉพาะรถจดใหม่
+    // (งานสลับเลข/งานอื่นไม่มีใบยื่น - วันที่ยื่นของงานพวกนั้นไม่ควรไปดึงรถคันอื่นของลูกค้าเดียวกันมา)
     // ทุกแถว (queue / recent / plate-pending) มี customer { id, name, company, branch } ไว้แยกลูกค้าชื่อซ้ำ (F47 2026-09-27)
-    return { vehicles, lotVehicles: await this.deliveryService.lotVehicles(vehicles) };
+    return { vehicles, lotVehicles: await this.deliveryService.lotVehicles(vehicles.filter((v) => v.source === 'VEHICLE')) };
   }
 
   @Get('recent')

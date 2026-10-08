@@ -27,6 +27,7 @@ import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/inv
 import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถที่พนักงานบันทึกส่งงานแล้วมารอที่นี่ บัญชีเลือกคัน ตรวจค่าดำเนินการ แล้วออกใบวางบิล
 // (ผู้ใช้ 2026-09-21) ทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่งคิด VAT + หัก ณ ที่จ่าย, เลขที่ IV พิมพ์เองเพราะยังรันเลขร่วมกับ Google Sheet
@@ -345,6 +346,8 @@ export function BillingPage() {
     // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข - เก็บแยกในบรรทัดเดียวกัน (ผู้ใช้ 2026-09-28)
     plateSwapId: v.plateSwap?.id ?? null,
     swapReceiptAmount: v.plateSwap?.receiptAmount ?? null,
+    // ใบเสร็จแจ้งย้ายของคันนี้ (ขั้น 2) - ใช้แสดงยอดก่อนออกบิลเท่านั้น backend อ่านจากข้อมูลรถเองตอนออกบิล (ผู้ใช้ 2026-10-08)
+    transferReceiptAmount: v.transferReceiptAmount ?? null,
   }));
   // สรุปคันที่เลือกตามราคาที่ใช้ เช่น "ต่ำกว่า 300 cc + ขอใช้ = 620.00 · 3 คัน" - เห็นคันที่ราคาแปลกได้ทันที
   const priceBreakdown = [
@@ -382,7 +385,12 @@ export function BillingPage() {
   const customerWht = customer ? effectiveWhtRate(customer.terms, issueDateIso || todayIso()) : 0;
   const totals = customer
     ? computeTotals(
-        draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0, swapReceiptAmount: l.swapReceiptAmount })),
+        draftLines.map((l) => ({
+          receiptAmount: l.receiptAmount ?? 0,
+          serviceFee: l.serviceFee ?? 0,
+          swapReceiptAmount: l.swapReceiptAmount,
+          transferReceiptAmount: l.transferReceiptAmount,
+        })),
         [],
         account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
@@ -425,6 +433,7 @@ export function BillingPage() {
             deductionNote: l.deduction ? PLATE_REQUEST_NOTE : null,
             plateSwapId: l.plateSwapId,
             swapReceiptAmount: l.swapReceiptAmount,
+            transferReceiptAmount: l.transferReceiptAmount,
           })),
         }
       : null;
@@ -549,8 +558,10 @@ export function BillingPage() {
         รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน - คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด
         &quot;ปิดงาน&quot; พร้อมหมายเหตุ
       </p>
+      {/* ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่ลงส่งงาน - วางบิลไม่ได้จนกว่าจะลง บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08) */}
+      <AwaitingDeliveryPanel only="all" onRecorded={() => loadQueue(false)} />
       {/* บัญชีเปิดรายงานส่งงาน/ใบส่งงานได้แบบอ่านอย่างเดียว ไว้ตรวจก่อนวางบิล (ผู้ใช้ 2026-09-27) - หน้า Delivery ไม่มีในเมนูของบัญชี */}
-      <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+      <Link href="/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
         รายงานส่งงาน / ใบส่งงาน →
       </Link>
       {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
@@ -717,7 +728,19 @@ export function BillingPage() {
                           <span>{plateText(v) || "—"}</span>
                           <span>{v.cc === null ? "—" : v.cc}</span>
                           <span>{v.weight === null ? "—" : v.weight.toLocaleString("en-US")}</span>
-                          <span style={{ textAlign: "right" }}>{receipt === null ? "—" : formatMoney(receipt)}</span>
+                          <span style={{ textAlign: "right" }}>
+                            {receipt === null ? "—" : formatMoney(receipt)}
+                            {/* ใบเสร็จแจ้งย้าย (ขั้น 2) ของคันนี้ - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-08) */}
+                            {v.transferReceiptAmount != null ? (
+                              <span style={{ display: "block", fontSize: 11, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
+                                + แจ้งย้าย {formatMoney(v.transferReceiptAmount)}
+                              </span>
+                            ) : v.transferNotice ? (
+                              <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="รถจดต่างจังหวัดคันนี้ไม่มีใบเสร็จแจ้งย้ายในระบบ - แนบได้ที่หน้าแจ้งย้าย/ตัดบัญชี ก่อนออกบิล">
+                                ไม่มีใบเสร็จแจ้งย้าย
+                              </span>
+                            ) : null}
+                          </span>
                           <span style={{ textAlign: "right" }}>
                             {/* ป้ายขอใช้/ด่วนอยู่หน้าตัวเลข */}
                             {addOnsOf(row).map((a) => (

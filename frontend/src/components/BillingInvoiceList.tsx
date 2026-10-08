@@ -627,7 +627,12 @@ function InvoiceEditDialog({
   const keptValues = kept.map((l) => valuesOf(l.id));
   const extraValues = extras.map((e) => ({ label: e.label.trim(), amount: parseMoney(e.amountText) }));
   const totals = computeTotals(
-    keptValues.map((v) => (typeof v === "string" ? { receiptAmount: 0, serviceFee: 0 } : v)),
+    // ค่าใบเสร็จของงานสลับเลข / ใบเสร็จแจ้งย้ายของคันนั้นแก้ที่นี่ไม่ได้ แต่ยังนับในยอดบิล (backend คงค่าเดิมของบรรทัด)
+    keptValues.map((v, i) => ({
+      ...(typeof v === "string" ? { receiptAmount: 0, serviceFee: 0 } : v),
+      swapReceiptAmount: kept[i].swapReceiptAmount,
+      transferReceiptAmount: kept[i].transferReceiptAmount,
+    })),
     extraValues.map((e) => ({ amount: e.amount ?? 0 })),
     useCurrent && currentTerms ? currentTerms : invoiceTerms,
     issueForTotals,

@@ -94,6 +94,7 @@ export class VehicleSearchService {
         body: true,
         plateCategory: true,
         plateNumber: true,
+        registrationProvince: true,
         transferDone: true,
         transferCompletedDate: true,
         inspectionSentDate: true,

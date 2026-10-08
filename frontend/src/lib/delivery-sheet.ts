@@ -7,7 +7,7 @@ import { deliveryCustomerLabels } from "@/lib/delivery-print";
 // วันที่ของแต่ละประเภท: รถจดใหม่/สลับเลข = วันที่บนใบ DL, ต่อภาษี = วันที่คืนเอกสารให้ลูกค้า,
 // ยกเลิกการใช้รถ/คัดป้าย/งานโอน = วันที่รับเอกสารกลับ, ยามาฮ่า = วันที่แจ้งย้าย
 // แก้วันที่ผิด: ใบ DL ใช้หน้าต่างแก้ใบเดิม, ประเภทอื่นเรียก PATCH ของงานนั้น (ต้องมีเหตุผล บันทึกประวัติฝั่ง backend)
-export type SheetSource = "VEHICLE" | "PLATE_SWAP" | "TAX_RENEWAL" | "USE_CANCEL" | "PLATE_COPY" | "TRANSFER" | "YAMAHA";
+export type SheetSource = "VEHICLE" | "PLATE_SWAP" | "TAX_RENEWAL" | "USE_CANCEL" | "PLATE_COPY" | "TRANSFER" | "MOVE_OUT" | "YAMAHA";
 
 export interface SheetCustomer {
   id: string;
@@ -36,7 +36,7 @@ export interface SheetRow {
   updatedAt: string | null;
 }
 
-export const SHEET_SOURCE_ORDER: SheetSource[] = ["VEHICLE", "PLATE_SWAP", "TAX_RENEWAL", "USE_CANCEL", "PLATE_COPY", "TRANSFER", "YAMAHA"];
+export const SHEET_SOURCE_ORDER: SheetSource[] = ["VEHICLE", "PLATE_SWAP", "TAX_RENEWAL", "USE_CANCEL", "PLATE_COPY", "TRANSFER", "MOVE_OUT", "YAMAHA"];
 
 export const SHEET_SOURCE_LABEL: Record<SheetSource, string> = {
   VEHICLE: "รถจดใหม่",
@@ -45,6 +45,7 @@ export const SHEET_SOURCE_LABEL: Record<SheetSource, string> = {
   USE_CANCEL: "ยกเลิกการใช้รถ",
   PLATE_COPY: "คัดแผ่นป้ายทะเบียน",
   TRANSFER: "งานโอน",
+  MOVE_OUT: "ย้ายออก",
   YAMAHA: "แจ้งย้ายยามาฮ่า",
 };
 
@@ -113,6 +114,8 @@ export function groupSheetRows(rows: SheetRow[], labels: Map<string, string>): S
 // คัดป้าย = รถยนต์เท่านั้น; ยามาฮ่า = ADMIN / STAFF_ENTRY) - DELIVERY / ACCOUNTANT ดูอย่างเดียว backend ตรวจซ้ำ
 export function canEditSheetRow(row: SheetRow, roles: UserRole[]): boolean {
   if (row.source === "YAMAHA") return roles.includes("ADMIN") || roles.includes("STAFF_ENTRY");
+  // งานอื่นที่ส่งก่อนมีใบ DL (ผู้ใช้ 2026-10-08): วันที่ส่งไม่มีใบให้แก้ - ยกเว้นต่อภาษีที่ยังแก้วันที่คืนลูกค้าที่กรอกมือได้
+  if (row.slipId === null && ["USE_CANCEL", "PLATE_COPY", "TRANSFER", "MOVE_OUT"].includes(row.source)) return false;
   const scope: VehicleScope = submitWriteScopeFor(roles);
   if (scope === "NONE") return false;
   if (row.source === "PLATE_COPY") return scope === "ALL" || scope === "CAR";
@@ -129,15 +132,10 @@ export function updateSheetRowDate(row: SheetRow, date: string, remark: string):
   switch (row.source) {
     case "TAX_RENEWAL":
       return patch(`/api/tax-renewals/${id}`, { deliveredDate: date, remark, ...guard });
-    case "USE_CANCEL":
-      return patch(`/api/vehicle-use-cancellations/${id}`, { returnedDate: date, remark, ...guard });
-    case "PLATE_COPY":
-      return patch(`/api/plate-copies/${id}`, { returnedDate: date, remark, ...guard });
-    case "TRANSFER":
-      return patch(`/api/vehicle-transfers/${id}`, { returnedDate: date, remark, ...guard });
     case "YAMAHA":
       return patch(`/api/yamaha-relocation/${id}`, { date, remark, expectedDate: row.date });
     default:
+      // รถจดใหม่ / สลับเลข / งานอื่นที่ส่งผ่านใบ DL แก้ที่ใบ - งานที่ส่งก่อนมีใบ DL ไม่มีวันที่ให้แก้ (canEditSheetRow ซ่อนปุ่มแล้ว)
       return Promise.reject(new Error("ใบส่งงาน DL แก้ผ่านหน้าต่างแก้ใบ"));
   }
 }

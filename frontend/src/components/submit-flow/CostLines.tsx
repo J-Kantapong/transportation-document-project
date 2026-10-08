@@ -9,7 +9,7 @@ export function CostLines({ fee, tax, ownerMissing }: { fee: FeePreview; tax: Ta
   return (
     <div className="cost-lines">
       <div>
-        <div className="cost-head">Bill</div>
+        <div className="cost-head">{fee.viaSupplier ? "Bill (ซับจ่ายแทน - ประมาณการ)" : "Bill"}</div>
         {fee.billItems.map((item, i) => (
           <div key={i} className="cost-row">
             <span>{item.label}</span>
@@ -37,7 +37,7 @@ export function CostLines({ fee, tax, ownerMissing }: { fee: FeePreview; tax: Ta
         </div>
       </div>
       <div>
-        <div className="cost-head">No bill</div>
+        <div className="cost-head">{fee.viaSupplier ? "ค่าจ้างซับ (No bill)" : "No bill"}</div>
         {fee.noBillItems.map((item, i) => (
           <div key={i} className="cost-row">
             <span>{item.label}</span>

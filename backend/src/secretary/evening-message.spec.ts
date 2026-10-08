@@ -17,9 +17,9 @@ const base: EveningInput = {
   ],
   workingCapital: { overdue: { customers: [{ customerName: 'TWE', amount: 86400 }, { customerName: 'SPI', amount: 30000 }, { customerName: 'X', amount: 5 }] } },
   staff: [
-    { name: 'ก.', edits: 2, slips: 1 },
-    { name: 'ข.', edits: 0, slips: 0 },
-    { name: 'ค.', edits: 0, slips: 3 },
+    { name: 'ก.', entered: 14, submitted: 0, received: 0, edits: 2, slips: 1 },
+    { name: 'ข.', entered: 0, submitted: 0, received: 0, edits: 0, slips: 0 },
+    { name: 'ค.', entered: 0, submitted: 20, received: 5, edits: 0, slips: 3 },
   ],
 };
 
@@ -54,10 +54,10 @@ describe('buildEveningMessage', () => {
 
   it('พนักงาน: แสดงเฉพาะคนที่มีรายการ พร้อมหมายเหตุว่ารายคนมีเท่าที่ระบบจดไว้', () => {
     const texts = allText(flexOf(base).contents);
-    expect(texts).toContain('ก.: แก้/ยกเลิก 2 ครั้ง · ใบส่งงาน 1 ใบ');
-    expect(texts).toContain('ค.: ใบส่งงาน 3 ใบ');
+    expect(texts).toContain('ก.: ใส่รถ 14 · ใบส่งงาน 1 · แก้/ยกเลิก 2 ครั้ง');
+    expect(texts).toContain('ค.: ยื่น 20 · รับใบเสร็จ 5 · ใบส่งงาน 3');
     expect(texts.some((t) => t.startsWith('ข.'))).toBe(false);
-    expect(texts).toContain('รายคนมีเฉพาะการแก้ไข/ยกเลิกและใบส่งงาน');
+    expect(texts).toContain('ยังไม่จดชื่อคนทำ: รับป้าย รับเล่ม งานอื่นๆ');
   });
 
   it('ปัญหา = รายการแจ้งเตือนระดับสูงเท่านั้น', () => {
@@ -78,7 +78,7 @@ describe('buildEveningMessage', () => {
     const full: EveningInput = {
       ...base,
       process: Array.from({ length: 12 }, (_, i) => ({ label: `ขั้นที่ ${i + 1}`, done: { car: i + 1, moto: 0 } })),
-      staff: Array.from({ length: 8 }, (_, i) => ({ name: `คนที่ ${i + 1}`, edits: i + 1, slips: 0 })),
+      staff: Array.from({ length: 8 }, (_, i) => ({ name: `คนที่ ${i + 1}`, entered: 0, submitted: 0, received: 0, edits: i + 1, slips: 0 })),
       alerts: Array.from({ length: 6 }, (_, i) => ({ severity: 'high', title: `ปัญหาที่ ${i + 1}`, detail: '' })),
     };
     const messages = buildEveningMessage(full);
@@ -94,7 +94,7 @@ describe('buildEveningMessage', () => {
     const huge: EveningInput = {
       ...base,
       process: Array.from({ length: 30 }, (_, i) => ({ label: `งานโอนตรวจรถ (รอผลตรวจ) ขั้นที่ ${i + 1}`, done: { car: 100 - i, moto: 0 } })),
-      staff: Array.from({ length: 30 }, (_, i) => ({ name: `พนักงานชื่อยาวนามสกุลยาว ${i + 1}`, edits: 100 - i, slips: 3 })),
+      staff: Array.from({ length: 30 }, (_, i) => ({ name: `พนักงานชื่อยาวนามสกุลยาว ${i + 1}`, entered: 40, submitted: 30, received: 20, edits: 100 - i, slips: 3 })),
       alerts: [
         ...Array.from({ length: 30 }, (_, i) => ({ severity: 'high', title: `ปัญหาเรื่องที่ ${i + 1}`, detail: 'ตรวจไม่ผ่าน 1 คัน · ผลตรวจหมดอายุ 0 คัน', href: '/registration/new-vehicle/inspection' })),
         ...Array.from({ length: 30 }, (_, i) => ({ severity: 'medium', title: `เรื่องไม่ด่วนที่ ${i + 1}`, detail: 'ตรวจว่าอัตราค่าธรรมเนียมยังถูกต้อง', href: '/accounting/billing' })),

@@ -297,6 +297,8 @@ export interface FeePreview {
   isMoto: boolean;
   isOtherProvince: boolean;
   hasExtraRequest: boolean;
+  // ส่งซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08): noBillItems = ค่าจ้างซับตามตารางจังหวัด, billItems = ประมาณการค่าธรรมเนียมที่ซับจ่ายแทน
+  viaSupplier?: boolean;
   billItems: FeeItem[];
   noBillItems: FeeItem[];
   billTotal: number;
@@ -335,6 +337,7 @@ export interface DocumentSubmission {
   relocateAddon: boolean;
   stopUseRelocateOut: boolean;
   urgent: boolean;
+  viaSupplier?: boolean; // รายการนี้ = ส่งงานให้ซับจดต่างจังหวัด (noBillItems = ค่าจ้างซับ)
   billItems: FeeItem[];
   noBillItems: FeeItem[];
   billFeeTotal: string;
@@ -570,6 +573,11 @@ export interface TransferNoticeVehicle {
   transferDone: boolean;
   transferCompletedDate: string | null;
   transferCost: string | null;
+  // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จก่อนติ๊กดำเนินการแล้ว - 1 ใบผูกได้หลายคัน
+  // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (Bill) · คันที่มีใบเสร็จ transferCost = No bill อย่างเดียว
+  receiptRequired?: boolean;
+  transferBillCost?: string | null;
+  transferReceipt?: { id: string; totalAmount: string; vehicleCount: number } | null;
   // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
   inspectionSentDate?: string | null;
   submitted?: boolean;
@@ -832,6 +840,8 @@ export interface TaxRenewal {
   paymentDate: string | null;
   receivedDate: string | null;
   deliveredDate: string | null;
+  // คืนลูกค้าผ่านใบส่งงาน DL (หน้า Delivery, ผู้ใช้ 2026-10-08) = มีผู้รับ - วันที่แก้ได้ที่ใบ DL เท่านั้น (แถวเก่าที่กรอกมือไม่มี)
+  deliveryRecipient?: string | null;
   // ใบเสร็จ (ผู้ใช้ 2026-10-08): รับใบเสร็จครั้งแรก (receivedDate) ต้องมีรูปอย่างน้อย 1 รูป - เลขที่/วันที่/ยอดเติมจาก OCR แก้เองได้
   receiptNo?: string | null;
   receiptDate?: string | null;
@@ -1218,7 +1228,7 @@ export const api = {
     recipient: string;
     note: string;
   }) =>
-    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>('/api/delivery', {
+    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number; jobs: number }>('/api/delivery', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

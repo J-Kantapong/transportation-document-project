@@ -12,6 +12,8 @@ import { buildMorningMessage } from './morning-message.js';
 import type { Slot } from './run-key.js';
 import { helpText, overdueText, spendText, stuckText, textMessage, withQuickReply } from './replies.js';
 
+const total = (s: Omit<EveningInput['staff'][number], 'name'>) => s.entered + s.submitted + s.received + s.edits + s.slips;
+
 // เลขาส่วนตัว (ผู้ใช้ 2026-10-07): ดึงตัวเลขจากภาพรวมผู้บริหารแล้วส่งการ์ดเข้าไลน์ส่วนตัวของเจ้าของ
 // ไม่ผ่านผู้ใช้/สิทธิ์ของคำขอ HTTP (ทำงานนอก request = ไม่จำกัดประเภทรถ) - ผู้เรียกต้องเป็นระบบเองเท่านั้น
 @Injectable()
@@ -106,24 +108,32 @@ export class SecretaryService {
     }
   }
 
-  // ใครทำอะไรวันนี้ (ตามวันเวลาไทย) เท่าที่ระบบจดชื่อคนทำไว้: แก้ไข/ยกเลิก (VehicleEditLog + AuditLog) และใบส่งงานที่ไม่ได้ยกเลิก
-  // การใส่รถ/ยื่นเอกสาร/รับใบเสร็จยังไม่มีคอลัมน์ผู้ทำ จึงยังบอกรายคนไม่ได้
+  // ใครทำอะไรวันนี้ (ตามวันเวลาไทย) เท่าที่ระบบจดชื่อคนทำไว้: ใส่รถ / ยื่นเอกสาร / บันทึกรับใบเสร็จ (Vehicle.createdById,
+  // DocumentSubmission.createdById / receivedById ตั้งแต่ 2026-10-08) แก้ไข/ยกเลิก (VehicleEditLog + AuditLog) และใบส่งงานที่ไม่ได้ยกเลิก
+  // รับป้าย/รับเล่ม/งานอื่นๆ ยังไม่มีคอลัมน์ผู้ทำ
   async staffActivity(today: string): Promise<EveningInput['staff']> {
     const start = new Date(`${today}T00:00:00+07:00`);
     const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-    const [vehicleEdits, audits, slips] = await Promise.all([
+    const [vehicleEdits, audits, slips, entered, submitted, received] = await Promise.all([
       this.prisma.vehicleEditLog.groupBy({ by: ['editedById'], where: { editedAt: { gte: start, lt: end }, editedById: { not: null } }, _count: { _all: true } }),
       this.prisma.auditLog.groupBy({ by: ['editedById'], where: { createdAt: { gte: start, lt: end }, editedById: { not: null } }, _count: { _all: true } }),
       this.prisma.deliverySlip.groupBy({ by: ['createdById'], where: { createdAt: { gte: start, lt: end }, createdById: { not: null }, cancelledAt: null }, _count: { _all: true } }),
+      // ผู้ทำ (ผู้ใช้ 2026-10-08): ใส่รถ / ยื่นเอกสาร (นับยื่นไม่สำเร็จด้วย เพราะเป็นงานที่ทำ) / บันทึกรับใบเสร็จ (นับตามวันที่แก้ล่าสุด)
+      this.prisma.vehicle.groupBy({ by: ['createdById'], where: { createdAt: { gte: start, lt: end }, createdById: { not: null }, deletedAt: null }, _count: { _all: true } }),
+      this.prisma.documentSubmission.groupBy({ by: ['createdById'], where: { createdAt: { gte: start, lt: end }, createdById: { not: null } }, _count: { _all: true } }),
+      this.prisma.documentSubmission.groupBy({ by: ['receivedById'], where: { updatedAt: { gte: start, lt: end }, status: 'RECEIPT_RECEIVED', receivedById: { not: null } }, _count: { _all: true } }),
     ]);
 
-    const byUser = new Map<string, { edits: number; slips: number }>();
-    const add = (id: string | null, field: 'edits' | 'slips', n: number) => {
+    const byUser = new Map<string, Omit<EveningInput['staff'][number], 'name'>>();
+    const add = (id: string | null, field: keyof Omit<EveningInput['staff'][number], 'name'>, n: number) => {
       if (!id) return;
-      const row = byUser.get(id) ?? { edits: 0, slips: 0 };
+      const row = byUser.get(id) ?? { entered: 0, submitted: 0, received: 0, edits: 0, slips: 0 };
       row[field] += n;
       byUser.set(id, row);
     };
+    for (const r of entered) add(r.createdById, 'entered', r._count._all);
+    for (const r of submitted) add(r.createdById, 'submitted', r._count._all);
+    for (const r of received) add(r.receivedById, 'received', r._count._all);
     for (const r of vehicleEdits) add(r.editedById, 'edits', r._count._all);
     for (const r of audits) add(r.editedById, 'edits', r._count._all);
     for (const r of slips) add(r.createdById, 'slips', r._count._all);
@@ -132,6 +142,6 @@ export class SecretaryService {
     const users = await this.prisma.user.findMany({ where: { id: { in: [...byUser.keys()] } }, select: { id: true, name: true, displayName: true } });
     return users
       .map((u) => ({ name: u.displayName?.trim() || u.name, ...byUser.get(u.id)! }))
-      .sort((a, b) => b.edits + b.slips - (a.edits + a.slips));
+      .sort((a, b) => total(b) - total(a));
   }
 }

@@ -1,6 +1,6 @@
 // Ported from prototype/sites-reference/shared/vehicle-data.js (normalizeVehicle / vehicleErrors).
 
-import { FUEL_TYPES, OWNER_TYPE_CHOICES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey } from './vehicle-reference-data.js';
+import { FUEL_TYPES, OWNER_TYPE_CHOICES, PROVINCES, VEHICLE_COLUMNS, VEHICLE_TYPES, VehicleColumnKey, isMotorcycleType } from './vehicle-reference-data.js';
 
 export type NormalizedVehicleRow = Record<VehicleColumnKey, string>;
 
@@ -39,7 +39,7 @@ function isValidNumeric(value: string): boolean {
 // รย.12 (มอเตอร์ไซค์) ภาษีเป็นอัตราคงที่ แต่ผู้ใช้กำหนดให้บังคับกรอก CC เสมอ - ยังไม่เลือกประเภทรถ/เชื้อเพลิง = ยังบอกไม่ได้
 export function requiredSizeField(body: string, fuel: string): 'cc' | 'weight' | null {
   if (!body || !fuel) return null;
-  if (body.startsWith('รย.12-')) return 'cc';
+  if (isMotorcycleType(body)) return 'cc';
   if (body.startsWith('รย.1-')) return fuel === 'ไฟฟ้า (BEV)' ? 'weight' : 'cc';
   if (body.startsWith('รย.2-') || body.startsWith('รย.3-')) return 'weight';
   return null;

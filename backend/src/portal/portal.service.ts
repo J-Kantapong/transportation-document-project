@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { isSupplierProvince } from '../document-submission/supplier-route.js';
 
 // Portal ลูกค้า (เฟสแรก ผู้ใช้ตกลง 2026-09-22): ดูรถของบริษัทตัวเองพร้อมสถานะ 8 ขั้นตอน + กดยืนยันรับของ
 // ห้ามส่งราคา/ค่าธรรมเนียม/ค่าใช้จ่ายใดๆ ออกไปจากที่นี่
@@ -87,7 +88,9 @@ type Row = {
 export function buildSteps(v: Row): PortalStep[] {
   const submission = v.documentSubmissions[0];
   const receiptReceived = submission?.status === 'RECEIPT_RECEIVED';
-  const inspectionPassed = v.inspectionResult === 'ผ่าน';
+  // รถที่ส่งซับจดต่างจังหวัด (supplier-route.ts) ซับตรวจรถให้ - ถือว่าขั้นตรวจรถเสร็จเมื่อส่งงานให้ซับแล้ว (ไม่มีวันที่ตรวจในระบบ)
+  const submitted = Boolean(submission) && submission.status !== 'FAILED';
+  const inspectionPassed = v.inspectionResult === 'ผ่าน' || (isSupplierProvince(v.registrationProvince) && submitted);
   const raw: Array<Omit<PortalStep, 'state'> & { done: boolean; failed?: boolean }> = [
     { key: 'entry', title: 'รับข้อมูลรถ', done: true, date: isoDate(v.date), note: null },
     {
@@ -102,7 +105,7 @@ export function buildSteps(v: Row): PortalStep[] {
       title: 'ตรวจรถ',
       done: inspectionPassed,
       failed: v.inspectionResult === 'ไม่ผ่าน',
-      date: inspectionPassed ? isoDate(v.inspectionResultDate) : null,
+      date: v.inspectionResult === 'ผ่าน' ? isoDate(v.inspectionResultDate) : null,
       note: v.inspectionResult === 'ไม่ผ่าน' ? 'ตรวจไม่ผ่าน รอตรวจใหม่' : v.inspectionSentDate && !v.inspectionResult ? 'ส่งตรวจแล้ว รอผล' : null,
     },
     {

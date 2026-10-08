@@ -7,6 +7,7 @@
 
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
 import { INSPECTION_VALID_DAYS } from '../document-submission/submission-eligibility.js';
+import { isSupplierProvince } from '../document-submission/supplier-route.js';
 import { PLATE_COPY_EXPECTED_DAYS } from '../plate-copy/plate-copy-fee.js';
 import { addDays, daysBetween, isoOf } from './overview-calculator.js';
 
@@ -23,8 +24,8 @@ export const STAGES = {
   receipt: { label: 'รับใบเสร็จ', href: '/registration/new-vehicle/receive-receipt', sla: 7 },
   plate: { label: 'รับป้ายทะเบียน', href: '/registration/new-vehicle/receive-plate', sla: 7 },
   book: { label: 'รับเล่มทะเบียน', href: '/registration/new-vehicle/receive-book', sla: 7 },
-  delivery: { label: 'ส่งงานลูกค้า (Delivery)', href: '/registration/new-vehicle/delivery', sla: 3 },
-  plateDelivery: { label: 'ส่งป้ายตามหลัง', href: '/registration/new-vehicle/delivery', sla: 3 },
+  delivery: { label: 'ส่งงานลูกค้า (Delivery)', href: '/delivery', sla: 3 },
+  plateDelivery: { label: 'ส่งป้ายตามหลัง', href: '/delivery', sla: 3 },
   billing: { label: 'วางบิล', href: '/accounting/billing', sla: 7 },
   plateSwap: { label: 'สลับเลข (รอรับเอกสารกลับ)', href: '/registration/plate-swap/old-new', sla: 14 },
   taxRenewal: { label: 'ต่อภาษี (รอชำระ)', href: '/registration/tax-renewal', sla: 7 },
@@ -37,6 +38,8 @@ export const STAGES = {
   transferInspectSend: { label: 'งานโอนตรวจรถ (รอส่งตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 3 },
   transferInspectResult: { label: 'งานโอนตรวจรถ (รอผลตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 7 },
   transferJob: { label: 'งานโอน (รอรับใบเสร็จ)', href: '/registration/transfer', sla: 7 },
+  // งานอื่นทุกประเภท (รวมต่อภาษี) ที่ของครบแล้วแต่ยังไม่ลงส่งงาน (ใบ DL) - ผู้ใช้ 2026-10-08: พนักงานลืมลงวันส่ง จึงต้องเตือน
+  jobDelivery: { label: 'งานอื่น (รอส่งงานลูกค้า)', href: '/delivery', sla: 3 },
 } as const;
 export type StageKey = keyof typeof STAGES;
 
@@ -62,6 +65,8 @@ export interface OpenVehicle {
   id: string;
   date: Date;
   body: string | null;
+  // จังหวัดที่จด - จังหวัดที่ส่งซับจด (supplier-route.ts) ข้ามคิวตรวจรถ: แจ้งย้ายเสร็จแล้วรอส่งงานให้ซับที่ขั้นยื่นเอกสาร
+  registrationProvince?: string | null;
   transferDone: boolean;
   transferCompletedDate: Date | null;
   inspectionSentDate: Date | null;
@@ -102,6 +107,11 @@ export function receiptWait(stage: 'useCancel' | 'moveOut' | 'plateCopy', submit
   return wait(stage, iso(submitDate));
 }
 
+// ของครบแล้ว (ใบเสร็จกลับ + ป้ายถ้าเป็นคัดป้าย / ต่อภาษีรับป้ายภาษีแล้ว) แต่ยังไม่ลงส่งงาน - นับจากวันที่ของครบ
+export function jobDeliveryWait(readySince: Date): Wait {
+  return wait('jobDelivery', iso(readySince));
+}
+
 // คัดป้ายมีขั้นรับป้ายแยกจากรับใบเสร็จ (ไม่ผูกกัน - ดู PlateCopy.plateReceivedDate)
 export function plateCopyWaits(j: { submitDate: Date; returnedDate: Date | null; plateReceivedDate: Date | null }): Wait[] {
   const waits: Wait[] = [];
@@ -137,7 +147,12 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
   if (sub?.status === 'PENDING') {
     // ค้างจากใบก่อนแล้วมีรูปใบเสร็จแนบเข้ามาทีหลัง = ได้ใบเสร็จแล้ว รอบันทึกใบยื่น ไม่ต้องติดธง (พบ 2026-09-27)
     const unknown = sub.receiptCarriedAt !== null && !sub._count?.receipts;
-    waits.push(wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null]));
+    waits.push(
+      wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [
+        isSupplierProvince(v.registrationProvince) ? `ส่งซับจด${v.registrationProvince} - รอซับส่งใบเสร็จกลับ` : null,
+        unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null,
+      ]),
+    );
   } else if (sub?.status === 'RECEIPT_RECEIVED') {
     // รายการก่อนมีช่องวันที่ในใบเสร็จ (ยังไม่ backfill) ใช้วันที่รับใบเสร็จ แล้วค่อยวันที่ยื่น
     const receiptDate = iso(sub.receiptDate ?? sub.receiptReceivedDate ?? sub.submitDate);
@@ -163,6 +178,16 @@ function beforeSubmission(v: OpenVehicle, today: string): Wait[] {
   const failReason = failed ? `ยื่นไม่สำเร็จ${v.latestSubmission?.failRemark ? `: ${v.latestSubmission.failRemark}` : ''}` : null;
 
   if (!v.transferDone) return [wait('transfer', iso(v.date))];
+  if (isSupplierProvince(v.registrationProvince)) {
+    // ส่งซับจด (ผู้ใช้ 2026-10-08): ไม่ผ่านคิวตรวจรถของออฟฟิศ - รอส่งงานให้ซับ นับจากวันที่แจ้งย้ายเสร็จ
+    const flags: Flag[] = [...failFlags];
+    const reasons: Array<string | null> = [`รอส่งงานให้ซับจด${v.registrationProvince}`, failReason];
+    if (v.hasPendingPlateSwap) {
+      flags.push('PLATE_SWAP_PENDING');
+      reasons.push('รอรับเอกสารงานสลับเลขกลับก่อนจึงยื่นได้');
+    }
+    return [wait('submit', iso(v.transferCompletedDate ?? v.date), flags, reasons)];
+  }
   if (!v.inspectionSentDate) return [wait('inspectSend', iso(v.transferCompletedDate ?? v.date), failFlags, [failReason])];
   if (!v.inspectionResultDate) return [wait('inspectResult', iso(v.inspectionSentDate), failFlags, [failReason])];
 

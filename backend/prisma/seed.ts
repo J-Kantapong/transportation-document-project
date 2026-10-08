@@ -27,6 +27,8 @@ const TYPE_BRAND_ROWS: Array<[string, string]> = [
   ["รย.3-กระบะบรรทุกมีหลังคาแหนบ", "อื่นๆ"],
   ["รย.3-ตู้บรรทุก", "อื่นๆ"],
   ["นำรถมาตรวจ", "อื่นๆ"],
+  // จักรยานยนต์สาธารณะ (ผู้ใช้ 2026-10-08) - ค่าใช้จ่ายชุดเดียวกับ รย.12-น้อยกว่า 300cc (ต่อท้ายเสมอ ลำดับตรงกับ array ยอดเงินด้านล่าง)
+  ["รย.17-จักรยานยนต์สาธารณะ", "อื่นๆ"],
 ];
 
 const VEHICLE_TYPES_13 = [
@@ -34,6 +36,7 @@ const VEHICLE_TYPES_13 = [
   "รย.12-300-799cc",
   "รย.12-800-999cc",
   "รย.12-1000cc ขึ้นไป",
+  "รย.17-จักรยานยนต์สาธารณะ",
   "รย.1-เก๋ง 2 ตอน",
   "รย.1-นั่ง 2 ตอน",
   "รย.1-นั่ง 3 ตอน",
@@ -72,7 +75,7 @@ async function seedBrands() {
 }
 
 async function seedDeregistration() {
-  const amounts = [12, 12, 12, 12, 20, 20, 20, 20, 20, 20, 20, 50, 50, 20, 20, 20, 20, 20];
+  const amounts = [12, 12, 12, 12, 20, 20, 20, 20, 20, 20, 20, 50, 50, 20, 20, 20, 20, 20, 12];
   for (let i = 0; i < TYPE_BRAND_ROWS.length; i++) {
     const [vehicleType, brand] = TYPE_BRAND_ROWS[i];
     await prisma.feeDeregistration.upsert({
@@ -84,7 +87,7 @@ async function seedDeregistration() {
 }
 
 async function seedRelocate() {
-  const noBillAmounts = [20, 20, 20, 20, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30];
+  const noBillAmounts = [20, 20, 20, 20, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 20];
   for (let i = 0; i < TYPE_BRAND_ROWS.length; i++) {
     const [vehicleType, brand] = TYPE_BRAND_ROWS[i];
     await prisma.feeRelocate.upsert({
@@ -96,7 +99,7 @@ async function seedRelocate() {
 }
 
 async function seedInspectionBangkok() {
-  const amounts = [50, 300, 500, 1000, 150, 200, 200, 200, 200, 300, 300, 500, 1000, 300, 1000, 3000, 1000, 0];
+  const amounts = [50, 300, 500, 1000, 150, 200, 200, 200, 200, 300, 300, 500, 1000, 300, 1000, 3000, 1000, 0, 50];
   for (let i = 0; i < TYPE_BRAND_ROWS.length; i++) {
     const [vehicleType, brand] = TYPE_BRAND_ROWS[i];
     await prisma.feeInspectionBangkok.upsert({
@@ -289,6 +292,7 @@ async function main() {
     ["ค่าอากร (ปกติ)", 10, null],
     ["ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)", 30, null],
     ["ลงขัน - รย.12 ทุกประเภท (CC)", 40, "ข้อมูลต้นทางระบุ 40 บาทเท่ากันทุกช่วง CC"],
+    ["ลงขัน - จดสมุทรปราการ", 100, "มอเตอร์ไซค์ที่จดสมุทรปราการ (รย.12 / รย.17) - แทนที่ลงขันปกติ 40 (ผู้ใช้ 2026-10-08)"],
     ["ลงขันด่วนเพิ่ม (ต่อคัน)", 50, null],
     ["ลงขัน - จดใหม่ หยุดใช้ย้ายออก", 250, "เฉพาะมอเตอร์ไซค์ - แทนที่ลงขันปกติเมื่อเลือกตัวเลือกนี้"],
   ]);

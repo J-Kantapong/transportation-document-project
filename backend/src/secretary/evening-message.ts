@@ -10,8 +10,9 @@ export interface EveningInput {
   process: Array<{ label: string; done: { car: number | null; moto: number | null; unsplit?: number } }>;
   alerts: Array<{ severity: string; title: string; detail: string; href?: string }>;
   workingCapital: { overdue: { customers: Array<{ customerName: string; amount: number }> } };
-  // รายคนจากประวัติที่ระบบจดชื่อคนทำไว้เท่านั้น (แก้ไข/ยกเลิก + ใบส่งงาน) - การใส่รถ/ยื่นเอกสารยังไม่จดชื่อ
-  staff: Array<{ name: string; edits: number; slips: number }>;
+  // รายคนจากที่ระบบจดชื่อคนทำไว้ (ผู้ใช้ 2026-10-08): ใส่รถ / ยื่นเอกสาร / รับใบเสร็จ / แก้-ยกเลิก / ใบส่งงาน
+  // รับป้าย รับเล่ม และงานอื่นๆ ยังไม่จดชื่อคนทำ
+  staff: Array<{ name: string; entered: number; submitted: number; received: number; edits: number; slips: number }>;
 }
 
 const doneTotal = (done: EveningInput['process'][number]['done']) => (done.car ?? 0) + (done.moto ?? 0) + (done.unsplit ?? 0);
@@ -29,8 +30,19 @@ export function buildEveningMessage(input: EveningInput, baseUrl?: string): Line
   const doneList = capList(done);
 
   const staff = input.staff
-    .filter((s) => s.edits > 0 || s.slips > 0)
-    .map((s) => `${s.name}: ${[s.edits > 0 ? `แก้/ยกเลิก ${s.edits} ครั้ง` : '', s.slips > 0 ? `ใบส่งงาน ${s.slips} ใบ` : ''].filter(Boolean).join(' · ')}`);
+    .filter((s) => s.entered + s.submitted + s.received + s.edits + s.slips > 0)
+    .map(
+      (s) =>
+        `${s.name}: ${[
+          s.entered > 0 ? `ใส่รถ ${s.entered}` : '',
+          s.submitted > 0 ? `ยื่น ${s.submitted}` : '',
+          s.received > 0 ? `รับใบเสร็จ ${s.received}` : '',
+          s.slips > 0 ? `ใบส่งงาน ${s.slips}` : '',
+          s.edits > 0 ? `แก้/ยกเลิก ${s.edits} ครั้ง` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')}`,
+    );
   const staffList = capList(staff);
 
   // พรุ่งนี้อย่าลืม: ตามเงินลูกค้าที่ค้างก่อน (เกินกำหนดนานสุด) แล้วตามด้วยเรื่องไม่ด่วนจากรายการแจ้งเตือน - ครบทุกราย/ทุกเรื่อง
@@ -62,7 +74,7 @@ export function buildEveningMessage(input: EveningInput, baseUrl?: string): Line
           section('พนักงาน', [
             ...staffList.shown.map((line) => text(line, { size: 'sm' })),
             ...moreLine(staffList.rest.length),
-            text('รายคนมีเฉพาะการแก้ไข/ยกเลิกและใบส่งงาน', { size: 'xxs', color: '#888888' }),
+            text('ยังไม่จดชื่อคนทำ: รับป้าย รับเล่ม งานอื่นๆ', { size: 'xxs', color: '#888888' }),
           ]),
         ]
       : []),

@@ -44,6 +44,7 @@ function baseRules(): DocumentFeeRuleSet {
       { key: 'ค่าอากร (ปกติ)', amount: 10 },
       { key: 'ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)', amount: 30 },
       { key: 'ลงขัน - รย.12 ทุกประเภท (CC)', amount: 40 },
+      { key: 'ลงขัน - จดสมุทรปราการ', amount: 100 },
       { key: 'ลงขันด่วนเพิ่ม (ต่อคัน)', amount: 50 },
       { key: 'ลงขัน - จดใหม่ หยุดใช้ย้ายออก', amount: 250 },
     ],
@@ -201,5 +202,49 @@ describe('requestsPlateNumber / isSwapPlateOption', () => {
   it('ขอใช้เลข = NORMAL/AUCTION เท่านั้น, สลับเลข = SWAP_*', () => {
     expect(['NONE', 'NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION'].map(requestsPlateNumber)).toEqual([false, true, true, false, false]);
     expect(['NONE', 'NORMAL', 'AUCTION', 'SWAP_NORMAL', 'SWAP_AUCTION', null].map(isSwapPlateOption)).toEqual([false, false, false, true, true, false]);
+  });
+});
+
+// ผู้ใช้ 2026-10-08: จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ ส่งซับจด - No bill = ค่าจ้างซับตามตารางจังหวัด (คิดทุกคัน ทั้ง 3 ช่อง)
+describe('computeDocumentFees - ส่งซับจดต่างจังหวัด', () => {
+  const rates = [
+    { province: 'เชียงใหม่', accepts: true, serviceFee: 1000, channelFee: 300, inspectionFee: 200 },
+    { province: 'พะเยา', accepts: false, serviceFee: null, channelFee: null, inspectionFee: null },
+    { province: 'ตราด', accepts: true, serviceFee: 1000, channelFee: null, inspectionFee: 200 },
+  ];
+  const rules = () => ({ ...baseRules(), supplierRates: rates });
+
+  it('No bill = ค่าดำเนินการ + ค่าช่อง + นำรถเข้าตรวจสภาพ ไม่มีอากร/ลงขัน/ด่วนของออฟฟิศ - Bill คิดตามปกติ', () => {
+    const normal = computeDocumentFees(carVehicle({ registrationProvince: 'เชียงใหม่', ownerProvince: 'เชียงใหม่' }), baseOptions({ urgent: true }), rules());
+    expect(normal.viaSupplier).toBe(true);
+    expect(normal.noBillItems).toEqual([
+      { label: 'ค่าดำเนินการซับ', amount: 1000 },
+      { label: 'ค่าช่อง', amount: 300 },
+      { label: 'นำรถเข้าตรวจสภาพ', amount: 200 },
+    ]);
+    expect(normal.noBillTotal).toBe(1500);
+    const self = computeDocumentFees(carVehicle(), baseOptions(), rules());
+    expect(self.viaSupplier).toBe(false);
+    expect(normal.billItems.map((i) => i.label)).toEqual(self.billItems.map((i) => i.label));
+  });
+
+  it('สมุทรปราการออฟฟิศจดเอง - ใช้ No bill ปกติ', () => {
+    const fee = computeDocumentFees(motoVehicle({ registrationProvince: 'สมุทรปราการ', ownerProvince: 'สมุทรปราการ' }), baseOptions(), rules());
+    expect(fee.viaSupplier).toBe(false);
+    expect(fee.noBillItems.some((i) => i.label.startsWith('ลงขัน'))).toBe(true);
+  });
+
+  it('ซับไม่รับ / ยังไม่มีราคา / ราคาไม่ครบ = คิดไม่ได้ พร้อมเหตุผล (ไม่เดาราคา)', () => {
+    const at = (province: string) => () => computeDocumentFees(carVehicle({ registrationProvince: province }), baseOptions(), rules());
+    expect(at('พะเยา')).toThrow('ซับไม่รับจดทะเบียนจังหวัดพะเยา');
+    expect(at('น่าน')).toThrow('ยังไม่มีราคาซับของจังหวัดน่าน');
+    expect(at('ตราด')).toThrow('ยังไม่ครบ (ค่าช่อง)');
+    expect(() => computeDocumentFees(carVehicle({ registrationProvince: 'น่าน' }), baseOptions(), baseRules())).toThrow('ยังไม่มีราคาซับ');
+  });
+
+  it('billOnly (หน้าวางบิล): ได้ยอด Bill โดยไม่ต้องมีตารางราคาซับ', () => {
+    const fee = computeDocumentFees(carVehicle({ registrationProvince: 'น่าน' }), baseOptions(), baseRules(), { billOnly: true });
+    expect(fee.billTotal).toBeGreaterThan(0);
+    expect(fee.noBillTotal).toBe(0);
   });
 });

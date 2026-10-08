@@ -8,6 +8,7 @@
 //   ถ้าวันนั้นยังไม่ครบ 90 วันจากวันที่ตรวจผ่าน - คิวยื่น/ค้นเลขตัวถังก็ใช้วันที่ยื่นของหน้ายื่นเอกสาร
 
 import type { Prisma } from '../generated/prisma/client.js';
+import { isSupplierProvince } from './supplier-route.js';
 
 export const INSPECTION_VALID_DAYS = 90;
 
@@ -17,6 +18,9 @@ export const ACTIVE_SUBMISSION_STATUSES = ['PENDING', 'RECEIPT_RECEIVED'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface SubmissionEligibilityInput {
+  // จังหวัดที่จด - จังหวัดที่ส่งซับจด (ดู supplier-route.ts) ไม่ต้องตรวจรถกับออฟฟิศ: แจ้งย้ายเสร็จแล้วส่งซับได้เลย
+  registrationProvince?: string | null;
+  transferCompletedDate?: Date | null;
   transferDone: boolean;
   inspectionSentDate: Date | null;
   inspectionResult: string | null;
@@ -53,6 +57,13 @@ export function getSubmitBlockReason(vehicle: SubmissionEligibilityInput, submit
   }
   if (vehicle.plateSwap && !vehicle.plateSwap.returnedDate) {
     return PLATE_SWAP_PENDING_REASON;
+  }
+  if (isSupplierProvince(vehicle.registrationProvince)) {
+    // ส่งซับจด (ผู้ใช้ 2026-10-08): ซับตรวจรถเอง จึงไม่ดูผลตรวจ/อายุ 90 วัน - วันที่ส่งซับต้องไม่ก่อนวันที่แจ้งย้ายเสร็จ
+    if (vehicle.transferCompletedDate && submitDate.getTime() < vehicle.transferCompletedDate.getTime()) {
+      return 'วันที่ส่งซับอยู่ก่อนวันที่แจ้งย้ายเสร็จ';
+    }
+    return null;
   }
   if (vehicle.inspectionResult !== 'ผ่าน' || !vehicle.inspectionResultDate) {
     if (vehicle.inspectionResult === 'ไม่ผ่าน') return 'ตรวจรถไม่ผ่าน - ต้องส่งตรวจใหม่ให้ผ่านก่อน';

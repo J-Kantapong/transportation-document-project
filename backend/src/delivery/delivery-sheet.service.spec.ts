@@ -40,7 +40,10 @@ function build(opts: { slips?: unknown[]; truncated?: boolean; tables?: Partial<
     vehicleUseCancellation: { findMany: find('vehicleUseCancellation') },
     plateCopy: { findMany: find('plateCopy') },
     vehicleTransfer: { findMany: find('vehicleTransfer') },
+    vehicleMoveOut: { findMany: find('vehicleMoveOut') },
     yamahaRelocationEntry: { findMany: find('yamahaRelocationEntry') },
+    // งานที่ส่งผ่านใบ DL แล้ว (ผู้ใช้ 2026-10-08) - ถูกตัดออกจากส่วนรายประเภท
+    deliverySlipItem: { findMany: find('deliverySlipItem') },
   };
   const slips = vi.fn().mockResolvedValue({ slips: opts.slips ?? [], truncated: opts.truncated ?? false });
   const svc = new DeliverySheetService(prisma as unknown as PrismaService, { slips } as unknown as DeliveryService);
@@ -63,9 +66,10 @@ describe('DeliverySheetService.sheet', () => {
       slips: [slip({ items: [slipItem(), slipItem({ id: 'i2', source: 'PLATE_SWAP', chassis: 'SW1' })] })],
       tables: {
         taxRenewal: [{ ...common, id: 't1', deliveredDate: day('2026-10-04'), vehicleType: 'รย.1-เก๋ง' }],
-        vehicleUseCancellation: [{ ...common, id: 'u1', returnedDate: day('2026-10-01'), vehicleClass: 'CAR' }],
-        plateCopy: [{ ...common, id: 'p1', returnedDate: day('2026-10-02') }],
-        vehicleTransfer: [{ ...common, id: 'x1', returnedDate: day('2026-10-03'), vehicleClass: 'MOTO', transferType: 'INSPECTION', transfereeName: 'ผู้รับ' }],
+        vehicleUseCancellation: [{ ...common, id: 'u1', deliveredDate: day('2026-10-01'), vehicleClass: 'CAR' }],
+        plateCopy: [{ ...common, id: 'p1', deliveredDate: day('2026-10-02') }],
+        vehicleTransfer: [{ ...common, id: 'x1', deliveredDate: day('2026-10-03'), vehicleClass: 'MOTO', transferType: 'INSPECTION', transfereeName: 'ผู้รับ' }],
+        vehicleMoveOut: [{ ...common, id: 'm1', deliveredDate: day('2026-10-02'), vehicleClass: 'MOTO' }],
         yamahaRelocationEntry: [{ id: 'y1', date: day('2026-10-03'), size: 'SMALL', count: 12 }],
       },
     });
@@ -78,6 +82,7 @@ describe('DeliverySheetService.sheet', () => {
       '2026-10-03 TRANSFER',
       '2026-10-03 YAMAHA',
       '2026-10-02 PLATE_COPY',
+      '2026-10-02 MOVE_OUT',
       '2026-10-01 USE_CANCEL',
     ]);
     const transfer = rows.find((r) => r.source === 'TRANSFER')!;
@@ -102,7 +107,7 @@ describe('DeliverySheetService.sheet', () => {
     const { svc, prisma, slips } = build();
     await svc.sheet({ from: '2026-10-01', to: '2026-10-31', customerId: 'c1' });
     expect(slips).toHaveBeenCalledWith(expect.objectContaining({ customerId: 'c1' }));
-    for (const table of ['taxRenewal', 'vehicleUseCancellation', 'plateCopy', 'vehicleTransfer'] as const) {
+    for (const table of ['taxRenewal', 'vehicleUseCancellation', 'plateCopy', 'vehicleTransfer', 'vehicleMoveOut'] as const) {
       expect(prisma[table].findMany.mock.calls[0][0].where).toMatchObject({ customerId: 'c1', cancelledAt: null });
     }
     expect(prisma.yamahaRelocationEntry.findMany).not.toHaveBeenCalled();
@@ -113,9 +118,10 @@ describe('DeliverySheetService.sheet', () => {
     await svc.sheet({ from: '2026-10-01', to: '2026-10-31' });
     const range = { gte: day('2026-10-01'), lte: day('2026-10-31') };
     expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.deliveredDate).toEqual(range);
-    expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.returnedDate).toEqual(range);
-    expect(prisma.plateCopy.findMany.mock.calls[0][0].where.returnedDate).toEqual(range);
-    expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.returnedDate).toEqual(range);
+    expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.deliveredDate).toEqual(range);
+    expect(prisma.plateCopy.findMany.mock.calls[0][0].where.deliveredDate).toEqual(range);
+    expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.deliveredDate).toEqual(range);
+    expect(prisma.vehicleMoveOut.findMany.mock.calls[0][0].where.deliveredDate).toEqual(range);
     expect(prisma.yamahaRelocationEntry.findMany.mock.calls[0][0].where.date).toEqual(range);
   });
 
@@ -123,7 +129,24 @@ describe('DeliverySheetService.sheet', () => {
     const { svc, prisma } = build();
     await svc.sheet({});
     expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.deliveredDate).toEqual({ not: null });
-    expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.returnedDate).toEqual({ not: null });
+    expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.deliveredDate).toEqual({ not: null });
+  });
+
+  // ผู้ใช้ 2026-10-08: งานอื่นส่งผ่านใบ DL - แถวจากใบ DL ขึ้นแล้ว ส่วนรายประเภทต้องไม่ขึ้นซ้ำ เหลือเฉพาะงานที่ส่งก่อนมีใบ (แก้วันที่ไม่ได้)
+  it('งานที่ส่งผ่านใบ DL แล้วไม่ขึ้นซ้ำในส่วนรายประเภท งานเก่าที่ไม่มีใบยังขึ้นด้วยวันที่ส่ง', async () => {
+    const { svc } = build({
+      slips: [slip({ items: [slipItem({ id: 'j1', source: 'TRANSFER', chassis: 'TR-IN-SLIP', jobType: 'TRANSFER', jobId: 'x1', book: false, plate: false })] })],
+      tables: {
+        vehicleTransfer: [
+          { ...common, id: 'x1', deliveredDate: day('2026-10-03'), vehicleClass: 'CAR', transferType: 'OWNER', transfereeName: 'ก' },
+          { ...common, id: 'x2', chassis: 'LEGACY', deliveredDate: day('2026-10-02'), vehicleClass: 'CAR', transferType: 'OWNER', transfereeName: 'ข' },
+        ],
+        deliverySlipItem: [{ jobType: 'TRANSFER', jobId: 'x1' }],
+      },
+    });
+    const { rows } = await svc.sheet({});
+    expect(rows.map((r) => r.key)).toEqual(['TRANSFER:j1', 'TRANSFER:x2']);
+    expect(rows[1].dateLabel).toContain('แก้ไม่ได้');
   });
 
   it('STAFF_MOTO เห็นเฉพาะมอเตอร์ไซค์ และไม่เห็นคัดป้าย (รถยนต์เท่านั้น)', async () => {
@@ -131,7 +154,7 @@ describe('DeliverySheetService.sheet', () => {
     await asUser(['STAFF_MOTO'], () => svc.sheet({}));
     expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.vehicleClass).toBe('MOTO');
     expect(prisma.vehicleTransfer.findMany.mock.calls[0][0].where.vehicleClass).toBe('MOTO');
-    expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.vehicleType).toEqual({ startsWith: 'รย.12-' });
+    expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.OR).toEqual([{ vehicleType: { startsWith: 'รย.12-' } }, { vehicleType: { startsWith: 'รย.17-' } }]);
     expect(prisma.plateCopy.findMany).not.toHaveBeenCalled();
   });
 
@@ -139,7 +162,7 @@ describe('DeliverySheetService.sheet', () => {
     const { svc, prisma } = build();
     await asUser(['STAFF_CAR'], () => svc.sheet({}));
     expect(prisma.vehicleUseCancellation.findMany.mock.calls[0][0].where.vehicleClass).toBe('CAR');
-    expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.NOT).toEqual({ vehicleType: { startsWith: 'รย.12-' } });
+    expect(prisma.taxRenewal.findMany.mock.calls[0][0].where.NOT).toEqual({ OR: [{ vehicleType: { startsWith: 'รย.12-' } }, { vehicleType: { startsWith: 'รย.17-' } }] });
     expect(prisma.plateCopy.findMany).toHaveBeenCalled();
   });
 

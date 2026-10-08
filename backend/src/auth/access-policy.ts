@@ -18,7 +18,7 @@ const ALL_STAFF_READ: UserRole[] = ['ADMIN', 'STAFF_ENTRY', 'STAFF_CAR', 'STAFF_
 
 interface Rule {
   pattern: RegExp; // ทดสอบกับ path (ไม่มี query string, ตัด / ท้ายแล้ว)
-  method?: 'GET' | 'DELETE'; // ไม่ระบุ = ทุก method
+  method?: 'GET' | 'POST' | 'DELETE'; // ไม่ระบุ = ทุก method
   access: Access;
 }
 
@@ -38,6 +38,9 @@ const RULES: Rule[] = [
   // (ไม่มีกฎนี้ กฎ GET ท้ายตารางจะเปิดให้พนักงานทุกกลุ่มอ่านได้)
   { pattern: /^\/api\/hr(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
+  // ราคาซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08): พนักงานทุกฝ่ายอ่านได้ แก้ราคา = ADMIN เท่านั้น
+  { pattern: /^\/api\/supplier-rates(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
+  { pattern: /^\/api\/supplier-rates(\/|$)/, access: ['ADMIN'] },
   // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
   // ตั้งเลขเริ่มใบกำกับภาษี (= เปิดใช้ใบกำกับในระบบ) ADMIN เท่านั้น (ผู้ใช้ 2026-09-28)
@@ -47,6 +50,9 @@ const RULES: Rule[] = [
   // ACCOUNTANT อ่านรายงานส่งงานได้ (ใบส่งงาน + ป้ายค้างส่ง) ไว้ตรวจก่อนวางบิล แต่ไม่เห็นคิว Delivery และบันทึก/แก้ไม่ได้ (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/delivery\/(slips|plate-pending|sheet)(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery\/slips(\/|$)/, access: SUBMIT },
+  // บัญชีลงส่งงานที่พนักงานลืมได้จากหน้าวางบิล (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2) - อ่านคิว + บันทึกส่งงานเท่านั้น ไม่แก้/ยกเลิกใบ
+  { pattern: /^\/api\/delivery\/queue$/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
+  { pattern: /^\/api\/delivery$/, method: 'POST', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
   { pattern: /^\/api\/vehicle-search(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
@@ -67,6 +73,9 @@ const RULES: Rule[] = [
   // ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24) - service กรองประเภทรถอีกชั้น
   // /correct = แก้/ยกเลิกสถานะคันที่ดำเนินการแล้ว (ต้องมีเหตุผล - ผู้ใช้ 2026-09-27) สิทธิ์เดียวกัน
   { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice(\/correct)?$/, access: [...ENTRY, 'STAFF_MOTO'] },
+  // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): แนบ/แก้/ถอด = สิทธิ์เดียวกับการบันทึกแจ้งย้าย - อ่านไฟล์ได้ทุกฝ่าย (กฎ GET ด้านล่าง)
+  { pattern: /^\/api\/transfer-notice-receipts(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
+  { pattern: /^\/api\/transfer-notice-receipts(\/|$)/, access: [...ENTRY, 'STAFF_MOTO'] },
   // ขั้น 1-3 + ข้อมูลอ้างอิง: ทุกกลุ่มอ่านได้ เขียนได้เฉพาะ STAFF_ENTRY
   { pattern: /^\/api(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api(\/|$)/, access: ENTRY },

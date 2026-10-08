@@ -6,6 +6,11 @@
 // memory/project_fee_pricing_workflow.md), so both are always computed together here.
 import { classifyVehicleFamily } from '../tax/government-tax-reference-data.js';
 import { GovTaxVehicleFamily } from '../generated/prisma/enums.js';
+import { isSupplierProvince, supplierFeeItems, type SupplierRateRow } from './supplier-route.js';
+
+// มอเตอร์ไซค์ที่จดสมุทรปราการ (รย.12 / รย.17) ลงขัน 100 บาท แทน 40 ของกรุงเทพฯ (ผู้ใช้ 2026-10-08) - แถวใน FeeMotorcycleNoBillParam
+const SAMUT_PRAKAN = 'สมุทรปราการ';
+export const MOTO_SAMUT_PRAKAN_NO_BILL_KEY = 'ลงขัน - จดสมุทรปราการ';
 
 // SWAP_NORMAL / SWAP_AUCTION = "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27): คนอื่นทำสลับเลขแล้วส่งเลขมาให้ แผ่นป้ายขาวดำ / ประมูล
 // ต้องกรอกหมวด+เลข ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ และไม่นับเป็นคำขอเพิ่ม (ค่าคำขอ/ค่าอากรตามปกติ) - รถยนต์เท่านั้น
@@ -52,12 +57,17 @@ export interface DocumentFeeRuleSet {
   carNoBill: FeeParamRow[];
   motoBill: FeeParamRow[];
   motoNoBill: FeeParamRow[];
+  // ราคาซับจดต่างจังหวัด (SupplierProvinceRate) - ใช้กับรถที่จดจังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ (ดู supplier-route.ts)
+  supplierRates?: SupplierRateRow[];
 }
 
 export interface DocumentFeeResult {
   isMoto: boolean;
   isOtherProvince: boolean;
   hasExtraRequest: boolean;
+  // ส่งซับจด (ผู้ใช้ 2026-10-08): billItems = ประมาณการค่าธรรมเนียมราชการที่ซับจ่ายแทน (เทียบกับใบเสร็จตอนรับกลับ)
+  // noBillItems = ค่าจ้างซับตามตารางจังหวัด ไม่มีค่าอากร/ลงขันของออฟฟิศ
+  viaSupplier: boolean;
   billItems: FeeItem[];
   noBillItems: FeeItem[];
   billTotal: number;
@@ -91,6 +101,8 @@ export function computeDocumentFees(
   vehicle: DocumentSubmissionVehicleInput,
   options: DocumentSubmissionOptionsInput,
   rules: DocumentFeeRuleSet,
+  // billOnly: คิดเฉพาะค่าธรรมเนียมราชการ (หน้าวางบิลใช้เทียบกับใบเสร็จ) - ไม่แตะ No bill / ตารางราคาซับ
+  mode: { billOnly?: boolean } = {},
 ): DocumentFeeResult {
   const isMoto = isMotorcycle(vehicle.body);
   const isOtherProvince = !!vehicle.registrationProvince && !!vehicle.ownerProvince && vehicle.registrationProvince !== vehicle.ownerProvince;
@@ -140,6 +152,25 @@ export function computeDocumentFees(
     billItems.push({ label: 'ค่าทำแผ่นป้ายทะเบียนใหม่ (ป้ายประมูล)', amount: lookupFee(bill, 'ค่าทำแผ่นป้ายทะเบียนใหม่ - ป้ายประมูล') });
   }
 
+  const viaSupplier = isSupplierProvince(vehicle.registrationProvince);
+  if (mode.billOnly) {
+    const billOnlyTotal = billItems.reduce((sum, it) => sum + it.amount, 0);
+    return { isMoto, isOtherProvince, hasExtraRequest, viaSupplier, billItems, noBillItems: [], billTotal: billOnlyTotal, noBillTotal: 0 };
+  }
+  if (viaSupplier) {
+    const supplierItems = supplierFeeItems(vehicle.registrationProvince as string, rules.supplierRates);
+    return {
+      isMoto,
+      isOtherProvince,
+      hasExtraRequest,
+      viaSupplier,
+      billItems,
+      noBillItems: supplierItems,
+      billTotal: billItems.reduce((sum, it) => sum + it.amount, 0),
+      noBillTotal: supplierItems.reduce((sum, it) => sum + it.amount, 0),
+    };
+  }
+
   const noBillItems: FeeItem[] = [];
   noBillItems.push(
     hasExtraRequest
@@ -150,7 +181,10 @@ export function computeDocumentFees(
     noBillItems.push(
       options.stopUseRelocateOut
         ? { label: 'ลงขัน (จดใหม่ หยุดใช้ย้ายออก)', amount: lookupFee(noBill, 'ลงขัน - จดใหม่ หยุดใช้ย้ายออก') }
-        : { label: 'ลงขัน (รย.12)', amount: lookupFee(noBill, 'ลงขัน - รย.12 ทุกประเภท (CC)') },
+        : vehicle.registrationProvince === SAMUT_PRAKAN
+          ? // จดที่สมุทรปราการ (ออฟฟิศจดเอง): ลงขัน 100 บาท ค่าอากรคิดแบบกรุงเทพฯ ปกติ 10 / ขอใช้ 30 (ผู้ใช้ 2026-10-08)
+            { label: 'ลงขัน (จดสมุทรปราการ)', amount: lookupFee(noBill, MOTO_SAMUT_PRAKAN_NO_BILL_KEY) }
+          : { label: 'ลงขัน (รย.12)', amount: lookupFee(noBill, 'ลงขัน - รย.12 ทุกประเภท (CC)') },
     );
   } else {
     // ลงขันรถยนต์แปรผันตามประเภทรถ (vehicle.body) จริง ไม่ใช่ราคาเดียวกันทุกประเภทแบบที่ mockup สมมติไว้
@@ -169,5 +203,5 @@ export function computeDocumentFees(
   const billTotal = billItems.reduce((sum, it) => sum + it.amount, 0);
   const noBillTotal = noBillItems.reduce((sum, it) => sum + it.amount, 0);
 
-  return { isMoto, isOtherProvince, hasExtraRequest, billItems, noBillItems, billTotal, noBillTotal };
+  return { isMoto, isOtherProvince, hasExtraRequest, viaSupplier, billItems, noBillItems, billTotal, noBillTotal };
 }

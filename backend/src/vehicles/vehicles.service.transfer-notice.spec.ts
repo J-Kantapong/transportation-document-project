@@ -60,6 +60,19 @@ describe('VehiclesService.updateTransferNotice', () => {
     expect(editLogCreate).not.toHaveBeenCalled();
   });
 
+  // ผู้ใช้ 2026-10-08: งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว - ตัดบัญชี (กรุงเทพฯ) ไม่ต้อง
+  it('งานแจ้งย้ายต้องมีใบเสร็จแจ้งย้ายก่อนบันทึกว่าดำเนินการแล้ว', async () => {
+    const noReceipt = service(vehicleRow({ registrationProvince: 'เชียงใหม่', transferReceiptId: null }));
+    expect((await failureOf(noReceipt.service.updateTransferNotice('v1', body))).error).toContain('ต้องแนบใบเสร็จแจ้งย้าย');
+    expect(noReceipt.updateMany).not.toHaveBeenCalled();
+
+    const withReceipt = service(vehicleRow({ registrationProvince: 'เชียงใหม่', transferReceiptId: 'r1' }));
+    await expect(withReceipt.service.updateTransferNotice('v1', body)).resolves.toMatchObject({ transferDone: true });
+
+    const bangkok = service(vehicleRow({ registrationProvince: 'กรุงเทพมหานคร', transferReceiptId: null }));
+    await expect(bangkok.service.updateTransferNotice('v1', body)).resolves.toMatchObject({ transferDone: true });
+  });
+
   it('ดำเนินการแล้วต้องมีวันที่เสร็จ', async () => {
     const { service: svc, updateMany } = service(vehicleRow());
     expect((await failureOf(svc.updateTransferNotice('v1', { ...body, completedDate: null }))).error).toBe('กรุณาระบุวันที่เสร็จ');

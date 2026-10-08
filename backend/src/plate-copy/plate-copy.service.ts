@@ -57,6 +57,9 @@ export interface PlateCopyRow {
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหากจาก billTotal / noBillTotal
   returnedDate: string | null; // YYYY-MM-DD
+  // ส่งงานลูกค้า (ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08) - ส่งแล้วจึงวางบิลได้
+  deliveredDate: string | null;
+  deliveryRecipient: string | null;
   plateReceivedDate: string | null; // YYYY-MM-DD - วันที่รับป้าย (ตั้งพร้อมรูป)
   platePhotoId: string | null; // ดูรูปที่ GET /api/plate-copies/:id/plate-photo/image
   receipts: { id: string; createdAt: string }[];
@@ -122,6 +125,8 @@ const plateCopyInclude = {
 } satisfies Prisma.PlateCopyInclude;
 
 interface PlateCopyRecord {
+  deliveredDate?: Date | null; // ส่งงานลูกค้าแล้ว (ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08)
+  deliveryRecipient?: string | null;
   id: string;
   vehicleClass: string;
   customerId?: string | null;
@@ -165,6 +170,8 @@ export function serializePlateCopy(row: PlateCopyRecord): PlateCopyRow {
     noBillTotal: String(row.noBillTotal),
     dutyAmount: String(row.dutyAmount),
     returnedDate: isoDate(row.returnedDate),
+    deliveredDate: isoDate(row.deliveredDate ?? null),
+    deliveryRecipient: row.deliveryRecipient ?? null,
     plateReceivedDate: isoDate(row.plateReceivedDate),
     platePhotoId: row.platePhotoId ?? null,
     receipts: row.receipts.map((r) => ({ id: r.id, createdAt: r.createdAt.toISOString() })),
@@ -384,6 +391,8 @@ export class PlateCopyService {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกรับเอกสารกลับ');
     const existing = await this.findOrThrow(id);
     if (!existing.returnedDate) throw new BadRequestException({ error: 'งานนี้ยังไม่รับเอกสารกลับ' });
+    // ส่งงานลูกค้าแล้ว (ใบ DL) - ต้องยกเลิกใบส่งงานก่อน ไม่งั้นใบ DL ค้างชี้งานที่ย้อนสถานะ/ยกเลิกไปแล้ว (ผู้ใช้ 2026-10-08)
+    if (existing.deliveredDate) throw new BadRequestException({ error: 'งานนี้ส่งงานลูกค้าแล้ว - ยกเลิกใบส่งงาน (DL) ที่หน้ารายงานส่งงานก่อน' });
     await this.prisma.$transaction(async (tx) => {
       await tx.plateCopy
         .update({ where: { id, cancelledAt: null, returnedDate: existing.returnedDate }, data: { returnedDate: null } })
@@ -404,6 +413,8 @@ export class PlateCopyService {
   async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกงานคัดแผ่นป้ายทะเบียน');
     const existing = await this.findOrThrow(id);
+    // ส่งงานลูกค้าแล้ว (ใบ DL) - ต้องยกเลิกใบส่งงานก่อน ไม่งั้นใบ DL ค้างชี้งานที่ย้อนสถานะ/ยกเลิกไปแล้ว (ผู้ใช้ 2026-10-08)
+    if (existing.deliveredDate) throw new BadRequestException({ error: 'งานนี้ส่งงานลูกค้าแล้ว - ยกเลิกใบส่งงาน (DL) ที่หน้ารายงานส่งงานก่อน' });
     await this.prisma.$transaction(async (tx) => {
       await tx.plateCopy
         .update({ where: { id, cancelledAt: null }, data: { cancelledAt: new Date(), cancelReason: remark, cancelledById: currentUser()?.id ?? null } })

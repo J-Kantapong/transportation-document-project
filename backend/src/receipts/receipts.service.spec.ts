@@ -264,7 +264,7 @@ describe('ReceiptsService - ขอบเขตการดูรูป / ถา�
     await as(['STAFF_MOTO'], () => svc.findByIds('a,b'));
     expect(images.findMany.mock.calls[0][0].where).toEqual({
       id: { in: ['a', 'b'] },
-      OR: [{ submissionId: null }, { submission: { vehicle: { AND: [{ body: { startsWith: 'รย.12-' } }] } } }],
+      OR: [{ submissionId: null }, { submission: { vehicle: { AND: [{ OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] }] } } }],
     });
   });
 

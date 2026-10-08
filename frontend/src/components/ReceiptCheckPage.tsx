@@ -10,6 +10,7 @@ import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { ReceiptEditButton, ReceivedReceiptFixButton, type FieldFlags } from "./ReceiptEditDialog";
 import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary, useCanEditReceipts } from "./ReceiptPhotos";
+import { SupplierFeeLine } from "./SupplierFeeLine";
 import { DateInput } from "@/components/DateInput";
 import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 
@@ -607,6 +608,14 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
   // แก้ข้อมูลใบเสร็จที่บันทึกแล้ว (✎ แก้ ในตาราง "ได้ใบเสร็จแล้ว") - อัปเดตแถวในตารางตามที่ backend ตอบ
   // แก้วันที่รับ = แถวย้ายที่บน server (เรียงด้วยวันที่รับ): จัดลำดับใหม่ และถ้ายังมีหน้าถัดไปแล้วแถวย้ายไปอยู่หลังแถวสุดท้าย
   // ของช่วงที่โหลดไว้ ไม่นับแถวนั้นใน offset ของ "โหลดเพิ่ม" (พบ 2026-09-27: offset = จำนวนแถวที่แสดง โหลดเพิ่มแล้วข้ามไป 1 แถว)
+  // แก้ค่าจ้างซับของรายการที่ส่งซับจด (ผู้ใช้ 2026-10-08) - อัปเดตแถวตามที่ backend ตอบ (ค่าอื่นของแถวคงเดิม)
+  function applySupplierFee(submission: DocumentSubmission) {
+    const patch = (rows: DocumentSubmission[]) =>
+      rows.map((r) => (r.id === submission.id ? { ...r, noBillItems: submission.noBillItems, noBillTotal: submission.noBillTotal } : r));
+    setSheetRows(patch);
+    setCompleted(patch);
+  }
+
   function applyReceiptFix({ submission }: ReceiptFieldsFixResult) {
     setCompleted((prev) => {
       const before = prev.find((c) => c.id === submission.id);
@@ -1014,6 +1023,12 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                                 ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
                               </div>
                             </div>
+                            {s.viaSupplier && (
+                              <>
+                                <span>ค่าจ้างซับ</span>
+                                <SupplierFeeLine submission={s} canEdit={canEdit} onSaved={applySupplierFee} />
+                              </>
+                            )}
                             <span>ใบเสร็จ</span>
                             {editable ? (
                               <div>
@@ -1185,7 +1200,15 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                         <td>{s.receiptDate ? isoToDisplayDate(s.receiptDate.slice(0, 10)) : "—"}</td>
                         <td>{s.receiptReceivedDate ? isoToDisplayDate(s.receiptReceivedDate.slice(0, 10)) : "—"}</td>
                         <td>{(receipts[s.id] ?? []).length ? <ReceiptThumbs receipts={receipts[s.id]} /> : "—"}</td>
-                        <td>{bill === null ? "—" : money(bill)}</td>
+                        <td>
+                          {bill === null ? "—" : money(bill)}
+                          {s.viaSupplier && (
+                            <div style={{ marginTop: 4 }}>
+                              <span className="badge warn">ส่งซับ</span>
+                              <SupplierFeeLine submission={s} canEdit={canEdit} onSaved={applySupplierFee} />
+                            </div>
+                          )}
+                        </td>
                         <td>
                           {s.receiptAmount === null ? "—" : money(Number(s.receiptAmount))}
                           {s.receiptAmount !== null && bill !== null && Number(s.receiptAmount) !== bill && (

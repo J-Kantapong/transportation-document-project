@@ -35,6 +35,7 @@ import {
   INSPECTION_VALID_DAYS,
   inspectionValidUntil,
 } from '../document-submission/submission-eligibility.js';
+import { isSupplierProvince, SUPPLIER_VEHICLE_WHERE } from '../document-submission/supplier-route.js';
 
 // งานสลับเลขที่ส่งเลขมาให้รถจดใหม่คันหนึ่ง - หน้ายื่นเอกสาร (Step 4) แสดงและกดใช้เป็นเลขที่ขอได้ (ดู backend/src/plate-swap)
 export interface PlateSwapSummary {
@@ -151,6 +152,11 @@ function isReinspectionDue(vehicle: {
     vehicle.documentSubmissions.length === 0
   );
 }
+
+// ใบเสร็จแจ้งย้ายของรถ (ขั้น 2) พร้อมจำนวนคันที่ใช้ใบเดียวกัน - หน้าแจ้งย้าย/ตัดบัญชีแสดงและใช้ตัดสินว่าติ๊กดำเนินการแล้วได้หรือยัง
+const transferReceiptInclude = {
+  transferReceipt: { select: { id: true, totalAmount: true, _count: { select: { vehicles: true } } } },
+} as const;
 
 const activeSubmissionsInclude = {
   documentSubmissions: { where: { status: { in: ACTIVE_SUBMISSION_STATUSES } }, select: { id: true }, take: 1 },
@@ -468,11 +474,20 @@ export class VehiclesService {
       where: {
         deletedAt: null, // รถที่ถูกลบไม่เข้าคิวไหนอีก (ดู deleteVehicle)
         transferDone: true,
-        inspectionResult: 'ผ่าน',
-        inspectionResultDate: { gte: earliestValidPass, lte: submitDate },
         documentSubmissions: { none: { status: { in: ACTIVE_SUBMISSION_STATUSES } } },
-        ...vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
+        // AND แยกชั้นไว้ เพราะ vehicleTypeWhere() อาจมี OR ของตัวเอง
+        AND: [
+          {
+            OR: [
+              { inspectionResult: 'ผ่าน', inspectionResultDate: { gte: earliestValidPass, lte: submitDate } },
+              // ส่งซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08): แจ้งย้ายเสร็จแล้วเข้าคิวนี้เลย ไม่ผ่านคิวตรวจรถ (ดู supplier-route.ts)
+              SUPPLIER_VEHICLE_WHERE,
+            ],
+          },
+          vehicleTypeWhere(), // STAFF_CAR / STAFF_MOTO เห็นเฉพาะประเภทรถของตัวเอง
+        ],
       },
+      // รถส่งซับไม่มีวันที่ตรวจ (null) - Postgres เรียง null ไว้ท้ายสุดของ asc
       orderBy: [{ inspectionResultDate: 'asc' }, { date: 'asc' }, { chassis: 'asc' }],
       include: this.vehicleFullInclude,
     });
@@ -591,7 +606,9 @@ export class VehiclesService {
           data: rows.map((row) => ownerDataFor(row, financeNames.get(row.financeId) ?? null)),
           select: { id: true },
         });
-        await tx.vehicle.createMany({ data: rows.map((row, index) => this.toCreateData(row, owners[index].id)) });
+        // ผู้ทำ (ผู้ใช้ 2026-10-08): คนที่กดบันทึก - เฉพาะตอนสร้าง ไม่เขียนทับตอนแก้ไข (ดู toCreateData ที่ใช้ตอนแก้ด้วย)
+        const createdById = currentUser()?.id ?? null;
+        await tx.vehicle.createMany({ data: rows.map((row, index) => ({ ...this.toCreateData(row, owners[index].id), createdById })) });
       });
     } catch (err) {
       if (!isChassisConflict(err)) throw err;
@@ -901,6 +918,7 @@ export class VehiclesService {
         include: {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
+          ...transferReceiptInclude,
         },
       }),
       this.prisma.feeDeregistration.findMany(),
@@ -926,6 +944,7 @@ export class VehiclesService {
           customer: { select: { name: true } },
           brand: { select: { name: true } },
           ...activeSubmissionsInclude,
+          ...transferReceiptInclude,
         },
       }),
       this.prisma.feeDeregistration.findMany(),
@@ -948,6 +967,8 @@ export class VehiclesService {
       transferDone: boolean;
       transferCompletedDate: Date | null;
       transferCost: unknown;
+      transferBillCost?: unknown;
+      transferReceipt?: { id: string; totalAmount: unknown; _count: { vehicles: number } } | null;
       inspectionSentDate: Date | null;
       customer: { name: string };
       brand: { name: string };
@@ -972,6 +993,13 @@ export class VehiclesService {
       transferDone: vehicle.transferDone,
       transferCompletedDate: vehicle.transferCompletedDate?.toISOString().slice(0, 10) ?? null,
       transferCost: vehicle.transferCost,
+      // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จก่อนติ๊กดำเนินการแล้ว - 1 ใบผูกได้หลายคัน
+      // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (Bill) ส่วน transferCost ของคันที่มีใบเสร็จ = No bill อย่างเดียว
+      receiptRequired: status === 'แจ้งย้าย',
+      transferBillCost: vehicle.transferBillCost === null || vehicle.transferBillCost === undefined ? null : String(vehicle.transferBillCost),
+      transferReceipt: vehicle.transferReceipt
+        ? { id: vehicle.transferReceipt.id, totalAmount: String(vehicle.transferReceipt.totalAmount), vehicleCount: vehicle.transferReceipt._count.vehicles }
+        : null,
       // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
       inspectionSentDate: vehicle.inspectionSentDate?.toISOString().slice(0, 10) ?? null,
       submitted: (vehicle.documentSubmissions?.length ?? 0) > 0,
@@ -995,7 +1023,8 @@ export class VehiclesService {
 
     const row = relocateFees.find((f) => f.vehicleType === body && sameBrandName(f.brand, brandName))
       ?? relocateFees.find((f) => f.vehicleType === body && f.brand === 'อื่นๆ');
-    return row ? String(Number(row.noBillAmount) + Number(row.billAmount)) : null;
+    // แจ้งย้าย: แนะนำเฉพาะส่วน No bill (ผู้ใช้ 2026-10-08) - ส่วน Bill มาจากยอดใบเสร็จแจ้งย้ายที่แนบ ไม่กรอกในช่องค่าใช้จ่ายแล้ว
+    return row ? String(Number(row.noBillAmount)) : null;
   }
 
   async updateTransferNotice(id: string, dto: UpdateTransferNoticeDto) {
@@ -1034,6 +1063,10 @@ export class VehiclesService {
     // ได้แม้ส่งตรวจแล้วและไม่มีเหตุผล) - ดู correctTransferNotice
     if (vehicle.transferDone) {
       throw new BadRequestException({ error: 'รถคันนี้ดำเนินการแจ้งย้าย/ตัดบัญชีแล้ว - แก้ได้ที่ปุ่ม "✎ แก้" (ต้องระบุเหตุผล)' });
+    }
+    // งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว (ผู้ใช้ 2026-10-08) - ยอดในใบเสร็จไปขึ้นใบวางบิล
+    if (done && getTransferStatus(vehicle.registrationProvince) === 'แจ้งย้าย' && !vehicle.transferReceiptId) {
+      throw new BadRequestException({ error: 'งานแจ้งย้ายต้องแนบใบเสร็จแจ้งย้ายก่อนบันทึกว่าดำเนินการแล้ว' });
     }
 
     const completedDate = completedDateRaw ? toDate(completedDateRaw) : null;
@@ -1156,6 +1189,8 @@ export class VehiclesService {
         where: {
           deletedAt: null,
           transferDone: true,
+          // รถที่ส่งซับจดต่างจังหวัดไม่เข้าคิวตรวจรถของออฟฟิศ - ซับตรวจให้ (ผู้ใช้ 2026-10-08, ดู supplier-route.ts)
+          NOT: SUPPLIER_VEHICLE_WHERE,
           OR: [
             { inspectionSentDate: null },
             { inspectionResult: 'ไม่ผ่าน' },
@@ -1402,6 +1437,11 @@ export class VehiclesService {
     assertNotSubmitted(vehicle);
     // Step 1 -> 4 ต้องทำตามลำดับ: ส่งตรวจได้หลังแจ้งย้าย/ตัดบัญชีเสร็จแล้วเท่านั้น
     if (!vehicle.transferDone) throw new BadRequestException({ error: 'ยังไม่ผ่านขั้นตอนแจ้งย้าย/ตัดบัญชี - ส่งตรวจรถไม่ได้' });
+    if (isSupplierProvince(vehicle.registrationProvince)) {
+      throw new BadRequestException({
+        error: `รถจดจังหวัด${vehicle.registrationProvince} ส่งซับจดให้ - ไม่ต้องส่งตรวจรถ ให้ส่งงานที่หน้ายื่นเอกสารจดทะเบียน`,
+      });
+    }
     // ส่งตรวจแล้วรอผลอยู่ = ห้ามบันทึกส่งตรวจทับ (พบ 2026-09-27: หน้าที่เปิดค้างไว้เคยเขียนทับประเภท/วันที่/ค่าใช้จ่าย
     // ของคนอื่นโดยไม่มีประวัติ) - แก้ได้ทางปุ่ม "แก้การส่งตรวจ" ที่ต้องระบุเหตุผล (correctInspectionSent)
     if (vehicle.inspectionSentDate && vehicle.inspectionResult == null) {

@@ -12,6 +12,8 @@ import type {
 import { getToken, rolesFromToken, submitWriteScopeFor, vehicleScopeFor, type VehicleScope } from "@/lib/auth";
 import { OWNER_TYPE_LABEL, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
+import { isSupplierProvince } from "@/lib/supplier-route";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 
 // ยื่นเอกสารจดทะเบียน (Step 4) แบบ 3 ขั้น (ผู้ใช้ 2026-09-25): เลือกรถ -> ตรวจทานและตั้งค่า -> ผลการยื่น แต่ละขั้นเป็น URL
 // ของตัวเอง ใช้ state ร่วมกันผ่าน SubmitFlowProvider ใน submit/layout.tsx (ไม่เก็บร่างในเครื่องแล้ว - รีเฟรช = เริ่มใหม่)
@@ -44,13 +46,15 @@ export function formatMoney(amount: number): string {
 }
 
 export function isMotoBody(body: string | null): boolean {
-  return !!body && body.startsWith("รย.12-");
+  return isMotorcycleBody(body);
 }
 
 export function jobTypeLabel(vehicle: Vehicle): string {
-  if (!vehicle.registrationProvince || !vehicle.ownerProvince) return "จดทะเบียนปกติ";
-  if (vehicle.registrationProvince === vehicle.ownerProvince) return "จดทะเบียนปกติ";
-  return `ขอใช้${vehicle.registrationProvince}`;
+  // จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ = ส่งซับจด (ผู้ใช้ 2026-10-08) - ขั้นนี้คือส่งงานให้ซับ ไม่ใช่ออฟฟิศยื่นเอง
+  const supplier = isSupplierProvince(vehicle.registrationProvince) ? `ส่งซับจด${vehicle.registrationProvince}` : null;
+  const otherProvince = !!vehicle.registrationProvince && !!vehicle.ownerProvince && vehicle.registrationProvince !== vehicle.ownerProvince;
+  if (supplier) return otherProvince ? `${supplier} (ขอใช้)` : supplier;
+  return otherProvince ? `ขอใช้${vehicle.registrationProvince}` : "จดทะเบียนปกติ";
 }
 
 export function summarizeList(items: string[]): string {
