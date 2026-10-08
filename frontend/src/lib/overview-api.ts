@@ -94,7 +94,20 @@ export interface OverviewAlert {
   href: string;
   // เรื่องที่เป็นรายคัน (ผู้ใช้ 2026-10-09): คันที่ด่วนที่สุดไม่เกิน 50 รายการ + จำนวนจริงทั้งหมด - เรื่องอื่น (บิล ใบเสนอราคา ฯลฯ) ไม่มี
   items?: StuckItem[];
+  // เรื่องที่เป็นรายใบ (บิล ใบกำกับ ใบเสนอราคา ใบเสร็จ - รอบสอง): href ของแต่ละใบมาจาก backend
+  docs?: AlertDoc[];
   itemTotal?: number;
+}
+
+export interface AlertDoc {
+  id: string;
+  title: string; // เลขที่ใบ / เลขตัวถัง
+  customerName: string;
+  amount: number | null;
+  dateLabel: string;
+  date: string | null;
+  note: string;
+  href: string;
 }
 
 export interface Overview {

@@ -8,13 +8,14 @@ import { OverviewService } from './overview.service.js';
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
 const sub = (submitDate: string, o: Record<string, unknown> = {}) => ({
+  id: `s-${submitDate}`,
   submitDate: d(submitDate),
   status: 'PENDING',
   receiptAmount: null,
   billFeeTotal: 250,
   taxAmount: 2150,
   noBillTotal: 0,
-  vehicle: { body: 'รย.1-เก๋ง 2 ตอน' },
+  vehicle: { body: 'รย.1-เก๋ง 2 ตอน', chassis: `CH-${submitDate}`, customer: { name: 'ลูกค้า' } },
   ...o,
 });
 
@@ -174,7 +175,12 @@ describe('OverviewService.overview', () => {
       ],
     });
     const result = await svc.overview();
-    expect(result.alerts.find((a) => a.key === 'tax-missing')?.detail).toMatch(/^1 คัน/);
+    const taxMissing = result.alerts.find((a) => a.key === 'tax-missing')!;
+    expect(taxMissing.detail).toMatch(/^1 คัน/);
+    // รายคัน: ลิงก์ไปหน้ารายการที่ยื่นของวันนั้น แท็บตามประเภทรถ พร้อมไฮไลต์คันนั้น
+    expect(taxMissing.itemTotal).toBe(1);
+    expect(taxMissing.docs).toMatchObject([{ title: 'CH-2026-09-20', customerName: 'ลูกค้า', date: '2026-09-20' }]);
+    expect(taxMissing.docs![0].href).toBe('/registration/new-vehicle/submit-documents/records?date=2026-09-20&tab=car&focus=CH-2026-09-20');
     const { svc: none } = service({ inProcessSubs: [sub('2026-09-22')] });
     expect((await none.overview()).alerts.some((a) => a.key === 'tax-missing')).toBe(false);
     const { svc: advanceOnly } = service({ inProcessSubs: [sub('2026-09-28', { taxAmount: null })] });
@@ -291,6 +297,48 @@ describe('OverviewService.overview', () => {
       ['j1', 'otherJob', 'jobDelivery'],
       ['v1', 'vehicle', 'delivery'],
     ]);
+  });
+
+  // ผู้ใช้ 2026-10-09 รอบสอง: เรื่องบิล / 50 ทวิ / ใบเสนอราคา ส่งรายใบพร้อมลิงก์ไปถึงใบนั้น จำนวนตรงกับข้อความ
+  it('สิ่งที่ควรจัดการ: บิล 50 ทวิ และใบเสนอราคามีรายใบพร้อมลิงก์ของแต่ละใบ', async () => {
+    const { svc, prisma } = service();
+    const inv = (invoiceNo: string, issueDate: string, dueDate: string | null, netTotal: number) => ({
+      id: `id-${invoiceNo}`,
+      invoiceNo,
+      issueDate: d(issueDate),
+      dueDate: dueDate ? d(dueDate) : null,
+      customerId: 'c1',
+      netTotal,
+      customerSnapshot: { name: 'ลูกค้า ก' },
+    });
+    prisma.invoice.findMany.mockImplementation(async ({ where }: { where: { status?: unknown; issueDate?: unknown; paidDate?: unknown } }) =>
+      where.status === 'ISSUED'
+        ? [inv('IV2026-012', '2026-07-01', null, 1000), inv('IV2026-121', '2026-09-01', '2026-09-20', 500), inv('IV2026-130', '2026-09-20', '2026-09-30', 300), inv('IV2026-090', '2026-08-20', '2026-09-10', 200)]
+        : [],
+    );
+    prisma.taxInvoice.findMany.mockResolvedValue([
+      { id: 't1', taxInvoiceNo: 'TV2026-005', issueDate: d('2026-08-01'), whtAmount: 30, customerSnapshot: { name: 'ลูกค้า ข' } },
+      { id: 't2', taxInvoiceNo: 'TV2026-020', issueDate: d('2026-09-20'), whtAmount: 10, customerSnapshot: { name: 'ลูกค้า ข' } },
+    ]);
+    const quote = (id: string, o: Record<string, unknown>) => ({ id, quotationNo: `QT-${id}`, customerSnapshot: { name: 'YM' }, netTotal: 9000, approvedDate: null, status: 'ISSUED', kind: 'JOB', validUntil: d('2026-10-10'), ratesAppliedAt: null, _count: { invoices: 0 }, ...o });
+    prisma.quotation.findMany.mockResolvedValue([quote('q1', { status: 'APPROVED', approvedDate: d('2026-09-25') }), quote('q2', { validUntil: d('2026-09-20') }), quote('q3', {})]);
+
+    const alerts = (await svc.overview()).alerts;
+    const alert = (key: string) => alerts.find((a) => a.key === key)!;
+
+    expect(alert('ar-overdue').docs).toMatchObject([{ title: 'IV2026-012', amount: 1000, note: 'ค้าง 88 วัน', href: '/accounting/billing?focus=IV2026-012' }]);
+    // เลยกำหนด: ใบที่ครบกำหนดก่อนขึ้นก่อน
+    expect(alert('ar-past-due').detail).toMatch(/^2 ใบ/);
+    expect(alert('ar-past-due').itemTotal).toBe(2);
+    expect(alert('ar-past-due').docs!.map((x) => [x.title, x.note])).toEqual([
+      ['IV2026-090', 'เลยกำหนด 17 วัน'],
+      ['IV2026-121', 'เลยกำหนด 7 วัน'],
+    ]);
+    expect(alert('ar-due-soon').docs).toMatchObject([{ title: 'IV2026-130', date: '2026-09-30', note: 'อีก 3 วัน' }]);
+    expect(alert('wht-overdue').docs).toMatchObject([{ title: 'TV2026-005', customerName: 'ลูกค้า ข', amount: 30, href: '/accounting/tax-invoices/wht?focus=TV2026-005' }]);
+    expect(alert('quotation-approved-open').docs).toMatchObject([{ title: 'QT-q1', note: 'รอออกใบวางบิล', date: '2026-09-25', href: '/accounting/quotations/view?id=q1' }]);
+    expect(alert('quotation-expired').docs).toMatchObject([{ title: 'QT-q2', note: 'หมดอายุมา 7 วัน' }]);
+    expect(alerts.some((a) => a.key === 'quotation-waiting')).toBe(false); // มีใบหมดอายุแล้ว เรื่องรอตอบรวมอยู่ในข้อความของเรื่องนั้น
   });
 
   // ผู้ใช้ 2026-09-27: งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอดในภาพรวม

@@ -56,6 +56,25 @@ const INSPECTION_REQUEST_FEE = 25; // ค่าใบคำขอตรวจส
 const STUCK_LIMIT = 100;
 const ALERT_ITEM_LIMIT = 50; // รายคันที่ส่งไปกับ "สิ่งที่ควรจัดการ" แต่ละเรื่อง (คันที่ด่วนที่สุดก่อน) - จำนวนจริงอยู่ใน itemTotal
 const NOT_VOID = { invoice: { status: { not: 'VOID' } } } as const;
+// รถของรายการยื่น - ให้ "สิ่งที่ควรจัดการ" บอกได้ว่าคันไหนและลิงก์ไปถึงคันนั้น
+const vehicleRef = { chassis: true, body: true, customer: { select: { name: true } } } as const;
+const snapshotName = (snapshot: unknown) => (snapshot as { name?: string } | null)?.name ?? '-';
+
+// รายใบของ "สิ่งที่ควรจัดการ" ที่ไม่ใช่รายคันติดขัด (บิล ใบกำกับ ใบเสนอราคา ใบเสร็จ) - ผู้ใช้ 2026-10-09 รอบสอง
+// href พาไปถึงใบนั้น: หน้ารายการใช้ ?focus=<เลขที่> (FocusVehicleRow ไฮไลต์แถวที่มีเลขนั้น) ใบเสนอราคาเปิดหน้าของใบเลย
+export interface AlertDoc {
+  id: string;
+  title: string; // เลขที่ใบ / เลขตัวถัง
+  customerName: string;
+  amount: number | null;
+  dateLabel: string;
+  date: string | null; // ค.ศ. YYYY-MM-DD
+  note: string;
+  href: string;
+}
+const focusUrl = (page: string, value: string, extra: Record<string, string> = {}) => `${page}?${new URLSearchParams({ ...extra, focus: value }).toString()}`;
+// แท็บของหน้ารายการที่ยื่นแล้ว (classify ใน frontend SubmittedRecordsView.tsx): ประเภทรถที่ไม่ใช่ รย.1/2/3 หรือจักรยานยนต์ อยู่แท็บ unknown
+const recordsTab = (body: string | null) => (vehicleKindOf(body) === 'moto' ? 'moto' : body && /^รย.[123]-/.test(body) ? 'car' : 'unknown');
 const MOTO_TYPE_PREFIX = 'รย.12'; // ต่อภาษี: vehicleType ขึ้นต้น รย.12 = จักรยานยนต์ (เหมือน Vehicle.body)
 
 const num = (d: unknown) => (d === null || d === undefined ? 0 : Number(d));
@@ -255,7 +274,7 @@ export class OverviewService {
       // รวมงานที่คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ด้วย แล้วแยกออกใน inProcessMoney - ยังไม่ได้จ่ายจริง
       this.prisma.documentSubmission.findMany({
         where: { status: { in: ACTIVE_SUBMISSION_STATUSES }, vehicle: { ...live, deliveredDate: null } },
-        select: { submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, taxAmount: true },
+        select: { id: true, submitDate: true, status: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, vehicle: { select: vehicleRef } },
       }),
       this.prisma.documentSubmission.findMany({
         where: {
@@ -265,7 +284,7 @@ export class OverviewService {
           receiptDate: { gte: toDate(addDays(asOf, -(SERIES_DAYS - 1))), lte: day }, // วันที่ในใบเสร็จ (ผู้ใช้ 2026-09-25)
           vehicle: live,
         },
-        select: { receiptAmount: true, billFeeTotal: true, taxAmount: true },
+        select: { id: true, receiptDate: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, vehicle: { select: vehicleRef } },
       }),
       // --- รถที่ยังไม่จบงาน (ยังไม่ส่งงาน / ป้ายค้างส่ง / ยังไม่วางบิล) -> คิวค้าง + คันที่ติดขัด ---
       // ปิดงาน - วางบิลนอกระบบแล้ว = ไม่ค้างวางบิล (ผู้ใช้ 2026-09-27)
@@ -440,12 +459,17 @@ export class OverviewService {
       // 50 ทวิที่ลูกค้าหักไว้แต่ยังไม่ส่งหลักฐาน (หน้า /accounting/tax-invoices/wht)
       this.prisma.taxInvoice.findMany({
         where: { status: 'ISSUED', whtAmount: { gt: 0 }, whtCertificateId: null },
-        select: { issueDate: true, whtAmount: true },
+        select: { id: true, taxInvoiceNo: true, issueDate: true, whtAmount: true, customerSnapshot: true },
       }),
       // ใบเสนอราคาที่ยังมีเรื่องต้องตาม: ส่งแล้วรอลูกค้าตอบ / อนุมัติแล้วยังไม่ออกบิลหรือตั้งราคา
       this.prisma.quotation.findMany({
         where: { status: { in: ['ISSUED', 'APPROVED'] } },
         select: {
+          id: true,
+          quotationNo: true,
+          customerSnapshot: true,
+          netTotal: true,
+          approvedDate: true,
           status: true,
           kind: true,
           validUntil: true,
@@ -628,6 +652,8 @@ export class OverviewService {
 
     // ---------- ลูกหนี้ / เงินจม ----------
     const receivableItems = receivables.map((i) => ({
+      id: i.id,
+      invoiceNo: i.invoiceNo,
       customerId: i.customerId,
       customerName: (i.customerSnapshot as { name?: string } | null)?.name ?? '-',
       issueDate: isoOf(i.issueDate),
@@ -943,22 +969,55 @@ export class OverviewService {
     // เลยกำหนดเครดิตของลูกค้า (Invoice.dueDate = วันที่ออกบิล + เครดิตวัน ณ วันออกบิล) แต่ยังไม่ถึง 60 วัน - 60 วันขึ้นไปอยู่ในการเตือนข้างบนแล้ว
     const pastDue = receivableItems.filter((r) => r.dueDate !== null && r.dueDate < today && daysBetween(r.issueDate, today) <= 60);
     const dueSoon = receivableItems.filter((r) => r.dueDate !== null && r.dueDate >= today && daysBetween(today, r.dueDate) <= 7);
-    const whtOverdue = whtPendingRows.filter((r) => daysBetween(isoOf(r.issueDate), today) > WHT_OVERDUE_DAYS);
+    const whtOverdue = whtPendingRows.filter((r) => daysBetween(isoOf(r.issueDate), today) > WHT_OVERDUE_DAYS).sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
     // ใบเสนอราคา: รอลูกค้าตอบ (หมดอายุแล้วนับแยก) · อนุมัติแล้วแต่ยังไม่ได้ออกบิล/ตั้งเป็นราคาลูกค้า (stageOf ใน quotation-calc.ts)
-    const quoteWaiting = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) >= today).length;
-    const quoteExpired = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) < today).length;
-    const quoteApprovedOpen = quotations.filter((q) => q.status === 'APPROVED' && (q.kind === 'RATE' ? !q.ratesAppliedAt : q._count.invoices === 0)).length;
-    const variance = receiptRows
-      .map((r) => num(r.receiptAmount) - (num(r.billFeeTotal) + num(r.taxAmount)))
-      .filter((d) => Math.abs(d) >= 1);
+    const byValidUntil = (a: { validUntil: Date }, b: { validUntil: Date }) => a.validUntil.getTime() - b.validUntil.getTime();
+    const quoteWaitingList = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) >= today).sort(byValidUntil);
+    const quoteExpiredList = quotations.filter((q) => q.status === 'ISSUED' && isoOf(q.validUntil) < today).sort(byValidUntil);
+    const quoteApprovedList = quotations.filter((q) => q.status === 'APPROVED' && (q.kind === 'RATE' ? !q.ratesAppliedAt : q._count.invoices === 0));
+    const quoteWaiting = quoteWaitingList.length;
+    const quoteExpired = quoteExpiredList.length;
+    const quoteApprovedOpen = quoteApprovedList.length;
+    // ส่วนต่างมากสุดขึ้นก่อน (ไม่ปัดเศษตรงนี้ ยอดรวมในข้อความจึงเท่าเดิม)
+    const varianceRows = receiptRows
+      .map((r) => ({ ...r, diff: num(r.receiptAmount) - (num(r.billFeeTotal) + num(r.taxAmount)) }))
+      .filter((r) => Math.abs(r.diff) >= 1)
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+    const variance = varianceRows.map((r) => r.diff);
     // ยื่นแล้วแต่ระบบคำนวณภาษีไม่ได้ (taxAmount = null เช่น จักรยานยนต์ไฟฟ้า) ยอดระหว่างดำเนินการนับภาษีเป็น 0 - ต้องบอกให้รู้
     // ไม่ให้ดูเหมือนยอดครบ (พบ 2026-09-27) · ได้ใบเสร็จแล้วใช้ยอดบนใบเสร็จจริง จึงไม่นับ · งานคีย์ล่วงหน้าไม่อยู่ในยอดนั้น จึงไม่นับเช่นกัน
-    const taxMissing = inProcessSubs.filter(
-      (s) =>
-        isoOf(s.submitDate) <= today &&
-        s.taxAmount === null &&
-        !(s.status === 'RECEIPT_RECEIVED' && s.receiptAmount !== null),
-    ).length;
+    const taxMissingRows = inProcessSubs
+      .filter((s) => isoOf(s.submitDate) <= today && s.taxAmount === null && !(s.status === 'RECEIPT_RECEIVED' && s.receiptAmount !== null))
+      .sort((a, b) => a.submitDate.getTime() - b.submitDate.getTime());
+    const taxMissing = taxMissingRows.length;
+
+    // รายใบของแต่ละเรื่อง (ใบที่ควรดูก่อนขึ้นก่อน) - ตัดที่ ALERT_ITEM_LIMIT เหมือนรายคัน จำนวนจริงอยู่ใน itemTotal
+    const withDocs = <T>(rows: T[], toDoc: (row: T) => AlertDoc) => ({ docs: rows.slice(0, ALERT_ITEM_LIMIT).map(toDoc), itemTotal: rows.length });
+    type Receivable = (typeof receivableItems)[number];
+    const invoiceDoc = (note: (r: Receivable) => string, byDue: boolean) => (r: Receivable): AlertDoc => ({
+      id: r.id,
+      title: r.invoiceNo,
+      customerName: r.customerName,
+      amount: r.amount,
+      dateLabel: byDue ? 'ครบกำหนด' : 'ออกบิล',
+      date: byDue ? r.dueDate : r.issueDate,
+      note: note(r),
+      href: focusUrl('/accounting/billing', r.invoiceNo),
+    });
+    const oldestIssue = (a: Receivable, b: Receivable) => a.issueDate.localeCompare(b.issueDate);
+    const earliestDue = (a: Receivable, b: Receivable) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
+    type QuoteRow = (typeof quotations)[number];
+    const quoteDoc = (note: (q: QuoteRow) => string, approved: boolean) => (q: QuoteRow): AlertDoc => ({
+      id: q.id,
+      title: q.quotationNo ?? '(ร่าง)',
+      customerName: snapshotName(q.customerSnapshot),
+      amount: num(q.netTotal),
+      dateLabel: approved ? 'อนุมัติ' : 'ใช้ได้ถึง',
+      date: approved ? (q.approvedDate ? isoOf(q.approvedDate) : null) : isoOf(q.validUntil),
+      note: note(q),
+      href: `/accounting/quotations/view?id=${encodeURIComponent(q.id)}`,
+    });
+    const receiptPage = (body: string | null) => `${STAGES.receipt.href}/${vehicleKindOf(body)}`;
     // รายคันของแต่ละเรื่อง (ผู้ใช้ 2026-10-09: กดแล้วไปถึงคันที่มีปัญหา) - จำนวนบนหัวข้อนับจากรายการชุดเดียวกับที่กางให้ดู
     // ธงปัญหานับเฉพาะรถจดใหม่ (งานโอนตรวจไม่ผ่านอยู่ในรายการติดขัด ไม่อยู่ในเรื่องเหล่านี้) · เกินกำหนด = ค้างขั้นนั้นเกิน SLA
     const sortedProblems = sortStuck(problems);
@@ -975,6 +1034,7 @@ export class OverviewService {
         title: 'บิลค้างชำระเกิน 60 วัน',
         detail: `${overdueAr.length} ใบ รวม ${fmt(overdueAr.reduce((a, r) => a + r.amount, 0))} บาท - ควรติดตามทวงถาม`,
         href: '/accounting/billing',
+        ...withDocs([...overdueAr].sort(oldestIssue), invoiceDoc((r) => `ค้าง ${daysBetween(r.issueDate, today)} วัน`, false)),
       },
       pastDue.length && {
         key: 'ar-past-due',
@@ -982,6 +1042,7 @@ export class OverviewService {
         title: 'บิลเลยกำหนดชำระตามเครดิตลูกค้า',
         detail: `${pastDue.length} ใบ รวม ${fmt(pastDue.reduce((a, r) => a + r.amount, 0))} บาท`,
         href: '/accounting/billing',
+        ...withDocs([...pastDue].sort(earliestDue), invoiceDoc((r) => `เลยกำหนด ${daysBetween(r.dueDate!, today)} วัน`, true)),
       },
       whtOverdue.length && {
         key: 'wht-overdue',
@@ -989,6 +1050,16 @@ export class OverviewService {
         title: `ลูกค้าหัก ณ ที่จ่ายแล้วยังไม่ส่ง 50 ทวิ เกิน ${WHT_OVERDUE_DAYS} วัน`,
         detail: `${whtOverdue.length} ใบกำกับ ภาษีที่หักไว้ ${fmt(whtOverdue.reduce((a, r) => a + num(r.whtAmount), 0))} บาท - ควรทวงหลักฐาน`,
         href: '/accounting/tax-invoices/wht',
+        ...withDocs(whtOverdue, (r) => ({
+          id: r.id,
+          title: r.taxInvoiceNo,
+          customerName: snapshotName(r.customerSnapshot),
+          amount: num(r.whtAmount),
+          dateLabel: 'รับเงิน',
+          date: isoOf(r.issueDate),
+          note: `ค้าง ${daysBetween(isoOf(r.issueDate), today)} วัน`,
+          href: focusUrl('/accounting/tax-invoices/wht', r.taxInvoiceNo),
+        })),
       },
       quoteApprovedOpen && {
         key: 'quotation-approved-open',
@@ -996,6 +1067,7 @@ export class OverviewService {
         title: 'ใบเสนอราคาอนุมัติแล้ว ยังไม่ได้ออกบิล / ตั้งราคา',
         detail: `${quoteApprovedOpen} ใบ - ลูกค้าตอบรับแล้ว รอดำเนินการต่อ`,
         href: '/accounting/quotations',
+        ...withDocs(quoteApprovedList, quoteDoc((q) => (q.kind === 'RATE' ? 'รอตั้งเป็นราคาลูกค้า' : 'รอออกใบวางบิล'), true)),
       },
       quoteExpired && {
         key: 'quotation-expired',
@@ -1003,6 +1075,7 @@ export class OverviewService {
         title: 'ใบเสนอราคาหมดอายุโดยลูกค้ายังไม่ตอบ',
         detail: `${quoteExpired} ใบ${quoteWaiting ? ` (ยังรอตอบอยู่อีก ${quoteWaiting} ใบ)` : ''} - ติดตามลูกค้าหรือยกเลิก`,
         href: '/accounting/quotations',
+        ...withDocs(quoteExpiredList, quoteDoc((q) => `หมดอายุมา ${daysBetween(isoOf(q.validUntil), today)} วัน`, false)),
       },
       !quoteExpired && quoteWaiting && {
         key: 'quotation-waiting',
@@ -1010,6 +1083,7 @@ export class OverviewService {
         title: 'ใบเสนอราคารอลูกค้าตอบ',
         detail: `${quoteWaiting} ใบ`,
         href: '/accounting/quotations',
+        ...withDocs(quoteWaitingList, quoteDoc((q) => `เหลือ ${daysBetween(today, isoOf(q.validUntil))} วัน`, false)),
       },
       dueSoon.length && {
         key: 'ar-due-soon',
@@ -1017,6 +1091,7 @@ export class OverviewService {
         title: 'บิลที่จะครบกำหนดชำระภายใน 7 วัน',
         detail: `${dueSoon.length} ใบ รวม ${fmt(dueSoon.reduce((a, r) => a + r.amount, 0))} บาท`,
         href: '/accounting/billing',
+        ...withDocs([...dueSoon].sort(earliestDue), invoiceDoc((r) => (r.dueDate === today ? 'ครบกำหนดวันนี้' : `อีก ${daysBetween(today, r.dueDate!)} วัน`), true)),
       },
       flags('INSPECTION_EXPIRING') && {
         key: 'inspection-expiring',
@@ -1090,6 +1165,16 @@ export class OverviewService {
         title: 'ใบเสร็จจริงไม่ตรงกับยอดที่ระบบคำนวณ (30 วันล่าสุด)',
         detail: `${variance.length} ใบ ส่วนต่างสุทธิ ${fmt(variance.reduce((a, b) => a + b, 0))} บาท - ตรวจว่าอัตราค่าธรรมเนียมยังถูกต้อง`,
         href: STAGES.receipt.href,
+        ...withDocs(varianceRows, (r) => ({
+          id: r.id,
+          title: r.vehicle.chassis,
+          customerName: r.vehicle.customer.name,
+          amount: round2(r.diff),
+          dateLabel: 'ใบเสร็จ',
+          date: r.receiptDate ? isoOf(r.receiptDate) : null,
+          note: `ใบเสร็จ ${fmt(num(r.receiptAmount))} · ระบบคำนวณ ${fmt(num(r.billFeeTotal) + num(r.taxAmount))}`,
+          href: focusUrl(receiptPage(r.vehicle.body), r.vehicle.chassis),
+        })),
       },
       taxMissing && {
         key: 'tax-missing',
@@ -1097,6 +1182,16 @@ export class OverviewService {
         title: 'ยื่นแล้วแต่ยังคำนวณภาษีไม่ได้',
         detail: `${taxMissing} คัน - ยอดจ่ายแล้วระหว่างดำเนินการยังไม่รวมภาษีของคันเหล่านี้`,
         href: '/registration/new-vehicle/submit-documents/records',
+        ...withDocs(taxMissingRows, (r) => ({
+          id: r.id,
+          title: r.vehicle.chassis,
+          customerName: r.vehicle.customer.name,
+          amount: null,
+          dateLabel: 'ยื่น',
+          date: isoOf(r.submitDate),
+          note: 'ระบบยังคำนวณภาษีไม่ได้',
+          href: focusUrl('/registration/new-vehicle/submit-documents/records', r.vehicle.chassis, { date: isoOf(r.submitDate), tab: recordsTab(r.vehicle.body) }),
+        })),
       },
       pendingUsers && {
         key: 'pending-users',
@@ -1105,7 +1200,7 @@ export class OverviewService {
         detail: `${pendingUsers} บัญชี`,
         href: '/admin/users',
       },
-    ].filter(Boolean) as Array<{ key: string; severity: 'high' | 'medium' | 'info'; title: string; detail: string; href: string; items?: StuckItem[]; itemTotal?: number }>;
+    ].filter(Boolean) as Array<{ key: string; severity: 'high' | 'medium' | 'info'; title: string; detail: string; href: string; items?: StuckItem[]; docs?: AlertDoc[]; itemTotal?: number }>;
     const severityRank = { high: 0, medium: 1, info: 2 } as const;
     alerts.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]); // เรียงตามความเร่งด่วน (sort เสถียร คงลำดับเดิมในระดับเดียวกัน)
 

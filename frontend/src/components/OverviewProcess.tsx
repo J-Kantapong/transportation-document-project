@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import { isoToDisplayDate } from "@/lib/date";
-import type { ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
+import type { AlertDoc, ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 
 // ภาพรวมผู้บริหาร - งานแต่ละขั้นตอน + คันที่ติดขัด แยกรถยนต์/จักรยานยนต์ (ผู้ใช้ขอ 2026-09-24)
@@ -230,14 +230,54 @@ function StuckTable({ items, linkLabel, showSeverity }: { items: StuckItem[]; li
   );
 }
 
+// รายใบของเรื่องที่ไม่ใช่รถติดขัด (บิล ใบกำกับที่รอ 50 ทวิ ใบเสนอราคา ใบเสร็จที่ยอดไม่ตรง) - ลิงก์ของแต่ละใบมาจาก backend
+const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function DocTable({ docs }: { docs: AlertDoc[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="exec-table stuck-table">
+        <thead>
+          <tr>
+            <th>รายการ</th>
+            <th>ลูกค้า</th>
+            <th className="num-col">ยอด (บาท)</th>
+            <th>วันที่</th>
+            <th>หมายเหตุ</th>
+            <th aria-label="ลิงก์" />
+          </tr>
+        </thead>
+        <tbody>
+          {docs.map((doc) => (
+            <tr key={doc.id}>
+              <td className="job">{doc.title}</td>
+              <td className="exec-wrap">{doc.customerName}</td>
+              <td className="num-col">{doc.amount === null ? "–" : money(doc.amount)}</td>
+              <td>{doc.date ? `${doc.dateLabel} ${isoToDisplayDate(doc.date)}` : "–"}</td>
+              <td className="stuck-reason">{doc.note}</td>
+              <td>
+                <Link href={doc.href} className="text-button">
+                  ไปที่รายการนี้ →
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // รายคันของ "สิ่งที่ควรจัดการ" หนึ่งเรื่อง (ผู้ใช้ 2026-10-09: กดแล้วไปถึงคันที่มีปัญหา ไม่ต้องไปหาเองในหน้าคิว)
 // คันเดียวอยู่ได้หลายเรื่อง (เช่น ยังไม่วางบิล + ป้ายยังไม่ส่งตาม) แต่ละเรื่องจึงลิงก์ไปหน้าของขั้นนั้นเอง
-export function AlertItems({ items, total, queueHref }: { items: StuckItem[]; total: number; queueHref: string }) {
+export function AlertItems({ items, docs, total, queueHref }: { items: StuckItem[]; docs: AlertDoc[]; total: number; queueHref: string }) {
+  const shown = items.length + docs.length;
   return (
     <div className="exec-alert-items">
-      <StuckTable items={items} linkLabel="ไปที่คันนี้ →" />
+      {items.length > 0 && <StuckTable items={items} linkLabel="ไปที่คันนี้ →" />}
+      {docs.length > 0 && <DocTable docs={docs} />}
       <p className="exec-note">
-        {total > items.length && `แสดง ${items.length} รายการที่เร่งด่วนที่สุด จากทั้งหมด ${total} รายการ · `}
+        {total > shown && `แสดง ${shown} รายการแรก จากทั้งหมด ${total} รายการ · `}
         <Link href={queueHref} className="text-button">
           เปิดหน้าคิวทั้งหมด →
         </Link>

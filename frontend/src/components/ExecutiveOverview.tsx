@@ -55,12 +55,15 @@ const SEVERITY: Record<OverviewAlert["severity"], { label: string; icon: string 
 };
 
 // เรื่องที่เป็นรายคัน (ผู้ใช้ 2026-10-09): คันเดียว = "ไปจัดการ" พาไปที่คันนั้นเลย · หลายคัน = กดกางรายชื่อ แต่ละคันมีลิงก์ของตัวเอง
-// เรื่องอื่น (บิล ใบเสนอราคา ผู้ใช้รออนุมัติ ฯลฯ) ยังไปหน้าของเรื่องนั้นเหมือนเดิม
+// เรื่องที่เป็นรายใบ (บิล 50 ทวิ ใบเสนอราคา ใบเสร็จไม่ตรง) ทำแบบเดียวกันด้วย docs · เรื่องที่ไม่มีรายการ (ผู้ใช้รออนุมัติ) ไปหน้าของเรื่องนั้น
 function AlertRow({ alert: a }: { alert: OverviewAlert }) {
   const [open, setOpen] = useState(false);
   const items = a.items ?? [];
-  const total = a.itemTotal ?? items.length;
+  const docs = a.docs ?? [];
+  const count = items.length + docs.length;
+  const total = a.itemTotal ?? count;
   const only = total === 1 ? items[0] : undefined;
+  const onlyDoc = total === 1 ? docs[0] : undefined;
   return (
     <li className={`exec-alert exec-alert--${a.severity}`}>
       <span className="exec-alert-chip">
@@ -71,12 +74,17 @@ function AlertRow({ alert: a }: { alert: OverviewAlert }) {
         <strong>{a.title}</strong>
         <div className="sub">{a.detail}</div>
         {only && <div className="sub">{[only.brandName, only.plate, only.chassis, only.customerName].filter(Boolean).join(" · ")}</div>}
+        {onlyDoc && <div className="sub">{[onlyDoc.title, onlyDoc.customerName].filter(Boolean).join(" · ")}</div>}
       </div>
       {only ? (
         <Link href={stuckHref(only)} className="text-button">
           ไปที่คันนี้ →
         </Link>
-      ) : items.length > 0 ? (
+      ) : onlyDoc ? (
+        <Link href={onlyDoc.href} className="text-button">
+          ไปที่รายการนี้ →
+        </Link>
+      ) : count > 0 ? (
         <button type="button" className="text-button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {open ? "ซ่อนรายการ ▴" : `ดู ${total} รายการ ▾`}
         </button>
@@ -85,7 +93,7 @@ function AlertRow({ alert: a }: { alert: OverviewAlert }) {
           ไปจัดการ →
         </Link>
       )}
-      {open && !only && items.length > 0 && <AlertItems items={items} total={total} queueHref={a.href} />}
+      {open && !only && !onlyDoc && count > 0 && <AlertItems items={items} docs={docs} total={total} queueHref={a.href} />}
     </li>
   );
 }
