@@ -345,6 +345,8 @@ export function BillingPage() {
     // ค่าใบเสร็จกรมฯ ของรถเก่าในงานสลับเลข - เก็บแยกในบรรทัดเดียวกัน (ผู้ใช้ 2026-09-28)
     plateSwapId: v.plateSwap?.id ?? null,
     swapReceiptAmount: v.plateSwap?.receiptAmount ?? null,
+    // ใบเสร็จแจ้งย้ายของคันนี้ (ขั้น 2) - ใช้แสดงยอดก่อนออกบิลเท่านั้น backend อ่านจากข้อมูลรถเองตอนออกบิล (ผู้ใช้ 2026-10-08)
+    transferReceiptAmount: v.transferReceiptAmount ?? null,
   }));
   // สรุปคันที่เลือกตามราคาที่ใช้ เช่น "ต่ำกว่า 300 cc + ขอใช้ = 620.00 · 3 คัน" - เห็นคันที่ราคาแปลกได้ทันที
   const priceBreakdown = [
@@ -382,7 +384,12 @@ export function BillingPage() {
   const customerWht = customer ? effectiveWhtRate(customer.terms, issueDateIso || todayIso()) : 0;
   const totals = customer
     ? computeTotals(
-        draftLines.map((l) => ({ receiptAmount: l.receiptAmount ?? 0, serviceFee: l.serviceFee ?? 0, swapReceiptAmount: l.swapReceiptAmount })),
+        draftLines.map((l) => ({
+          receiptAmount: l.receiptAmount ?? 0,
+          serviceFee: l.serviceFee ?? 0,
+          swapReceiptAmount: l.swapReceiptAmount,
+          transferReceiptAmount: l.transferReceiptAmount,
+        })),
         [],
         account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, // บัญชีบุคคลไม่มี VAT (เหมือน backend)
         issueDateIso || todayIso(),
@@ -425,6 +432,7 @@ export function BillingPage() {
             deductionNote: l.deduction ? PLATE_REQUEST_NOTE : null,
             plateSwapId: l.plateSwapId,
             swapReceiptAmount: l.swapReceiptAmount,
+            transferReceiptAmount: l.transferReceiptAmount,
           })),
         }
       : null;
@@ -717,7 +725,19 @@ export function BillingPage() {
                           <span>{plateText(v) || "—"}</span>
                           <span>{v.cc === null ? "—" : v.cc}</span>
                           <span>{v.weight === null ? "—" : v.weight.toLocaleString("en-US")}</span>
-                          <span style={{ textAlign: "right" }}>{receipt === null ? "—" : formatMoney(receipt)}</span>
+                          <span style={{ textAlign: "right" }}>
+                            {receipt === null ? "—" : formatMoney(receipt)}
+                            {/* ใบเสร็จแจ้งย้าย (ขั้น 2) ของคันนี้ - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-08) */}
+                            {v.transferReceiptAmount != null ? (
+                              <span style={{ display: "block", fontSize: 11, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
+                                + แจ้งย้าย {formatMoney(v.transferReceiptAmount)}
+                              </span>
+                            ) : v.transferNotice ? (
+                              <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="รถจดต่างจังหวัดคันนี้ไม่มีใบเสร็จแจ้งย้ายในระบบ - แนบได้ที่หน้าแจ้งย้าย/ตัดบัญชี ก่อนออกบิล">
+                                ไม่มีใบเสร็จแจ้งย้าย
+                              </span>
+                            ) : null}
+                          </span>
                           <span style={{ textAlign: "right" }}>
                             {/* ป้ายขอใช้/ด่วนอยู่หน้าตัวเลข */}
                             {addOnsOf(row).map((a) => (

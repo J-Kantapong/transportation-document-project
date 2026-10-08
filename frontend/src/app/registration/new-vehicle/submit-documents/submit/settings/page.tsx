@@ -7,6 +7,7 @@ import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
 import { ChecksNote } from "@/components/submit-flow/ChecksNote";
 import { CostLines } from "@/components/submit-flow/CostLines";
+import { isSupplierProvince } from "@/lib/supplier-route";
 import { EligibilityNotice } from "@/components/submit-flow/EligibilityNotice";
 import { SubmitDateField } from "@/components/submit-flow/SubmitDateField";
 import {
@@ -52,8 +53,9 @@ export default function SubmitSettingsPage() {
   }
 
   function setAllUrgent(urgent: boolean) {
+    // รถส่งซับจดต่างจังหวัดไม่มีงานด่วน - ปุ่มรวมไม่แตะคันกลุ่มนี้
     updateSettings(
-      selected.map((v) => v.id),
+      selected.filter((v) => !isSupplierProvince(v.registrationProvince)).map((v) => v.id),
       (s) => ({ ...s, options: { ...s.options, urgent } }),
     );
   }
@@ -69,8 +71,9 @@ export default function SubmitSettingsPage() {
     );
   }
 
-  const allUrgent = selected.every((v) => settingsOf(v).options.urgent);
-  const noneUrgent = selected.every((v) => !settingsOf(v).options.urgent);
+  const urgentable = selected.filter((v) => !isSupplierProvince(v.registrationProvince));
+  const allUrgent = urgentable.length > 0 && urgentable.every((v) => settingsOf(v).options.urgent);
+  const noneUrgent = urgentable.every((v) => !settingsOf(v).options.urgent);
 
   return (
     <>
@@ -109,6 +112,7 @@ export default function SubmitSettingsPage() {
             {selected.map((v) => {
               const s = settingsOf(v);
               const isMoto = isMotoBody(v.body);
+              const viaSupplier = isSupplierProvince(v.registrationProvince);
               const state = rowState(v);
               const ownerMissing = isOwnerUnspecified(v, s);
               const needPlate = plateMissing(s);
@@ -247,16 +251,21 @@ export default function SubmitSettingsPage() {
                     </td>
                     <td>
                       {/* ตัวเลือกเสริมแสดงในแถวเลย ไม่มีปุ่ม "เพิ่มเติม" (ผู้ใช้ 2026-09-25) */}
+                      {/* รถส่งซับจดต่างจังหวัดไม่มี "ด่วน" และ "หยุดใช้ย้ายออก" (ผู้ใช้ 2026-10-08) - ค่าจ้างซับคิดตามตารางจังหวัดอย่างเดียว */}
                       <div className="review-checks">
-                        <label className="review-inline-check">
-                          <input
-                            type="checkbox"
-                            checked={s.options.urgent}
-                            onChange={(e) => setOne(v, (cur) => ({ ...cur, options: { ...cur.options, urgent: e.target.checked } }))}
-                          />
-                          ด่วน (+{isMoto ? 50 : 100})
-                        </label>
-                        {isMoto ? (
+                        {viaSupplier ? (
+                          <span className="muted">ส่งซับ - ไม่มีตัวเลือกด่วน</span>
+                        ) : (
+                          <label className="review-inline-check">
+                            <input
+                              type="checkbox"
+                              checked={s.options.urgent}
+                              onChange={(e) => setOne(v, (cur) => ({ ...cur, options: { ...cur.options, urgent: e.target.checked } }))}
+                            />
+                            ด่วน (+{isMoto ? 50 : 100})
+                          </label>
+                        )}
+                        {viaSupplier && isMoto ? null : isMoto ? (
                           <label className="review-inline-check">
                             <input
                               type="checkbox"
@@ -277,7 +286,7 @@ export default function SubmitSettingsPage() {
                             แจ้งย้ายออกต่างจังหวัด (+50)
                           </label>
                         )}
-                        {isMoto && s.options.stopUseRelocateOut && (
+                        {isMoto && !viaSupplier && s.options.stopUseRelocateOut && (
                           <div className="sub" style={{ color: "#c07a1e" }}>
                             * ค่าธรรมเนียมอื่นของรายการนี้ยังไม่มีข้อมูล (ปรับเฉพาะลงขันเป็น 250)
                           </div>

@@ -288,6 +288,9 @@ export interface BillingVehicle {
   otherProvince: boolean; // ขอใช้ = จังหวัดที่จดทะเบียน ≠ จังหวัดเจ้าของรถ
   transferNotice: boolean; // แจ้งย้าย = จดต่างจังหวัด ไม่ใช่กรุงเทพฯ (ต่างจาก otherProvince)
   plateSwap: BillingPlateSwap | null; // รถคันนี้เป็นรถใหม่ของงานสลับเลข (null = ไม่ใช่)
+  // ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย ขั้น 2 (ผู้ใช้ 2026-10-08) - ระบบบวกเข้าค่าธรรมเนียมของบิลเองตอนออกบิล · null = ไม่มี
+  transferReceiptAmount?: number | null;
+  transferReceiptId?: string | null;
   // จับคู่อัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนที่ระบบติ๊กให้
   suggestedAddOnIds: string[];
 }
@@ -323,6 +326,9 @@ export interface InvoiceLine {
   // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount
   plateSwapId: string | null;
   swapReceiptAmount: number | null;
+  // ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย ขั้น 2 (ผู้ใช้ 2026-10-08) - ระบบใส่ตอนออกบิล รวมอยู่ในค่าธรรมเนียมของบิล แก้ที่หน้าแก้บิลไม่ได้
+  // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount + transferReceiptAmount · null/ไม่มี = ไม่มีใบเสร็จแจ้งย้าย
+  transferReceiptAmount?: number | null;
   // ใบยื่นล่าสุดของรถ (อ่านสด ไม่ได้ snapshot) - ใช้เรียงใบแนบ; null = หาใบยื่นไม่เจอ / ข้อมูลจากหน้าจอที่ยังไม่บันทึก
   submitDate?: string | null;
   submitUrgent?: boolean | null;

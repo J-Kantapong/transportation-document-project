@@ -38,6 +38,9 @@ const RULES: Rule[] = [
   // (ไม่มีกฎนี้ กฎ GET ท้ายตารางจะเปิดให้พนักงานทุกกลุ่มอ่านได้)
   { pattern: /^\/api\/hr(\/|$)/, access: ['ADMIN'] },
   { pattern: /^\/api\/portal(\/|$)/, access: ['CUSTOMER'] },
+  // ราคาซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08): พนักงานทุกฝ่ายอ่านได้ แก้ราคา = ADMIN เท่านั้น
+  { pattern: /^\/api\/supplier-rates(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
+  { pattern: /^\/api\/supplier-rates(\/|$)/, access: ['ADMIN'] },
   // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
   // ตั้งเลขเริ่มใบกำกับภาษี (= เปิดใช้ใบกำกับในระบบ) ADMIN เท่านั้น (ผู้ใช้ 2026-09-28)
@@ -67,6 +70,9 @@ const RULES: Rule[] = [
   // ขั้น 2 แจ้งย้าย/ตัดบัญชี: STAFF_MOTO บันทึกได้ด้วย เฉพาะจักรยานยนต์ (ผู้ใช้ 2026-09-24) - service กรองประเภทรถอีกชั้น
   // /correct = แก้/ยกเลิกสถานะคันที่ดำเนินการแล้ว (ต้องมีเหตุผล - ผู้ใช้ 2026-09-27) สิทธิ์เดียวกัน
   { pattern: /^\/api\/vehicles\/[^/]+\/transfer-notice(\/correct)?$/, access: [...ENTRY, 'STAFF_MOTO'] },
+  // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): แนบ/แก้/ถอด = สิทธิ์เดียวกับการบันทึกแจ้งย้าย - อ่านไฟล์ได้ทุกฝ่าย (กฎ GET ด้านล่าง)
+  { pattern: /^\/api\/transfer-notice-receipts(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
+  { pattern: /^\/api\/transfer-notice-receipts(\/|$)/, access: [...ENTRY, 'STAFF_MOTO'] },
   // ขั้น 1-3 + ข้อมูลอ้างอิง: ทุกกลุ่มอ่านได้ เขียนได้เฉพาะ STAFF_ENTRY
   { pattern: /^\/api(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api(\/|$)/, access: ENTRY },

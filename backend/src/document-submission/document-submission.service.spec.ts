@@ -50,6 +50,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     },
     feeMotorcycleBillParam: { findMany: vi.fn().mockResolvedValue([]) },
     feeMotorcycleNoBillParam: { findMany: vi.fn().mockResolvedValue([]) },
+    supplierProvinceRate: { findMany: vi.fn().mockResolvedValue([]) },
     ...overrides,
   } as Record<string, unknown>;
   // interactive transaction: ส่ง prisma ตัวเดิมเป็น tx (เทสต์ที่ส่ง $transaction มาเองใช้ของตัวเอง)

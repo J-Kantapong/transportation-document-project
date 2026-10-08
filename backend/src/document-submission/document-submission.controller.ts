@@ -69,6 +69,15 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.updateReceiptFields(id, body);
   }
 
+  // แก้ค่าจ้างซับของรายการที่ส่งซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08) ต้องมี remark - ดู DocumentSubmissionService.updateSupplierFee
+  @Patch('document-submission/:id/supplier-fee')
+  updateSupplierFee(
+    @Param('id') id: string,
+    @Body() body: { serviceFee?: unknown; channelFee?: unknown; inspectionFee?: unknown; remark?: unknown },
+  ) {
+    return this.documentSubmissionService.updateSupplierFee(id, body);
+  }
+
   // ยกเลิกรายการที่ยังรอใบเสร็จ ให้รถกลับไปยื่นใหม่ได้ ต้องมี remark - ดู DocumentSubmissionService.cancel
   @Post('document-submission/:id/cancel')
   cancel(@Param('id') id: string, @Body() body: { remark?: unknown }) {

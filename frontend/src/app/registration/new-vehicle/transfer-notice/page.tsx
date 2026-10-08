@@ -6,6 +6,11 @@ import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { SupplierRouteHint } from "@/components/SupplierRouteHint";
+import { TransferReceiptAttachButton, TransferReceiptCell } from "@/components/TransferNoticeReceipts";
+
+// งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว (ผู้ใช้ 2026-10-08) - backend บังคับเหมือนกัน
+const receiptMissing = (v: TransferNoticeVehicle) => !!v.receiptRequired && !v.transferReceipt;
 
 interface RowState {
   done: boolean;
@@ -41,6 +46,7 @@ const COMPLETED_DETAIL_FIELDS: Array<[string, (v: TransferNoticeVehicle) => stri
   ["สถานะ", (v) => v.status ?? ""],
   ["วันที่เสร็จ", (v) => (v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "")],
   ["ค่าใช้จ่าย", (v) => (v.transferCost ? `${v.transferCost} บาท` : "")],
+  ["ใบเสร็จแจ้งย้าย (Bill)", (v) => (v.transferBillCost ? `${v.transferBillCost} บาท` : "")],
 ];
 
 // รายการที่ดำเนินการแล้วโหลดทีละเท่านี้ (โหลดใหม่หลังแก้ = ได้เท่าที่เปิดดูอยู่ สูงสุด 1,000 - ตรงกับ backend)
@@ -84,6 +90,9 @@ function PendingVehicleTable({
   bulkSaving,
   highlightDate,
   canEdit,
+  picked,
+  onPick,
+  onReceiptChanged,
 }: {
   vehicles: TransferNoticeVehicle[];
   rows: Record<string, RowState>;
@@ -94,8 +103,13 @@ function PendingVehicleTable({
   bulkSaving: boolean;
   highlightDate?: string;
   canEdit: (v: TransferNoticeVehicle) => boolean;
+  // คันที่เลือกไว้เพื่อแนบใบเสร็จแจ้งย้ายใบเดียวกัน
+  picked: Set<string>;
+  onPick: (id: string, picked: boolean) => void;
+  onReceiptChanged: () => void;
 }) {
-  const editable = vehicles.filter(canEdit);
+  // "เลือกทั้งหมด" ติ๊กเฉพาะคันที่ติ๊กดำเนินการแล้วได้ (งานแจ้งย้ายต้องแนบใบเสร็จก่อน)
+  const editable = vehicles.filter((v) => canEdit(v) && !receiptMissing(v));
   const allSelected = editable.length > 0 && editable.every((v) => rows[v.id]?.done);
 
   return (
@@ -110,6 +124,7 @@ function PendingVehicleTable({
             <th>ประเภทรถ</th>
             <th>จังหวัดที่จดทะเบียน</th>
             <th>สถานะ</th>
+            <th>ใบเสร็จแจ้งย้าย</th>
             <th>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "inherit" }}>
                 <input type="checkbox" checked={allSelected} disabled={!editable.length} onChange={(e) => onSelectAll(e.target.checked)} />
@@ -135,12 +150,24 @@ function PendingVehicleTable({
                 <td>{v.brandName}</td>
                 <td>{v.body || "—"}</td>
                 <td>{v.registrationProvince || "—"}</td>
-                <td>{v.status || "—"}</td>
+                <td>
+                  {v.status || "—"} <SupplierRouteHint province={v.registrationProvince} />
+                </td>
+                <td>
+                  <TransferReceiptCell
+                    vehicle={v}
+                    canEdit={!readOnly}
+                    picked={picked.has(v.id)}
+                    onPick={(value) => onPick(v.id, value)}
+                    onChanged={onReceiptChanged}
+                  />
+                </td>
                 <td>
                   <input
                     type="checkbox"
                     checked={row.done}
-                    disabled={readOnly}
+                    disabled={readOnly || receiptMissing(v)}
+                    title={receiptMissing(v) ? "แนบใบเสร็จแจ้งย้ายก่อนจึงติ๊กดำเนินการแล้วได้" : undefined}
                     onChange={(e) => onDoneChange(v.id, e.target.checked)}
                     aria-label="ดำเนินการแล้ว"
                   />
@@ -166,6 +193,7 @@ function PendingVehicleTable({
                     style={{ width: 90 }}
                   />
                   {v.suggestedCost && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {v.suggestedCost} บาท</div>}
+                  {v.receiptRequired && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>เฉพาะ No bill (ไม่รวมใบเสร็จ)</div>}
                 </td>
                 <td>
                   {readOnly ? (
@@ -203,6 +231,20 @@ export default function TransferNoticePage() {
   const [pendingError, setPendingError] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  // คันที่เลือกไว้เพื่อแนบใบเสร็จแจ้งย้ายใบเดียวกัน (ผู้ใช้ 2026-10-08: ใบเสร็จ 1 ใบออกรวมหลายคันได้)
+  const [receiptPicked, setReceiptPicked] = useState<Set<string>>(new Set());
+  // แนบ/แก้/ถอดใบเสร็จแล้วโหลดทั้งสองตาราง (คันที่ดำเนินการแล้วก็แนบย้อนหลังได้)
+  function reloadAfterReceipt() {
+    void Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
+  }
+  function pickForReceipt(id: string, value: boolean) {
+    setReceiptPicked((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
   // ตัดบัญชีแล้ว: เรียงตามทำเสร็จล่าสุด ไม่กรองตามวันที่รับงาน - ทีละ 100 คัน + ค้นหาทั้งฐานข้อมูล (ผู้ใช้ 2026-09-27:
   // เดิมแสดงแค่ 100 คันล่าสุด คันที่เก่ากว่านั้นหาไม่เจอจึงแก้ไม่ได้)
@@ -290,9 +332,9 @@ export default function TransferNoticePage() {
 
   useEffect(() => {
     // Standard fetch-on-mount; loadPending()/loadCompleted() set the loading flag before their first await.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPending();
     loadCompleted();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRoles(getCachedUser()?.roles ?? []);
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -320,7 +362,7 @@ export default function TransferNoticePage() {
     const today = isoToDisplayDate(todayIso());
     setRows((prev) => {
       const next = { ...prev };
-      for (const v of vehicles.filter(canEdit)) {
+      for (const v of vehicles.filter((x) => canEdit(x) && !receiptMissing(x))) {
         const row = next[v.id];
         next[v.id] = { ...row, done, completedDateText: done && !row.completedDateText ? today : row.completedDateText };
       }
@@ -517,6 +559,14 @@ export default function TransferNoticePage() {
                 {bulkMessage.text}
               </span>
             )}
+            <TransferReceiptAttachButton
+              picked={[...pendingVehicles, ...completedVehicles].filter((v) => receiptPicked.has(v.id) && receiptMissing(v) && canEdit(v))}
+              onDone={(message) => {
+                setReceiptPicked(new Set());
+                setBulkMessage({ text: message });
+                reloadAfterReceipt();
+              }}
+            />
             <button className="primary" disabled={bulkSaving || !pendingVehicles.some(canEdit)} onClick={() => handleSaveAll(pendingVehicles)}>
               บันทึกทั้งหมด
             </button>
@@ -545,6 +595,9 @@ export default function TransferNoticePage() {
             bulkSaving={bulkSaving}
             highlightDate={dateIso}
             canEdit={canEdit}
+            picked={receiptPicked}
+            onPick={pickForReceipt}
+            onReceiptChanged={reloadAfterReceipt}
           />
         )}
       </div>
@@ -595,6 +648,9 @@ export default function TransferNoticePage() {
             onSelectAll={(done) => handleSelectAll(byDateVehicles, done)}
             bulkSaving={bulkSaving}
             canEdit={canEdit}
+            picked={receiptPicked}
+            onPick={pickForReceipt}
+            onReceiptChanged={reloadAfterReceipt}
           />
         )}
       </div>
@@ -652,6 +708,7 @@ export default function TransferNoticePage() {
                   <th>สถานะ</th>
                   <th>วันที่เสร็จ</th>
                   <th>ค่าใช้จ่าย</th>
+                  <th>ใบเสร็จแจ้งย้าย</th>
                   <th></th>
                 </tr>
               </thead>
@@ -662,9 +719,21 @@ export default function TransferNoticePage() {
                     <td>{v.customerName}</td>
                     <td>{v.chassis}</td>
                     <td>{v.brandName}</td>
-                    <td>{v.status || "—"}</td>
+                    <td>
+                      {v.status || "—"} <SupplierRouteHint province={v.registrationProvince} />
+                    </td>
                     <td>{v.transferCompletedDate ? isoToDisplayDate(v.transferCompletedDate) : "—"}</td>
                     <td>{v.transferCost ? `${v.transferCost} บาท` : "—"}</td>
+                    <td>
+                      {/* คันที่ทำแจ้งย้ายไปก่อนมีช่องนี้ แนบใบเสร็จย้อนหลังได้ (ก่อนออกบิล) */}
+                      <TransferReceiptCell
+                        vehicle={v}
+                        canEdit={canEdit(v)}
+                        picked={receiptPicked.has(v.id)}
+                        onPick={(value) => pickForReceipt(v.id, value)}
+                        onChanged={reloadAfterReceipt}
+                      />
+                    </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button className="text-button" onClick={() => openDetail(v)}>
                         ดูข้อมูล

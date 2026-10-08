@@ -70,6 +70,7 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/hr/wht")) return [{ label: "งานบัญชี" }, { label: "Withholding Tax", href: "/hr/wht" }];
   if (within(pathname, "/hr/suppliers")) return [{ label: "งานบัญชี" }, { label: "Suppliers", href: "/hr/suppliers" }];
   if (within(pathname, "/admin/users")) return [{ label: "ผู้ดูแลระบบ" }, { label: "จัดการผู้ใช้", href: "/admin/users" }];
+  if (within(pathname, "/admin/supplier-rates")) return [{ label: "ผู้ดูแลระบบ" }, { label: "ราคาซับจดต่างจังหวัด", href: "/admin/supplier-rates" }];
   if (within(pathname, "/portal")) return [{ label: "สถานะรถของคุณ", href: "/portal" }];
   const category = REGISTRATION_CATEGORIES.find((c) => within(pathname, c.href));
   if (!category) return [];
@@ -258,6 +259,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <>
                 <div className="label">ผู้ดูแลระบบ</div>
                 <NavLink href="/admin/users" icon="users" label="จัดการผู้ใช้" pathname={pathname} onClick={close} />
+                <NavLink href="/admin/supplier-rates" icon="move" label="ราคาซับจดต่างจังหวัด" pathname={pathname} onClick={close} />
               </>
             )}
           </>

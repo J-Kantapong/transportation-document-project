@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { api, ApiError, type SubmitCandidate } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
+import { isSupplierProvince } from "@/lib/supplier-route";
 import { FOCUS_PARAM } from "@/lib/vehicle-focus";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
 import { SubmitDateField } from "@/components/submit-flow/SubmitDateField";
@@ -240,7 +241,8 @@ function SubmitPickStep() {
         >
           <SubmitDateField />
           <span className="muted" style={{ fontSize: 13 }}>
-            คิวนี้คือรถที่ยื่นได้ ณ วันที่ยื่นนี้ (ตรวจผ่านไม่เกิน 90 วัน) - ยื่นใหม่ด้วยวันที่ยื่นเดิม เช่น หลังยกเลิก ให้เปลี่ยนวันที่ตรงนี้
+            คิวนี้คือรถที่ยื่นได้ ณ วันที่ยื่นนี้ (ตรวจผ่านไม่เกิน 90 วัน) และรถจดต่างจังหวัดที่แจ้งย้ายแล้ว รอส่งงานให้ซับ - ยื่นใหม่ด้วยวันที่ยื่นเดิม
+            เช่น หลังยกเลิก ให้เปลี่ยนวันที่ตรงนี้
           </span>
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -382,7 +384,7 @@ function SubmitPickStep() {
                 </button>
               </>
             ) : rows.length === 0 ? (
-              "ยังไม่มีรถที่พร้อมยื่น ณ วันที่ยื่นนี้ (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านไม่เกิน 90 วัน)"
+              "ยังไม่มีรถที่พร้อมยื่น ณ วันที่ยื่นนี้ (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านไม่เกิน 90 วัน - รถจดต่างจังหวัดที่ส่งซับไม่ต้องตรวจรถ)"
             ) : (
               "ไม่มีรถตรงกับตัวกรอง"
             )}
@@ -422,7 +424,15 @@ function SubmitPickStep() {
                         onChange={() => toggle(v)}
                       />
                     </td>
-                    <td>{v.inspectionResultDate ? isoToDisplayDate(v.inspectionResultDate) : "—"}</td>
+                    <td>
+                      {v.inspectionResultDate ? (
+                        isoToDisplayDate(v.inspectionResultDate)
+                      ) : isSupplierProvince(v.registrationProvince) ? (
+                        <span className="badge warn">ซับตรวจ</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td>{v.customerName}</td>
                     <td>{v.chassis}</td>
                     <td>{v.brandName}</td>

@@ -175,7 +175,13 @@ model Vehicle {
   // Step 2: แจ้งย้าย/ตัดบัญชี confirmation (สถานะคำนวณจาก registrationProvince เอง ไม่ต้องเก็บ)
   transferDone          Boolean   @default(false) // ลูกน้องติ๊กว่าดำเนินการแจ้งย้าย/ตัดบัญชีเรียบร้อยแล้ว
   transferCompletedDate DateTime? // วันที่ดำเนินการเสร็จ
-  transferCost          Decimal?  @db.Decimal(10, 2) // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate)
+  // ค่าใช้จ่ายจริง (ค่าเริ่มต้นมาจากตาราง FeeDeregistration/FeeRelocate) - คันที่มีใบเสร็จแจ้งย้าย (transferReceiptId) ช่องนี้คือ
+  // ส่วน No bill อย่างเดียว ส่วน Bill อยู่ใน transferBillCost · คันเก่าที่ไม่มีใบเสร็จ = ยอดรวมเหมือนเดิม
+  transferCost          Decimal?  @db.Decimal(10, 2)
+  // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): รถจดต่างจังหวัดต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว ใบเสร็จ 1 ใบผูกได้หลายคัน
+  // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (หารเท่ากัน หรือแก้รายคันได้ รวมแล้วเท่ายอดใบ) - ขึ้นใบวางบิลรวมในค่าธรรมเนียมราชการ
+  transferReceiptId     String?
+  transferBillCost      Decimal?  @db.Decimal(10, 2)
 
   // Step 3: ตรวจรถ - รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน (ส่งตรวจ -> ผลตรวจ) โดย inspectionRound บอกว่า
   // ข้อมูลส่งตรวจ/ผลตรวจชุดปัจจุบันเป็นของรอบไหน ผลตรวจผ่านมีอายุ 90 วัน: ครบ 90 วันจาก inspectionResultDate
@@ -246,6 +252,7 @@ model Vehicle {
   owner               VehicleOwner?         @relation(fields: [ownerId], references: [id])
   platePhoto          PlatePhoto?           @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
   bookPhoto           BookPhoto?            @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
+  transferReceipt     TransferNoticeReceipt? @relation(fields: [transferReceiptId], references: [id], onDelete: SetNull)
   invoiceLines        InvoiceLine[]
   paymentLines        CustomerPaymentLine[]
   cases               Case[]
@@ -261,6 +268,24 @@ model Vehicle {
   @@index([ownerId])
   @@index([chassis])
   @@index([deletedAt])
+  @@index([transferReceiptId])
+}
+
+// ใบเสร็จแจ้งย้ายของรถจดใหม่ (ขั้น 2, ผู้ใช้ 2026-10-08) - ไฟล์อยู่ใน storage เดียวกับรูปใบเสร็จ (key ขึ้นต้น transfer-notice/)
+// 1 ใบผูกได้หลายคัน (Vehicle.transferReceiptId) ยอดรวมของใบ = totalAmount = ผลรวม Vehicle.transferBillCost ของคันที่ผูก
+// contentHash กันอัปโหลดไฟล์เดิมซ้ำ - ถอดคันสุดท้ายออก = ลบแถวและไฟล์ (hash ว่าง แนบใหม่ได้)
+model TransferNoticeReceipt {
+  id           String   @id @default(cuid())
+  storageKey   String   @unique
+  mimeType     String
+  sizeBytes    Int
+  originalName String?
+  contentHash  String?  @unique
+  totalAmount  Decimal  @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  createdById  String?
+
+  vehicles Vehicle[]
 }
 
 // แก้ไขข้อมูลรถจดใหม่หลังบันทึกแล้ว ต้องระบุเหตุผล (remark) ทุกครั้ง - บังคับที่ระดับ service
@@ -379,6 +404,24 @@ model FeeRelocate {
   billAmount   Decimal @default(5) @db.Decimal(10, 2) // ค่าแจ้งย้าย (Bill, คงที่ 5 บาท/คัน)
 
   @@unique([vehicleType, brand])
+}
+
+// ราคาซับ (Supplier) จดทะเบียนต่างจังหวัด ต่อจังหวัด (ผู้ใช้ 2026-10-08) - ซับคิดตามตารางนี้เสมอ แต่ขึ้นราคาได้ จึงแก้ได้จากหน้าจอ
+// (ADMIN, เหตุผลบังคับ, ประวัติใน AuditLog entity SupplierProvinceRate) รายการยื่นแต่ละคันเก็บราคา ณ วันที่ส่งซับไว้เอง
+// (DocumentSubmission.noBillItems) แก้ตารางทีหลังไม่กระทบรถที่ส่งไปแล้ว · accepts = false คือซับไม่รับจดจังหวัดนี้
+// plateSwapFee / plateSwapNote = ราคาสลับป้ายของซับ เก็บไว้อ้างอิงเท่านั้น ยังไม่มีหน้าจอไหนใช้คิดเงิน
+model SupplierProvinceRate {
+  id            String   @id @default(cuid())
+  province      String   @unique
+  accepts       Boolean  @default(true)
+  serviceFee    Decimal? @db.Decimal(10, 2) // ค่าดำเนินการ
+  channelFee    Decimal? @db.Decimal(10, 2) // ค่าช่อง
+  inspectionFee Decimal? @db.Decimal(10, 2) // นำรถเข้าตรวจสภาพ
+  plateSwapFee  Decimal? @db.Decimal(10, 2) // สลับป้าย (อ้างอิง)
+  plateSwapNote String? // เช่น "จดพร้อมสลับ", "ไม่รับ"
+  note          String?
+  updatedAt     DateTime @updatedAt
+  updatedById   String?
 }
 
 model FeeInspectionBangkok {
@@ -614,6 +657,10 @@ model DocumentSubmission {
   relocateAddon       Boolean   @default(false) // แจ้งย้ายออกต่างจังหวัดพร้อมกัน - รถยนต์เท่านั้น
   stopUseRelocateOut  Boolean   @default(false) // จดใหม่ หยุดใช้ย้ายออก (ลงขัน 250 บาท) - มอเตอร์ไซค์เท่านั้น
   urgent              Boolean   @default(false)
+  // ส่งซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08, ดู supplier-route.ts): รายการนี้ = วันที่ส่งงานให้ซับ ไม่ใช่ออฟฟิศยื่นเอง
+  // noBillItems = ค่าจ้างซับตามตารางจังหวัด (ค่าดำเนินการ/ค่าช่อง/นำรถเข้าตรวจสภาพ) แก้ได้ตอนรับใบเสร็จถ้าซับคิดต่างจากตาราง
+  // billItems = ประมาณการค่าธรรมเนียมราชการที่ซับจ่ายแทน ใช้เทียบกับใบเสร็จขนส่งที่ซับส่งกลับมา
+  viaSupplier         Boolean   @default(false)
   billItems           Json // snapshot [{label, amount}] ไม่รวมภาษี
   noBillItems         Json
   billFeeTotal        Decimal   @db.Decimal(12, 2)
@@ -1492,6 +1539,10 @@ model InvoiceLine {
   // ยอดค่าธรรมเนียมบนบิล = receiptAmount + swapReceiptAmount (คิดใน computeInvoiceTotals)
   plateSwapId       String?
   swapReceiptAmount Decimal? @db.Decimal(12, 2)
+
+  // ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย ขั้น 2 (ผู้ใช้ 2026-10-08, Vehicle.transferBillCost ตอนออกบิล) - รวมในค่าธรรมเนียมของบิล
+  // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount + transferReceiptAmount · null = บิลก่อนมีช่องนี้ / รถไม่มีใบเสร็จแจ้งย้าย
+  transferReceiptAmount Decimal? @db.Decimal(12, 2)
 
   invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   vehicle   Vehicle    @relation(fields: [vehicleId], references: [id])

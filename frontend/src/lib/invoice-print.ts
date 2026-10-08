@@ -127,8 +127,9 @@ function attachmentTables(inv: PrintableInvoice): AttachmentTable[] {
       refHead: "เลขที่ใบเสร็จ",
       rows: lines.map((l) => ({
         cells: [escapeHtml(l.brandName.toUpperCase()), escapeHtml(l.chassis), escapeHtml(l.plateText || "—"), escapeHtml(l.receiptNo || "—")],
-        // แถวรายคันพิมพ์ค่าใบเสร็จของคันนั้นอย่างเดียว (เหมือนเดิม) - ค่าใบเสร็จของรถเก่าในงานสลับเลขอยู่ในแถวรวมผ่าน feeCars
-        fee: l.receiptAmount,
+        // แถวรายคัน = ค่าใบเสร็จจดทะเบียน + ใบเสร็จแจ้งย้ายของคันนั้น (ผู้ใช้ 2026-10-08: รวมกัน ไม่เพิ่มคอลัมน์)
+        // ค่าใบเสร็จของรถเก่าในงานสลับเลขยังอยู่ในแถวรวมผ่าน feeCars เหมือนเดิม
+        fee: round2(l.receiptAmount + (l.transferReceiptAmount ?? 0)),
         service: l.serviceFee,
       })),
       fee: feeCars,

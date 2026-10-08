@@ -134,6 +134,29 @@ describe('waitsFor - ขั้นที่รถค้างอยู่', () =>
   });
 });
 
+// ผู้ใช้ 2026-10-08: จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ ส่งซับจด - ข้ามคิวตรวจรถ
+describe('waitsFor - ส่งซับจดต่างจังหวัด', () => {
+  const done = { transferDone: true, transferCompletedDate: d('2026-09-18') };
+
+  it('แจ้งย้ายเสร็จแล้วรอส่งงานให้ซับ (ขั้นยื่นเอกสาร) ไม่เข้าคิวตรวจรถ', () => {
+    const [w] = waitsFor(vehicle({ ...done, registrationProvince: 'เชียงใหม่' }), TODAY);
+    expect(w).toMatchObject({ stage: 'submit', since: '2026-09-18' });
+    expect(w.reason).toContain('ซับจดเชียงใหม่');
+    expect(stages(vehicle({ registrationProvince: 'เชียงใหม่' }))).toEqual(['transfer']);
+  });
+
+  it('สมุทรปราการ/กรุงเทพฯ ออฟฟิศจดเอง ยังเข้าคิวตรวจรถ', () => {
+    expect(stages(vehicle({ ...done, registrationProvince: 'สมุทรปราการ' }))).toEqual(['inspectSend']);
+    expect(stages(vehicle({ ...done, registrationProvince: 'กรุงเทพมหานคร' }))).toEqual(['inspectSend']);
+  });
+
+  it('ส่งซับแล้วรอใบเสร็จ บอกว่ารอซับ', () => {
+    const [w] = waitsFor(vehicle({ ...done, registrationProvince: 'เชียงใหม่', latestSubmission: sub('PENDING') }), TODAY);
+    expect(w.stage).toBe('receipt');
+    expect(w.reason).toContain('รอซับส่งใบเสร็จกลับ');
+  });
+});
+
 describe('summarizeBacklog', () => {
   it('นับแยกรถยนต์/จักรยานยนต์ อายุงานค้าง และงานที่เกินกำหนด', () => {
     const b = summarizeBacklog(

@@ -208,7 +208,7 @@ export class OverviewService {
       }),
       this.prisma.vehicle.findMany({
         where: { ...live, transferDone: true, OR: spendWindows.map((w) => ({ transferCompletedDate: w })) },
-        select: { transferCompletedDate: true, transferCost: true, body: true },
+        select: { transferCompletedDate: true, transferCost: true, transferBillCost: true, body: true },
       }),
       this.prisma.vehicle.findMany({
         where: { ...live, OR: spendWindows.map((w) => ({ inspectionSentDate: w })) },
@@ -273,6 +273,7 @@ export class OverviewService {
           body: true,
           plateCategory: true,
           plateNumber: true,
+          registrationProvince: true,
           transferDone: true,
           transferCompletedDate: true,
           inspectionSentDate: true,
@@ -505,7 +506,7 @@ export class OverviewService {
       if (inSpendWindow(toDate(monthEnd))) events.push({ date: monthEnd, category: 'yamaha', kind: null, bill: 0, noBill: num(y.noBillFee), other: 0 });
     }
     for (const t of transfers) {
-      events.push({ date: isoOf(t.transferCompletedDate!), category: 'transfer', kind: vehicleKindOf(t.body), bill: 0, noBill: 0, other: num(t.transferCost) });
+      events.push({ date: isoOf(t.transferCompletedDate!), category: 'transfer', kind: vehicleKindOf(t.body), bill: num(t.transferBillCost), noBill: 0, other: num(t.transferCost) });
     }
     for (const v of inspections) {
       // ทราบผลแล้ว ใช้ราคา ณ วันทราบผล (ตรวจไม่ผ่านเป็น 0 = ได้เงินคืน) ยังไม่ทราบผลใช้ราคาตอนส่งตรวจ

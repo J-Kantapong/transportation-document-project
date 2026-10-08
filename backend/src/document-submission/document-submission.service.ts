@@ -14,6 +14,7 @@ import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEnt
 import type { GovernmentTaxOwnerInput, GovernmentTaxRuleSet } from '../tax/government-tax-calculator.js';
 import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason, OPEN_PLATE_SWAP_WHERE } from './submission-eligibility.js';
 import { lockSubmissions } from './submission-lock.js';
+import { SUPPLIER_FEE_KEYS, SUPPLIER_FEE_LABELS, withoutOfficeOnlyOptions } from './supplier-route.js';
 import {
   assertPlateFormat,
   assertPlateNumberProvided,
@@ -159,13 +160,27 @@ export class DocumentSubmissionService {
   ) {}
 
   private async loadRuleSet(): Promise<DocumentFeeRuleSet> {
-    const [carBill, carNoBill, motoBill, motoNoBill] = await Promise.all([
+    const [carBill, carNoBill, motoBill, motoNoBill, supplierRates] = await Promise.all([
       this.prisma.feeCarBillParam.findMany(),
       this.prisma.feeCarNoBillParam.findMany(),
       this.prisma.feeMotorcycleBillParam.findMany(),
       this.prisma.feeMotorcycleNoBillParam.findMany(),
+      this.prisma.supplierProvinceRate.findMany(),
     ]);
-    return { carBill: toRows(carBill), carNoBill: toRows(carNoBill), motoBill: toRows(motoBill), motoNoBill: toRows(motoNoBill) };
+    const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    return {
+      carBill: toRows(carBill),
+      carNoBill: toRows(carNoBill),
+      motoBill: toRows(motoBill),
+      motoNoBill: toRows(motoNoBill),
+      supplierRates: supplierRates.map((r) => ({
+        province: r.province,
+        accepts: r.accepts,
+        serviceFee: num(r.serviceFee),
+        channelFee: num(r.channelFee),
+        inspectionFee: num(r.inspectionFee),
+      })),
+    };
   }
 
   // ฐานข้อมูลมีตารางงานสลับเลขแล้วหรือยัง - ยังไม่ได้รันไมเกรชัน (P2021) ถือว่าไม่มีงานสลับเลข
@@ -191,6 +206,8 @@ export class DocumentSubmissionService {
   private async assertEligible(
     vehicle: {
       id: string;
+      registrationProvince: string | null;
+      transferCompletedDate: Date | null;
       transferDone: boolean;
       inspectionSentDate: Date | null;
       inspectionResult: string | null;
@@ -236,7 +253,7 @@ export class DocumentSubmissionService {
       if (!vehicle) return { vehicleId: entry?.vehicleId, error: 'ไม่พบข้อมูลรถ' };
       if (!isVehicleInScope(vehicle.body, scope)) return { vehicleId: vehicle.id, error: scopeErrorMessage(scope) };
       try {
-        const options = parseDocumentSubmissionOptions(entry, isMotorcycle(vehicle.body));
+        const options = withoutOfficeOnlyOptions(parseDocumentSubmissionOptions(entry, isMotorcycle(vehicle.body)), vehicle.registrationProvince);
         const fee = computeDocumentFees(
           { body: vehicle.body, registrationProvince: vehicle.registrationProvince, ownerProvince: vehicle.ownerProvince },
           options,
@@ -299,7 +316,7 @@ export class DocumentSubmissionService {
         if (!vehicle) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
         assertVehicleInScope(vehicle.body); // STAFF_CAR / STAFF_MOTO ยื่นได้เฉพาะประเภทรถของตัวเอง
         await this.assertEligible(vehicle, submitDate, checkPlateSwap, tx);
-        const options = parseDocumentSubmissionOptions(dto, isMotorcycle(vehicle.body));
+        const options = withoutOfficeOnlyOptions(parseDocumentSubmissionOptions(dto, isMotorcycle(vehicle.body)), vehicle.registrationProvince);
         assertPlateNumberProvided(options.plateNumberOption, plateCategory, plateNumber);
         const fees = computeDocumentFees(
           { body: vehicle.body, registrationProvince: vehicle.registrationProvince, ownerProvince: vehicle.ownerProvince },
@@ -345,6 +362,7 @@ export class DocumentSubmissionService {
             relocateAddon: options.relocateAddon,
             stopUseRelocateOut: options.stopUseRelocateOut,
             urgent: options.urgent,
+            viaSupplier: fees.viaSupplier,
             billItems: JSON.parse(JSON.stringify(fees.billItems)),
             noBillItems: JSON.parse(JSON.stringify(fees.noBillItems)),
             billFeeTotal: fees.billTotal,
@@ -661,6 +679,52 @@ export class DocumentSubmissionService {
       }),
     ]);
     return updated;
+  }
+
+  // แก้ค่าจ้างซับของรายการที่ส่งซับจด (ผู้ใช้ 2026-10-08): ซับคิดตามตารางราคาเสมอ แต่อาจขึ้นราคา - ตอนรับใบเสร็จกลับมาถ้ายอดจริง
+  // ต่างจากตาราง พนักงานแก้รายคันได้ ต้องมีเหตุผล เก็บค่าเดิม/ค่าใหม่ลง VehicleEditLog (ผู้ดูแลระบบเห็นแล้วไปแก้ตารางราคา)
+  // แก้ได้ทั้งตอนรอใบเสร็จและหลังได้ใบเสร็จ ไม่แตะสถานะ/ค่าธรรมเนียมราชการ - ส่งมาครบทั้ง 3 ช่อง (จำนวนเงินตั้งแต่ 0)
+  async updateSupplierFee(submissionId: string, body: { serviceFee?: unknown; channelFee?: unknown; inspectionFee?: unknown; remark?: unknown } = {}) {
+    const input = body ?? {};
+    const remark = typeof input.remark === 'string' ? input.remark.trim() : '';
+    if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ค่าจ้างซับ' });
+    const items = SUPPLIER_FEE_KEYS.map((key) => {
+      const raw = input[key];
+      const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : '';
+      if (!/^\d{1,7}(\.\d{1,2})?$/.test(text)) {
+        throw new BadRequestException({ error: `${SUPPLIER_FEE_LABELS[key]}ต้องเป็นจำนวนเงินตั้งแต่ 0 (ทศนิยมไม่เกิน 2 ตำแหน่ง)` });
+      }
+      return { label: SUPPLIER_FEE_LABELS[key], amount: Number(text) };
+    });
+    const noBillTotal = Math.round(items.reduce((sum, it) => sum + it.amount, 0) * 100) / 100;
+
+    return this.prisma.$transaction(async (tx) => {
+      await lockSubmissions(tx, [submissionId]);
+      const submission = await tx.documentSubmission.findUnique({
+        where: { id: submissionId },
+        select: { status: true, viaSupplier: true, vehicleId: true, noBillItems: true, noBillTotal: true, vehicle: { select: { body: true } } },
+      });
+      if (!submission) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+      assertVehicleInScope(submission.vehicle.body);
+      if (!submission.viaSupplier) throw new BadRequestException({ error: 'รายการนี้ไม่ได้ส่งซับจด - ไม่มีค่าจ้างซับให้แก้' });
+      if (submission.status === 'FAILED') throw new BadRequestException({ error: 'รายการนี้ยื่นไม่สำเร็จแล้ว - แก้ค่าจ้างซับไม่ได้' });
+      const before = describeItems(submission.noBillItems);
+      const after = describeItems(items);
+      if (before === after) throw new BadRequestException({ error: 'ค่าจ้างซับไม่ได้เปลี่ยน' });
+      const updated = await tx.documentSubmission.update({
+        where: { id: submissionId },
+        data: { noBillItems: JSON.parse(JSON.stringify(items)), noBillTotal },
+      });
+      await tx.vehicleEditLog.create({
+        data: {
+          vehicleId: submission.vehicleId,
+          remark,
+          changes: JSON.stringify({ 'submission.supplierFee': { from: before, to: after } }),
+          editedById: currentUser()?.id ?? null,
+        },
+      });
+      return { submission: updated };
+    });
   }
 
   // แก้ข้อมูลใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ผู้ใช้ 2026-09-27 เลือกแบบ ก): ทะเบียน (เขียนลง Vehicle) เลขที่ใบเสร็จ ยอด

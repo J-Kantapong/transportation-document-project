@@ -11,6 +11,8 @@ import { DeliveryModule } from './delivery/delivery.module.js';
 import { DocumentSubmissionModule } from './document-submission/document-submission.module.js';
 import { HrModule } from './hr/hr.module.js';
 import { FinanceCompaniesModule } from './finance-companies/finance-companies.module.js';
+import { SupplierRatesModule } from './supplier-rates/supplier-rates.module.js';
+import { TransferNoticeReceiptsModule } from './transfer-notice-receipts/transfer-notice-receipts.module.js';
 import { OverviewModule } from './overview/overview.module.js';
 import { ActivityModule } from './activity/activity.module.js';
 import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
@@ -40,6 +42,8 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     CustomersModule,
     BrandsModule,
     FinanceCompaniesModule,
+    SupplierRatesModule,
+    TransferNoticeReceiptsModule,
     TaxModule,
     TaxRenewalModule,
     VehicleOwnersModule,

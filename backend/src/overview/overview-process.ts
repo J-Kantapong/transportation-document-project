@@ -7,6 +7,7 @@
 
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
 import { INSPECTION_VALID_DAYS } from '../document-submission/submission-eligibility.js';
+import { isSupplierProvince } from '../document-submission/supplier-route.js';
 import { PLATE_COPY_EXPECTED_DAYS } from '../plate-copy/plate-copy-fee.js';
 import { addDays, daysBetween, isoOf } from './overview-calculator.js';
 
@@ -62,6 +63,8 @@ export interface OpenVehicle {
   id: string;
   date: Date;
   body: string | null;
+  // จังหวัดที่จด - จังหวัดที่ส่งซับจด (supplier-route.ts) ข้ามคิวตรวจรถ: แจ้งย้ายเสร็จแล้วรอส่งงานให้ซับที่ขั้นยื่นเอกสาร
+  registrationProvince?: string | null;
   transferDone: boolean;
   transferCompletedDate: Date | null;
   inspectionSentDate: Date | null;
@@ -137,7 +140,12 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
   if (sub?.status === 'PENDING') {
     // ค้างจากใบก่อนแล้วมีรูปใบเสร็จแนบเข้ามาทีหลัง = ได้ใบเสร็จแล้ว รอบันทึกใบยื่น ไม่ต้องติดธง (พบ 2026-09-27)
     const unknown = sub.receiptCarriedAt !== null && !sub._count?.receipts;
-    waits.push(wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null]));
+    waits.push(
+      wait('receipt', iso(sub.submitDate), unknown ? ['RECEIPT_UNKNOWN'] : [], [
+        isSupplierProvince(v.registrationProvince) ? `ส่งซับจด${v.registrationProvince} - รอซับส่งใบเสร็จกลับ` : null,
+        unknown ? 'ตรวจใบยื่นแล้วยังไม่ได้ใบเสร็จ ยังไม่ทราบสาเหตุ' : null,
+      ]),
+    );
   } else if (sub?.status === 'RECEIPT_RECEIVED') {
     // รายการก่อนมีช่องวันที่ในใบเสร็จ (ยังไม่ backfill) ใช้วันที่รับใบเสร็จ แล้วค่อยวันที่ยื่น
     const receiptDate = iso(sub.receiptDate ?? sub.receiptReceivedDate ?? sub.submitDate);
@@ -163,6 +171,16 @@ function beforeSubmission(v: OpenVehicle, today: string): Wait[] {
   const failReason = failed ? `ยื่นไม่สำเร็จ${v.latestSubmission?.failRemark ? `: ${v.latestSubmission.failRemark}` : ''}` : null;
 
   if (!v.transferDone) return [wait('transfer', iso(v.date))];
+  if (isSupplierProvince(v.registrationProvince)) {
+    // ส่งซับจด (ผู้ใช้ 2026-10-08): ไม่ผ่านคิวตรวจรถของออฟฟิศ - รอส่งงานให้ซับ นับจากวันที่แจ้งย้ายเสร็จ
+    const flags: Flag[] = [...failFlags];
+    const reasons: Array<string | null> = [`รอส่งงานให้ซับจด${v.registrationProvince}`, failReason];
+    if (v.hasPendingPlateSwap) {
+      flags.push('PLATE_SWAP_PENDING');
+      reasons.push('รอรับเอกสารงานสลับเลขกลับก่อนจึงยื่นได้');
+    }
+    return [wait('submit', iso(v.transferCompletedDate ?? v.date), flags, reasons)];
+  }
   if (!v.inspectionSentDate) return [wait('inspectSend', iso(v.transferCompletedDate ?? v.date), failFlags, [failReason])];
   if (!v.inspectionResultDate) return [wait('inspectResult', iso(v.inspectionSentDate), failFlags, [failReason])];
 
