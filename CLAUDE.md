@@ -249,6 +249,13 @@ This private repository is the shared development surface for the user, Claude C
   same 300-799cc bracket so CC alone can't tell them apart) - an optional prefix a BASE row's vehicle must match
   (case-insensitive `chassis.startsWith`), checked in `suggestRate` alongside vehicleKind/CC; null = unrestricted, same
   as before. Rate editor has an "เลขตัวถังขึ้นต้น" column.
+  Rate filters by province / vehicle type (user 2026-10-09, บางบ่ออารียนต์: จดสมุทรปราการ 935 and ป้ายเหลือง รย.17 1,400 next to
+  the normal 440, migration `20261009100000_service_fee_rate_province`): `ServiceFeeRate.registrationProvince` (full province
+  name, validated against `PROVINCES`) and `ServiceFeeRate.bodyPrefix` (`Vehicle.body` prefix such as `รย.17-`), both nullable =
+  unrestricted. `suggestRate` matches them against the vehicle's `registrationProvince` / `body` and tries the more specific rows
+  first (province > body prefix > `sortOrder`), so a Samut Prakan row wins over the general row wherever it sits in the table;
+  a vehicle without a province never matches a province row. The rate editor has "จังหวัดที่จด" and "ประเภทรถ" selects.
+  Quotation `RATE` lines do not carry these fields (applied rates get null).
   Rate kind `PLATE_REQUEST` (user 2026-09-28, Spac EV: "ขอใช้เลข" priced separately from "ขอใช้" the province) = the
   vehicle's latest submission requested a plate number (`requestsPlateNumber`) - distinct from the pre-existing
   "ลูกค้าชำระค่าขอใช้เลขเอง" deduction checkbox on the billing row, which subtracts from an already-computed fee rather
