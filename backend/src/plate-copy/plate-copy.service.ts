@@ -78,7 +78,7 @@ export interface CreatePlateCopyDto {
   brand?: unknown;
   plateCategory?: unknown;
   plateNumber?: unknown;
-  copyType?: unknown; // BOTH (ค่าเริ่มต้น) | SINGLE_NORMAL | SINGLE_AUCTION
+  copyType?: unknown; // BOTH (ค่าเริ่มต้น = คัดคู่ปกติ) | SINGLE_NORMAL | BOTH_AUCTION | SINGLE_AUCTION
   submitDate?: unknown;
 }
 
@@ -101,7 +101,7 @@ export interface UpdatePlateCopyDto {
 export function parseCopyType(value: unknown): PlateCopyType {
   if (value === undefined || value === null || value === '') return 'BOTH';
   if (PLATE_COPY_TYPES.includes(value as PlateCopyType)) return value as PlateCopyType;
-  throw new BadRequestException({ error: 'ชนิดการคัดป้ายต้องเป็น BOTH, SINGLE_NORMAL หรือ SINGLE_AUCTION' });
+  throw new BadRequestException({ error: 'ชนิดการคัดป้ายต้องเป็น BOTH, SINGLE_NORMAL, BOTH_AUCTION หรือ SINGLE_AUCTION' });
 }
 
 export function parseVehicleClass(value: unknown): PlateCopyVehicleClass {
