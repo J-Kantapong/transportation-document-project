@@ -163,8 +163,8 @@ interface DeliveryReminder {
   row: QueueRow; // เปิดหน้าต่างแก้วันที่รับจากข้อความนี้ได้เลย
 }
 
-const DELIVERY_PAGE = "/registration/new-vehicle/delivery";
-const DELIVERY_REPORT_PAGE = "/registration/new-vehicle/delivery/report";
+const DELIVERY_PAGE = "/delivery";
+const DELIVERY_REPORT_PAGE = "/delivery/report";
 const COMPLETED_PAGE_SIZE = 100; // ตรงกับ backend (receiving.service.ts)
 const COMPLETED_MAX_LIMIT = 1000;
 

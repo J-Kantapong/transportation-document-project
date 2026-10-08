@@ -9,8 +9,9 @@ export interface EveningInput {
   process: Array<{ label: string; done: { car: number | null; moto: number | null; unsplit?: number } }>;
   alerts: Array<{ severity: string; title: string; detail: string; href?: string }>;
   workingCapital: { overdue: { customers: Array<{ customerName: string; amount: number }> } };
-  // รายคนจากประวัติที่ระบบจดชื่อคนทำไว้เท่านั้น (แก้ไข/ยกเลิก + ใบส่งงาน) - การใส่รถ/ยื่นเอกสารยังไม่จดชื่อ
-  staff: Array<{ name: string; edits: number; slips: number }>;
+  // รายคนจากที่ระบบจดชื่อคนทำไว้ (ผู้ใช้ 2026-10-08): ใส่รถ / ยื่นเอกสาร / รับใบเสร็จ / แก้-ยกเลิก / ใบส่งงาน
+  // รับป้าย รับเล่ม และงานอื่นๆ ยังไม่จดชื่อคนทำ
+  staff: Array<{ name: string; entered: number; submitted: number; received: number; edits: number; slips: number }>;
 }
 
 const MAX_DONE = 4;
@@ -33,9 +34,20 @@ export function buildEveningMessage(input: EveningInput, baseUrl?: string): Line
     .sort((a, b) => b.count - a.count);
   const doneLines = done.slice(0, MAX_DONE).map((p) => text(`${p.label} ${p.count}`, { size: 'sm' }));
 
-  const staff = input.staff.filter((s) => s.edits > 0 || s.slips > 0);
+  const staff = input.staff.filter((s) => s.entered + s.submitted + s.received + s.edits + s.slips > 0);
   const staffLines = staff.slice(0, MAX_STAFF).map((s) =>
-    text(`${s.name}: ${[s.edits > 0 ? `แก้/ยกเลิก ${s.edits} ครั้ง` : '', s.slips > 0 ? `ใบส่งงาน ${s.slips} ใบ` : ''].filter(Boolean).join(' · ')}`, { size: 'sm' }),
+    text(
+      `${s.name}: ${[
+        s.entered > 0 ? `ใส่รถ ${s.entered}` : '',
+        s.submitted > 0 ? `ยื่น ${s.submitted}` : '',
+        s.received > 0 ? `รับใบเสร็จ ${s.received}` : '',
+        s.slips > 0 ? `ใบส่งงาน ${s.slips}` : '',
+        s.edits > 0 ? `แก้/ยกเลิก ${s.edits} ครั้ง` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')}`,
+      { size: 'sm' },
+    ),
   );
 
   // พรุ่งนี้อย่าลืม: ตามเงินลูกค้าที่ค้างก่อน (เกินกำหนดนานสุด) แล้วเติมเรื่องไม่ด่วนจากรายการแจ้งเตือน
@@ -56,7 +68,7 @@ export function buildEveningMessage(input: EveningInput, baseUrl?: string): Line
       doneLines.length > 0 ? [...doneLines, ...moreLine(done.length, MAX_DONE)] : [text('วันนี้ยังไม่มีงานที่ทำ', { size: 'sm', color: '#888888' })],
     ),
     ...(staffLines.length > 0
-      ? [section('พนักงาน', [...staffLines, ...moreLine(staff.length, MAX_STAFF), text('รายคนมีเฉพาะการแก้ไข/ยกเลิกและใบส่งงาน', { size: 'xxs', color: '#888888' })])]
+      ? [section('พนักงาน', [...staffLines, ...moreLine(staff.length, MAX_STAFF), text('ยังไม่จดชื่อคนทำ: รับป้าย รับเล่ม งานอื่นๆ', { size: 'xxs', color: '#888888' })])]
       : []),
     ...(reminderLines.length > 0 ? [section('พรุ่งนี้อย่าลืม', [...reminderLines, ...moreLine(reminders.length, MAX_REMINDERS)])] : []),
   ];

@@ -30,7 +30,7 @@ import {
   VehicleTaxResult,
 } from './vehicle-tax-calculator.js';
 
-const MOTO_PREFIX = 'รย.12-';
+import { motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
 
 // snapshot ลงคอลัมน์ Json - ผ่าน JSON ก่อนเพื่อให้ Date/Decimal กลายเป็นค่าธรรมดาที่ Prisma รับได้
 const toJson = (value: unknown) => JSON.parse(JSON.stringify(value)) as object;
@@ -93,6 +93,7 @@ const TAX_INPUT_FIELDS = ['taxExpiryDate', 'vehicleType', 'fuel', 'cc', 'weight'
 const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับใบเสร็จ (หน้ารับใบเสร็จ)';
 const LAST_RECEIPT_ERROR = 'งานที่รับใบเสร็จแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';
 const WORKFLOW_DATE_FIELDS = ['paymentDate', 'receivedDate', 'deliveredDate'] as const;
+const DELIVERED_BY_SLIP_ERROR = 'งานนี้ส่งคืนลูกค้าผ่านใบส่งงาน (DL) แล้ว - แก้วันที่หรือยกเลิกการส่งที่หน้ารายงานส่งงานก่อน';
 
 @Injectable()
 export class TaxRenewalService {
@@ -357,6 +358,12 @@ export class TaxRenewalService {
     return { ...stored, fromVehicle: false };
   }
 
+  // ส่งลูกค้าผ่านใบส่งงาน DL (หน้า Delivery) แล้วหรือยัง - แถวเก่าที่กรอกวันที่คืนเองไม่มีใบ
+  private async hasDeliverySlip(id: string): Promise<boolean> {
+    const item = await this.prisma.deliverySlipItem.findFirst({ where: { jobType: 'TAX_RENEWAL', jobId: id, cancelledAt: null }, select: { id: true } });
+    return item !== null;
+  }
+
   // งานที่จะแก้/ยกเลิก - ต้องอยู่ในขอบเขตการแก้ของผู้ใช้ และยังไม่ถูกยกเลิก (409 ให้หน้าเว็บโหลดใหม่)
   private async findActive(id: string) {
     const existing = await this.prisma.taxRenewal.findUnique({ where: { id } });
@@ -370,6 +377,7 @@ export class TaxRenewalService {
   async cancel(id: string, remarkRaw: unknown): Promise<{ id: string }> {
     const remark = requireRemark(remarkRaw, 'กรุณาระบุเหตุผลที่ยกเลิกงานต่อภาษี');
     const existing = await this.findActive(id);
+    if (existing.deliveredDate && (await this.hasDeliverySlip(id))) throw new BadRequestException({ error: DELIVERED_BY_SLIP_ERROR });
     await this.prisma.$transaction(async (tx) => {
       await tx.taxRenewal
         .update({
@@ -481,6 +489,10 @@ export class TaxRenewalService {
     }
     if (deliveredDate && !receivedDate) {
       throw new BadRequestException({ error: 'ต้องรับป้ายภาษี/ใบเสร็จก่อนคืนเอกสารให้ลูกค้า' });
+    }
+    // คืนลูกค้าผ่านใบส่งงาน DL แล้ว (ผู้ใช้ 2026-10-08) - วันที่/การยกเลิกต้องทำที่ใบ DL ไม่ให้ช่องนี้กับใบไม่ตรงกัน
+    if (existing.deliveredDate && (deliveredDate === null || deliveredDate.getTime() !== existing.deliveredDate.getTime()) && (await this.hasDeliverySlip(id))) {
+      throw new BadRequestException({ error: DELIVERED_BY_SLIP_ERROR });
     }
 
     // แยกการแก้ข้อมูล (ต้องมีเหตุผล) ออกจากงานปกติ: กรอกวันที่ที่ยังว่าง = งานปกติ / แก้หรือล้างวันที่ที่มีแล้ว = แก้ข้อมูล
@@ -726,7 +738,7 @@ export class TaxRenewalService {
 function vehicleTypeWhereForRenewal() {
   const scope = currentVehicleScope();
   if (scope === 'ALL') return {};
-  if (scope === 'MOTO') return { vehicleType: { startsWith: MOTO_PREFIX } };
-  if (scope === 'CAR') return { NOT: { vehicleType: { startsWith: MOTO_PREFIX } } };
+  if (scope === 'MOTO') return motorcycleTypeWhere('vehicleType');
+  if (scope === 'CAR') return { NOT: motorcycleTypeWhere('vehicleType') };
   return { id: { in: [] as string[] } };
 }

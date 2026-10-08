@@ -1,3 +1,4 @@
+import { isMotorcycleType } from '../vehicles/vehicle-reference-data.js';
 // Classifies a Vehicle row into the government annual-tax dimensions
 // (GovTaxVehicleFamily / GovTaxFuelGroup) used by the GovernmentTax* tables in
 // schema.prisma. Kept separate from vehicle-reference-data.ts (VEHICLE_TYPES) because the
@@ -26,7 +27,8 @@ export function classifyVehicleFamily(
   body: string | null | undefined,
 ): GovTaxVehicleFamily | null {
   if (!body) return null;
-  if (body.startsWith('รย.12-')) return GovTaxVehicleFamily.RY12;
+  // รย.17 (จักรยานยนต์สาธารณะ, ผู้ใช้ 2026-10-08) ใช้อัตราภาษีมอเตอร์ไซค์ชุดเดียวกับ รย.12
+  if (isMotorcycleType(body)) return GovTaxVehicleFamily.RY12;
   if (body.startsWith('รย.1-')) return GovTaxVehicleFamily.RY1;
   if (body.startsWith('รย.2-')) return GovTaxVehicleFamily.RY2;
   if (body.startsWith('รย.3-')) return GovTaxVehicleFamily.RY3;

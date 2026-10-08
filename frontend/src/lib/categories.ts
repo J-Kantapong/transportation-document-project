@@ -33,7 +33,8 @@ export const NEW_VEHICLE_SUBTASKS: RegistrationSubtask[] = [
   { title: "รับใบเสร็จ", href: "/registration/new-vehicle/receive-receipt" },
   { title: "รับป้ายทะเบียน", href: "/registration/new-vehicle/receive-plate" },
   { title: "รับเล่มทะเบียน", href: "/registration/new-vehicle/receive-book" },
-  { title: "Delivery", href: "/registration/new-vehicle/delivery" },
+  // ขั้นที่ 8 ย้ายไปเป็นเมนูหลัก /delivery (ขั้นร่วมของทุกงาน ผู้ใช้ 2026-10-08) - คงไว้ในรายการขั้นตอนให้กดต่อได้
+  { title: "Delivery (ส่งงานลูกค้า)", href: "/delivery" },
 ];
 
 // The two subtask headings under "งานแจ้งย้ายยามาฮ่า".

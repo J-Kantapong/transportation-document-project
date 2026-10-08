@@ -518,7 +518,7 @@ describe('DocumentSubmissionService.listDates - วันที่ยื่น�
       { date: '2026-09-20', count: 3 },
       { date: '2026-09-19', count: 3 },
     ]);
-    expect(groupBy.mock.calls[0][0]).toMatchObject({ by: ['submitDate'], where: { vehicle: { AND: [{ body: { startsWith: 'รย.12-' } }] } } });
+    expect(groupBy.mock.calls[0][0]).toMatchObject({ by: ['submitDate'], where: { vehicle: { AND: [{ OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] }] } } });
   });
 });
 
@@ -655,7 +655,7 @@ describe('DocumentSubmissionService.saveReceiptCheck - บันทึกทั�
     expect(vehicleUpdate).not.toHaveBeenCalled();
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'sub1', status: 'PENDING', receipts: { none: {} } },
-      data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, failRemark: 'บัตรประชาชนหมดอายุ' },
+      data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, receivedById: null, failRemark: 'บัตรประชาชนหมดอายุ' },
     });
   });
 
@@ -976,7 +976,7 @@ describe('DocumentSubmissionService.listByDate - ตาราง "ได้ใ�
     const args = findMany.mock.calls[0][0];
     expect(args).toMatchObject({ skip: 100, take: 101 });
     expect(args.where.status).toBe('RECEIPT_RECEIVED');
-    expect(args.where.AND).toContainEqual({ vehicle: { AND: [{ body: { startsWith: 'รย.12-' } }] } });
+    expect(args.where.AND).toContainEqual({ vehicle: { AND: [{ OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] }] } });
     expect(JSON.stringify(args.where.AND)).toContain('"receiptNo":{"contains":"69/00"');
     expect(res.submissions).toHaveLength(100);
     expect(res.hasMore).toBe(true);

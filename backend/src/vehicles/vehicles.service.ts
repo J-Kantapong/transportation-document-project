@@ -606,7 +606,9 @@ export class VehiclesService {
           data: rows.map((row) => ownerDataFor(row, financeNames.get(row.financeId) ?? null)),
           select: { id: true },
         });
-        await tx.vehicle.createMany({ data: rows.map((row, index) => this.toCreateData(row, owners[index].id)) });
+        // ผู้ทำ (ผู้ใช้ 2026-10-08): คนที่กดบันทึก - เฉพาะตอนสร้าง ไม่เขียนทับตอนแก้ไข (ดู toCreateData ที่ใช้ตอนแก้ด้วย)
+        const createdById = currentUser()?.id ?? null;
+        await tx.vehicle.createMany({ data: rows.map((row, index) => ({ ...this.toCreateData(row, owners[index].id), createdById })) });
       });
     } catch (err) {
       if (!isChassisConflict(err)) throw err;

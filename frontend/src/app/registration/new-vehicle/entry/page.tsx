@@ -21,6 +21,7 @@ import { getVehicleRowErrors, normalizeVehicleRow, requiredSizeField, type Norma
 import { entryOwnerType, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, parseBatchDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 
@@ -1446,7 +1447,7 @@ export default function VehicleEntryPage() {
             <EditImpactWarning
               warning={editWarning}
               roles={roles}
-              isMotorcycle={editRow.body.startsWith("รย.12-")}
+              isMotorcycle={isMotorcycleBody(editRow.body)}
               chassis={editRow.chassis}
               saving={editSaving}
               onConfirm={() => handleEditSubmit(undefined, editWarning)}

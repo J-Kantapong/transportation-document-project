@@ -27,6 +27,7 @@ import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/inv
 import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถที่พนักงานบันทึกส่งงานแล้วมารอที่นี่ บัญชีเลือกคัน ตรวจค่าดำเนินการ แล้วออกใบวางบิล
 // (ผู้ใช้ 2026-09-21) ทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่งคิด VAT + หัก ณ ที่จ่าย, เลขที่ IV พิมพ์เองเพราะยังรันเลขร่วมกับ Google Sheet
@@ -557,8 +558,10 @@ export function BillingPage() {
         รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน - คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด
         &quot;ปิดงาน&quot; พร้อมหมายเหตุ
       </p>
+      {/* ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่ลงส่งงาน - วางบิลไม่ได้จนกว่าจะลง บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08) */}
+      <AwaitingDeliveryPanel only="all" onRecorded={() => loadQueue(false)} />
       {/* บัญชีเปิดรายงานส่งงาน/ใบส่งงานได้แบบอ่านอย่างเดียว ไว้ตรวจก่อนวางบิล (ผู้ใช้ 2026-09-27) - หน้า Delivery ไม่มีในเมนูของบัญชี */}
-      <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+      <Link href="/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
         รายงานส่งงาน / ใบส่งงาน →
       </Link>
       {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}

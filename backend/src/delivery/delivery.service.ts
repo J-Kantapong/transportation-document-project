@@ -12,6 +12,7 @@ import {
 } from '../auth/vehicle-scope.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { isJobType, JOB_AUDIT_ENTITY, JOB_LABEL, jobDelegate, jobInvoiceNos, jobKey, loadJobRows, type JobDeliveryRow, type JobType } from './job-delivery.js';
 
 // ส่งงานลูกค้า (พนักงาน): ติ๊กคันที่ส่งแล้ว + วันที่ส่ง + ผู้รับ แล้วกดบันทึกครั้งเดียวทั้งชุด - พนักงานไม่เห็นราคา เรื่องบิลอยู่ที่ backend/src/billing
 // กติกา (ผู้ใช้ 2026-09-21): ปกติส่งเล่ม + ป้ายพร้อมกัน แต่บางคันป้ายยังไม่ออก -> ส่งเล่มไปก่อนได้ แล้วป้ายตามทีหลัง
@@ -47,7 +48,7 @@ const VEHICLE_INCLUDE = {
   documentSubmissions: {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
-    select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true },
+    select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true, receiptReceivedDate: true },
   },
   invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } },
   // ใบส่งเล่มที่ยังไม่ยกเลิก - รายงานส่งงานใช้กับปุ่ม "ป้ายไปพร้อมเล่มแล้ว" ของรถที่ป้ายค้างส่ง (ผู้ใช้ 2026-09-27)
@@ -149,10 +150,20 @@ const plateNoteOf = (date: Date, recipient: string, note: string | null) =>
   `ส่งป้าย ${dmy(date)} ผู้รับ ${recipient}${note ? ` (${note})` : ''}`;
 
 // งานสลับเลขส่งคืนลูกค้าได้ในใบเดียวกับรถจดใหม่ (ผู้ใช้ 2026-09-28) - แถวในคิว/ใบส่งงานจึงมาจาก 2 ที่
-export type DeliverySource = 'VEHICLE' | 'PLATE_SWAP';
+// งานอื่นๆ (โอน / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / ต่อภาษี) ส่งใบเสร็จให้ลูกค้าเซ็นรับในใบเดียวกันได้ด้วย (ผู้ใช้ 2026-10-08) - ดู job-delivery.ts
+export type DeliverySource = 'VEHICLE' | 'PLATE_SWAP' | JobType;
 
 // คีย์ของแถวที่ติ๊ก - id ซ้ำข้ามตารางได้ในทางทฤษฎี จึงคีย์ด้วย source ด้วย
 const itemKey = (source: DeliverySource, id: string) => `${source}:${id}`;
+const parseSource = (raw: unknown): DeliverySource => (isJobType(raw) ? raw : raw === 'PLATE_SWAP' ? 'PLATE_SWAP' : 'VEHICLE');
+// แถวงานอื่นในใบ -> แผนที่ประเภทงาน -> ids (ให้ job-delivery.ts อ่านทีเดียว)
+function jobIdsOf(items: Array<{ jobType: JobType; jobId: string }>): Map<JobType, string[]> {
+  const ids = new Map<JobType, string[]>();
+  for (const i of items) ids.set(i.jobType, [...(ids.get(i.jobType) ?? []), i.jobId]);
+  return ids;
+}
+// วันที่หลังสุดจากสองวัน (null = ไม่นับ) - ใช้หา "พร้อมส่งตั้งแต่" ของแถวในคิว
+const laterOf = (a: Date | null, b: Date | null) => (a && b ? (a > b ? a : b) : (a ?? b));
 
 // คันที่ติ๊ก + ชนิดงานที่ผู้ใช้เห็นในป๊อปอัปยืนยัน (items) - vehicleIds อย่างเดียว = แบบเดิม ไม่ตรวจชนิดงาน
 // หน้าเว็บส่งทั้งสองแบบคู่กัน backend รุ่นก่อนหน้าจึงยังรับได้ระหว่างอัปเดต
@@ -162,7 +173,7 @@ function parseDeliveryItems(dto: { items?: unknown; vehicleIds?: unknown }): Map
   if (Array.isArray(dto.items)) {
     for (const raw of dto.items as Array<{ source?: unknown; id?: unknown; vehicleId?: unknown; kind?: unknown } | null>) {
       if (!raw || !DELIVERABLE_KINDS.includes(raw.kind as DeliveryKind)) throw bad('รายการที่ส่งไม่ถูกต้อง');
-      const source: DeliverySource = raw.source === 'PLATE_SWAP' ? 'PLATE_SWAP' : 'VEHICLE';
+      const source = parseSource(raw.source);
       const id = typeof raw.id === 'string' ? raw.id : typeof raw.vehicleId === 'string' ? raw.vehicleId : '';
       if (!id) throw bad('รายการที่ส่งไม่ถูกต้อง');
       expected.set(itemKey(source, id), raw.kind as DeliveryKind);
@@ -213,7 +224,48 @@ interface Deliverable {
   plateDeliveredDate: Date | null;
   deliveryNote: string | null;
   // พร้อมส่งครั้งแรกไหม - รถจดใหม่: การยื่นล่าสุดได้ใบเสร็จ + รับเล่มแล้ว / สลับเลข: รับใบเสร็จ (returnedDate) + รับเล่มแล้ว
+  // งานอื่น: ใบเสร็จกลับแล้ว (คัดป้าย + ป้าย, ต่อภาษี + ชำระแล้ว)
   readyForFirstDelivery: boolean;
+  // งานอื่นๆ (ผู้ใช้ 2026-10-08): ส่งครั้งเดียวจบ (ใบเสร็จ + ป้ายถ้าเป็นคัดป้าย) ไม่มีเล่ม ไม่มีป้ายตามทีหลัง - detail พิมพ์บนใบ DL
+  jobType: JobType | null;
+  jobDetail: string | null;
+  notReadyReason: string | null; // ข้อความบอกว่าทำไมงานนี้ยังส่งไม่ได้ (เฉพาะงานอื่น)
+}
+
+// งานอื่นในรูปร่างเดียวกับรถจดใหม่: ป้าย/เล่มของงานพวกนี้คือ "ใบเสร็จครบหรือยัง" - plateReceivedDate = วันที่พร้อมส่ง และ
+// plateDeliveredDate = วันที่ส่ง ให้ deliveryKind() ตอบ FULL (พร้อม) / NO_PLATE (ยังไม่พร้อม -> readyForFirstDelivery = false) / DONE (ส่งแล้ว)
+// โดยไม่ต้องแยกกรณีทุกจุด (ใบส่งป้ายตามทีหลังไม่มีสำหรับงานพวกนี้)
+function jobDeliverable(j: JobDeliveryRow): Deliverable {
+  const notReady =
+    j.type === 'PLATE_COPY' && j.returnedDate && !j.plateReceivedDate
+      ? 'ยังไม่ได้รับป้าย - แนบรูปป้ายที่หน้ารับป้ายของงานคัดแผ่นป้ายก่อน'
+      : j.type === 'TAX_RENEWAL'
+        ? !j.readySince
+          ? 'ต้องชำระภาษีและรับป้ายภาษี/ใบเสร็จก่อนจึงจะส่งงานได้'
+          : null
+        : !j.returnedDate
+          ? 'ยังไม่ได้รับใบเสร็จกลับ'
+          : null;
+  return {
+    source: j.type,
+    id: j.id,
+    customerId: j.customerId ?? '',
+    chassis: j.chassis,
+    brandName: j.brandName,
+    body: null,
+    vehicleKind: j.vehicleKind,
+    plateText: j.plateCategory && j.plateNumber ? `${j.plateCategory} ${j.plateNumber}` : '',
+    receiptNo: j.receiptNo,
+    ownerName: j.ownerName,
+    deliveredDate: j.deliveredDate,
+    plateReceivedDate: j.readySince,
+    plateDeliveredDate: j.deliveredDate,
+    deliveryNote: j.deliveryNote,
+    readyForFirstDelivery: !!j.readySince && !!j.customerId,
+    jobType: j.type,
+    jobDetail: j.detail,
+    notReadyReason: !j.customerId ? 'ยังไม่ได้ระบุเจ้าของงาน - เติมที่หน้างานก่อน' : notReady,
+  };
 }
 
 // ขอบเขตประเภทรถของงานสลับเลข - ไม่มี body ให้ดูเหมือนรถจดใหม่ จึงเทียบ vehicleClass ตรงๆ ด้วยกฎเดียวกัน
@@ -294,6 +346,9 @@ function plateSwapDeliverable(s: PlateSwapRow): Deliverable {
     plateDeliveredDate: s.plateDeliveredDate,
     deliveryNote: s.deliveryNote,
     readyForFirstDelivery: !!s.returnedDate && !!s.bookReceivedDate,
+    jobType: null,
+    jobDetail: null,
+    notReadyReason: null,
   };
 }
 
@@ -321,7 +376,14 @@ export class DeliveryService {
       .filter((v) => v.deliveredDate || v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED')
       .map((v) => this.mapRow(v));
     // งานสลับเลขส่งคืนลูกค้าในใบเดียวกันได้ (ผู้ใช้ 2026-09-28) - อยู่คิวเดียวกันเลย
-    return [...vehicleRows, ...(await this.plateSwapQueue())];
+    // งานอื่นๆ ที่ใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-08: ทุกงานส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) - คิวเดียวกัน
+    return [...vehicleRows, ...(await this.plateSwapQueue()), ...(await this.jobQueue())];
+  }
+
+  // งานอื่นๆ ที่พร้อมส่ง (ใบเสร็จกลับ + ป้ายถ้าเป็นคัดป้าย + มีเจ้าของงาน) และยังไม่ส่ง - ขอบเขตเดียวกับรถจดใหม่ (ประเภทรถของงาน)
+  private async jobQueue() {
+    const jobs = await loadJobRows(this.prisma, { mode: 'queue' }, currentDeliveryScope());
+    return jobs.map((j) => this.mapJobRow(j, null));
   }
 
   // งานสลับเลขที่รอส่งคืนลูกค้า - แปลงเป็นแถวหน้าตาเดียวกับรถจดใหม่ให้หน้า Delivery ใช้ซ้ำได้ทั้งหน้า
@@ -363,7 +425,11 @@ export class DeliveryService {
       take: 200,
       include: VEHICLE_INCLUDE,
     });
-    return vehicles.map((v) => this.mapRow(v));
+    // งานอื่นๆ ที่ส่งแล้วล่าสุดอยู่ตารางเดียวกัน (บอกด้วยว่าวางบิลแล้วหรือยัง เหมือนรถจดใหม่)
+    const jobs = await loadJobRows(this.prisma, { mode: 'recent', take: 100 }, currentDeliveryScope());
+    const billed = await jobInvoiceNos(this.prisma, jobs);
+    const rows = [...vehicles.map((v) => this.mapRow(v)), ...jobs.map((j) => this.mapJobRow(j, billed.get(jobKey(j.type, j.id)) ?? null))];
+    return rows.sort((a, b) => (b.deliveredDate ?? '').localeCompare(a.deliveredDate ?? '')).slice(0, 200);
   }
 
   // รายงานส่งงาน: รถที่ส่งเล่มแล้วแต่ป้ายยังค้างส่ง - ขอบเขตการอ่านเดียวกับ slips() ไม่ใช่ขอบเขตการส่งของ queue()
@@ -393,13 +459,22 @@ export class DeliveryService {
     const expected = parseDeliveryItems(dto);
     const vehicleIds = [...expected.keys()].filter((k) => k.startsWith('VEHICLE:')).map((k) => k.slice('VEHICLE:'.length));
     const swapIds = [...expected.keys()].filter((k) => k.startsWith('PLATE_SWAP:')).map((k) => k.slice('PLATE_SWAP:'.length));
+    // งานอื่นๆ คีย์เป็น "ประเภทงาน:id" - รวมเป็นแผนที่ประเภท -> ids ให้ job-delivery.ts อ่านทีเดียว
+    const jobIds = new Map<JobType, string[]>();
+    for (const key of expected.keys()) {
+      const sep = key.indexOf(':');
+      const source = key.slice(0, sep);
+      if (isJobType(source)) jobIds.set(source, [...(jobIds.get(source) ?? []), key.slice(sep + 1)]);
+    }
+    const jobCount = [...jobIds.values()].reduce((n, list) => n + list.length, 0);
 
     const vehicles = await this.prisma.vehicle.findMany({ where: { id: { in: vehicleIds }, deletedAt: null }, include: VEHICLE_INCLUDE });
     const swaps = swapIds.length
       ? await this.prisma.plateSwap.findMany({ where: { id: { in: swapIds }, cancelledAt: null }, select: PLATE_SWAP_SELECT })
       : [];
+    const jobs = jobCount ? await loadJobRows(this.prisma, { mode: 'ids', ids: jobIds }, 'ALL') : [];
     // ข้อความไม่บอกให้โหลดหน้าใหม่ - หน้า Delivery โหลดรายการให้เองโดยเก็บคันที่ติ๊ก/ผู้รับ/หมายเหตุไว้ กด F5 แล้วหาย (พบ 2026-09-27)
-    if (vehicles.length !== vehicleIds.length || swaps.length !== swapIds.length) {
+    if (vehicles.length !== vehicleIds.length || swaps.length !== swapIds.length || jobs.length !== jobCount) {
       throw bad('ไม่พบข้อมูลบางรายการ กรุณาตรวจรายการแล้วบันทึกใหม่');
     }
 
@@ -420,15 +495,18 @@ export class DeliveryService {
       plateDeliveredDate: v.plateDeliveredDate,
       deliveryNote: v.deliveryNote,
       readyForFirstDelivery: !!v.bookReceivedDate && v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED',
+      jobType: null,
+      jobDetail: null,
+      notReadyReason: null,
     }));
-    const items: Deliverable[] = [...vehicleItems, ...swaps.map((s) => plateSwapDeliverable(s))];
+    const items: Deliverable[] = [...vehicleItems, ...swaps.map((s) => plateSwapDeliverable(s)), ...jobs.map((j) => jobDeliverable(j))];
 
     const scope = currentDeliveryScope(); // DELIVERY ส่งได้ทุกคัน, STAFF_CAR / STAFF_MOTO เฉพาะประเภทรถของตัวเอง
     for (const v of vehicles) assertVehicleInScope(v.body, scope);
-    // งานสลับเลขไม่มี body ให้ดู - เช็คจาก vehicleClass ตรงๆ ด้วยกฎเดียวกัน
-    for (const s of swaps) {
-      const kind = s.vehicleClass === 'MOTO' ? 'moto' : 'car';
-      if (scope !== 'ALL' && scope.toLowerCase() !== kind) {
+    // งานสลับเลข / งานอื่นไม่มี body ให้ดู - เช็คจาก vehicleKind ที่แปลงมาแล้วด้วยกฎเดียวกัน
+    for (const i of items) {
+      if (i.source === 'VEHICLE') continue;
+      if (scope !== 'ALL' && scope.toLowerCase() !== i.vehicleKind) {
         throw new ForbiddenException({ error: scope === 'CAR' ? 'บัญชีของคุณดูแลเฉพาะรถยนต์' : 'บัญชีของคุณดูแลเฉพาะจักรยานยนต์' });
       }
     }
@@ -445,6 +523,8 @@ export class DeliveryService {
     const changed = items.filter((i) => {
       const now = kindOfItem(i);
       const want = expected.get(itemKey(i.source, i.id)) ?? null;
+      // งานอื่นที่ยังไม่พร้อม (NO_PLATE = ใบเสร็จ/ป้ายยังไม่ครบ) ให้ตกไปที่การตรวจความพร้อมด้านล่าง ซึ่งบอกเหตุผลตรงกว่า 409
+      if (i.jobType && now === 'NO_PLATE') return false;
       return now === 'DONE' || (want !== null && want !== now);
     });
     if (changed.length) {
@@ -462,6 +542,7 @@ export class DeliveryService {
           throw bad(`รถ ${i.chassis} ส่งเล่มเมื่อ ${dmy(i.deliveredDate)} วันที่ส่งป้ายต้องไม่ก่อนวันนั้น`);
         }
       } else if (!i.readyForFirstDelivery) {
+        if (i.jobType) throw bad(`${JOB_LABEL[i.jobType]} ${i.chassis}: ${i.notReadyReason ?? 'ยังไม่พร้อมส่ง'}`);
         throw bad(`รถ ${i.chassis} ต้องได้รับใบเสร็จและเล่มทะเบียนก่อนจึงจะส่งงานได้`);
       }
     }
@@ -483,6 +564,15 @@ export class DeliveryService {
           if (sIds.length) {
             const { count } = await tx.plateSwap.updateMany({ where: { id: { in: sIds }, cancelledAt: null, deliveredDate: null }, data });
             if (count !== sIds.length) throw conflict('มีการบันทึกส่งงานสลับเลขบางรายการในชุดนี้ไปก่อนแล้ว กรุณาตรวจรายการแล้วบันทึกใหม่');
+          }
+          // งานอื่นๆ: ตารางของงานเก็บแค่วันที่ส่ง + ผู้รับ + หมายเหตุ (ไม่มีป้ายตามทีหลัง) - เขียนแบบมีเงื่อนไขเหมือนกัน
+          for (const type of [...new Set(group.map((i) => i.jobType).filter((t): t is JobType => !!t))]) {
+            const ids = group.filter((i) => i.jobType === type).map((i) => i.id);
+            const { count } = await jobDelegate(tx, type).updateMany({
+              where: { id: { in: ids }, cancelledAt: null, deliveredDate: null },
+              data: { deliveredDate: date, deliveryRecipient: recipient, deliveryNote: note },
+            });
+            if (count !== ids.length) throw conflict(`มีการบันทึกส่ง${JOB_LABEL[type]}บางรายการในชุดนี้ไปก่อนแล้ว กรุณาตรวจรายการแล้วบันทึกใหม่`);
           }
         }
         for (const i of ofKind('PLATE_ONLY')) {
@@ -511,11 +601,16 @@ export class DeliveryService {
                   // แถวหนึ่งผูกกับที่มาเดียว - อีกช่องเป็น null (บังคับ XOR ที่นี่ Prisma เช็คให้ไม่ได้)
                   vehicleId: i.source === 'VEHICLE' ? i.id : null,
                   plateSwapId: i.source === 'PLATE_SWAP' ? i.id : null,
+                  // งานอื่นๆ (ผู้ใช้ 2026-10-08): ชี้ด้วยประเภท + id และเก็บชื่องานไว้พิมพ์บนใบ
+                  jobType: i.jobType,
+                  jobId: i.jobType ? i.id : null,
+                  jobDetail: i.jobDetail,
                   // ผู้ใช้ 2026-09-30: ใบส่งงานบอกว่าส่งใบเสร็จไปด้วย (แสดงเป็นวงกลม) - ส่งพร้อมเล่มครั้งแรก
                   // ใบส่งป้ายตามทีหลังไม่มีใบเสร็จ ใบระหว่าง 2026-09-26 ถึง 2026-09-30 ยังเป็น false
                   receipt: kind !== 'PLATE_ONLY',
-                  book: kind !== 'PLATE_ONLY',
-                  plate: kind !== 'NO_PLATE',
+                  // งานอื่นไม่มีเล่ม ป้ายมีเฉพาะคัดแผ่นป้าย (ส่งพร้อมใบเสร็จครั้งเดียว)
+                  book: kind !== 'PLATE_ONLY' && !i.jobType,
+                  plate: i.jobType ? i.jobType === 'PLATE_COPY' : kind !== 'NO_PLATE',
                   chassis: i.chassis,
                   brandName: i.brandName,
                   body: i.body,
@@ -533,12 +628,15 @@ export class DeliveryService {
       { timeout: 30_000 },
     );
 
+    const jobItems = items.filter((i) => i.jobType);
     return {
       slipId: created.id,
       slipNo: created.slipNo,
-      delivered: ofKind('FULL').length + ofKind('NO_PLATE').length,
+      // delivered = รถจดใหม่ + สลับเลขที่ส่งเล่ม (ไม่นับงานอื่น) / jobs = งานอื่นที่ส่งใบเสร็จในใบนี้
+      delivered: ofKind('FULL').length + ofKind('NO_PLATE').length - jobItems.length,
       plateOnly: ofKind('PLATE_ONLY').length,
       platePending: ofKind('NO_PLATE').length,
+      jobs: jobItems.length,
     };
   }
 
@@ -562,18 +660,27 @@ export class DeliveryService {
       include: SLIP_INCLUDE,
     });
     const slips = found.slice(0, SLIP_LIMIT);
-    const later = await this.platesSentLater(slips);
+    const [later, billedJobs] = await Promise.all([this.platesSentLater(slips), this.billedJobsOf(slips)]);
     return {
-      slips: slips.map((s) => this.mapSlip(s, later)).filter((s) => s.items.length > 0),
+      slips: slips.map((s) => this.mapSlip(s, later, billedJobs)).filter((s) => s.items.length > 0),
       truncated: found.length > SLIP_LIMIT,
     };
   }
 
   async slip(id: string) {
     const found = await this.prisma.deliverySlip.findUnique({ where: { id }, include: SLIP_INCLUDE });
-    const slip = found && this.mapSlip(found, await this.platesSentLater([found]));
+    const slip = found && this.mapSlip(found, await this.platesSentLater([found]), await this.billedJobsOf([found]));
     if (!slip || slip.items.length === 0) throw new NotFoundException({ error: 'ไม่พบใบส่งงาน' });
     return slip;
+  }
+
+  // งานอื่นในใบที่วางบิลไปแล้ว -> เลขที่บิล (คีย์ ประเภท:id) - ใช้ล็อกแก้/ยกเลิกใบเหมือนรถจดใหม่ (อ่านสดจาก InvoiceItem)
+  private billedJobsOf(slips: Array<{ items: Array<{ jobType: string | null; jobId: string | null }> }>) {
+    const jobs = slips.flatMap((s) => s.items).filter((i): i is { jobType: JobType; jobId: string } => isJobType(i.jobType) && !!i.jobId);
+    return jobInvoiceNos(
+      this.prisma,
+      jobs.map((i) => ({ type: i.jobType, id: i.jobId })),
+    );
   }
 
   // ใบส่งเล่มที่ป้ายส่งตามไปทีหลังในใบอื่น: เลขที่/วันที่ของใบส่งป้าย (อ่านสดทุกครั้ง) ให้รายงานบอกว่าทำไมช่องป้ายของใบนี้ว่าง
@@ -625,9 +732,10 @@ export class DeliveryService {
         ? slip.items.find((i) => (bySource.source === 'PLATE_SWAP' ? i.plateSwapId === bySource.id : i.vehicleId === bySource.id))
         : slip.items.find((i) => i.vehicleId === legacyVehicleId);
     if (!item) throw bad(`รายการนี้ไม่อยู่ในใบ ${label}`);
+    if (item.jobType) throw bad(`รายการ ${item.chassis} เป็น${JOB_LABEL[item.jobType as JobType] ?? 'งานอื่น'} ไม่มีป้ายตามทีหลัง`);
     const source: DeliverySource = item.plateSwapId ? 'PLATE_SWAP' : 'VEHICLE';
     const targetId = item.plateSwapId ?? item.vehicleId ?? '';
-    this.assertItemInScope(item.body, `รถ ${item.chassis} `);
+    this.assertItemInScope(item, `รถ ${item.chassis} `);
     if (item.cancelledAt) throw bad(`รถ ${item.chassis} ถูกยกเลิกจากใบ ${label} แล้ว`);
     if (!item.book) throw bad(`ใบ ${label} เป็นใบส่งป้ายของรถ ${item.chassis} อยู่แล้ว`);
     if (item.plate) throw bad(`ใบ ${label} ส่งป้ายของรถ ${item.chassis} ไปแล้ว`);
@@ -687,7 +795,7 @@ export class DeliveryService {
     const date = parseIsoDate(dto.date);
     const slip = await this.findActiveSlip(id);
     const items = slip.items.filter((i) => !i.cancelledAt);
-    for (const i of items) this.assertItemInScope(i.body, 'ใบนี้');
+    for (const i of items) this.assertItemInScope(i, 'ใบนี้');
     const dateChanged = slip.date.getTime() !== date.getTime();
     if (slip.recipient === recipient && !dateChanged) throw bad('ไม่มีอะไรเปลี่ยน');
 
@@ -705,8 +813,38 @@ export class DeliveryService {
       ...vehicles.map((v) => [itemKey('VEHICLE', v.id), v] as const),
       ...swapRows.map((v) => [itemKey('PLATE_SWAP', v.id), v] as const),
     ]);
+    // งานอื่นๆ ในใบ (ผู้ใช้ 2026-10-08): วันที่ส่ง + ผู้รับอยู่ในตารางของงาน - วางบิลแล้วเปลี่ยนวันที่ไม่ได้เหมือนรถจดใหม่
+    const jobItems = items.filter((i): i is (typeof items)[number] & { jobType: JobType; jobId: string } => isJobType(i.jobType) && !!i.jobId);
+    const jobRows = jobItems.length ? await loadJobRows(this.prisma, { mode: 'ids', ids: jobIdsOf(jobItems) }, 'ALL') : [];
+    const jobById = new Map(jobRows.map((j) => [jobKey(j.type, j.id), j]));
+    const billedJobs = await this.billedJobsOf([slip]);
     const writes: Array<(tx: Tx) => Promise<void>> = [];
+    for (const i of jobItems) {
+      const j = jobById.get(jobKey(i.jobType, i.jobId));
+      if (!j) continue;
+      const invoiceNo = billedJobs.get(jobKey(i.jobType, i.jobId));
+      if (dateChanged && invoiceNo) throw bad(`${JOB_LABEL[i.jobType]} ${i.chassis} วางบิลแล้ว (${invoiceNo}) เปลี่ยนวันที่ส่งไม่ได้ - แก้ได้เฉพาะชื่อผู้รับ (ยกเลิกบิลก่อน)`);
+      if (j.returnedDate && date < j.returnedDate) throw bad(`${JOB_LABEL[i.jobType]} ${i.chassis} ได้ใบเสร็จกลับเมื่อ ${dmy(j.returnedDate)} วันที่ส่งต้องไม่ก่อนวันนั้น`);
+      const changes: Record<string, { from: string | null; to: string | null }> = {};
+      if (isoDay(j.deliveredDate) !== isoDay(date)) changes.deliveredDate = { from: isoDay(j.deliveredDate), to: isoDay(date) };
+      if (j.deliveryRecipient !== recipient) changes.deliveryRecipient = { from: j.deliveryRecipient, to: recipient };
+      writes.push(async (tx) => {
+        const { count } = await jobDelegate(tx, i.jobType).updateMany({
+          where: { id: i.jobId, cancelledAt: null, deliveredDate: { not: null } },
+          data: { deliveredDate: date, deliveryRecipient: recipient },
+        });
+        if (count !== 1) throw conflict(`${JOB_LABEL[i.jobType]} ${i.chassis} เพิ่งถูกแก้หรือยกเลิก - โหลดรายการใหม่`);
+        await writeAudit(tx, {
+          entity: JOB_AUDIT_ENTITY[i.jobType],
+          entityId: i.jobId,
+          action: 'delivery-update',
+          remark: `แก้ใบส่งงาน ${slipNoLabel(slip.slipNo)}: ${remark}`,
+          changes,
+        });
+      });
+    }
     for (const i of items) {
+      if (i.jobType) continue;
       const source: DeliverySource = i.plateSwapId ? 'PLATE_SWAP' : 'VEHICLE';
       const v = byId.get(itemKey(source, i.plateSwapId ?? i.vehicleId ?? ''));
       if (!v) continue;
@@ -809,8 +947,35 @@ export class DeliveryService {
     const now = new Date();
     const cancelledById = currentUser()?.id ?? null;
     const writes: Array<(tx: Tx) => Promise<void>> = [];
+    // งานอื่นๆ ในใบ (ผู้ใช้ 2026-10-08): ยกเลิกแล้วงานกลับเข้าคิว Delivery - วางบิลแล้วยกเลิกไม่ได้ (ยกเลิกบิลก่อน)
+    const billedJobs = await this.billedJobsOf([slip]);
     for (const i of chosen) {
-      this.assertItemInScope(i.body, `รถ ${i.chassis} `);
+      if (!isJobType(i.jobType) || !i.jobId) continue;
+      const type = i.jobType;
+      const jobId = i.jobId;
+      this.assertItemInScope(i, `${JOB_LABEL[type]} ${i.chassis} `);
+      const invoiceNo = billedJobs.get(jobKey(type, jobId));
+      if (invoiceNo) throw bad(`${JOB_LABEL[type]} ${i.chassis} วางบิลแล้ว (${invoiceNo}) ยกเลิกการส่งไม่ได้ - ยกเลิกบิลก่อน`);
+      writes.push(async (tx) => {
+        const { count } = await jobDelegate(tx, type).updateMany({
+          where: { id: jobId, cancelledAt: null, deliveredDate: { not: null } },
+          data: { deliveredDate: null, deliveryRecipient: null, deliveryNote: null },
+        });
+        if (count !== 1) throw conflict(`${JOB_LABEL[type]} ${i.chassis} เพิ่งถูกแก้หรือยกเลิก - โหลดรายการใหม่`);
+        const itemUpdate = await tx.deliverySlipItem.updateMany({ where: { id: i.id, cancelledAt: null }, data: { cancelledAt: now, cancelReason: remark, cancelledById } });
+        if (itemUpdate.count !== 1) throw conflict(`${JOB_LABEL[type]} ${i.chassis} ถูกยกเลิกจากใบนี้ไปแล้ว`);
+        await writeAudit(tx, {
+          entity: JOB_AUDIT_ENTITY[type],
+          entityId: jobId,
+          action: 'delivery-cancel',
+          remark,
+          changes: { 'deliverySlip.cancelled': { from: `${slipNoLabel(slip.slipNo)} ${dmy(slip.date)} ผู้รับ ${slip.recipient}`, to: 'ยกเลิกการส่ง' } },
+        });
+      });
+    }
+    for (const i of chosen) {
+      if (i.jobType) continue;
+      this.assertItemInScope(i, `รถ ${i.chassis} `);
       // ล็อกเฉพาะรายการส่งเล่ม (บิลเก็บวันส่งเล่ม) - ใบส่งป้ายตามทีหลังยกเลิกได้แม้วางบิลแล้ว (ผู้ใช้ 2026-09-27)
       // งานสลับเลขยังไม่เข้าระบบวางบิล (i.vehicle เป็น null) จึงไม่มีล็อกฝั่งบิล
       const invoiceNo = i.vehicle?.invoiceLines[0]?.invoice.invoiceNo;
@@ -883,8 +1048,9 @@ export class DeliveryService {
     return slip;
   }
 
-  private assertItemInScope(body: string | null, what: string) {
-    if (!isVehicleInScope(body, currentWriteScope())) throw new ForbiddenException({ error: `${what}มีรถประเภทที่บัญชีของคุณไม่ได้ดูแล` });
+  // แถวในใบ: ดู vehicleKind ที่บันทึกไว้ก่อน (งานสลับเลข/งานอื่นไม่มี body) แถวเก่าดู body
+  private assertItemInScope(item: { body: string | null; vehicleKind?: string | null }, what: string) {
+    if (!itemInScope(item, currentWriteScope())) throw new ForbiddenException({ error: `${what}มีรถประเภทที่บัญชีของคุณไม่ได้ดูแล` });
   }
 
   private editLog(vehicleId: string, remark: string, changes: Record<string, unknown>, db: Pick<Tx, 'vehicleEditLog'> = this.prisma) {
@@ -909,6 +1075,9 @@ export class DeliveryService {
       id: string;
       vehicleId: string | null;
       plateSwapId: string | null;
+      jobType: string | null;
+      jobId: string | null;
+      jobDetail: string | null;
       vehicleKind: string | null;
       ownerName: string | null;
       receipt: boolean;
@@ -929,7 +1098,7 @@ export class DeliveryService {
         documentSubmissions: Array<{ createdAt: Date }>;
       } | null;
     }>;
-  }, later = new Map<string, { slipNo: number; date: string }>()) {
+  }, later = new Map<string, { slipNo: number; date: string }>(), billedJobs = new Map<string, string>()) {
     return {
       id: s.id,
       slipNo: s.slipNo,
@@ -949,8 +1118,8 @@ export class DeliveryService {
         .filter((i) => itemInScope(i))
         .sort(
           (a, b) =>
-            (a.vehicle?.documentSubmissions[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) -
-              (b.vehicle?.documentSubmissions[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) ||
+            (a.vehicle?.documentSubmissions?.[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) -
+              (b.vehicle?.documentSubmissions?.[0]?.createdAt.getTime() ?? Number.MAX_SAFE_INTEGER) ||
             comparePlateText(a.plateText, b.plateText) ||
             a.chassis.localeCompare(b.chassis),
         )
@@ -958,7 +1127,11 @@ export class DeliveryService {
           id: i.id,
           vehicleId: i.vehicleId,
           plateSwapId: i.plateSwapId,
-          source: (i.plateSwapId ? 'PLATE_SWAP' : 'VEHICLE') as DeliverySource,
+          // งานอื่น (ผู้ใช้ 2026-10-08): source = ประเภทงาน, jobDetail = ชื่องานตอนส่ง (พิมพ์บนใบ)
+          jobType: isJobType(i.jobType) ? i.jobType : null,
+          jobId: i.jobId,
+          jobDetail: i.jobDetail,
+          source: (isJobType(i.jobType) ? i.jobType : i.plateSwapId ? 'PLATE_SWAP' : 'VEHICLE') as DeliverySource,
           chassis: i.chassis,
           brandName: i.brandName,
           body: i.body,
@@ -972,8 +1145,8 @@ export class DeliveryService {
           cancelledAt: i.cancelledAt?.toISOString() ?? null,
           cancelReason: i.cancelReason,
           cancelledBy: userName(i.cancelledBy),
-          // งานสลับเลขยังไม่เข้าระบบวางบิล จึงไม่มีบิล/ปิดงานให้ล็อก (ผู้ใช้ 2026-09-28)
-          invoiceNo: i.vehicle?.invoiceLines[0]?.invoice.invoiceNo ?? null,
+          // งานสลับเลขยังไม่เข้าระบบวางบิล จึงไม่มีบิล/ปิดงานให้ล็อก (ผู้ใช้ 2026-09-28) / งานอื่นอ่านจาก InvoiceItem (sourceType/sourceId)
+          invoiceNo: i.vehicle?.invoiceLines[0]?.invoice.invoiceNo ?? (isJobType(i.jobType) && i.jobId ? (billedJobs.get(jobKey(i.jobType, i.jobId)) ?? null) : null),
           // ปิดงาน - วางบิลนอกระบบ = ล็อกใบส่งเล่มเหมือนวางบิลแล้ว (2026-09-27)
           billingClosed: i.vehicle?.billingClosedAt != null,
           // แถวสลับเลขใช้ชื่อเจ้าของที่ snapshot ไว้ (ไม่มี VehicleOwner ให้อ่านสด)
@@ -1001,12 +1174,24 @@ export class DeliveryService {
     bookReceivedDate: Date | null;
     customer: { id: string; name: string; company: string | null; branch?: string | null };
     brand: { name: string };
-    documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date }>;
+    documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date; receiptReceivedDate?: Date | null }>;
     invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
     deliverySlipItems: Array<{ slip: { id: string; slipNo: number; date: Date } }>;
   }) {
     const bookSlip = v.deliveredDate ? v.deliverySlipItems[0]?.slip : undefined;
+    const sub = v.documentSubmissions[0];
+    // พร้อมส่งตั้งแต่ (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม): ส่งเล่ม = วันที่ได้ครบทั้งใบเสร็จและเล่ม / ส่งป้ายตามหลัง = วันที่รับป้าย
+    const readySince = v.deliveredDate
+      ? v.plateDeliveredDate
+        ? null
+        : v.plateReceivedDate
+      : v.bookReceivedDate && sub?.status === 'RECEIPT_RECEIVED'
+        ? laterOf(v.bookReceivedDate, sub.receiptReceivedDate ?? null)
+        : null;
     return {
+      readySince: isoDay(readySince),
+      jobLabel: null as string | null,
+      jobDetail: null as string | null,
       id: v.id,
       customerId: v.customer.id,
       customerName: v.customer.company || v.customer.name,
@@ -1052,7 +1237,11 @@ export class DeliveryService {
   ) {
     const d = plateSwapDeliverable(s);
     const bookSlip = s.deliveredDate ? s.deliverySlipItems[0]?.slip : undefined;
+    const readySince = s.deliveredDate ? (s.plateDeliveredDate ? null : s.plateReceivedDate) : d.readyForFirstDelivery ? laterOf(s.returnedDate, s.bookReceivedDate) : null;
     return {
+      readySince: isoDay(readySince),
+      jobLabel: null as string | null,
+      jobDetail: null as string | null,
       id: s.id,
       customerId: s.customer?.id ?? '',
       customerName: s.customer?.company || s.customer?.name || '',
@@ -1083,6 +1272,44 @@ export class DeliveryService {
       bookSlip: bookSlip ? { id: bookSlip.id, slipNo: bookSlip.slipNo, date: bookSlip.date.toISOString().slice(0, 10) } : null,
       source: 'PLATE_SWAP' as DeliverySource,
       vehicleKind: d.vehicleKind,
+    };
+  }
+
+  // งานอื่นๆ ในคิว/ส่งแล้วล่าสุด - รูปร่างเดียวกับ mapRow() (ผู้ใช้ 2026-10-08) · ส่งครั้งเดียวจบ จึง plateDeliveredDate = deliveredDate
+  // และ plateReceived = พร้อมส่งแล้ว (deliveryKind ตอบ FULL / DONE ตรงกับ jobDeliverable)
+  private mapJobRow(j: JobDeliveryRow, invoiceNo: string | null) {
+    const d = jobDeliverable(j);
+    return {
+      readySince: isoDay(j.deliveredDate ? null : j.readySince),
+      jobLabel: JOB_LABEL[j.type] as string | null,
+      jobDetail: j.detail as string | null,
+      id: j.id,
+      customerId: j.customer?.id ?? '',
+      customerName: j.customer?.company || j.customer?.name || '',
+      customer: j.customer ? { id: j.customer.id, name: j.customer.name, company: j.customer.company, branch: j.customer.branch } : { id: '', name: '', company: null, branch: null },
+      chassis: j.chassis,
+      brandName: j.brandName,
+      body: null,
+      plateCategory: j.plateCategory,
+      plateNumber: j.plateNumber,
+      receiptNo: j.receiptNo,
+      kind: deliveryKind(d),
+      plateReceived: !!j.readySince,
+      deliveredDate: isoDay(j.deliveredDate),
+      plateDeliveredDate: isoDay(j.deliveredDate),
+      recipient: j.deliveryRecipient,
+      note: j.deliveryNote,
+      invoiceNo,
+      // lot ของงานอื่น = วันที่ยื่น + ประเภทงาน + ลูกค้า (หน้าเว็บจัดการ์ดด้วย jobLabel)
+      submitDate: isoDay(j.submitDate),
+      urgent: false,
+      submittedAt: null,
+      submissionStatus: null,
+      receiptReceived: !!j.returnedDate,
+      bookReceived: false,
+      bookSlip: null,
+      source: j.type as DeliverySource,
+      vehicleKind: j.vehicleKind,
     };
   }
 }

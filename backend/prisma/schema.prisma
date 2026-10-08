@@ -71,28 +71,31 @@ model User {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  customer           Customer?               @relation(fields: [customerId], references: [id])
-  approvedBy         User?                   @relation("ApprovedUsers", fields: [approvedById], references: [id])
-  approvedUsers      User[]                  @relation("ApprovedUsers")
-  assignedCases      Case[]                  @relation("AssignedStaff")
-  deletedVehicles    Vehicle[]               @relation("DeletedVehicles")
-  vehicleEdits       VehicleEditLog[]        @relation("VehicleEdits")
-  deliverySlips      DeliverySlip[]          @relation("DeliverySlips")
-  cancelledSlips     DeliverySlip[]          @relation("DeliverySlipCancels")
-  cancelledSlipItems DeliverySlipItem[]      @relation("DeliverySlipItemCancels")
-  auditLogs          AuditLog[]              @relation("AuditLogs")
-  cancelledTaxRenews TaxRenewal[]            @relation("TaxRenewalCancels")
-  cancelledYamaha    YamahaRelocationEntry[] @relation("YamahaRelocationCancels")
-  cancelledSwaps     PlateSwap[]             @relation("PlateSwapCancels")
+  customer                  Customer?                @relation(fields: [customerId], references: [id])
+  approvedBy                User?                    @relation("ApprovedUsers", fields: [approvedById], references: [id])
+  approvedUsers             User[]                   @relation("ApprovedUsers")
+  assignedCases             Case[]                   @relation("AssignedStaff")
+  deletedVehicles           Vehicle[]                @relation("DeletedVehicles")
+  createdVehicles           Vehicle[]                @relation("VehiclesCreated")
+  createdSubmissions        DocumentSubmission[]     @relation("SubmissionsCreated")
+  receivedSubmissions       DocumentSubmission[]     @relation("SubmissionsReceived")
+  vehicleEdits              VehicleEditLog[]         @relation("VehicleEdits")
+  deliverySlips             DeliverySlip[]           @relation("DeliverySlips")
+  cancelledSlips            DeliverySlip[]           @relation("DeliverySlipCancels")
+  cancelledSlipItems        DeliverySlipItem[]       @relation("DeliverySlipItemCancels")
+  auditLogs                 AuditLog[]               @relation("AuditLogs")
+  cancelledTaxRenews        TaxRenewal[]             @relation("TaxRenewalCancels")
+  cancelledYamaha           YamahaRelocationEntry[]  @relation("YamahaRelocationCancels")
+  cancelledSwaps            PlateSwap[]              @relation("PlateSwapCancels")
   cancelledUseCancellations VehicleUseCancellation[] @relation("VehicleUseCancellationCancels")
-  cancelledMoveOuts VehicleMoveOut[] @relation("VehicleMoveOutCancels")
-  cancelledPlateCopies PlateCopy[] @relation("PlateCopyCancels")
-  cancelledTransfers VehicleTransfer[] @relation("VehicleTransferCancels")
-  billingClosures    Vehicle[]               @relation("VehicleBillingClosures")
-  accountPeriods     CustomerAccountPeriod[] @relation("CustomerAccountPeriods")
-  paymentsCreated    CustomerPayment[]       @relation("CustomerPaymentsCreated")
-  paymentsCancelled  CustomerPayment[]       @relation("CustomerPaymentsCancelled")
-  employee           Employee?               @relation("EmployeeUser")
+  cancelledMoveOuts         VehicleMoveOut[]         @relation("VehicleMoveOutCancels")
+  cancelledPlateCopies      PlateCopy[]              @relation("PlateCopyCancels")
+  cancelledTransfers        VehicleTransfer[]        @relation("VehicleTransferCancels")
+  billingClosures           Vehicle[]                @relation("VehicleBillingClosures")
+  accountPeriods            CustomerAccountPeriod[]  @relation("CustomerAccountPeriods")
+  paymentsCreated           CustomerPayment[]        @relation("CustomerPaymentsCreated")
+  paymentsCancelled         CustomerPayment[]        @relation("CustomerPaymentsCancelled")
+  employee                  Employee?                @relation("EmployeeUser")
 
   @@index([status])
   @@index([customerId])
@@ -111,38 +114,38 @@ model Customer {
   updatedAt DateTime @updatedAt
 
   // เงื่อนไขวางบิลในนามบริษัท (ดู backend/src/billing) - VAT 7% และหัก ณ ที่จ่ายคิดจากทุกรายการที่ไม่ใช่ค่าใบเสร็จกรมขนส่ง
-  billingVat             Boolean   @default(true) // false = บิลไม่มี VAT
-  billingWhtRate         Decimal   @default(3) @db.Decimal(5, 2) // % หัก ณ ที่จ่ายอัตราปกติ (0 = ไม่หัก)
-  billingWhtSpecialRate  Decimal?  @db.Decimal(5, 2) // % อัตราพิเศษชั่วคราว เช่น 1% ถึงสิ้นปี
-  billingWhtSpecialUntil DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
+  billingVat               Boolean   @default(true) // false = บิลไม่มี VAT
+  billingWhtRate           Decimal   @default(3) @db.Decimal(5, 2) // % หัก ณ ที่จ่ายอัตราปกติ (0 = ไม่หัก)
+  billingWhtSpecialRate    Decimal?  @db.Decimal(5, 2) // % อัตราพิเศษชั่วคราว เช่น 1% ถึงสิ้นปี
+  billingWhtSpecialUntil   DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
   // ประเภทหนังสือรับรองหัก ณ ที่จ่ายที่ลูกค้ารายนี้ส่งมาตามปกติ (ผู้ใช้ 2026-10-06: YM และ Lexus = e-WHT ที่เหลือ = กระดาษ) - ตั้งต้นในหน้าต่างออกใบกำกับ แก้รายใบได้
-  billingWhtMethod       String    @default("PAPER") // PAPER | EWHT
+  billingWhtMethod         String    @default("PAPER") // PAPER | EWHT
   // ผู้รับเงินของบิลบัญชีบุคคล (ผู้ใช้ 2026-10-08: SPI จ่ายเข้านายจิรฤทธิ์ ส่วน YMAC เข้าอารี) - ว่าง = ใช้ผู้รับเงินตั้งต้น (PERSONAL_PROFILE)
-  personalPayeeName      String?
-  personalPayeeBank      String?
-  personalPayeeAccountNo String?
-  billingCreditDays      Int? // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28: มีรอบรับวางบิลแต่ใช้ค่าคร่าวๆ) - null = ไม่ได้ตั้ง
+  personalPayeeName        String?
+  personalPayeeBank        String?
+  personalPayeeAccountNo   String?
+  billingCreditDays        Int? // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28: มีรอบรับวางบิลแต่ใช้ค่าคร่าวๆ) - null = ไม่ได้ตั้ง
   // ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น
-  billingRequiresQuotation Boolean @default(false)
+  billingRequiresQuotation Boolean   @default(false)
 
-  vehicles        Vehicle[]
-  requestedCases  Case[]
-  serviceFeeRates ServiceFeeRate[]
-  jobFeeRates     JobFeeRate[]
-  taxRenewals     TaxRenewal[]
-  invoices        Invoice[]
-  deliverySlips   DeliverySlip[]
-  users           User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
-  accountPeriods  CustomerAccountPeriod[]
-  payments        CustomerPayment[]
-  plateSwaps      PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
+  vehicles                Vehicle[]
+  requestedCases          Case[]
+  serviceFeeRates         ServiceFeeRate[]
+  jobFeeRates             JobFeeRate[]
+  taxRenewals             TaxRenewal[]
+  invoices                Invoice[]
+  deliverySlips           DeliverySlip[]
+  users                   User[] // บัญชีลูกค้าที่ล็อกอินเข้า portal ของบริษัทนี้
+  accountPeriods          CustomerAccountPeriod[]
+  payments                CustomerPayment[]
+  plateSwaps              PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
   vehicleUseCancellations VehicleUseCancellation[] // งานยกเลิกการใช้รถที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
-  vehicleMoveOuts VehicleMoveOut[] // งานย้ายออกที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-06)
-  plateCopies PlateCopy[] // งานคัดแผ่นป้ายทะเบียนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
-  vehicleTransfers VehicleTransfer[] // งานโอนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
-  taxInvoices     TaxInvoice[]
-  whtCertificates WhtCertificate[]
-  quotations      Quotation[]
+  vehicleMoveOuts         VehicleMoveOut[] // งานย้ายออกที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-06)
+  plateCopies             PlateCopy[] // งานคัดแผ่นป้ายทะเบียนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
+  vehicleTransfers        VehicleTransfer[] // งานโอนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
+  taxInvoices             TaxInvoice[]
+  whtCertificates         WhtCertificate[]
+  quotations              Quotation[]
 }
 
 model Brand {
@@ -241,12 +244,15 @@ model Vehicle {
   deletedAt     DateTime?
   deletedReason String? // เหตุผลที่ลบ (Remark) - บังคับกรอกที่ระดับ service
   deletedById   String? // ผู้ใช้ที่กดลบ
+  // ผู้ที่คีย์ข้อมูลรถ (ผู้ใช้ 2026-10-08 "ช่องผู้ทำ") - NULL = รถที่คีย์ก่อนมีช่องนี้ หรือนำเข้านอกคำขอ HTTP (script)
+  createdById   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   customer            Customer              @relation(fields: [customerId], references: [id])
   deletedBy           User?                 @relation("DeletedVehicles", fields: [deletedById], references: [id])
+  createdBy           User?                 @relation("VehiclesCreated", fields: [createdById], references: [id], onDelete: SetNull)
   billingClosedBy     User?                 @relation("VehicleBillingClosures", fields: [billingClosedById], references: [id], onDelete: SetNull)
   brand               Brand                 @relation(fields: [brandId], references: [id])
   owner               VehicleOwner?         @relation(fields: [ownerId], references: [id])
@@ -666,14 +672,21 @@ model DocumentSubmission {
   billFeeTotal        Decimal   @db.Decimal(12, 2)
   noBillTotal         Decimal   @db.Decimal(12, 2)
   taxAmount           Decimal?  @db.Decimal(12, 2)
+  // ผู้ทำ (ผู้ใช้ 2026-10-08): createdById = คนกดยื่นเอกสาร, receivedById = คนบันทึกว่าได้รับใบเสร็จ (NULL = ก่อนมีช่องนี้)
+  createdById         String?
+  receivedById        String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  vehicle  Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  receipts ReceiptImage[]
+  vehicle    Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdBy  User?          @relation("SubmissionsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  receivedBy User?          @relation("SubmissionsReceived", fields: [receivedById], references: [id], onDelete: SetNull)
+  receipts   ReceiptImage[]
 
   @@index([vehicleId])
   @@index([submitDate])
+  @@index([createdById])
+  @@index([receivedById])
 }
 
 // --- รูปใบเสร็จ (หน้ารับใบเสร็จ) ---------------------------------------------------
@@ -694,25 +707,25 @@ model ReceiptImage {
   createdAt        DateTime @default(now())
 
   // ใบเสร็จของงานสลับเลข (รับเอกสารกลับ) - รูปหนึ่งเป็นของรายการยื่นเอกสารรถใหม่ หรือของงานสลับเลข อย่างใดอย่างหนึ่ง
-  plateSwapId String?
+  plateSwapId              String?
   // หรือของงานยกเลิกการใช้รถ (ผู้ใช้ 2026-10-02) - ทั้งสองช่องว่างพร้อมกัน = ใบเสร็จรถจดใหม่ที่ยังไม่จับคู่
   vehicleUseCancellationId String?
   // หรือของงานคัดแผ่นป้ายทะเบียน (ผู้ใช้ 2026-10-02)
-  plateCopyId String?
+  plateCopyId              String?
   // หรือของงานโอน (ผู้ใช้ 2026-10-02)
-  vehicleTransferId String?
+  vehicleTransferId        String?
   // หรือของงานย้ายออก (ผู้ใช้ 2026-10-06)
-  vehicleMoveOutId String?
+  vehicleMoveOutId         String?
   // หรือของงานต่อภาษี (ผู้ใช้ 2026-10-08)
-  taxRenewalId String?
+  taxRenewalId             String?
 
   submission             DocumentSubmission?     @relation(fields: [submissionId], references: [id], onDelete: SetNull)
   plateSwap              PlateSwap?              @relation(fields: [plateSwapId], references: [id], onDelete: Cascade)
   vehicleUseCancellation VehicleUseCancellation? @relation(fields: [vehicleUseCancellationId], references: [id], onDelete: Cascade)
-  plateCopy PlateCopy? @relation(fields: [plateCopyId], references: [id], onDelete: Cascade)
-  vehicleTransfer VehicleTransfer? @relation(fields: [vehicleTransferId], references: [id], onDelete: Cascade)
-  vehicleMoveOut VehicleMoveOut? @relation(fields: [vehicleMoveOutId], references: [id], onDelete: Cascade)
-  taxRenewal TaxRenewal? @relation(fields: [taxRenewalId], references: [id], onDelete: Cascade)
+  plateCopy              PlateCopy?              @relation(fields: [plateCopyId], references: [id], onDelete: Cascade)
+  vehicleTransfer        VehicleTransfer?        @relation(fields: [vehicleTransferId], references: [id], onDelete: Cascade)
+  vehicleMoveOut         VehicleMoveOut?         @relation(fields: [vehicleMoveOutId], references: [id], onDelete: Cascade)
+  taxRenewal             TaxRenewal?             @relation(fields: [taxRenewalId], references: [id], onDelete: Cascade)
 
   @@index([submissionId])
   @@index([plateSwapId])
@@ -822,12 +835,12 @@ model PlateSwap {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  customer    Customer?      @relation(fields: [customerId], references: [id])
-  newVehicle  Vehicle?       @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
-  cancelledBy User?          @relation("PlateSwapCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
-  platePhoto  PlatePhoto?    @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
-  bookPhoto   BookPhoto?     @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
-  receipts    ReceiptImage[]
+  customer          Customer?          @relation(fields: [customerId], references: [id])
+  newVehicle        Vehicle?           @relation(fields: [newVehicleId], references: [id], onDelete: SetNull)
+  cancelledBy       User?              @relation("PlateSwapCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  platePhoto        PlatePhoto?        @relation(fields: [platePhotoId], references: [id], onDelete: SetNull)
+  bookPhoto         BookPhoto?         @relation(fields: [bookPhotoId], references: [id], onDelete: SetNull)
+  receipts          ReceiptImage[]
   // รายการในใบส่งงาน - ใบเดียวกับรถจดใหม่ได้ (ผู้ใช้ 2026-09-28)
   deliverySlipItems DeliverySlipItem[]
   // บรรทัดในบิลที่เก็บค่าใบเสร็จกรมฯ ของรถเก่างานนี้ (ผู้ใช้ 2026-09-28) - งานหนึ่งขึ้นบิลได้ครั้งเดียว
@@ -874,6 +887,12 @@ model VehicleUseCancellation {
   receiptDate   DateTime?
   receiptAmount Decimal?  @db.Decimal(12, 2)
 
+  // ส่งงานลูกค้า (ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนจึงวางบิลได้ - บันทึกจากหน้า Delivery เป็นใบ DL
+  // เหมือนรถจดใหม่ DeliverySlipItem.jobType/jobId ชี้มาที่งานนี้) - วันที่ไม่ว่าง = ส่งแล้ว
+  deliveredDate     DateTime?
+  deliveryRecipient String?
+  deliveryNote      String?
+
   // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการและยอดรวม
   cancelledAt   DateTime?
   cancelReason  String?
@@ -889,6 +908,7 @@ model VehicleUseCancellation {
   @@index([customerId])
   @@index([submitDate])
   @@index([returnedDate])
+  @@index([deliveredDate])
 }
 
 // --- คัดแผ่นป้ายทะเบียน (Plate copy) ---------------------------------------------------
@@ -929,6 +949,12 @@ model PlateCopy {
   plateReceivedDate DateTime?
   platePhotoId      String?
 
+  // ส่งงานลูกค้า (ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนจึงวางบิลได้ - บันทึกจากหน้า Delivery เป็นใบ DL
+  // เหมือนรถจดใหม่ DeliverySlipItem.jobType/jobId ชี้มาที่งานนี้) - วันที่ไม่ว่าง = ส่งแล้ว
+  deliveredDate     DateTime?
+  deliveryRecipient String?
+  deliveryNote      String?
+
   // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการและยอดรวม
   cancelledAt   DateTime?
   cancelReason  String?
@@ -945,6 +971,7 @@ model PlateCopy {
   @@index([customerId])
   @@index([submitDate])
   @@index([returnedDate])
+  @@index([deliveredDate])
   @@index([plateReceivedDate])
 }
 
@@ -994,6 +1021,12 @@ model VehicleTransfer {
   receiptDate   DateTime?
   receiptAmount Decimal?  @db.Decimal(12, 2)
 
+  // ส่งงานลูกค้า (ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนจึงวางบิลได้ - บันทึกจากหน้า Delivery เป็นใบ DL
+  // เหมือนรถจดใหม่ DeliverySlipItem.jobType/jobId ชี้มาที่งานนี้) - วันที่ไม่ว่าง = ส่งแล้ว
+  deliveredDate     DateTime?
+  deliveryRecipient String?
+  deliveryNote      String?
+
   // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการ
   cancelledAt   DateTime?
   cancelReason  String?
@@ -1009,6 +1042,7 @@ model VehicleTransfer {
   @@index([customerId])
   @@index([submitDate])
   @@index([returnedDate])
+  @@index([deliveredDate])
   @@index([transferType])
 }
 
@@ -1094,8 +1128,8 @@ model PlatePhoto {
   closedAt         DateTime?
   createdAt        DateTime  @default(now())
 
-  vehicles   Vehicle[]
-  plateSwaps PlateSwap[] // รูปป้ายของงานสลับเลข (รถเก่า) - ตารางเดียวกับรูปป้ายรถจดใหม่ (ผู้ใช้ 2026-09-28)
+  vehicles    Vehicle[]
+  plateSwaps  PlateSwap[] // รูปป้ายของงานสลับเลข (รถเก่า) - ตารางเดียวกับรูปป้ายรถจดใหม่ (ผู้ใช้ 2026-09-28)
   plateCopies PlateCopy[] // รูปป้ายที่ได้รับของงานคัดแผ่นป้ายทะเบียน (ผู้ใช้ 2026-10-02)
 
   @@index([kind, closedAt])
@@ -1188,14 +1222,19 @@ model DeliverySlip {
 }
 
 model DeliverySlipItem {
-  id     String @id @default(cuid())
-  slipId String
+  id            String    @id @default(cuid())
+  slipId        String
   // แถวหนึ่งเป็นได้อย่างใดอย่างหนึ่งเท่านั้น: รถจดใหม่ (vehicleId) หรืองานสลับเลข (plateSwapId)
   // ผู้ใช้ 2026-09-28: ลูกค้าเดียวกันมารับทีเดียว เซ็นใบเดียวจบ จึงผสมสองอย่างในใบเดียวกันได้
   // vehicleId ผ่อนเป็น nullable เพราะรถเก่าของงานสลับเลขไม่ได้อยู่ในตาราง Vehicle (กรอกเอง)
   // Prisma บังคับ XOR ไม่ได้ จึงบังคับที่ชั้น service (DeliveryService.parseDeliveryItems)
   vehicleId     String?
   plateSwapId   String?
+  // งานอื่นๆ (ผู้ใช้ 2026-10-08 ทุกงานส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล): jobType = TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL
+  // + jobId = id ของงานนั้น (ไม่มี FK เหมือน InvoiceItem.sourceType/sourceId - งานไม่ถูกลบ มีแต่ยกเลิก) jobDetail = ชื่องานตอนส่ง เช่น "โอนตรวจรถ"
+  jobType       String?
+  jobId         String?
+  jobDetail     String?
   receipt       Boolean // ส่งใบเสร็จรอบนี้ - เฉพาะใบก่อน 2026-09-26 ใบใหม่เป็น false เสมอ (ใบเสร็จไปกับใบวางบิล)
   book          Boolean // ส่งเล่มทะเบียนรอบนี้
   plate         Boolean // ส่งป้ายรอบนี้
@@ -1223,6 +1262,7 @@ model DeliverySlipItem {
   @@index([slipId])
   @@index([vehicleId])
   @@index([plateSwapId])
+  @@index([jobType, jobId])
 }
 
 // ใบวางบิล/ใบแจ้งหนี้ (IV) - ยอดทุกช่องเป็น snapshot ณ วันออกบิล ไม่คำนวณใหม่ตามอัตราที่แก้ทีหลัง
@@ -1323,11 +1363,11 @@ model TaxInvoice {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  invoice        Invoice?        @relation(fields: [invoiceId], references: [id])
-  customer       Customer        @relation(fields: [customerId], references: [id])
-  whtCertificate WhtCertificate? @relation(fields: [whtCertificateId], references: [id], onDelete: SetNull)
-  replaces       TaxInvoice?     @relation("TaxInvoiceReplaces", fields: [replacesId], references: [id])
-  replacedBy     TaxInvoice?     @relation("TaxInvoiceReplaces")
+  invoice        Invoice?         @relation(fields: [invoiceId], references: [id])
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  whtCertificate WhtCertificate?  @relation(fields: [whtCertificateId], references: [id], onDelete: SetNull)
+  replaces       TaxInvoice?      @relation("TaxInvoiceReplaces", fields: [replacesId], references: [id])
+  replacedBy     TaxInvoice?      @relation("TaxInvoiceReplaces")
   items          TaxInvoiceItem[]
 
   @@unique([year, number])
@@ -1476,19 +1516,19 @@ model QuotationItem {
 // quantity x unitPrice = amount (ยอดรวมก่อน VAT ของบรรทัด เช่น ต่อภาษีรถจักรยานยนต์ 100 x 12 คัน, ผู้ใช้ 2026-09-29)
 // cost = ต้นทุนต่อหน่วย ใช้คิดกำไรภายใน ไม่พิมพ์บนบิล (null = ไม่ทราบ, FEE ต้นทุน = ยอดเสมอจึงไม่เก็บ)
 model InvoiceItem {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  kind        String
-  description String
-  quantity    Int      @default(1)
-  unitPrice   Decimal  @db.Decimal(12, 2)
-  amount      Decimal  @db.Decimal(12, 2)
-  cost        Decimal? @db.Decimal(12, 2)
-  sortOrder   Int      @default(0)
+  id             String   @id @default(cuid())
+  invoiceId      String
+  kind           String
+  description    String
+  quantity       Int      @default(1)
+  unitPrice      Decimal  @db.Decimal(12, 2)
+  amount         Decimal  @db.Decimal(12, 2)
+  cost           Decimal? @db.Decimal(12, 2)
+  sortOrder      Int      @default(0)
   // งานอื่นๆ ที่ดึงเข้าบิล (ผู้ใช้ 2026-10-07): sourceType = TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL, sourceId = id ของงานนั้น
   // งานหนึ่งงานอยู่ในบิลที่ยังไม่ VOID ได้ใบเดียว (ตรวจใน BillingService.createJobInvoice ใต้ล็อกแถวงาน) · null = บรรทัดที่พิมพ์เอง
-  sourceType  String?
-  sourceId    String?
+  sourceType     String?
+  sourceId       String?
   // snapshot ของงานตอนออกบิล ไว้พิมพ์ตารางในใบแนบ { chassis, plateText, brand, ownerName, receiptNo, doneDate, vehicleClass, variant } - ทั้ง 2 บรรทัดของงานเดียวกันเก็บเหมือนกัน
   sourceSnapshot Json?
 
@@ -1602,11 +1642,13 @@ model TaxRenewal {
   noBillTotal  Decimal? @db.Decimal(12, 2)
   taxBreakdown Json? // ใบคำนวณเต็มจาก calculateVehicleTax (cycles + calculationDetails + warnings)
 
-  receivedDate  DateTime? // รับป้ายภาษี/ใบเสร็จ - ต้องมีรูปใบเสร็จอย่างน้อย 1 รูปก่อน (ผู้ใช้ 2026-10-08)
-  receiptNo     String? // เลขที่/วันที่/ยอดตามใบเสร็จ - เติมจาก OCR ครั้งแรก แก้เองได้
-  receiptDate   DateTime?
-  receiptAmount Decimal?  @db.Decimal(12, 2)
-  deliveredDate DateTime? // คืนเอกสารให้ลูกค้า
+  receivedDate      DateTime? // รับป้ายภาษี/ใบเสร็จ - ต้องมีรูปใบเสร็จอย่างน้อย 1 รูปก่อน (ผู้ใช้ 2026-10-08)
+  receiptNo         String? // เลขที่/วันที่/ยอดตามใบเสร็จ - เติมจาก OCR ครั้งแรก แก้เองได้
+  receiptDate       DateTime?
+  receiptAmount     Decimal?  @db.Decimal(12, 2)
+  deliveredDate     DateTime? // คืนเอกสารให้ลูกค้า - ตั้งแต่ 2026-10-08 บันทึกจากหน้า Delivery เป็นใบ DL (แถวเก่ากรอกมือ ไม่มีใบ)
+  deliveryRecipient String?
+  deliveryNote      String?
 
   // ยกเลิกงาน (soft cancel - ผู้ใช้ 2026-09-27 ห้ามลบแถว): ADMIN/STAFF_CAR/STAFF_MOTO (ตามประเภทรถของตัวเอง) ต้องระบุ
   // เหตุผล บันทึกประวัติลง AuditLog - cancelledAt ไม่ว่าง = ยกเลิกแล้ว ไม่แสดงในรายการ ยอดรวม และภาพรวม
@@ -1617,9 +1659,9 @@ model TaxRenewal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vehicle     Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
-  customer    Customer? @relation(fields: [customerId], references: [id])
-  cancelledBy User?     @relation("TaxRenewalCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  customer    Customer?      @relation(fields: [customerId], references: [id])
+  cancelledBy User?          @relation("TaxRenewalCancels", fields: [cancelledById], references: [id], onDelete: SetNull)
   receipts    ReceiptImage[]
 
   @@index([vehicleId])
@@ -1735,7 +1777,7 @@ model Employee {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  user         User?         @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
+  user         User?                  @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
   payrollItems PayrollItem[]
   issuedWht    IssuedWhtCertificate[]
 
@@ -1930,6 +1972,12 @@ model VehicleMoveOut {
   receiptDate   DateTime?
   receiptAmount Decimal?  @db.Decimal(12, 2)
 
+  // ส่งงานลูกค้า (ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนจึงวางบิลได้ - บันทึกจากหน้า Delivery เป็นใบ DL
+  // เหมือนรถจดใหม่ DeliverySlipItem.jobType/jobId ชี้มาที่งานนี้) - วันที่ไม่ว่าง = ส่งแล้ว
+  deliveredDate     DateTime?
+  deliveryRecipient String?
+  deliveryNote      String?
+
   // ยกเลิกงาน (soft cancel) - cancelledAt ไม่ว่าง = ไม่แสดงในรายการ
   cancelledAt   DateTime?
   cancelReason  String?
@@ -1945,6 +1993,7 @@ model VehicleMoveOut {
   @@index([customerId])
   @@index([submitDate])
   @@index([returnedDate])
+  @@index([deliveredDate])
 }
 
 // เลขาส่วนตัว: ตู้ข้อความของเจ้าของ (ผู้ใช้ 2026-10-07) เช่น ที่อยู่บริษัท เลขผู้เสียภาษี - จำ/ขอ/ลืมผ่านแชตไลน์

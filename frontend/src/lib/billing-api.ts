@@ -6,7 +6,11 @@ import type { PersonalPayee } from "@/lib/company-profile";
 export type DeliveryKind = "FULL" | "NO_PLATE" | "PLATE_ONLY" | "WAITING_PLATE" | "DONE";
 
 // งานสลับเลขส่งคืนลูกค้าในใบเดียวกับรถจดใหม่ได้ (ผู้ใช้ 2026-09-28) - แถวในคิว/ใบส่งงานจึงมาจาก 2 ที่
-export type DeliverySource = "VEHICLE" | "PLATE_SWAP";
+// งานอื่นๆ (ผู้ใช้ 2026-10-08: ทุกงานส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) ส่งในใบเดียวกันได้ - source = ประเภทงาน
+export type DeliveryJobSource = "TRANSFER" | "USE_CANCEL" | "PLATE_COPY" | "MOVE_OUT" | "TAX_RENEWAL";
+export type DeliverySource = "VEHICLE" | "PLATE_SWAP" | DeliveryJobSource;
+export const DELIVERY_JOB_SOURCES: DeliveryJobSource[] = ["TRANSFER", "USE_CANCEL", "PLATE_COPY", "MOVE_OUT", "TAX_RENEWAL"];
+export const isDeliveryJobSource = (s: string): s is DeliveryJobSource => (DELIVERY_JOB_SOURCES as string[]).includes(s);
 
 export interface DeliveryRow {
   id: string; // vehicleId หรือ plateSwapId แล้วแต่ source
@@ -36,6 +40,11 @@ export interface DeliveryRow {
   bookReceived: boolean;
   // ใบที่ส่งเล่มไป (เฉพาะคันที่ส่งเล่มแล้ว) - ปุ่ม "ป้ายไปพร้อมเล่มแล้ว" ในรายงานส่งงานอ้างถึงใบนี้
   bookSlip: { id: string; slipNo: number; date: string } | null;
+  // พร้อมส่งตั้งแต่วันไหน (YYYY-MM-DD) - ตัวช่วยกันลืม (ผู้ใช้ 2026-10-08): ค้างนานขึ้นสีส้ม/แดง · null = ไม่ได้รออยู่
+  readySince: string | null;
+  // งานอื่นๆ: ชื่อประเภทงาน (เช่น "งานโอน") + รายละเอียด (เช่น "โอนตรวจรถ") · null = รถจดใหม่ / สลับเลข
+  jobLabel: string | null;
+  jobDetail: string | null;
 }
 
 // ใบส่งงาน Delivery: บันทึกส่ง 1 ครั้ง = 1 ใบ บอกแยกรายคันว่ารอบนี้ส่งใบเสร็จ / เล่ม / ป้าย (ไม่มีราคา)
@@ -43,6 +52,10 @@ export interface DeliverySlipItem {
   id: string; // id ของแถว - ใช้ระบุแถวตอนยกเลิก/ติ๊กป้าย (แถวงานสลับเลขไม่มี vehicleId)
   vehicleId: string | null;
   plateSwapId: string | null;
+  // งานอื่นๆ (ผู้ใช้ 2026-10-08): ประเภท + id ของงาน และชื่องานตอนส่ง (พิมพ์บนใบ)
+  jobType: DeliveryJobSource | null;
+  jobId: string | null;
+  jobDetail: string | null;
   source: DeliverySource;
   chassis: string;
   brandName: string;
@@ -406,6 +419,7 @@ export interface OtherJob {
   brand: string | null;
   ownerName: string | null;
   doneDate: string; // วันที่รับใบเสร็จกลับ (ต่อภาษี = วันที่คืนเอกสาร)
+  deliveredDate: string; // วันที่ส่งงานลูกค้า (ใบ DL) - เข้าคิววางบิลได้หลังจากนี้ (ผู้ใช้ 2026-10-08)
   receiptNo: string | null;
   receiptAmount: number | null;
   fee: number; // ค่าธรรมเนียมราชการที่จะขึ้นบิล (ใบเสร็จจริง ไม่มี = ยอด Bill ที่คิดไว้)

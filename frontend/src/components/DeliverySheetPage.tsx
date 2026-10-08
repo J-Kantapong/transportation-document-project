@@ -25,7 +25,7 @@ import { PageTabs } from "@/components/PageTabs";
 // ใบส่งงานรวมทุกประเภท (ผู้ใช้ 2026-10-05): เลือกเจ้าของงาน + ช่วงวันที่ แล้วพิมพ์/บันทึก PDF ใบส่งงานของทุกประเภทงานที่ส่งแล้ว/เสร็จในช่วงนั้น
 // 1 ใบ = เจ้าของงาน 1 ราย x 1 วัน แบ่งช่วงตามประเภท - อ่านอย่างเดียว ไม่มีราคา ไม่ใช่ใบ DL (ใบ DL บันทึกที่หน้า Delivery)
 // ลงวันที่ผิดแก้ได้จากแถวเลย: ใบ DL ใช้หน้าต่างแก้ใบเดิม ประเภทอื่นแก้วันที่ของงานนั้น (ต้องมีเหตุผล บันทึกประวัติ)
-const REPORT_PAGE = "/registration/new-vehicle/delivery/report";
+const REPORT_PAGE = "/delivery/report";
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
 const YAMAHA_ID = "YAMAHA";
 

@@ -31,10 +31,8 @@ const isPersonal = (inv: PrintableInvoice) => inv.account === "PERSONAL";
 
 // หัวผู้ออกบิล: บัญชีบริษัท = บริษัท + เลขผู้เสียภาษี, บัญชีบุคคล = ชื่อตามบัญชีธนาคาร ไม่มีเลขผู้เสียภาษี (ผู้ใช้ 2026-09-27)
 function issuerHtml(inv: PrintableInvoice): string {
-  if (isPersonal(inv)) {
-    const p = personalIssuerOf(inv.customer.payee);
-    return `<div><b>${escapeHtml(p.name)}</b>${p.addressLines.length ? `<br><span class="k">${p.addressLines.map(escapeHtml).join("<br>")}</span>` : ""}</div>`;
-  }
+  // ผู้ใช้ 2026-10-08: บิลบัญชีบุคคลไม่พิมพ์ชื่อผู้ออกบิลมุมซ้ายบน (ชื่อผู้รับเงินยังพิมพ์ในเงื่อนไขการชำระเงิน) - เว้น div ว่างไว้ให้เลย์เอาต์เหมือนเดิม
+  if (isPersonal(inv)) return `<div></div>`;
   const co = COMPANY_PROFILE;
   return `<div><b class="en">${escapeHtml(co.nameEn)}</b><br>${escapeHtml(co.nameTh)}<br>
 <span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>`;

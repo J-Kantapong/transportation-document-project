@@ -948,12 +948,13 @@ export class BillingService {
   }
 
   // --- งานอื่นๆ ในใบวางบิล (ผู้ใช้ 2026-10-07) ---------------------------------------------------------------
-  // งานที่พร้อมวางบิล: งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก เมื่อรับใบเสร็จกลับแล้ว (returnedDate) และต่อภาษีเมื่อคืนเอกสารให้ลูกค้าแล้ว
+  // งานที่พร้อมวางบิล: งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก เมื่อรับใบเสร็จกลับแล้ว (returnedDate) และส่งงานลูกค้าแล้ว (deliveredDate -
+  // ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) และต่อภาษีเมื่อคืนเอกสารให้ลูกค้าแล้ว
   // (deliveredDate) - ต้องมีเจ้าของงาน (customerId) ไม่ถูกยกเลิก และไม่อยู่ในบิลที่ยังไม่ VOID (บิลที่ VOID แล้วงานกลับเข้าคิวเอง)
   private async loadJobs(db: Prisma.TransactionClient, opts: { customerId?: string; ids?: Map<JobType, string[]> }) {
     const idsOf = (t: JobType) => (opts.ids ? { id: { in: opts.ids.get(t) ?? [] } } : {});
     const owner = opts.customerId ? { customerId: opts.customerId } : { customerId: { not: null } };
-    const done = { ...owner, cancelledAt: null, returnedDate: { not: null } };
+    const done = { ...owner, cancelledAt: null, returnedDate: { not: null }, deliveredDate: { not: null } };
     const shape = {
       id: true,
       customerId: true,
@@ -963,6 +964,7 @@ export class BillingService {
       plateCategory: true,
       plateNumber: true,
       returnedDate: true,
+      deliveredDate: true,
       receiptNo: true,
       receiptAmount: true,
       billTotal: true,
@@ -978,6 +980,7 @@ export class BillingService {
       plateCategory: string;
       plateNumber: string;
       returnedDate: Date | null;
+      deliveredDate: Date | null;
       receiptNo: string | null;
       receiptAmount: unknown;
       billTotal: unknown;
@@ -995,6 +998,7 @@ export class BillingService {
       brand: r.brand,
       ownerName,
       doneDate: iso(r.returnedDate)!,
+      deliveredDate: iso(r.deliveredDate)!,
       receiptNo: r.receiptNo,
       receiptAmount: num(r.receiptAmount),
       billTotal: Number(r.billTotal),
@@ -1033,6 +1037,7 @@ export class BillingService {
           brand: r.vehicleType.split('-')[0].trim(),
           ownerName: r.ownerName,
           doneDate: iso(r.deliveredDate)!,
+          deliveredDate: iso(r.deliveredDate)!,
           receiptNo: null,
           receiptAmount: null,
           billTotal: Number(r.billTotal ?? 0),

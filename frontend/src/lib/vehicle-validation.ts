@@ -1,3 +1,4 @@
+import { isMotorcycleBody } from './vehicle-kind';
 // Mirrors backend/src/vehicles/vehicle-validation.ts — client-side validation gives the
 // user immediate feedback; the backend re-validates everything as the final authority.
 
@@ -39,7 +40,7 @@ function isValidNumeric(value: string): boolean {
 // รย.12 (มอเตอร์ไซค์) ภาษีเป็นอัตราคงที่ แต่ผู้ใช้กำหนดให้บังคับกรอก CC เสมอ - ยังไม่เลือกประเภทรถ/เชื้อเพลิง = ยังบอกไม่ได้
 export function requiredSizeField(body: string, fuel: string): 'cc' | 'weight' | null {
   if (!body || !fuel) return null;
-  if (body.startsWith('รย.12-')) return 'cc';
+  if (isMotorcycleBody(body)) return 'cc';
   if (body.startsWith('รย.1-')) return fuel === 'ไฟฟ้า (BEV)' ? 'weight' : 'cc';
   if (body.startsWith('รย.2-') || body.startsWith('รย.3-')) return 'weight';
   return null;

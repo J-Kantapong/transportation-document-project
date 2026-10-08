@@ -25,6 +25,7 @@ import {
   STAGES,
   sortStuck,
   plateCopyWaits,
+  jobDeliveryWait,
   receiptWait,
   stuckItemFor,
   summarizeBacklog,
@@ -341,10 +342,14 @@ export class OverviewService {
         select: { id: true, vehicleClass: true, submitDate: true, oldOwnerName: true, oldChassis: true, oldBrand: true, oldPlateCategory: true, oldPlateNumber: true },
       }),
       this.prisma.taxRenewal.findMany({
-        where: { paymentDate: null, cancelledAt: null },
+        // รอชำระ หรือรับป้ายภาษี/ใบเสร็จแล้วแต่ยังไม่ลงส่งงาน (ผู้ใช้ 2026-10-08)
+        where: { cancelledAt: null, OR: [{ paymentDate: null }, { receivedDate: { not: null }, deliveredDate: null }] },
         select: {
           id: true,
           submitDate: true,
+          paymentDate: true,
+          receivedDate: true,
+          deliveredDate: true,
           vehicleType: true,
           chassis: true,
           plateCategory: true,
@@ -384,13 +389,13 @@ export class OverviewService {
           dutyAmount: true,
         },
       }),
-      // งานค้าง (ยังไม่รับใบเสร็จกลับ / ยังไม่รับป้าย) + ข้อมูลที่ใช้ขึ้นรายการ "ติดขัด"
+      // งานค้าง (ยังไม่รับใบเสร็จกลับ / ยังไม่รับป้าย / ของครบแล้วแต่ยังไม่ลงส่งงาน) + ข้อมูลที่ใช้ขึ้นรายการ "ติดขัด"
       this.prisma.vehicleUseCancellation.findMany({
-        where: { cancelledAt: null, returnedDate: null },
-        select: { id: true, vehicleClass: true, submitDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
+        where: { cancelledAt: null, deliveredDate: null },
+        select: { id: true, vehicleClass: true, submitDate: true, returnedDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
       }),
       this.prisma.plateCopy.findMany({
-        where: { cancelledAt: null, OR: [{ returnedDate: null }, { plateReceivedDate: null }] },
+        where: { cancelledAt: null, deliveredDate: null },
         select: {
           id: true,
           vehicleClass: true,
@@ -406,16 +411,17 @@ export class OverviewService {
         },
       }),
       this.prisma.vehicleMoveOut.findMany({
-        where: { cancelledAt: null, returnedDate: null },
-        select: { id: true, vehicleClass: true, submitDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
+        where: { cancelledAt: null, deliveredDate: null },
+        select: { id: true, vehicleClass: true, submitDate: true, returnedDate: true, ownerName: true, chassis: true, brand: true, plateCategory: true, plateNumber: true, customer: { select: { name: true } } },
       }),
       this.prisma.vehicleTransfer.findMany({
-        where: { cancelledAt: null, returnedDate: null },
+        where: { cancelledAt: null, deliveredDate: null },
         select: {
           id: true,
           vehicleClass: true,
           transferType: true,
           submitDate: true,
+          returnedDate: true,
           inspectionSentDate: true,
           inspectionResult: true,
           inspectionResultDate: true,
@@ -726,9 +732,10 @@ export class OverviewService {
       if (item) stuck.push(item);
     }
     for (const r of openRenewals) {
-      const since = isoOf(r.submitDate);
       const kind = renewalKind(r.vehicleType);
-      backlogItems.push({ stage: 'taxRenewal', kind, since });
+      // ชำระแล้ว + รับป้ายภาษีแล้ว = รอลงส่งงาน (นับจากวันรับ) / ยังไม่ชำระ = รอชำระ (นับจากวันยื่น)
+      const renewalWait = r.paymentDate && r.receivedDate ? jobDeliveryWait(r.receivedDate) : { stage: 'taxRenewal' as const, since: isoOf(r.submitDate), flags: [], reason: null };
+      backlogItems.push({ stage: renewalWait.stage, kind, since: renewalWait.since });
       const item = stuckItemFor(
         {
           id: r.id,
@@ -739,7 +746,7 @@ export class OverviewService {
           chassis: r.chassis,
           plate: plateText(r.plateCategory, r.plateNumber),
         },
-        [{ stage: 'taxRenewal', since, flags: [], reason: null }],
+        [renewalWait],
         today,
       );
       if (item) stuck.push(item);
@@ -774,14 +781,30 @@ export class OverviewService {
       );
       if (item) stuck.push(item);
     };
-    for (const j of openUseCancels) addJob(j, j.ownerName, [receiptWait('useCancel', j.submitDate)], `/registration/other/cancel-use/${classKind(j.vehicleClass)}/return`);
-    for (const j of openMoveOuts) addJob(j, j.ownerName, [receiptWait('moveOut', j.submitDate)], `/registration/other/move-out/${classKind(j.vehicleClass)}/return`);
+    // ใบเสร็จกลับแล้ว (ของครบ) แต่ยังไม่ลงส่งงาน = รอส่งงานลูกค้า ไปหน้า Delivery (ผู้ใช้ 2026-10-08)
+    const deliveryHref = STAGES.jobDelivery.href;
+    for (const j of openUseCancels) {
+      if (j.returnedDate) addJob(j, j.ownerName, [jobDeliveryWait(j.returnedDate)], deliveryHref);
+      else addJob(j, j.ownerName, [receiptWait('useCancel', j.submitDate)], `/registration/other/cancel-use/${classKind(j.vehicleClass)}/return`);
+    }
+    for (const j of openMoveOuts) {
+      if (j.returnedDate) addJob(j, j.ownerName, [jobDeliveryWait(j.returnedDate)], deliveryHref);
+      else addJob(j, j.ownerName, [receiptWait('moveOut', j.submitDate)], `/registration/other/move-out/${classKind(j.vehicleClass)}/return`);
+    }
     for (const j of openPlateCopies) {
       const waits = plateCopyWaits(j);
+      if (waits.length === 0 && j.returnedDate && j.plateReceivedDate) {
+        addJob(j, j.ownerName, [jobDeliveryWait(j.returnedDate > j.plateReceivedDate ? j.returnedDate : j.plateReceivedDate)], deliveryHref);
+        continue;
+      }
       addJob(j, j.ownerName, waits, waits.some((w) => w.stage === 'plateCopy') ? '/registration/other/plate-copy/return' : '/registration/other/plate-copy/receive-plate');
     }
     for (const t of openTransfers) {
-      const waits = transferWaits({ ...t, returnedDate: null }); // คิวค้างดึงเฉพาะที่ยังไม่รับใบเสร็จกลับ
+      if (t.returnedDate) {
+        addJob(t, t.transfereeName, [jobDeliveryWait(t.returnedDate)], deliveryHref);
+        continue;
+      }
+      const waits = transferWaits({ ...t, returnedDate: null });
       const href = waits[0]?.stage === 'transferJob' ? `/registration/transfer/${t.transferType === 'INSPECTION' ? 'inspection' : 'owner'}/return` : '/registration/transfer/inspection/inspect';
       addJob(t, t.transfereeName, waits, href);
     }
@@ -1023,6 +1046,15 @@ export class OverviewService {
         title: `รอใบเสร็จนานเกิน ${STAGES.receipt.sla} วัน`,
         detail: `${late('receipt')} คัน (นานสุด ${backlog.receipt.oldestDays} วัน) - เงินทดรองจ่ายจมอยู่`,
         href: STAGES.receipt.href,
+      },
+      // ตัวช่วยกันลืมลงวันส่งงาน (ผู้ใช้ 2026-10-08): ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่มีใบ DL เกินกำหนด
+      // ค้างนานกว่า 7 วัน = ด่วน (น่าจะส่งไปแล้วแต่ไม่ได้ลง จึงวางบิลไม่ได้) - ขึ้นทั้งหน้าภาพรวม สรุปเช้า และสรุปเย็นใน LINE
+      late('delivery') + late('jobDelivery') && {
+        key: 'delivery-pending',
+        severity: Math.max(backlog.delivery.oldestDays ?? 0, backlog.jobDelivery.oldestDays ?? 0) > 7 ? 'high' : 'medium',
+        title: 'ของพร้อมส่งแล้ว แต่ยังไม่ได้ลงส่งงาน (ใบ DL)',
+        detail: `รถจดใหม่/สลับเลข ${late('delivery')} คัน · งานอื่น ${late('jobDelivery')} งาน เกิน ${STAGES.delivery.sla} วัน (นานสุด ${Math.max(backlog.delivery.oldestDays ?? 0, backlog.jobDelivery.oldestDays ?? 0)} วัน) - พนักงานอาจลืมลงวันส่ง วางบิลไม่ได้จนกว่าจะลง`,
+        href: STAGES.delivery.href,
       },
       late('billing') && {
         key: 'billing-late',

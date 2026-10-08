@@ -18,11 +18,13 @@ import {
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { computeTotals, effectiveWhtRate, formatMoney, round2 } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
+import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 import { DateInput } from "@/components/DateInput";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
 
 // วางบิลงานอื่นๆ (ผู้ใช้ 2026-10-07: "ดึงงานทุกประเภทมาในการวางบิล"): งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก / ต่อภาษี
-// ที่รับใบเสร็จกลับแล้ว (ต่อภาษี = คืนเอกสารให้ลูกค้าแล้ว) มารอที่นี่ - เลือกงาน ตรวจค่าบริการ แล้วออกบิล
+// ที่รับใบเสร็จกลับและส่งงานลูกค้าแล้ว (ใบ DL จากหน้า Delivery - ผู้ใช้ 2026-10-08 ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล)
+// มารอที่นี่ - เลือกงาน ตรวจค่าบริการ แล้วออกบิล · งานที่ใบเสร็จกลับแล้วแต่ยังไม่ลงส่งงาน ขึ้นในกล่อง "รอลงส่งงาน" ให้บัญชีลงให้ได้
 // ค่าธรรมเนียมราชการอ่านจากใบเสร็จของงานเอง (เงินทดรองจ่าย ไม่มี VAT) ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย (แก้ได้ก่อนออกบิล)
 // งานหนึ่งอยู่ในบิลที่ยังไม่ยกเลิกได้ใบเดียว - ยกเลิกบิลแล้วงานกลับเข้าคิวเอง
 
@@ -284,9 +286,11 @@ export function OtherJobsBillingPage() {
     <section className="content">
       <h1 tabIndex={-1}>วางบิลงานอื่นๆ</h1>
       <p>
-        งานโอน ยกเลิกการใช้รถ คัดแผ่นป้ายทะเบียน ย้ายออก (ที่รับใบเสร็จกลับแล้ว) และต่อภาษี (ที่คืนเอกสารให้ลูกค้าแล้ว) มารอที่นี่ - เลือกลูกค้า เลือกงาน ตรวจค่าบริการ แล้วออกบิล
+        งานโอน ยกเลิกการใช้รถ คัดแผ่นป้ายทะเบียน ย้ายออก และต่อภาษี ที่ส่งใบเสร็จให้ลูกค้าแล้ว (มีใบส่งงาน DL) มารอที่นี่ - เลือกลูกค้า เลือกงาน ตรวจค่าบริการ แล้วออกบิล
         ค่าธรรมเนียมราชการอ่านจากใบเสร็จของงาน ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย
       </p>
+      {/* งานที่ใบเสร็จกลับแล้วแต่พนักงานยังไม่ลงส่งงาน - บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2) */}
+      <AwaitingDeliveryPanel only="jobs" onRecorded={() => void load()} />
       <Link href="/accounting/billing" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
         ← กลับไปหน้าวางบิล
       </Link>
@@ -449,7 +453,7 @@ export function OtherJobsBillingPage() {
                       <th>
                         <input type="checkbox" checked={selected.length > 0 && selected.length === jobs.filter((j) => !blockedReason(j)).length} onChange={toggleAll} aria-label="เลือกทุกงาน" />
                       </th>
-                      <th>เสร็จเมื่อ</th>
+                      <th>ส่งลูกค้าเมื่อ</th>
                       <th>งาน</th>
                       <th>ทะเบียน / เลขตัวถัง</th>
                       <th>เจ้าของรถ</th>
@@ -465,7 +469,11 @@ export function OtherJobsBillingPage() {
                           <td>
                             <input type="checkbox" checked={picked.has(keyOf(j))} disabled={!!blocked} onChange={() => toggle(j)} aria-label={`เลือก ${j.typeLabel} ${j.plateText || j.chassis}`} />
                           </td>
-                          <td>{isoToDisplayDate(j.doneDate)}</td>
+                          <td>
+                            {isoToDisplayDate(j.deliveredDate)}
+                            {/* ใบเสร็จกลับวันไหน (ส่งลูกค้าหลังจากนั้น - ผู้ใช้ 2026-10-08 ต้องส่งงานก่อนวางบิล) */}
+                            <div className="muted">ใบเสร็จกลับ {isoToDisplayDate(j.doneDate)}</div>
+                          </td>
                           <td>
                             {j.typeLabel}
                             <div className="muted">

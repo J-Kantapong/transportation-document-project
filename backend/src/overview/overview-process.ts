@@ -24,8 +24,8 @@ export const STAGES = {
   receipt: { label: 'รับใบเสร็จ', href: '/registration/new-vehicle/receive-receipt', sla: 7 },
   plate: { label: 'รับป้ายทะเบียน', href: '/registration/new-vehicle/receive-plate', sla: 7 },
   book: { label: 'รับเล่มทะเบียน', href: '/registration/new-vehicle/receive-book', sla: 7 },
-  delivery: { label: 'ส่งงานลูกค้า (Delivery)', href: '/registration/new-vehicle/delivery', sla: 3 },
-  plateDelivery: { label: 'ส่งป้ายตามหลัง', href: '/registration/new-vehicle/delivery', sla: 3 },
+  delivery: { label: 'ส่งงานลูกค้า (Delivery)', href: '/delivery', sla: 3 },
+  plateDelivery: { label: 'ส่งป้ายตามหลัง', href: '/delivery', sla: 3 },
   billing: { label: 'วางบิล', href: '/accounting/billing', sla: 7 },
   plateSwap: { label: 'สลับเลข (รอรับเอกสารกลับ)', href: '/registration/plate-swap/old-new', sla: 14 },
   taxRenewal: { label: 'ต่อภาษี (รอชำระ)', href: '/registration/tax-renewal', sla: 7 },
@@ -38,6 +38,8 @@ export const STAGES = {
   transferInspectSend: { label: 'งานโอนตรวจรถ (รอส่งตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 3 },
   transferInspectResult: { label: 'งานโอนตรวจรถ (รอผลตรวจ)', href: '/registration/transfer/inspection/inspect', sla: 7 },
   transferJob: { label: 'งานโอน (รอรับใบเสร็จ)', href: '/registration/transfer', sla: 7 },
+  // งานอื่นทุกประเภท (รวมต่อภาษี) ที่ของครบแล้วแต่ยังไม่ลงส่งงาน (ใบ DL) - ผู้ใช้ 2026-10-08: พนักงานลืมลงวันส่ง จึงต้องเตือน
+  jobDelivery: { label: 'งานอื่น (รอส่งงานลูกค้า)', href: '/delivery', sla: 3 },
 } as const;
 export type StageKey = keyof typeof STAGES;
 
@@ -103,6 +105,11 @@ function wait(stage: StageKey, since: string, flags: Flag[] = [], reasons: Array
 
 export function receiptWait(stage: 'useCancel' | 'moveOut' | 'plateCopy', submitDate: Date): Wait {
   return wait(stage, iso(submitDate));
+}
+
+// ของครบแล้ว (ใบเสร็จกลับ + ป้ายถ้าเป็นคัดป้าย / ต่อภาษีรับป้ายภาษีแล้ว) แต่ยังไม่ลงส่งงาน - นับจากวันที่ของครบ
+export function jobDeliveryWait(readySince: Date): Wait {
+  return wait('jobDelivery', iso(readySince));
 }
 
 // คัดป้ายมีขั้นรับป้ายแยกจากรับใบเสร็จ (ไม่ผูกกัน - ดู PlateCopy.plateReceivedDate)

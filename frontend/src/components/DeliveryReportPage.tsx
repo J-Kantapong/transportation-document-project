@@ -29,7 +29,7 @@ import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialo
 // พิมพ์ใบส่งงานซ้ำได้ทีละใบ + ท้ายรายงานมีรถที่ป้ายยังค้างส่ง - ไม่มีราคา (DELIVERY เปิดหน้านี้ได้)
 // ACCOUNTANT เปิดหน้านี้ได้แบบอ่านอย่างเดียว (ผู้ใช้ 2026-09-27) แต่เปิดหน้า Delivery ไม่ได้ - ลิงก์ไปหน้านั้นจึงซ่อน
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
-const DELIVERY_PAGE = "/registration/new-vehicle/delivery";
+const DELIVERY_PAGE = "/delivery";
 const BILLING_PAGE = "/accounting/billing";
 const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done">✓</span> : <span className="muted">—</span>);
 const CANCELLED_ROW = { color: "#9aa3b5", textDecoration: "line-through" } as const;
@@ -402,7 +402,11 @@ export function DeliveryReportPage() {
                               <tr key={i.id} style={i.cancelledAt ? CANCELLED_ROW : undefined}>
                                 <td>{i.plateText || "—"}</td>
                                 <td>{i.chassis}</td>
-                                <td>{i.brandName}</td>
+                                <td>
+                                  {i.brandName}
+                                  {/* งานอื่น (ผู้ใช้ 2026-10-08): บอกชื่องานที่ส่งใบเสร็จ */}
+                                  {i.jobDetail && <div className="muted">{i.jobDetail}</div>}
+                                </td>
                                 <td>{i.receiptNo || "—"}</td>
                                 <td>
                                   <Tick sent={i.book} />

@@ -29,8 +29,8 @@ const STAGE_PAGES: Record<string, string> = {
   receipt: "/registration/new-vehicle/receive-receipt",
   plate: "/registration/new-vehicle/receive-plate",
   book: "/registration/new-vehicle/receive-book",
-  delivery: "/registration/new-vehicle/delivery",
-  plateDelivery: "/registration/new-vehicle/delivery",
+  delivery: "/delivery",
+  plateDelivery: "/delivery",
   billing: "/accounting/billing",
 };
 

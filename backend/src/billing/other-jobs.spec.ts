@@ -16,6 +16,7 @@ const job = (o: Partial<BillableJob> = {}): BillableJob => ({
   brand: 'HONDA',
   ownerName: 'A → B',
   doneDate: '2026-10-05',
+  deliveredDate: '2026-10-06',
   receiptNo: 'R1',
   receiptAmount: 125,
   billTotal: 105,

@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { canAccessPage, getCachedUser } from "@/lib/auth";
 import { billingApi, slipNoText, type DeliveryRow } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
+import { AGING_COLOR, agingText, agingTone, daysSince } from "@/lib/delivery-aging";
 import { deliveryCustomerLabels, deliveryRowCustomer, downloadDeliverySlipPdf, printDeliverySlips } from "@/lib/delivery-print";
 import { jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 import { comparePlate } from "@/lib/plate-order";
@@ -20,14 +20,16 @@ import { DateInput } from "@/components/DateInput";
 // ติ๊กข้ามการ์ดได้ถ้าเป็นลูกค้าเดียวกันและรถประเภทเดียวกัน - บันทึก 1 ครั้ง = ใบส่งงาน DL 1 ใบของลูกค้ารายเดียว
 // รถยนต์กับจักรยานยนต์ส่งคนละใบ (ผู้ใช้ 2026-09-27) - backend ตอบ 400 "ส่งรถยนต์กับจักรยานยนต์คนละใบ" อีกชั้น
 
-type ItemState = { state: "sent" | "ready" | "waiting"; date?: string | null };
+type ItemState = { state: "sent" | "ready" | "waiting" | "none"; date?: string | null };
 type Kind = "car" | "moto";
 
 const KIND_LABEL: Record<Kind, string> = { car: "รถยนต์", moto: "จักรยานยนต์" };
 const plateText = (r: DeliveryRow) => (r.plateCategory && r.plateNumber ? `${r.plateCategory} ${r.plateNumber}` : "—");
 // งานสลับเลขไม่มีใบยื่นแบบรถจดใหม่ - จัดกลุ่มเป็นการ์ด "สลับเลข" ของตัวเอง (ผู้ใช้ 2026-09-28)
-const groupLabel = (r: DeliveryRow) => (r.source === "PLATE_SWAP" ? "สลับเลข" : jobSheetGroup(r.body, r.urgent).label);
-const kindOf = (r: DeliveryRow): Kind => (isMotorcycleBody(r.body) ? "moto" : "car");
+// งานอื่นๆ (ผู้ใช้ 2026-10-08: ส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) - การ์ดตามประเภทงาน เช่น "งานโอน"
+const groupLabel = (r: DeliveryRow) => r.jobLabel ?? (r.source === "PLATE_SWAP" ? "สลับเลข" : jobSheetGroup(r.body, r.urgent).label);
+// งานสลับเลข/งานอื่นไม่มี body ให้ดู - backend ส่ง vehicleKind มาให้ทุกแถว (แถวเก่าไม่มี = ดู body)
+const kindOf = (r: DeliveryRow): Kind => r.vehicleKind ?? (isMotorcycleBody(r.body) ? "moto" : "car");
 // ใบยื่น = วันที่ยื่น + กลุ่ม + รหัสลูกค้า (ชื่อใช้แสดงอย่างเดียว - ผู้ใช้ 2026-09-27 ทุกหน้าแบ่งใบยื่นด้วยรหัสลูกค้า)
 // กลุ่มแยกรถยนต์/จักรยานยนต์อยู่แล้ว การ์ดหนึ่งจึงเป็นรถประเภทเดียว
 const lotKeyOf = (r: DeliveryRow) => jobSheetKey(r.submitDate ?? "", groupLabel(r), r.customerId);
@@ -47,6 +49,15 @@ function keepSelectable(queue: DeliveryRow[], ids: Set<string>): Set<string> {
 // ใบเสร็จไม่ได้ส่งไปกับงาน (ไปพร้อมใบวางบิล ผู้ใช้ 2026-09-26) -> บอกแค่ว่าได้กลับมาแล้วหรือยัง (ต้องมีก่อนจึงส่งได้) ไม่ขึ้น "ส่งแล้ว"
 function itemsOf(r: DeliveryRow): { receipt: ItemState; book: ItemState; plate: ItemState } {
   const docs = (have: boolean): ItemState => (r.deliveredDate ? { state: "sent", date: r.deliveredDate } : { state: have ? "ready" : "waiting" });
+  // งานอื่น (ผู้ใช้ 2026-10-08): ของที่ส่งคือใบเสร็จ (+ ป้ายสำหรับคัดแผ่นป้าย) ไม่มีเล่ม
+  if (r.jobLabel) {
+    const none: ItemState = { state: "none" };
+    return {
+      receipt: docs(r.receiptReceived),
+      book: none,
+      plate: r.source === "PLATE_COPY" ? docs(r.plateReceived) : none,
+    };
+  }
   return {
     receipt: { state: r.receiptReceived ? "ready" : "waiting" },
     book: docs(r.bookReceived),
@@ -57,6 +68,7 @@ function itemsOf(r: DeliveryRow): { receipt: ItemState; book: ItemState; plate: 
 const WAIT_TEXT = { receipt: "รอใบเสร็จ", book: "รอเล่ม", plate: "รอป้าย" } as const;
 
 function ItemCell({ item, kind }: { item: ItemState; kind: keyof typeof WAIT_TEXT }) {
+  if (item.state === "none") return <span className="muted">—</span>;
   if (item.state === "sent") return <span className="delivery-item sent">ส่งแล้ว {item.date ? isoToDisplayDate(item.date).slice(0, 5) : ""}</span>;
   if (item.state === "ready") return <span className="delivery-item ready">✓ มีแล้ว</span>;
   return <span className="delivery-item waiting">⏳ {WAIT_TEXT[kind]}</span>;
@@ -91,8 +103,6 @@ export function DeliveryPage() {
   const [printing, setPrinting] = useState(false);
   // ป๊อปอัปยืนยัน: วันที่ส่ง (YYYY-MM-DD) + คันที่เลือกตอนเปิด - บันทึกส่งชนิดงานของชุดนี้ไปให้ backend ตรวจ (ตรงกับที่ผู้ใช้เห็น)
   const [confirm, setConfirm] = useState<{ dateIso: string; rows: DeliveryRow[] } | null>(null);
-  // ลิงก์กลับเมนูจดทะเบียนรถใหม่ - บทบาท DELIVERY อย่างเดียวเปิดหน้านั้นไม่ได้ (กดแล้วเด้งกลับมาที่นี่) จึงไม่แสดง (พบ 2026-09-27)
-  const [canOpenMenu, setCanOpenMenu] = useState(false);
   const loadSeq = useRef(0);
   const lastRefresh = useRef(0);
   // ตัวกรองแบบหน้ารับป้าย/รับเล่ม
@@ -144,7 +154,6 @@ export function DeliveryPage() {
     // Standard fetch-on-mount; loadAll sets the loading flag before its first await.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
-    setCanOpenMenu(canAccessPage("/registration/new-vehicle", getCachedUser()?.roles ?? []));
   }, []);
 
   // หน้าเปิดค้างไว้นาน (พบ 2026-09-27): กลับมาที่แท็บนี้แล้วโหลดคิวใหม่เบื้องหลัง - เฉพาะตอนยังไม่ได้ติ๊กคันไหน (ไม่ล้างที่เลือกไว้)
@@ -293,6 +302,7 @@ export function DeliveryPage() {
       const result = await api.submitDelivery({ items, date: dateIso, recipient, note });
       const parts = [
         result.delivered ? `ส่งงาน ${result.delivered} คัน ส่งต่อให้บัญชีรอวางบิล` : "",
+        result.jobs ? `ส่งใบเสร็จงานอื่น ${result.jobs} งาน ส่งต่อให้บัญชีรอวางบิล` : "",
         result.plateOnly ? `ส่งป้าย ${result.plateOnly} คัน` : "",
         result.platePending ? `ป้ายค้างส่ง ${result.platePending} คัน` : "",
       ].filter(Boolean);
@@ -321,14 +331,12 @@ export function DeliveryPage() {
 
   return (
     <section className="content">
-      {canOpenMenu && (
-        <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-          ← จดทะเบียนรถใหม่
-        </Link>
-      )}
       <h1 tabIndex={-1}>Delivery</h1>
-      <p>ติ๊กคันที่ส่งให้ลูกค้าแล้ว ใส่วันที่ส่งและผู้รับ แล้วกดบันทึก รถที่ส่งแล้วจะไปรอฝ่ายบัญชีวางบิลต่อ ใบยื่นที่ยังไม่พร้อมทุกคัน ส่งคันที่พร้อมไปก่อนได้</p>
-      <Link href="/registration/new-vehicle/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
+      <p>
+        ติ๊กคันที่ส่งให้ลูกค้าแล้ว ใส่วันที่ส่งและผู้รับ แล้วกดบันทึก รถที่ส่งแล้วจะไปรอฝ่ายบัญชีวางบิลต่อ ใบยื่นที่ยังไม่พร้อมทุกคัน ส่งคันที่พร้อมไปก่อนได้ ·
+        งานโอน / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / ต่อภาษี ที่ใบเสร็จกลับแล้วก็ส่งใบเสร็จให้ลูกค้าเซ็นรับที่นี่ (ใบเดียวกับรถจดใหม่ได้ถ้าลูกค้าเดียวกัน) จึงจะวางบิลได้
+      </p>
+      <Link href="/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
         รายงานส่งงาน / พิมพ์ใบส่งงานย้อนหลัง →
       </Link>
 
@@ -430,7 +438,7 @@ export function DeliveryPage() {
             กำลังโหลด...
           </div>
         ) : allLots.length === 0 ? (
-          <div className="empty-customers">ไม่มีรถที่รอส่ง (ต้องได้รับใบเสร็จและเล่มทะเบียนก่อน)</div>
+          <div className="empty-customers">ไม่มีรถหรืองานที่รอส่ง (รถจดใหม่ต้องได้รับใบเสร็จและเล่มทะเบียนก่อน งานอื่นต้องได้ใบเสร็จกลับก่อน)</div>
         ) : (
           <div className="queue-sheets">
             {lots.length === 0 && <div className="empty-customers">ไม่มีใบยื่นที่ตรงกับตัวกรอง</div>}
@@ -443,6 +451,9 @@ export function DeliveryPage() {
               const lockText = lockReason(lot.customerId, lot.kind);
               const locked = !!lockText;
               const rows = orderRows(lot.rows);
+              // ตัวช่วยกันลืม (ผู้ใช้ 2026-10-08): การ์ดบอกว่าคันที่พร้อมส่ง รอมานานสุดกี่วัน - เกิน 3 วันส้ม เกิน 7 วันแดง
+              const waitDays = ready.reduce<number>((m, r) => Math.max(m, daysSince(r.readySince) ?? 0), 0);
+              const waitTone = agingTone(waitDays);
               return (
                 <div key={lot.key} className={`queue-sheet${notReady > 0 ? " warn" : ""}${open ? " open" : ""}`}>
                   <div
@@ -481,6 +492,11 @@ export function DeliveryPage() {
                       {done > 0 && ` · ส่งครบแล้ว ${done}`}
                       {pickedHere > 0 && <span className="badge done queue-warn">เลือกแล้ว {pickedHere}</span>}
                       {notReady > 0 && <span className="badge warn queue-warn">⚠ ยังไม่พร้อม {notReady}</span>}
+                      {waitTone !== "ok" && (
+                        <span className="badge warn queue-warn" style={{ color: AGING_COLOR[waitTone], fontWeight: 700 }} title="ของครบแล้วแต่ยังไม่ได้ลงส่งงาน - ส่งแล้วอย่าลืมลง">
+                          ⏰ {agingText(waitDays)}
+                        </span>
+                      )}
                     </span>
                   </div>
                   {open && (
@@ -542,7 +558,11 @@ export function DeliveryPage() {
                                 </td>
                                 <td>
                                   {r.brandName}
-                                  <div className="muted">{r.body || "—"}</div>
+                                  <div className="muted">{r.jobDetail ?? r.body ?? "—"}</div>
+                                  {/* รายคัน: พร้อมส่งมากี่วันแล้ว (เฉพาะที่รอเกิน 3 วัน) */}
+                                  {can && agingTone(daysSince(r.readySince)) !== "ok" && (
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: AGING_COLOR[agingTone(daysSince(r.readySince))] }}>⏰ {agingText(daysSince(r.readySince))}</div>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -586,14 +606,24 @@ export function DeliveryPage() {
               </thead>
               <tbody>
                 {recentRows.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={`${r.source}:${r.id}`}>
                     <td>{r.deliveredDate ? isoToDisplayDate(r.deliveredDate) : "—"}</td>
                     <td>{ownerName(r)}</td>
                     <td>{plateText(r)}</td>
-                    <td>{r.chassis}</td>
+                    <td>
+                      {r.chassis}
+                      {/* งานอื่น (ผู้ใช้ 2026-10-08): บอกว่าเป็นงานอะไร */}
+                      {r.jobLabel && <div className="muted">{r.jobDetail ?? r.jobLabel}</div>}
+                    </td>
                     <td>{r.recipient || "—"}</td>
                     <td>
-                      {r.plateDeliveredDate ? <span className="badge done">ส่งแล้ว {isoToDisplayDate(r.plateDeliveredDate)}</span> : <span className="badge warn">ค้างส่ง</span>}
+                      {r.jobLabel && r.source !== "PLATE_COPY" ? (
+                        <span className="muted">—</span>
+                      ) : r.plateDeliveredDate ? (
+                        <span className="badge done">ส่งแล้ว {isoToDisplayDate(r.plateDeliveredDate)}</span>
+                      ) : (
+                        <span className="badge warn">ค้างส่ง</span>
+                      )}
                     </td>
                     <td>{r.invoiceNo ? <span className="badge done">{r.invoiceNo}</span> : <span className="badge">อยู่ที่บัญชี</span>}</td>
                     <td>{r.note || "—"}</td>
@@ -696,11 +726,20 @@ function DeliveryConfirmDialog({
   const today = todayIso();
   const days = Math.round((Date.parse(dateIso) - Date.parse(today)) / 86_400_000);
   const dayNote = days === 0 ? "วันนี้" : days < 0 ? `ย้อนหลัง ${-days} วัน` : `ล่วงหน้า ${days} วัน`;
-  const count = (kind: DeliveryRow["kind"]) => rows.filter((r) => r.kind === kind).length;
+  // รถจดใหม่/สลับเลขนับตามชนิดงาน - งานอื่น (ผู้ใช้ 2026-10-08) นับแยกเป็น "ใบเสร็จ<ชื่องาน>" (คัดป้าย = ใบเสร็จ + ป้าย)
+  const vehicles = rows.filter((r) => !r.jobLabel);
+  const count = (kind: DeliveryRow["kind"]) => vehicles.filter((r) => r.kind === kind).length;
+  const jobCounts = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.jobLabel) continue;
+    const label = `ใบเสร็จ${r.jobLabel}${r.source === "PLATE_COPY" ? " + ป้าย" : ""}`;
+    jobCounts.set(label, (jobCounts.get(label) ?? 0) + 1);
+  }
   const parts = [
     [count("FULL"), "เล่ม + ป้าย"],
     [count("NO_PLATE"), "เล่ม (ป้ายตามทีหลัง)"],
     [count("PLATE_ONLY"), "ส่งป้ายอย่างเดียว"],
+    ...[...jobCounts.entries()].map(([label, n]) => [n, label]),
   ].filter(([n]) => n) as Array<[number, string]>;
 
   return (

@@ -62,6 +62,8 @@ function breadcrumbs(pathname: string): Crumb[] {
   if (within(pathname, "/activity")) return [{ label: "ภาพรวมการทำงาน", href: "/activity" }];
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
   if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
+  if (within(pathname, "/delivery/report")) return [{ label: "ส่งงานลูกค้า", href: "/delivery" }, { label: "รายงานส่งงาน", href: "/delivery/report" }];
+  if (within(pathname, "/delivery")) return [{ label: "ส่งงานลูกค้า", href: "/delivery" }, { label: "Delivery", href: "/delivery" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
   if (within(pathname, "/accounting/quotations")) return [{ label: "งานบัญชี" }, { label: "ใบเสนอราคา", href: "/accounting/quotations" }];
   if (within(pathname, "/accounting/tax-invoices")) return [{ label: "งานบัญชี" }, { label: "ใบกำกับภาษี", href: "/accounting/tax-invoices" }];
@@ -231,10 +233,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ))}
               </>
             )}
-            {has("DELIVERY") && !has("ADMIN", "STAFF_CAR", "STAFF_MOTO") && (
+            {/* ส่งงานลูกค้าเป็นขั้นร่วมของทุกงาน (รถจดใหม่ / สลับเลข / โอน / ต่อภาษี / งานอื่น) จึงเป็นเมนูหลัก ไม่อยู่ใต้จดทะเบียนรถใหม่ (ผู้ใช้ 2026-10-08)
+                บัญชีเปิดได้เฉพาะรายงานส่งงาน (อ่านอย่างเดียว) */}
+            {has("ADMIN", "STAFF_CAR", "STAFF_MOTO", "DELIVERY", "ACCOUNTANT") && (
               <>
-                <div className="label">งานส่งของ</div>
-                <NavLink href="/registration/new-vehicle/delivery" icon="move" label="Delivery" pathname={pathname} onClick={close} />
+                <div className="label">ส่งงานลูกค้า</div>
+                {has("ADMIN", "STAFF_CAR", "STAFF_MOTO", "DELIVERY") && (
+                  <NavLink href="/delivery" icon="move" label="Delivery (ส่งงาน)" pathname={pathname} exact onClick={close} />
+                )}
+                <NavLink href="/delivery/report" icon="stack" label="รายงานส่งงาน / ใบรวมทุกงาน" pathname={pathname} onClick={close} />
               </>
             )}
             {has("ADMIN", "ACCOUNTANT", "STAFF_CAR") && (

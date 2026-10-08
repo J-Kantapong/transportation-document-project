@@ -840,6 +840,8 @@ export interface TaxRenewal {
   paymentDate: string | null;
   receivedDate: string | null;
   deliveredDate: string | null;
+  // คืนลูกค้าผ่านใบส่งงาน DL (หน้า Delivery, ผู้ใช้ 2026-10-08) = มีผู้รับ - วันที่แก้ได้ที่ใบ DL เท่านั้น (แถวเก่าที่กรอกมือไม่มี)
+  deliveryRecipient?: string | null;
   // ใบเสร็จ (ผู้ใช้ 2026-10-08): รับใบเสร็จครั้งแรก (receivedDate) ต้องมีรูปอย่างน้อย 1 รูป - เลขที่/วันที่/ยอดเติมจาก OCR แก้เองได้
   receiptNo?: string | null;
   receiptDate?: string | null;
@@ -1226,7 +1228,7 @@ export const api = {
     recipient: string;
     note: string;
   }) =>
-    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number }>('/api/delivery', {
+    request<{ slipId: string; slipNo: number; delivered: number; plateOnly: number; platePending: number; jobs: number }>('/api/delivery', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

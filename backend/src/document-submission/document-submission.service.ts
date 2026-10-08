@@ -368,6 +368,7 @@ export class DocumentSubmissionService {
             billFeeTotal: fees.billTotal,
             noBillTotal: fees.noBillTotal,
             taxAmount: taxCalculation.finalAmount,
+            createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-08): คนกดยื่นเอกสาร
             ...(ctx.createdAt ? { createdAt: ctx.createdAt } : {}),
           },
         });
@@ -566,7 +567,7 @@ export class DocumentSubmissionService {
         await lockSubmissions(tx, [submissionId]);
         const { count } = await tx.documentSubmission.updateMany({
           where: { id: submissionId, status: 'PENDING', receipts: { none: {} } },
-          data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, failRemark },
+          data: { status: 'FAILED', receiptReceivedDate: null, receiptDate: null, receivedById: null, failRemark },
         });
         if (count === 0) throw await this.notUpdatedError(submissionId, RECEIPT_ATTACHED_ERROR, tx);
       });
@@ -598,7 +599,7 @@ export class DocumentSubmissionService {
       await lockSubmissions(tx, [submissionId]); // รูปที่กำลังถูกย้าย/ลบออกจากรายการนี้ต้องเสร็จก่อน (ดู submission-lock.ts)
       const { count } = await tx.documentSubmission.updateMany({
         where: { id: submissionId, status: 'PENDING', receipts: { some: {} } },
-        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptDate, receiptAmount, receiptNo },
+        data: { status: 'RECEIPT_RECEIVED', receiptReceivedDate, receiptDate, receiptAmount, receiptNo, receivedById: currentUser()?.id ?? null },
       });
       if (count === 0) throw await this.notUpdatedError(submissionId, NO_RECEIPT_PHOTO_ERROR, tx);
       await tx.vehicle.update({ where: { id: submission.vehicleId }, data: { plateCategory, plateNumber } });

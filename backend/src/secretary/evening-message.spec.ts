@@ -17,9 +17,9 @@ const base: EveningInput = {
   ],
   workingCapital: { overdue: { customers: [{ customerName: 'TWE', amount: 86400 }, { customerName: 'SPI', amount: 30000 }, { customerName: 'X', amount: 5 }] } },
   staff: [
-    { name: 'ก.', edits: 2, slips: 1 },
-    { name: 'ข.', edits: 0, slips: 0 },
-    { name: 'ค.', edits: 0, slips: 3 },
+    { name: 'ก.', entered: 14, submitted: 0, received: 0, edits: 2, slips: 1 },
+    { name: 'ข.', entered: 0, submitted: 0, received: 0, edits: 0, slips: 0 },
+    { name: 'ค.', entered: 0, submitted: 20, received: 5, edits: 0, slips: 3 },
   ],
 };
 
@@ -54,10 +54,10 @@ describe('buildEveningMessage', () => {
 
   it('พนักงาน: แสดงเฉพาะคนที่มีรายการ พร้อมหมายเหตุว่ารายคนมีเท่าที่ระบบจดไว้', () => {
     const texts = allText(flexOf(base).contents);
-    expect(texts).toContain('ก.: แก้/ยกเลิก 2 ครั้ง · ใบส่งงาน 1 ใบ');
-    expect(texts).toContain('ค.: ใบส่งงาน 3 ใบ');
+    expect(texts).toContain('ก.: ใส่รถ 14 · ใบส่งงาน 1 · แก้/ยกเลิก 2 ครั้ง');
+    expect(texts).toContain('ค.: ยื่น 20 · รับใบเสร็จ 5 · ใบส่งงาน 3');
     expect(texts.some((t) => t.startsWith('ข.'))).toBe(false);
-    expect(texts).toContain('รายคนมีเฉพาะการแก้ไข/ยกเลิกและใบส่งงาน');
+    expect(texts).toContain('ยังไม่จดชื่อคนทำ: รับป้าย รับเล่ม งานอื่นๆ');
   });
 
   it('ปัญหา = รายการแจ้งเตือนระดับสูงเท่านั้น', () => {

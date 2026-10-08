@@ -315,7 +315,7 @@ describe('PlatePhotosService.getImage - ขอบเขตประเภทร�
     const where = findFirstPhoto.mock.calls[0][0].where;
     expect(where.id).toBe('p9');
     expect(where.OR[0]).toEqual({ vehicles: { none: {} } });
-    expect(where.OR[1].vehicles.some).toEqual({ AND: [{ OR: [{ body: null }, { NOT: { body: { startsWith: 'รย.12-' } } }] }] });
+    expect(where.OR[1].vehicles.some).toEqual({ AND: [{ OR: [{ body: null }, { NOT: { OR: [{ body: { startsWith: 'รย.12-' } }, { body: { startsWith: 'รย.17-' } }] } }] }] });
   });
 
   it('ไม่พบ (หรือเป็นของรถนอกขอบเขต) = 404', async () => {

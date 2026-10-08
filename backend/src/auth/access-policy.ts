@@ -18,7 +18,7 @@ const ALL_STAFF_READ: UserRole[] = ['ADMIN', 'STAFF_ENTRY', 'STAFF_CAR', 'STAFF_
 
 interface Rule {
   pattern: RegExp; // ทดสอบกับ path (ไม่มี query string, ตัด / ท้ายแล้ว)
-  method?: 'GET' | 'DELETE'; // ไม่ระบุ = ทุก method
+  method?: 'GET' | 'POST' | 'DELETE'; // ไม่ระบุ = ทุก method
   access: Access;
 }
 
@@ -50,6 +50,9 @@ const RULES: Rule[] = [
   // ACCOUNTANT อ่านรายงานส่งงานได้ (ใบส่งงาน + ป้ายค้างส่ง) ไว้ตรวจก่อนวางบิล แต่ไม่เห็นคิว Delivery และบันทึก/แก้ไม่ได้ (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/delivery\/(slips|plate-pending|sheet)(\/|$)/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery\/slips(\/|$)/, access: SUBMIT },
+  // บัญชีลงส่งงานที่พนักงานลืมได้จากหน้าวางบิล (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2) - อ่านคิว + บันทึกส่งงานเท่านั้น ไม่แก้/ยกเลิกใบ
+  { pattern: /^\/api\/delivery\/queue$/, method: 'GET', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
+  { pattern: /^\/api\/delivery$/, method: 'POST', access: [...SUBMIT, 'DELIVERY', 'ACCOUNTANT'] },
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
   { pattern: /^\/api\/vehicle-search(\/|$)/, method: 'GET', access: ALL_STAFF_READ },

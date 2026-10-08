@@ -13,6 +13,7 @@ import { getToken, rolesFromToken, submitWriteScopeFor, vehicleScopeFor, type Ve
 import { OWNER_TYPE_LABEL, ownerDisplayLabel } from "@/lib/vehicle-owner";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { isSupplierProvince } from "@/lib/supplier-route";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 
 // ยื่นเอกสารจดทะเบียน (Step 4) แบบ 3 ขั้น (ผู้ใช้ 2026-09-25): เลือกรถ -> ตรวจทานและตั้งค่า -> ผลการยื่น แต่ละขั้นเป็น URL
 // ของตัวเอง ใช้ state ร่วมกันผ่าน SubmitFlowProvider ใน submit/layout.tsx (ไม่เก็บร่างในเครื่องแล้ว - รีเฟรช = เริ่มใหม่)
@@ -45,7 +46,7 @@ export function formatMoney(amount: number): string {
 }
 
 export function isMotoBody(body: string | null): boolean {
-  return !!body && body.startsWith("รย.12-");
+  return isMotorcycleBody(body);
 }
 
 export function jobTypeLabel(vehicle: Vehicle): string {

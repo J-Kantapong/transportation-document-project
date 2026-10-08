@@ -135,7 +135,7 @@ function missingVehicleFields(v: TaxRenewalVehicleHit | null): Array<keyof FormS
   if (!v.fuel) missing.push("fuel");
   if (!v.ownerType) missing.push("ownerType");
   const fuel = v.fuel ?? "";
-  const isMoto = v.body?.startsWith("รย.12-") ?? false;
+  const isMoto = isMotorcycleBody(v.body);
   const isRy1 = v.body?.startsWith("รย.1-") ?? false;
   const needsCc = isRy1 && fuel !== "ไฟฟ้า (BEV)";
   // cc/น้ำหนัก 0 = ยังไม่รู้ค่าจริง ต้องเปิดช่องให้กรอกเหมือนค่าว่าง (พบ 2026-09-27)
@@ -679,12 +679,18 @@ export function TaxRenewalPage() {
                         />
                       </td>
                       <td>
+                        {/* คืนลูกค้าผ่านใบส่งงาน DL (หน้า Delivery, ผู้ใช้ 2026-10-08) - แก้วันที่ที่ใบ DL เท่านั้น / แถวเก่าที่กรอกมือยังแก้ได้ */}
                         <DateCell
                           key={`delivered:${row.deliveredDate ?? ""}`}
                           value={row.deliveredDate}
-                          readOnly={!editable}
+                          readOnly={!editable || !!row.deliveryRecipient}
                           onSave={(v) => patch(row.id, { deliveredDate: v })}
                         />
+                        {row.deliveryRecipient && (
+                          <div className="muted" title="บันทึกจากหน้า Delivery - แก้วันที่หรือยกเลิกที่รายงานส่งงาน">
+                            ใบ DL · ผู้รับ {row.deliveryRecipient}
+                          </div>
+                        )}
                       </td>
                       {canWrite && (
                         <td>

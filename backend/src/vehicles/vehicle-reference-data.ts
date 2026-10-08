@@ -8,6 +8,9 @@ export const VEHICLE_TYPES = [
   'รย.12-300-799cc',
   'รย.12-800-999cc',
   'รย.12-1000cc ขึ้นไป',
+  // จักรยานยนต์สาธารณะ (ผู้ใช้ 2026-10-08) - นับเป็นมอเตอร์ไซค์ทุกที่ (ดู isMotorcycleType) ค่าใช้จ่ายใช้ชุดเดียวกับ รย.12
+  // ยกเว้นค่าตรวจรถสมุทรปราการ 300 บาท (รย.12 = 200)
+  'รย.17-จักรยานยนต์สาธารณะ',
   'รย.1-เก๋ง 2 ตอน',
   'รย.1-นั่ง 2 ตอน',
   'รย.1-นั่ง 3 ตอน',
@@ -18,6 +21,19 @@ export const VEHICLE_TYPES = [
   'รย.3-กระบะบรรทุกมีหลังคาแหนบ',
   'รย.3-ตู้บรรทุก',
 ] as const;
+
+// มอเตอร์ไซค์ = รย.12 (ทุกช่วง cc) และ รย.17 (จักรยานยนต์สาธารณะ, ผู้ใช้ 2026-10-08) - ใช้ที่เดียวกันทั้งระบบ: ขอบเขตงาน STAFF_MOTO,
+// ค่าธรรมเนียมขั้นยื่น, ภาษี (อัตรามอเตอร์ไซค์), ใบส่งงาน ฯลฯ · frontend/src/lib/vehicle-kind.ts ต้องตรงกัน
+export const MOTORCYCLE_PREFIXES = ['รย.12-', 'รย.17-'] as const;
+
+export function isMotorcycleType(body: string | null | undefined): boolean {
+  return !!body && MOTORCYCLE_PREFIXES.some((prefix) => body.startsWith(prefix));
+}
+
+// เงื่อนไข Prisma "เป็นมอเตอร์ไซค์" ของคอลัมน์ประเภทรถ (Vehicle.body / TaxRenewal.vehicleType) - รถยนต์ = { NOT: ... }
+export function motorcycleTypeWhere<Field extends 'body' | 'vehicleType'>(field: Field) {
+  return { OR: MOTORCYCLE_PREFIXES.map((prefix) => ({ [field]: { startsWith: prefix } }) as Record<Field, { startsWith: string }>) };
+}
 
 // Province names: Ministry of Commerce, referencing DOPA, https://std.moc.go.th/std/group/28
 export const PROVINCES = [
