@@ -1,4 +1,4 @@
-import type { WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
+import type { PayslipSignature, WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
 import { bahtText, formatMoney } from "@/lib/invoice";
 import { escapeHtml } from "@/lib/print-html";
 
@@ -59,6 +59,7 @@ const PAYEE = { id: [375.3, 675.6, 557.6, 690.3] as Box, name: [53.2, 657.6, 314
 
 // วัน/เดือน/ปี ท้ายฟอร์ม: ตำแหน่งกึ่งกลางของตัวเลขในไฟล์ต้นฉบับ (x) และกึ่งกลางแนวตั้ง (y)
 const SIGN_DATE = { dayX: 349.3, monthX: 389.3, yearX: 441.65, y: 79.6, size: 10 };
+const SIGNATURE_BOX: Box = [362, 87, 470, 108]; // ก้นกรอบอยู่ที่เส้นลงชื่อ (y ~88) สูงไม่เกินบรรทัด "ขอรับรองว่า..." มากนัก
 
 // ข้อมูลผู้จ่ายตามที่พิมพ์ในใบเดิมของบริษัท (ชื่อไม่มี "(สำนักงานใหญ่)" ที่อยู่เขียนย่อ) - ใช้เมื่อเลขผู้เสียภาษีของผู้จ่ายตรงกับบริษัท
 const KNOWN_PAYER_TAX_ID = "0115556016801";
@@ -134,10 +135,12 @@ function itemCells(item: WhtItem, row: RowBoxes, dy: number, dateSize: number, m
 }
 
 export interface OfficialFormOptions {
+  signature?: PayslipSignature | null;
   assetBase?: string; // เช่น https://host หรือ file:///.../public - ต่อด้วย OFFICIAL_FORM_IMAGE
 }
 
 export function officialFormPageHtml(c: WhtCertificate, options: OfficialFormOptions): string {
+  const sig = options.signature?.exists && options.signature.imageDataUrl?.startsWith("data:image/png;base64,") ? options.signature : null;
   const parts: string[] = [];
 
   // เลขที่ (เล่มที่เว้นว่างเหมือนใบเดิม)
@@ -190,6 +193,10 @@ export function officialFormPageHtml(c: WhtCertificate, options: OfficialFormOpt
     const at = (x: number, v: string) => text([x - 20, SIGN_DATE.y - 8, x + 20, SIGN_DATE.y + 8], v, { size: SIGN_DATE.size, align: "center", inset: 0 });
     parts.push(at(SIGN_DATE.dayX, String(Number(d[3]))), at(SIGN_DATE.monthX, String(Number(d[2]))), at(SIGN_DATE.yearX, d[1]));
   }
+  if (sig) {
+    const [x1, y1, x2, y2] = SIGNATURE_BOX;
+    parts.push(`<img class="sig" src="${sig.imageDataUrl}" alt="" style="left:${pctX(x1)}%;top:${pctY(PAGE_H - y2)}%;width:${pctX(x2 - x1)}%;height:${pctY(y2 - y1)}%">`);
+  }
 
   const bg = `${options.assetBase ?? ""}${OFFICIAL_FORM_IMAGE}`;
   return `<section class="fpage"><img class="bg" src="${bg}" alt="">${c.status === "CANCELLED" ? `<div class="wm">ยกเลิก</div>` : ""}${parts.join("")}</section>`;
@@ -205,5 +212,6 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .fpage .bg{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
 .fv{position:absolute;display:flex;align-items:center;white-space:nowrap;overflow:hidden;line-height:1;color:#000;font-family:"Microsoft Sans Serif","Tahoma","Leelawadee UI","Noto Sans Thai","Sarabun",sans-serif;font-variant-numeric:tabular-nums}
 .fv.ck{justify-content:center;font-family:"Segoe UI Symbol","Zapf Dingbats","Noto Sans Symbols 2","DejaVu Sans",sans-serif;font-weight:700}
+.fpage .sig{position:absolute;object-fit:contain;display:block}
 .fpage .wm{position:absolute;left:0;right:0;top:32%;text-align:center;font:700 calc(var(--u)*110) "Sarabun","Tahoma",sans-serif;color:#000;opacity:.08;transform:rotate(-24deg);pointer-events:none}
 `;
