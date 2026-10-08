@@ -1,10 +1,16 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
 import { assertVehicleInScope, currentVehicleScope, currentWriteScope, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday, toDate } from '../overview/overview-calculator.js';
+import { assertDateInRange, dateInRange, optionalAmount, optionalIsoDateField, optionalText, toUtcDate } from '../plate-swap/plate-swap.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-extractor.js';
+import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
+import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
+import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { TaxService } from '../tax/tax.service.js';
 import { calculateTaxRenewalFees } from './tax-renewal-fee.js';
 import {
@@ -84,6 +90,8 @@ function parseExpectedUpdatedAt(raw: unknown): Date | null {
 
 // ช่องข้อมูลรถ/ภาษีที่ใช้คิดยอด - เปลี่ยนช่องใดช่องหนึ่ง = คิด inspectionRequired และยอดเงินใหม่
 const TAX_INPUT_FIELDS = ['taxExpiryDate', 'vehicleType', 'fuel', 'cc', 'weight', 'firstRegistrationDate'] as const;
+const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับใบเสร็จ (หน้ารับใบเสร็จ)';
+const LAST_RECEIPT_ERROR = 'งานที่รับใบเสร็จแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';
 const WORKFLOW_DATE_FIELDS = ['paymentDate', 'receivedDate', 'deliveredDate'] as const;
 
 @Injectable()
@@ -91,7 +99,18 @@ export class TaxRenewalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly taxService: TaxService,
+    @Inject(RECEIPT_STORAGE) private readonly storage: ReceiptStorage,
+    @Inject(RECEIPT_EXTRACTOR) private readonly extractor: ReceiptExtractor,
   ) {}
+
+  // เจ้าของงานเลือกจาก dropdown ลูกค้าในฐานข้อมูล (ผู้ใช้ 2026-10-08) - ส่งมาแล้วต้องมีอยู่จริง
+  private async resolveCustomerId(raw: unknown): Promise<string> {
+    const id = typeof raw === 'string' ? raw.trim() : '';
+    if (!id) throw new BadRequestException({ error: 'กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)' });
+    const customer = await this.prisma.customer.findUnique({ where: { id }, select: { id: true } });
+    if (!customer) throw new BadRequestException({ error: 'ไม่พบเจ้าของงานที่เลือกในฐานข้อมูลลูกค้า' });
+    return customer.id;
+  }
 
   // รถที่ลิงก์จากฐานข้อมูลรถจดใหม่: ใช้ข้อมูลจากแถว Vehicle เป็นหลัก ช่องที่รถยังไม่มีให้กรอกเสริมได้
   private async resolveVehicleInfo(body: Record<string, unknown>): Promise<ParsedVehicleInfo> {
@@ -103,7 +122,7 @@ export class TaxRenewalService {
       assertVehicleInScope(vehicleType);
       return {
         vehicleId: null,
-        customerId: parseText(body.customerId, 'ลูกค้า', false, 50),
+        customerId: body.customerId ? await this.resolveCustomerId(body.customerId) : null,
         chassis: parseText(body.chassis, 'เลขตัวถัง', true, 50)!,
         engine: parseText(body.engine, 'เลขเครื่อง', false, 50),
         plateCategory: parseText(body.plateCategory, 'หมวดทะเบียน', true, 20)!,
@@ -298,6 +317,7 @@ export class TaxRenewalService {
       include: {
         customer: { select: { id: true, name: true, company: true } },
         vehicle: { select: { owner: { select: { id: true } } } },
+        receipts: { orderBy: { createdAt: 'asc' }, select: { id: true, createdAt: true } },
       },
     });
     return rows.map(({ vehicle, ...row }) => {
@@ -442,9 +462,19 @@ export class TaxRenewalService {
       body.receivedDate === undefined ? existing.receivedDate : parseDate(body.receivedDate, 'วันที่รับป้ายภาษี');
     const deliveredDate =
       body.deliveredDate === undefined ? existing.deliveredDate : parseDate(body.deliveredDate, 'วันที่คืนลูกค้า');
+    // เจ้าของงาน: เติมจากว่างเป็นงานปกติ / เปลี่ยนคนที่มีอยู่แล้วเป็นการแก้ข้อมูล (ต้องมีเหตุผล)
+    const customerId = has('customerId') ? await this.resolveCustomerId(body.customerId) : existing.customerId;
+    const customerChanged = customerId !== existing.customerId;
+    const customerCorrected = customerChanged && existing.customerId !== null;
+    const customerData: Prisma.TaxRenewalUpdateInput = customerChanged ? { customer: { connect: { id: customerId! } } } : {};
 
     if (receivedDate && !paymentDate) {
       throw new BadRequestException({ error: 'ต้องบันทึกวันที่ชำระภาษีก่อนรับป้ายภาษี/ใบเสร็จ' });
+    }
+    // รับใบเสร็จครั้งแรกต้องมีรูปใบเสร็จอย่างน้อย 1 รูป (ผู้ใช้ 2026-10-08) - แนบที่หน้ารับใบเสร็จ
+    if (receivedDate && !existing.receivedDate) {
+      const receiptCount = await this.prisma.receiptImage.count({ where: { taxRenewalId: id } });
+      if (receiptCount === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
     }
     if (deliveredDate && !receivedDate) {
       throw new BadRequestException({ error: 'ต้องรับป้ายภาษี/ใบเสร็จก่อนคืนเอกสารให้ลูกค้า' });
@@ -454,7 +484,7 @@ export class TaxRenewalService {
     const detailChanges = diffChanges(existing, { ...details, skipContribution });
     const dateChanges = diffChanges(existing, { paymentDate, receivedDate, deliveredDate });
     const correctedDates = WORKFLOW_DATE_FIELDS.filter((field) => field in dateChanges && existing[field] !== null);
-    const isCorrection = Object.keys(detailChanges).length > 0 || ownerChanged || correctedDates.length > 0;
+    const isCorrection = Object.keys(detailChanges).length > 0 || ownerChanged || correctedDates.length > 0 || customerCorrected;
     const remark = isCorrection ? requireRemark(body.remark, 'กรุณาระบุเหตุผลที่แก้งานต่อภาษี') : null;
 
     // ยอดเงินคิดใหม่เมื่อวันที่ชำระ ตัวเลือกลงขัน หรือข้อมูลที่ใช้คิดภาษีเปลี่ยน (เงินเพิ่มผูกกับวันที่ชำระโดยตรง)
@@ -508,6 +538,7 @@ export class TaxRenewalService {
         ...(has('inspectionConfirmed') ? { inspectionConfirmed } : {}),
         ...(has('insuranceConfirmed') ? { insuranceConfirmed } : {}),
         ...Object.fromEntries(sentDates.map((field) => [field, dates[field]])),
+        ...customerData,
         ...feeData,
         ...('taxBreakdown' in feeData ? { ownerType: owner.ownerType } : {}),
       };
@@ -533,12 +564,14 @@ export class TaxRenewalService {
       paymentDate,
       receivedDate,
       deliveredDate,
+      ...customerData,
       ...feeData,
     };
     const changes = {
       ...detailChanges,
       ...(ownerChanged ? { owner: { from: currentOwner, to: owner } } : {}),
       ...dateChanges,
+      ...(customerChanged ? { customerId: { from: existing.customerId, to: customerId } } : {}),
       ...diffChanges(existing, { inspectionConfirmed, insuranceConfirmed }),
       ...('billTotal' in feeData ? diffChanges(existing, { billTotal: feeData.billTotal, noBillTotal: feeData.noBillTotal }) : {}),
     };
@@ -550,6 +583,138 @@ export class TaxRenewalService {
       await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'update', remark, changes });
       return updated;
     });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // ใบเสร็จของงานต่อภาษี (ผู้ใช้ 2026-10-08, แบบเดียวกับงานย้ายออก/คัดแผ่นป้าย): แนบรูป -> OCR เติมเลขที่/วันที่/ยอด -> ยืนยันรับ (receivedDate)
+  // หลังรับแล้วแนบ/ลบรูปและแก้ข้อมูลใบเสร็จต้องมีเหตุผล บันทึก AuditLog และต้องเหลือรูปอย่างน้อย 1 รูป
+  // ---------------------------------------------------------------------------------------------
+
+  private async reloadOne(id: string) {
+    return this.prisma.taxRenewal.findUniqueOrThrow({
+      where: { id },
+      include: {
+        customer: { select: { id: true, name: true, company: true } },
+        receipts: { orderBy: { createdAt: 'asc' }, select: { id: true, createdAt: true } },
+      },
+    });
+  }
+
+  // ล็อกแถวงาน (FOR UPDATE) แล้วอ่านสถานะล่าสุด - กันลบรูปสุดท้ายพร้อมกับการยืนยันรับ
+  private async lockRow(tx: Prisma.TransactionClient, id: string, expectedReceivedDate: Date | null) {
+    await tx.$queryRaw`SELECT "id" FROM "TaxRenewal" WHERE "id" = ${id} FOR UPDATE`;
+    const live = await tx.taxRenewal.findFirst({
+      where: { id, cancelledAt: null },
+      select: { receivedDate: true, _count: { select: { receipts: true } } },
+    });
+    if (!live) throw new ConflictException({ error: STALE_ERROR });
+    if ((live.receivedDate?.getTime() ?? null) !== (expectedReceivedDate?.getTime() ?? null)) {
+      throw new ConflictException({ error: STALE_ERROR });
+    }
+    return live;
+  }
+
+  async addReceipt(id: string, file: UploadedReceiptFile | undefined, remarkRaw?: unknown) {
+    const existing = await this.findActive(id);
+    const remark = existing.receivedDate ? requireRemark(remarkRaw, 'งานนี้รับใบเสร็จแล้ว - แนบรูปเพิ่มต้องระบุเหตุผล') : null;
+    if (!file || file.size === 0) throw new BadRequestException({ error: 'ไม่พบไฟล์รูปใบเสร็จ' });
+    if (file.size > MAX_RECEIPT_BYTES) throw new BadRequestException({ error: 'ไฟล์รูปใหญ่เกิน 8MB' });
+    const type = detectImageType(file.buffer);
+    if (!type) throw new BadRequestException({ error: 'รองรับเฉพาะรูป JPEG, PNG หรือ WebP' });
+
+    // ตาราง ReceiptImage เดียวกับใบเสร็จอื่น - รูปที่ใช้เป็นใบเสร็จที่ไหนแล้วก็ใช้ซ้ำไม่ได้
+    const contentHash = contentHashOf(file.buffer);
+    if (await this.prisma.receiptImage.findUnique({ where: { contentHash }, select: { id: true } })) throw duplicateUpload();
+
+    const extraction = await this.extractor.extract(file.buffer, type.mimeType);
+
+    const now = new Date();
+    const storageKey = `receipts/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${type.ext}`;
+    await this.storage.put(storageKey, file.buffer, type.mimeType);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.lockRow(tx, id, existing.receivedDate);
+        const created = await tx.receiptImage.create({
+          data: {
+            taxRenewalId: existing.id,
+            storageKey,
+            contentHash,
+            mimeType: type.mimeType,
+            sizeBytes: file.size,
+            originalName: file.originalname ? file.originalname.slice(0, 200) : null,
+            extractionSource: this.extractor.source,
+            ...(extraction ? { extraction: extraction as object } : {}),
+          },
+          select: { id: true },
+        });
+        // เติมจาก OCR ครั้งแรกที่อ่านสำเร็จ - เฉพาะตอนช่องยังว่างทั้ง 3 ช่อง (กันทับของที่พนักงานแก้ไปแล้ว)
+        if (extraction && 'reading' in extraction) {
+          const { receiptNo, date, total } = extraction.reading;
+          const readDate = date && dateInRange(toUtcDate(date), existing.submitDate) ? toUtcDate(date) : undefined;
+          if (receiptNo || readDate || total !== null) {
+            await tx.taxRenewal.updateMany({
+              where: { id, receiptNo: null, receiptDate: null, receiptAmount: null },
+              data: { receiptNo: receiptNo || undefined, receiptDate: readDate, receiptAmount: total !== null ? total : undefined },
+            });
+          }
+        }
+        if (remark) {
+          await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'add-receipt', remark, changes: { receipt: { from: null, to: created.id } } });
+        }
+      });
+    } catch (err) {
+      await this.storage.delete(storageKey).catch(() => undefined);
+      if (isContentHashConflict(err)) throw duplicateUpload();
+      throw err;
+    }
+    return this.reloadOne(id);
+  }
+
+  async removeReceipt(id: string, receiptId: string, remarkRaw?: unknown) {
+    const existing = await this.findActive(id);
+    const remark = existing.receivedDate ? requireRemark(remarkRaw, 'งานนี้รับใบเสร็จแล้ว - ลบรูปใบเสร็จต้องระบุเหตุผล') : null;
+    const receipt = await this.prisma.receiptImage.findFirst({ where: { id: receiptId, taxRenewalId: id }, select: { id: true, storageKey: true } });
+    if (!receipt) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
+    await this.prisma.$transaction(async (tx) => {
+      const live = await this.lockRow(tx, id, existing.receivedDate);
+      if (remark && live._count.receipts <= 1) throw new BadRequestException({ error: LAST_RECEIPT_ERROR });
+      const { count } = await tx.receiptImage.deleteMany({ where: { id: receipt.id, taxRenewalId: id } });
+      if (count === 0) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
+      if (remark) {
+        await writeAudit(tx, {
+          entity: 'TaxRenewal',
+          entityId: id,
+          action: 'remove-receipt',
+          remark,
+          changes: { receipt: { from: receipt.id, to: null }, storageKey: receipt.storageKey },
+        });
+      }
+    });
+    // หลังรับแล้วรูปเป็นหลักฐาน: ถอดแถวออกแต่ไม่ลบไฟล์ใน storage
+    if (!remark) await this.storage.delete(receipt.storageKey).catch(() => undefined);
+    return this.reloadOne(id);
+  }
+
+  async updateReceiptFields(id: string, dto: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; remark?: unknown }) {
+    const existing = await this.findActive(id);
+    const receiptNo = optionalText(dto?.receiptNo, 'เลขที่ใบเสร็จ', 100);
+    const receiptDate = optionalIsoDateField(dto?.receiptDate, 'วันที่ใบเสร็จ');
+    if (receiptDate) assertDateInRange('วันที่ใบเสร็จ', receiptDate, existing.submitDate);
+    const receiptAmount = optionalAmount(dto?.receiptAmount, 'ยอดเงินตามใบเสร็จ');
+    const next = { receiptNo, receiptDate, receiptAmount };
+    const changes = diffChanges(existing, next);
+    if (Object.keys(changes).length === 0) return this.reloadOne(id);
+    const where = { id, cancelledAt: null, receivedDate: existing.receivedDate };
+    if (!existing.receivedDate) {
+      await this.prisma.taxRenewal.update({ where, data: next }).catch(staleIfMissing);
+      return this.reloadOne(id);
+    }
+    const remark = requireRemark(dto?.remark, 'งานนี้รับใบเสร็จแล้ว - แก้ข้อมูลใบเสร็จต้องระบุเหตุผล');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.taxRenewal.update({ where, data: next }).catch(staleIfMissing);
+      await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'update-receipt-fields', remark, changes });
+    });
+    return this.reloadOne(id);
   }
 }
 

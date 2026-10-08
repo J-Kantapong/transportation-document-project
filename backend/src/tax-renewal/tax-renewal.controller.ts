@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { TaxRenewalService } from './tax-renewal.service.js';
 
 @Controller('api/tax-renewals')
@@ -38,5 +40,26 @@ export class TaxRenewalController {
   @Post(':id/cancel')
   cancel(@Param('id') id: string, @Body() body: { remark?: unknown }) {
     return this.taxRenewalService.cancel(id, body?.remark);
+  }
+
+  // ใบเสร็จของงาน (ผู้ใช้ 2026-10-08) - multipart/form-data: file = รูปใบเสร็จ, remark = เหตุผล (บังคับเฉพาะงานที่รับใบเสร็จแล้ว)
+  @Post(':id/receipts')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 } }))
+  addReceipt(@Param('id') id: string, @UploadedFile() file: UploadedReceiptFile | undefined, @Body() body: { remark?: unknown }) {
+    return this.taxRenewalService.addReceipt(id, file, body?.remark);
+  }
+
+  @Delete(':id/receipts/:receiptId')
+  removeReceipt(@Param('id') id: string, @Param('receiptId') receiptId: string, @Body() body: { remark?: unknown }) {
+    return this.taxRenewalService.removeReceipt(id, receiptId, body?.remark);
+  }
+
+  // แก้/กรอกเองเลขที่ใบเสร็จ/วันที่/ยอดเงิน - remark บังคับหลังรับใบเสร็จแล้ว
+  @Patch(':id/receipt-fields')
+  updateReceiptFields(
+    @Param('id') id: string,
+    @Body() body: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; remark?: unknown },
+  ) {
+    return this.taxRenewalService.updateReceiptFields(id, body ?? {});
   }
 }

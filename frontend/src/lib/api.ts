@@ -791,6 +791,7 @@ export interface TaxRenewalUpdateInput {
   paymentDate?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
+  customerId?: string; // เจ้าของงาน (ผู้ใช้ 2026-10-08) - เติมจากว่างเป็นงานปกติ / เปลี่ยนคนเดิมต้องมี remark
   submitDate?: string;
   chassis?: string;
   engine?: string | null;
@@ -830,6 +831,11 @@ export interface TaxRenewal {
   paymentDate: string | null;
   receivedDate: string | null;
   deliveredDate: string | null;
+  // ใบเสร็จ (ผู้ใช้ 2026-10-08): รับใบเสร็จครั้งแรก (receivedDate) ต้องมีรูปอย่างน้อย 1 รูป - เลขที่/วันที่/ยอดเติมจาก OCR แก้เองได้
+  receiptNo?: string | null;
+  receiptDate?: string | null;
+  receiptAmount?: string | null;
+  receipts?: { id: string; createdAt: string }[];
   skipContribution: boolean;
   billTotal: string | null;
   noBillTotal: string | null;
@@ -1183,6 +1189,23 @@ export const api = {
     request<TaxRenewal>('/api/tax-renewals', { method: 'POST', body: JSON.stringify(data) }),
   updateTaxRenewal: (id: string, data: TaxRenewalUpdateInput) =>
     request<TaxRenewal>(`/api/tax-renewals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // ใบเสร็จงานต่อภาษี (multipart: file, remark?) / remark บังคับหลังรับใบเสร็จแล้ว
+  addTaxRenewalReceipt: (id: string, image: Blob, fileName: string, remark?: string) => {
+    const form = new FormData();
+    form.append('file', image, fileName);
+    if (remark) form.append('remark', remark);
+    return request<TaxRenewal>(`/api/tax-renewals/${encodeURIComponent(id)}/receipts`, { method: 'POST', body: form });
+  },
+  removeTaxRenewalReceipt: (id: string, receiptId: string, remark?: string) =>
+    request<TaxRenewal>(`/api/tax-renewals/${encodeURIComponent(id)}/receipts/${encodeURIComponent(receiptId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ remark }),
+    }),
+  updateTaxRenewalReceiptFields: (id: string, data: { receiptNo?: string; receiptDate?: string; receiptAmount?: string }, remark?: string) =>
+    request<TaxRenewal>(`/api/tax-renewals/${encodeURIComponent(id)}/receipt-fields`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...data, remark }),
+    }),
   // ยกเลิกงาน (ไม่ลบแถว, remark บังคับ - ผู้ใช้ 2026-09-27)
   cancelTaxRenewal: (id: string, remark: string) =>
     request<{ id: string }>(`/api/tax-renewals/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ remark }) }),

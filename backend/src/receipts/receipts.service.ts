@@ -286,7 +286,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       const saved = savedRows.find((r) => !clearlyDifferentChassis(chassis, r.vehicle.chassis));
       if (saved) return { by: 'receiptNo', receiptNo, chassis: saved.vehicle.chassis, receivedDate: isoDate(saved.receiptReceivedDate) };
       const images = await this.prisma.receiptImage.findMany({
-        where: { ...notSelf, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
+        where: { ...notSelf, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, extraction: { path: ['reading', 'receiptNo'], equals: receiptNo } },
         select: { extraction: true, submission: { select: { receiptReceivedDate: true, vehicle: { select: { chassis: true } } } } },
         take: 20,
       });
@@ -385,7 +385,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
   async listUnassigned(offsetRaw?: unknown, limitRaw?: unknown) {
     const offset = this.parseCount(offsetRaw, 0, 'offset');
     const limit = Math.min(this.parseCount(limitRaw, UNASSIGNED_PAGE_SIZE, 'limit') || UNASSIGNED_PAGE_SIZE, UNASSIGNED_MAX_LIMIT);
-    const where = { submissionId: null, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null };
+    const where = { submissionId: null, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null };
     const [receipts, total] = await Promise.all([
       this.prisma.receiptImage.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: offset, take: limit, select: receiptSelect }),
       this.prisma.receiptImage.count({ where }),
@@ -427,6 +427,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         plateSwapId: true,
         vehicleUseCancellationId: true,
         vehicleMoveOutId: true,
+        taxRenewalId: true,
         plateCopyId: true,
         vehicleTransferId: true,
         submission: { select: { status: true, vehicle: { select: { body: true } } } },
@@ -435,6 +436,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
     if (!existing) throw new NotFoundException({ error: 'ไม่พบรูปใบเสร็จ' });
     if (existing.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข จับคู่กับรถไม่ได้' });
     if (existing.vehicleUseCancellationId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานยกเลิกการใช้รถ จับคู่กับรถไม่ได้' });
+    if (existing.taxRenewalId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานต่อภาษี จับคู่กับรถไม่ได้' });
     if (existing.vehicleMoveOutId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานย้ายออก จับคู่กับรถไม่ได้' });
     if (existing.plateCopyId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานคัดแผ่นป้ายทะเบียน จับคู่กับรถไม่ได้' });
     if (existing.vehicleTransferId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานโอน จับคู่กับรถไม่ได้' });
@@ -465,7 +467,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
       if (target === 'FAILED') throw new BadRequestException({ error: FAILED_ATTACH_ERROR });
       // เขียนเฉพาะเมื่อรูปยังอยู่ที่เดิม และรายการเดิมยังไม่ได้รับใบเสร็จ (ระหว่างนี้ถูกลบ/ย้ายไปแล้ว = ไม่ทับ)
       const { count } = await tx.receiptImage.updateMany({
-        where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, ...(source ? { submission: { status: { not: 'RECEIPT_RECEIVED' } } } : {}) },
+        where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, ...(source ? { submission: { status: { not: 'RECEIPT_RECEIVED' } } } : {}) },
         data: { submissionId, ...(extraction ? { extraction: { ...extraction, match: matched.match, duplicate } as object } : {}) },
       });
       if (count === 0) throw new ConflictException({ error: 'รูปนี้ถูกจับคู่หรือลบไปแล้ว - โหลดหน้าใหม่' });
@@ -487,6 +489,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
         plateSwapId: true,
         vehicleUseCancellationId: true,
         vehicleMoveOutId: true,
+        taxRenewalId: true,
         plateCopyId: true,
         vehicleTransferId: true,
         submission: { select: { status: true, vehicle: { select: { body: true } } } },
@@ -506,6 +509,7 @@ export class ReceiptsService implements OnApplicationBootstrap {
     // ใบเสร็จงานสลับเลขลบผ่าน DELETE /api/plate-swaps/:id/receipts/:receiptId (รับเอกสารกลับแล้วห้ามลบ)
     if (receipt.plateSwapId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานสลับเลข ลบจากหน้างานสลับเลข' });
     if (receipt.vehicleUseCancellationId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานยกเลิกการใช้รถ ลบจากหน้างานยกเลิกการใช้รถ' });
+    if (receipt.taxRenewalId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานต่อภาษี ลบจากหน้างานต่อภาษี' });
     if (receipt.vehicleMoveOutId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานย้ายออก ลบจากหน้างานย้ายออก' });
     if (receipt.plateCopyId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานคัดแผ่นป้ายทะเบียน ลบจากหน้างานคัดแผ่นป้ายทะเบียน' });
     if (receipt.vehicleTransferId) throw new BadRequestException({ error: 'รูปนี้เป็นใบเสร็จงานโอน ลบจากหน้างานโอน' });
@@ -516,10 +520,10 @@ export class ReceiptsService implements OnApplicationBootstrap {
       ? await this.prisma.$transaction(async (tx) => {
           await lockSubmissions(tx, [source]);
           return tx.receiptImage.deleteMany({
-            where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, submission: { status: { not: 'RECEIPT_RECEIVED' } } },
+            where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, submissionId: source, submission: { status: { not: 'RECEIPT_RECEIVED' } } },
           });
         })
-      : await this.prisma.receiptImage.deleteMany({ where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, submissionId: null } });
+      : await this.prisma.receiptImage.deleteMany({ where: { id, plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, submissionId: null } });
     if (count === 0) throw new ConflictException({ error: 'รูปนี้ถูกจับคู่หรือเปลี่ยนสถานะไปแล้ว - โหลดหน้าใหม่' });
     await this.storage.delete(receipt.storageKey).catch(() => undefined);
     return { id };

@@ -154,7 +154,7 @@ describe('ReceiptsService.remove', () => {
   it('ลบรูปที่ยังไม่จับคู่ได้ ทั้งแถวและไฟล์ (ลบแบบมีเงื่อนไข - ต้องยังไม่ได้จับคู่)', async () => {
     const { svc, storage, images } = setup(undefined, unassigned);
     await svc.remove('r1');
-    expect(images.deleteMany).toHaveBeenCalledWith({ where: { id: 'r1', plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, submissionId: null } });
+    expect(images.deleteMany).toHaveBeenCalledWith({ where: { id: 'r1', plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, submissionId: null } });
     expect(storage.delete).toHaveBeenCalledWith('k');
   });
 
@@ -231,7 +231,7 @@ describe('ReceiptsService.assign - จับคู่เอง', () => {
     await svc.assign('r1', 's1');
     expect(lockRows.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
     expect(lockRows.mock.calls[0][1]).toEqual(['s1', 's9']);
-    expect(images.updateMany.mock.calls[0][0].where).toEqual({ id: 'r1', plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, plateCopyId: null, vehicleTransferId: null, submissionId: 's9', submission: { status: { not: 'RECEIPT_RECEIVED' } } });
+    expect(images.updateMany.mock.calls[0][0].where).toEqual({ id: 'r1', plateSwapId: null, vehicleUseCancellationId: null, vehicleMoveOutId: null, taxRenewalId: null, plateCopyId: null, vehicleTransferId: null, submissionId: 's9', submission: { status: { not: 'RECEIPT_RECEIVED' } } });
   });
 
   it('ระหว่างนั้นรายการใหม่ถูกบันทึกยื่นไม่สำเร็จ -> ไม่แนบ (รูปจะค้างกับรายการที่ไม่มีหน้าไหนเข้าถึง)', async () => {

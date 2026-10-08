@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
@@ -18,6 +19,7 @@ import { DateInput } from "@/components/DateInput";
 type Source = "VEHICLE" | "MANUAL";
 
 interface FormState {
+  customerId: string; // เจ้าของงาน - บังคับเมื่อกรอกรถเอง (รถจากระบบใช้ลูกค้าของรถ)
   submitDate: string; // วันที่ยื่นงาน - ตั้งต้นเป็นวันที่ทำรายการ
   source: Source;
   vehicleId: string;
@@ -44,6 +46,7 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  customerId: "",
   submitDate: "",
   source: "VEHICLE",
   vehicleId: "",
@@ -103,6 +106,7 @@ function toInput(form: FormState): TaxRenewalInput {
     };
   return {
     ...shared,
+    customerId: form.customerId || null,
     chassis: form.chassis,
     engine: form.engine || null,
     plateCategory: form.plateCategory,
@@ -188,7 +192,20 @@ function readyForPreview(form: FormState, selected: TaxRenewalVehicleHit | null)
   );
 }
 
+// เจ้าของงาน = ลูกค้าที่ส่งงานมา (ผู้ใช้ 2026-10-08) - dropdown จากฐานข้อมูลลูกค้า
+export function useCustomerOptions() {
+  const [options, setOptions] = useState<Array<{ id: string; label: string }>>([]);
+  useEffect(() => {
+    api
+      .listCustomers()
+      .then((data) => setOptions(data.customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") }))))
+      .catch(() => undefined);
+  }, []);
+  return options;
+}
+
 export function TaxRenewalPage() {
+  const customerOptions = useCustomerOptions();
   const [form, setForm] = useState<FormState>(freshForm);
   const [selectedVehicle, setSelectedVehicle] = useState<TaxRenewalVehicleHit | null>(null);
   const [rows, setRows] = useState<TaxRenewal[]>([]);
@@ -266,6 +283,10 @@ export function TaxRenewalPage() {
       setError(dateError);
       return;
     }
+    if (form.source === "MANUAL" && !form.customerId) {
+      setError("กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)");
+      return;
+    }
     setSaving(true);
     try {
       await api.createTaxRenewal(toInput(form));
@@ -340,6 +361,17 @@ export function TaxRenewalPage() {
                 </div>
               ) : (
                 <>
+                  <label className="field wide">
+                    <span>เจ้าของงาน * (ลูกค้าที่ส่งงานมา)</span>
+                    <select value={form.customerId} onChange={(e) => set("customerId", e.target.value)} required>
+                      <option value="">เลือกลูกค้า</option>
+                      {customerOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="field">
                     <span>เลขตัวถัง *</span>
                     <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} required />
@@ -542,6 +574,9 @@ export function TaxRenewalPage() {
       <div className="panel customer-list">
         <div className="panel-head">
           <h2>รายการงานต่อภาษี</h2>
+          <Link href="/registration/tax-renewal/receipt" className="text-button">
+            รับใบเสร็จ →
+          </Link>
           {readOnly && <span className="muted">ดูอย่างเดียว</span>}
         </div>
         {/* error โหลดรายการ - ปกติแสดงใต้ฟอร์มด้านบน แต่ผู้ใช้ที่ดูอย่างเดียวไม่มีฟอร์ม */}
@@ -707,8 +742,10 @@ function EditRenewalDialog({
   onSaved: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const customerOptions = useCustomerOptions();
   const dateText = (iso: string | null) => isoToDisplayDate((iso ?? "").slice(0, 10));
   const [form, setForm] = useState({
+    customerId: row.customerId ?? "",
     submitDate: dateText(row.submitDate),
     taxExpiryDate: dateText(row.taxExpiryDate),
     paymentDate: dateText(row.paymentDate),
@@ -762,6 +799,8 @@ function EditRenewalDialog({
     setSaving(true);
     try {
       await api.updateTaxRenewal(row.id, {
+        // ส่งเฉพาะเมื่อเลือกเจ้าของงานที่ต่างจากเดิม
+        ...(form.customerId && form.customerId !== (row.customerId ?? "") ? { customerId: form.customerId } : {}),
         submitDate: toIso(form.submitDate),
         taxExpiryDate: toIso(form.taxExpiryDate),
         paymentDate: isoOrNull(form.paymentDate),
@@ -805,6 +844,17 @@ function EditRenewalDialog({
         {manual ? " · กรอกข้อมูลรถเอง" : " · รถจากระบบ (เลือกผิดคันให้ยกเลิกงานแล้วบันทึกใหม่)"}
       </p>
       <div className="vehicle-fields" style={{ marginTop: 12 }}>
+        <label className="field wide">
+          <span>เจ้าของงาน (ลูกค้าที่ส่งงานมา)</span>
+          <select value={form.customerId} onChange={(e) => set("customerId", e.target.value)}>
+            <option value="">{row.customer ? "(ไม่เปลี่ยน)" : "ยังไม่ระบุ - เลือกลูกค้า"}</option>
+            {customerOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           <span>วันที่ยื่นงาน *</span>
           <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
