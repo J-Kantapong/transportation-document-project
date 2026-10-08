@@ -122,23 +122,23 @@ export class ActivityService {
       plateSwaps, taxRenewals, yamaha, transfers, useCancels, plateCopies, moveOuts, vehicleLogs, auditLogs,
     ] = await Promise.all([
       p.vehicle.findMany({ where: { createdAt: range, deletedAt: null }, select: { ...vehicleSel, createdAt: true } }),
-      p.documentSubmission.findMany({ where: { createdAt: range } }),
-      p.documentSubmission.findMany({ where: { receiptReceivedDate: exact, status: 'RECEIPT_RECEIVED' } }),
-      p.vehicle.findMany({ where: { plateReceivedDate: exact, deletedAt: null }, select: vehicleSel }),
-      p.vehicle.findMany({ where: { bookReceivedDate: exact, deletedAt: null }, select: vehicleSel }),
-      p.deliverySlip.findMany({ where: { createdAt: range, cancelledAt: null }, include: { items: { where: { cancelledAt: null }, select: { id: true, vehicleKind: true, body: true } }, createdBy: userSel } }),
-      p.invoice.findMany({ where: { createdAt: range } }),
-      p.invoice.findMany({ where: { paidDate: exact, status: 'PAID' } }),
-      p.taxInvoice.findMany({ where: { createdAt: range } }),
-      p.plateSwap.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.taxRenewal.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.yamahaRelocationEntry.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.vehicleTransfer.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.vehicleUseCancellation.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.plateCopy.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.vehicleMoveOut.findMany({ where: { createdAt: range, cancelledAt: null } }),
-      p.vehicleEditLog.findMany({ where: { editedAt: range }, include: { editedBy: userSel } }),
-      p.auditLog.findMany({ where: { createdAt: range }, include: { editedBy: userSel } }),
+      p.documentSubmission.findMany({ where: { createdAt: range }, select: { id: true, vehicleId: true, createdAt: true, urgent: true, status: true, noBillItems: true, noBillTotal: true, billFeeTotal: true, taxAmount: true, receiptAmount: true } }),
+      p.documentSubmission.findMany({ where: { receiptReceivedDate: exact, status: 'RECEIPT_RECEIVED' }, select: { id: true, vehicleId: true, status: true, receiptNo: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, receipts: { select: { createdAt: true }, orderBy: { createdAt: 'asc' } } } }),
+      p.vehicle.findMany({ where: { plateReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, platePhoto: { select: { createdAt: true } } } }),
+      p.vehicle.findMany({ where: { bookReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, bookPhoto: { select: { createdAt: true } } } }),
+      p.deliverySlip.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, slipNo: true, customerId: true, recipient: true, createdAt: true, items: { where: { cancelledAt: null }, select: { id: true, vehicleKind: true, body: true } }, createdBy: userSel } }),
+      p.invoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, invoiceNo: true, customerId: true, netTotal: true } }),
+      p.invoice.findMany({ where: { paidDate: exact, status: 'PAID' }, select: { id: true, invoiceNo: true, customerId: true, netTotal: true } }),
+      p.taxInvoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, taxInvoiceNo: true, customerId: true, grandTotal: true } }),
+      p.plateSwap.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, vehicleClass: true, oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
+      p.taxRenewal.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
+      p.yamahaRelocationEntry.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, size: true, count: true, billFee: true, noBillFee: true } }),
+      p.vehicleTransfer.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.vehicleUseCancellation.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.plateCopy.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.vehicleMoveOut.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.vehicleEditLog.findMany({ where: { editedAt: range }, select: { id: true, vehicleId: true, editedAt: true, remark: true, editedBy: userSel } }),
+      p.auditLog.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, entity: true, action: true, remark: true, editedBy: userSel } }),
     ]);
 
     // รถที่เหตุการณ์อ้างถึง + ชื่อลูกค้า (ดึงครั้งเดียว)
@@ -154,6 +154,9 @@ export class ActivityService {
     const customers = new Map(customerRows.map((c) => [c.id, c.name]));
     const cname = (id: string | null | undefined) => (id ? (customers.get(id) ?? null) : null);
     const person = (u: { name: string; displayName: string | null } | null | undefined) => (u ? u.displayName || u.name : null);
+
+    // รับใบเสร็จ / ป้าย / เล่ม: ระบบเก็บวันที่รับ (ไม่มีเวลา) แต่รูปที่แนบมีเวลาอัปโหลดจริง - ถ้ารูปถูกอัปโหลดในวันนี้ ใช้เวลานั้น ไม่งั้นแสดงเป็นวันที่ล้วน
+    const inDay = (d: Date | null | undefined) => (d && d >= dayStart && d < dayEnd ? d : undefined);
 
     const events: ActivityEvent[] = [];
     const add = (e: EventInput) => {
@@ -184,13 +187,13 @@ export class ActivityService {
     for (const s of receipts) {
       const v = vehicles.get(s.vehicleId);
       add({
-        id: `rec-${s.id}`, type: 'receipt', group: 'new', kind: v ? vehicleKindOf(v.body) : null, title: 'ได้รับใบเสร็จ', ref: v?.chassis ?? null, customer: cname(v?.customerId),
+        id: `rec-${s.id}`, at: inDay(s.receipts[0]?.createdAt), type: 'receipt', group: 'new', kind: v ? vehicleKindOf(v.body) : null, title: 'ได้รับใบเสร็จ', ref: v?.chassis ?? null, customer: cname(v?.customerId),
         detail: s.receiptNo ? `เลขที่ ${s.receiptNo}` : null, amount: s.receiptAmount === null ? null : round2(num(s.receiptAmount)),
         href: '/registration/new-vehicle/receive-receipt',
       });
     }
-    for (const v of plates) add({ id: `plate-${v.id}`, type: 'plate', group: 'new', kind: vehicleKindOf(v.body), title: 'รับป้ายทะเบียน', ref: v.chassis, customer: cname(v.customerId), detail: plate(v.plateCategory, v.plateNumber), href: '/registration/new-vehicle/receive-plate' });
-    for (const v of books) add({ id: `book-${v.id}`, type: 'book', group: 'new', kind: vehicleKindOf(v.body), title: 'รับเล่มทะเบียน', ref: v.chassis, customer: cname(v.customerId), href: '/registration/new-vehicle/receive-book' });
+    for (const v of plates) add({ id: `plate-${v.id}`, at: inDay(v.platePhoto?.createdAt), type: 'plate', group: 'new', kind: vehicleKindOf(v.body), title: 'รับป้ายทะเบียน', ref: v.chassis, customer: cname(v.customerId), detail: plate(v.plateCategory, v.plateNumber), href: '/registration/new-vehicle/receive-plate' });
+    for (const v of books) add({ id: `book-${v.id}`, at: inDay(v.bookPhoto?.createdAt), type: 'book', group: 'new', kind: vehicleKindOf(v.body), title: 'รับเล่มทะเบียน', ref: v.chassis, customer: cname(v.customerId), href: '/registration/new-vehicle/receive-book' });
     for (const s of slips) {
       add({
         id: `slip-${s.id}`, at: s.createdAt, type: 'delivery', group: 'new', kind: slipKind(s.items), title: 'ส่งงานให้ลูกค้า', ref: `DL-${String(s.slipNo).padStart(5, '0')}`, customer: cname(s.customerId),

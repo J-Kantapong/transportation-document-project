@@ -3,15 +3,21 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { ACTIVITY_GROUPS, activityApi, type ActivityDay, type ActivityGroup } from "@/lib/activity-api";
+import { ACTIVITY_GROUPS, ACTIVITY_TYPES, activityApi, type ActivityDay, type ActivityGroup } from "@/lib/activity-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "./DateInput";
 
 // ภาพรวมการทำงาน (ผู้ใช้ 2026-10-08): วันนี้มีการเคลื่อนไหวอะไรบ้าง พร้อมราคา เพื่อกดเข้าไปตรวจ - ข้อมูลจาก GET /api/activity
-// Bill / No bill / อากร แยกกัน (อากรไม่รวมในยอดรวม เหมือนหน้าอื่น)
+// Bill / No bill / อากร แยกกัน (อากรไม่รวมในยอดรวม เหมือนหน้าอื่น) สไตล์อยู่ท้าย app/globals.css (คลาส act-*)
 
-const baht = (n: number | null) => (n === null ? "" : n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
+const baht = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+const GROUP_LABEL = Object.fromEntries(ACTIVITY_GROUPS.map((g) => [g.key, g.label])) as Record<ActivityGroup, string>;
+
+function Money({ value }: { value: number | null }) {
+  if (value === null) return <span className="act-zero">–</span>;
+  return value === 0 ? <span className="act-zero">0</span> : <>{baht(value)}</>;
+}
 
 export function ActivityPage() {
   const [date, setDate] = useState<string | null>(null); // null = วันนี้
@@ -24,6 +30,7 @@ export function ActivityPage() {
   const loading = doneKey !== key;
   const [group, setGroup] = useState<ActivityGroup | "all">("all");
   const [kind, setKind] = useState<"all" | "car" | "moto">("all");
+  const [type, setType] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   useEffect(() => {
@@ -49,9 +56,10 @@ export function ActivityPage() {
       (e) =>
         (group === "all" || e.group === group) &&
         (kind === "all" || e.kind === kind) &&
+        (!type || e.type === type) &&
         (!needle || [e.title, e.ref, e.customer, e.detail, e.actor].some((t) => t?.toLowerCase().includes(needle))),
     );
-  }, [data, group, kind, q]);
+  }, [data, group, kind, type, q]);
 
   if (!data) {
     return (
@@ -72,8 +80,10 @@ export function ActivityPage() {
   }
 
   const isToday = data.date === data.today;
-  const groupCount = (g: ActivityGroup) => data.events.filter((e) => e.group === g).length;
   const t = data.totals;
+  const groupCount = (g: ActivityGroup) => data.events.filter((e) => e.group === g).length;
+  const stepChips = ACTIVITY_TYPES.filter((s) => data.counts[s.type]);
+  const dayWord = isToday ? "วันนี้" : `วันที่ ${isoToDisplayDate(data.date)}`;
 
   return (
     <div className="content">
@@ -81,7 +91,7 @@ export function ActivityPage() {
         <div>
           <h1>ภาพรวมการทำงาน</h1>
           <p>
-            {isToday ? "วันนี้" : `วันที่ ${isoToDisplayDate(data.date)}`} มีความเคลื่อนไหว {data.events.length} รายการ · กดชื่อรายการเพื่อเข้าไปตรวจ
+            {dayWord} ทีมทำงานไป {data.events.length} รายการ · กดชื่อรายการเพื่อเข้าไปตรวจ
             {loading && " · กำลังโหลด…"}
           </p>
         </div>
@@ -115,48 +125,89 @@ export function ActivityPage() {
       </div>
       {error && <p className="customer-message error">{error}</p>}
 
-      <section className="panel" style={{ display: "flex", flexWrap: "wrap", gap: "12px 32px" }}>
-        <Stat label="ค่าใช้จ่าย (Bill + No bill)" value={t.spend} strong />
-        <Stat label="Bill" value={t.bill} />
-        <Stat label="No bill" value={t.noBill} />
-        <Stat label="ค่าอากร (แยก ไม่รวม)" value={t.duty} />
-        <Stat label="ออกบิล" value={t.invoiced} />
-        <Stat label="รับเงิน" value={t.collected} />
-      </section>
+      <div className="act-kpis">
+        <div className="act-kpi main">
+          <div className="act-kpi-label">ค่าใช้จ่ายของวัน (Bill + No bill)</div>
+          <div className="act-kpi-value">{baht(t.spend)}</div>
+          <div className="act-kpi-sub">
+            <span>
+              Bill <b>{baht(t.bill)}</b>
+            </span>
+            <span>
+              No bill <b>{baht(t.noBill)}</b>
+            </span>
+          </div>
+        </div>
+        <div className="act-kpi">
+          <div className="act-kpi-label">ค่าอากร (แยก ไม่รวมในยอด)</div>
+          <div className="act-kpi-value">{baht(t.duty)}</div>
+        </div>
+        <div className="act-kpi">
+          <div className="act-kpi-label">ออกบิลวางบิล</div>
+          <div className="act-kpi-value">{baht(t.invoiced)}</div>
+        </div>
+        <div className="act-kpi">
+          <div className="act-kpi-label">รับเงินเข้า</div>
+          <div className="act-kpi-value">{baht(t.collected)}</div>
+        </div>
+      </div>
+
+      {stepChips.length > 0 && (
+        <div className="act-steps" aria-label="ขั้นตอนที่ทำวันนี้ กดเพื่อกรอง">
+          {stepChips.map((s) => (
+            <button
+              key={s.type}
+              type="button"
+              className={`act-step g-${s.group}${type === s.type ? " active" : ""}`}
+              onClick={() => setType(type === s.type ? null : s.type)}
+            >
+              {s.label} <b>{data.counts[s.type]}</b>
+            </button>
+          ))}
+        </div>
+      )}
 
       <section className="panel">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-          <button type="button" className={group === "all" ? "primary" : ""} onClick={() => setGroup("all")}>
-            ทั้งหมด ({data.events.length})
-          </button>
-          {ACTIVITY_GROUPS.map((g) => (
-            <button key={g.key} type="button" className={group === g.key ? "primary" : ""} onClick={() => setGroup(g.key)}>
-              {g.label} ({groupCount(g.key)})
+        <div className="act-bar">
+          <div className="act-seg" role="group" aria-label="กรองตามกลุ่มงาน">
+            <button type="button" className={group === "all" ? "on" : ""} onClick={() => setGroup("all")}>
+              ทั้งหมด<span>{data.events.length}</span>
             </button>
-          ))}
-          <span style={{ width: 1, alignSelf: "stretch", background: "currentColor", opacity: 0.2, margin: "0 4px" }} />
-          {([
-            ["all", "ทุกประเภทรถ"],
-            ["car", `รถยนต์ (${data.kinds.car})`],
-            ["moto", `มอเตอร์ไซค์ (${data.kinds.moto})`],
-          ] as const).map(([key, label]) => (
-            <button key={key} type="button" className={kind === key ? "primary" : ""} onClick={() => setKind(key)}>
-              {label}
+            {ACTIVITY_GROUPS.map((g) => (
+              <button key={g.key} type="button" className={group === g.key ? "on" : ""} onClick={() => setGroup(g.key)}>
+                {g.label}
+                <span>{groupCount(g.key)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="act-seg" role="group" aria-label="กรองตามประเภทรถ">
+            <button type="button" className={kind === "all" ? "on" : ""} onClick={() => setKind("all")}>
+              ทุกประเภทรถ
             </button>
-          ))}
+            <button type="button" className={kind === "car" ? "on" : ""} onClick={() => setKind("car")}>
+              รถยนต์<span>{data.kinds.car}</span>
+            </button>
+            <button type="button" className={kind === "moto" ? "on" : ""} onClick={() => setKind("moto")}>
+              มอเตอร์ไซค์<span>{data.kinds.moto}</span>
+            </button>
+          </div>
           <input
+            className="act-search"
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="ค้นหา เลขตัวถัง / ลูกค้า / ผู้ทำ"
-            style={{ marginLeft: "auto", minWidth: 220 }}
           />
         </div>
+
         {rows.length === 0 ? (
-          <p>ไม่มีรายการ</p>
+          <div className="act-empty">
+            <strong>ไม่มีรายการ</strong>
+            {data.events.length === 0 ? `${dayWord}ยังไม่มีความเคลื่อนไหวในระบบ` : "ลองเปลี่ยนตัวกรองหรือคำค้นหา"}
+          </div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="act-table">
               <thead>
                 <tr>
                   <th>เวลา</th>
@@ -164,49 +215,58 @@ export function ActivityPage() {
                   <th>เลขตัวถัง / เลขที่</th>
                   <th>ประเภทรถ</th>
                   <th>ลูกค้า</th>
-                  <th>รายละเอียด</th>
-                  <th style={{ textAlign: "right" }}>Bill</th>
-                  <th style={{ textAlign: "right" }}>No bill</th>
-                  <th style={{ textAlign: "right" }}>อากร</th>
-                  <th style={{ textAlign: "right" }}>ยอดเอกสาร</th>
+                  <th className="num-col">Bill</th>
+                  <th className="num-col">No bill</th>
+                  <th className="num-col">อากร</th>
+                  <th className="num-col">ยอดเอกสาร</th>
                   <th>ผู้ทำ</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} style={e.cancelled ? { opacity: 0.55, textDecoration: "line-through" } : undefined}>
-                    <td>{e.timed ? timeOf(e.at) : "—"}</td>
-                    <td>
-                      <Link href={e.href}>{e.title}</Link>
-                    </td>
-                    <td>{e.ref}</td>
-                    <td>{e.kind === "car" ? "รถยนต์" : e.kind === "moto" ? "มอเตอร์ไซค์" : ""}</td>
-                    <td>{e.customer}</td>
-                    <td>{e.detail}</td>
-                    <td style={{ textAlign: "right" }}>{baht(e.bill)}</td>
-                    <td style={{ textAlign: "right" }}>{baht(e.noBill)}</td>
-                    <td style={{ textAlign: "right" }}>{baht(e.duty)}</td>
-                    <td style={{ textAlign: "right" }}>{baht(e.amount)}</td>
-                    <td>{e.actor}</td>
-                  </tr>
-                ))}
+                {rows.map((e) => {
+                  const hasMoney = e.bill !== null || e.noBill !== null || e.duty !== null;
+                  return (
+                    <tr key={e.id} className={e.cancelled ? "act-row-cancelled" : undefined}>
+                      <td>
+                        <span className={`act-time g-${e.group}${e.timed ? "" : " untimed"}`} title={e.timed ? undefined : "ระบบเก็บเฉพาะวันที่ ไม่มีเวลา"}>
+                          <i />
+                          {e.timed ? timeOf(e.at) : "ทั้งวัน"}
+                        </span>
+                      </td>
+                      <td>
+                        <Link href={e.href} className={`act-type g-${e.group}`} title={GROUP_LABEL[e.group]}>
+                          {e.title}
+                        </Link>
+                        {e.detail && <span className="act-sub">{e.detail}</span>}
+                      </td>
+                      <td>
+                        <span className="act-ref">{e.ref ?? ""}</span>
+                      </td>
+                      <td>{e.kind && <span className={`act-kind ${e.kind}`}>{e.kind === "car" ? "รถยนต์" : "มอเตอร์ไซค์"}</span>}</td>
+                      <td>{e.customer}</td>
+                      <td className="num-col">{hasMoney && <Money value={e.bill} />}</td>
+                      <td className="num-col">{hasMoney && <Money value={e.noBill} />}</td>
+                      <td className="num-col">{hasMoney && <Money value={e.duty} />}</td>
+                      <td className="num-col">{e.amount !== null && <Money value={e.amount} />}</td>
+                      <td>
+                        {e.actor && (
+                          <span className="act-actor">
+                            <i>{e.actor.slice(0, 1).toUpperCase()}</i>
+                            {e.actor}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-        <p style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
-          เวลา “—” = ขั้นตอนที่ระบบเก็บแค่วันที่ (เช่น รับใบเสร็จ / ป้าย / เล่ม / รับเงิน) · ช่องผู้ทำว่าง = ระบบยังไม่ได้บันทึกว่าใครกด
+        <p className="act-note">
+          “ทั้งวัน” = ขั้นตอนที่ระบบเก็บเฉพาะวันที่ ไม่มีเวลา · รับใบเสร็จ / ป้าย / เล่ม แสดงเวลาจริงเมื่อรูปถูกอัปโหลดในวันนั้น · ช่องผู้ทำว่าง = ระบบยังไม่ได้บันทึกว่าใครกด · บิลที่ยกเลิกแล้วแสดงจางๆ และไม่นับในยอด
         </p>
       </section>
-    </div>
-  );
-}
-
-function Stat({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
-  return (
-    <div>
-      <div style={{ fontSize: 13, opacity: 0.7 }}>{label}</div>
-      <div style={{ fontSize: strong ? 26 : 20, fontWeight: strong ? 700 : 600 }}>{baht(value) || "0"}</div>
     </div>
   );
 }

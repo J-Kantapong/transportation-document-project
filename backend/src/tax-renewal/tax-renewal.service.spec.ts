@@ -99,11 +99,17 @@ function setup({ vehicle = vehicleRow(), renewal = renewalRow() }: { vehicle?: u
     },
     taxRenewal: { create, update, findUnique: vi.fn().mockResolvedValue(renewal), findMany: renewalFindMany },
     auditLog: { create: auditCreate },
+    receiptImage: { count: vi.fn().mockResolvedValue(1) },
   };
   prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
   const taxService = { loadRuleSet: vi.fn().mockResolvedValue(rules()) } as unknown as TaxService;
   return {
-    svc: new TaxRenewalService(prisma as unknown as PrismaService, taxService),
+    svc: new TaxRenewalService(
+      prisma as unknown as PrismaService,
+      taxService,
+      { put: vi.fn(), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) },
+      { source: 'NONE', extract: vi.fn().mockResolvedValue(null) },
+    ),
     create,
     update,
     vehicleFindUnique,
