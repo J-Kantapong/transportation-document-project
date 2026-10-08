@@ -171,6 +171,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/portal', roles: ['CUSTOMER'] },
   // ฝ่ายบุคคล / เงินเดือน (ผู้ใช้ 2026-10-05): ADMIN เท่านั้น - backend: /api/hr (ถ้าไม่มีกฎนี้ หน้าที่ไม่อยู่ในตารางเปิดให้พนักงานทุกกลุ่ม)
   { prefix: '/hr', roles: ['ADMIN'] },
+  // ภาพรวมการทำงาน (ผู้ใช้ 2026-10-08): มีราคา ADMIN เท่านั้น - backend: /api/activity
+  { prefix: '/activity', roles: ['ADMIN'] },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
   // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
   { prefix: '/registration/new-vehicle/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },

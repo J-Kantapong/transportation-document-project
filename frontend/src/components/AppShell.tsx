@@ -59,6 +59,7 @@ function within(pathname: string, href: string): boolean {
 
 function breadcrumbs(pathname: string): Crumb[] {
   if (pathname === "/") return [{ label: "ภาพรวม", href: "/" }];
+  if (within(pathname, "/activity")) return [{ label: "ภาพรวมการทำงาน", href: "/activity" }];
   if (within(pathname, "/customers")) return [{ label: "ฐานข้อมูลลูกค้า", href: "/customers" }];
   if (within(pathname, "/vehicles")) return [{ label: "ค้นหารถ", href: "/vehicles" }];
   if (within(pathname, "/accounting/billing")) return [{ label: "งานบัญชี" }, { label: "วางบิล", href: "/accounting/billing" }];
@@ -206,6 +207,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {has("ADMIN", "ACCOUNTANT") && (
               <NavLink href="/" icon="grid" label="ภาพรวม" pathname={pathname} exact onClick={close} />
             )}
+            {has("ADMIN") && <NavLink href="/activity" icon="stack" label="ภาพรวมการทำงาน" pathname={pathname} onClick={close} />}
             {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (
               <>
                 <NavLink href="/customers" icon="card" label="ฐานข้อมูลลูกค้า" pathname={pathname} onClick={close} />
