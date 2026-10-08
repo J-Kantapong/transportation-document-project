@@ -1,4 +1,4 @@
-import type { WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
+import type { PayslipSignature, WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
 import { bahtText, formatMoney } from "@/lib/invoice";
 import { escapeHtml, printHtmlDocument, safeFileName } from "@/lib/print-html";
 import { canUseOfficialForm, OFFICIAL_FORM_STYLE, officialFormPageHtml } from "@/lib/wht-form-layout";
@@ -6,7 +6,7 @@ import { canUseOfficialForm, OFFICIAL_FORM_STYLE, officialFormPageHtml } from "@
 // หนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) ที่บริษัทออก (ผู้ใช้ 2026-10-06) - จัดหน้าตามใบตัวอย่างของบริษัท (ฟอร์มทางการของกรมสรรพากรเต็มรูปแบบ), A4
 // วันที่ทุกช่องเป็นปี ค.ศ. (24/1/2026) ตามใบที่บริษัทใช้อยู่ - ไม่ใช่ พ.ศ.
 // 1 ใบ = 2 หน้า (ฉบับที่ 1 แนบแบบแสดงรายการภาษี / ฉบับที่ 2 เก็บเป็นหลักฐาน) ทุกหน้าพิมพ์คำอธิบายทั้งสองฉบับไว้มุมบนเหมือนฟอร์มจริง
-// ไม่พิมพ์ลายเซ็น (ผู้ใช้ 2026-10-06: เอาลายเซ็นออก - ต้นฉบับก็ไม่มี) ช่องลงชื่อเว้นว่างให้เซ็นเอง
+// ลายเซ็น/ชื่อผู้จ่ายเงินใช้ชุดเดียวกับสลิปเงินเดือน (PayslipSignature) - ไม่มี = เว้นช่องเซ็นเปล่า
 // ใบที่ยกเลิกแล้วพิมพ์ซ้ำได้ มีลายน้ำ "ยกเลิก"
 
 const esc = (t: string | null | undefined) => escapeHtml(t ?? "");
@@ -73,10 +73,12 @@ function rowsHtml(items: WhtItem[]): string {
 }
 
 export interface WhtPrintOptions {
+  signature?: PayslipSignature | null;
   assetBase?: string; // ที่อยู่ที่เปิดภาพฟอร์มเปล่าได้ (ค่าเริ่มต้นตอนพิมพ์จากหน้าเว็บ = origin ของหน้านั้น)
 }
 
-function pageHtml(c: WhtCertificate): string {
+function pageHtml(c: WhtCertificate, options: WhtPrintOptions): string {
+  const sig = options.signature?.exists && options.signature.imageDataUrl?.startsWith("data:image/png;base64,") ? options.signature : null;
   const form = c.formType;
   return `<section class="page">
   ${c.status === "CANCELLED" ? `<div class="wm">ยกเลิก</div>` : ""}
@@ -135,8 +137,8 @@ function pageHtml(c: WhtCertificate): string {
       <div class="warn"><b>คำเตือน</b> ผู้มีหน้าที่ออกหนังสือรับรองการหักภาษี ณ ที่จ่ายฝ่าฝืนไม่ปฏิบัติตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร ต้องรับโทษทางอาญาตามมาตรา 35 แห่งประมวลรัษฎากร</div>
       <div class="cert">ขอรับรองว่าข้อความและตัวเลขดังกล่าวข้างต้นถูกต้องตรงกับความจริงทุกประการ
         <div class="sg">
-          <div class="sl"></div>
-          <div>ลงชื่อ <span class="sgn"></span> ผู้จ่ายเงิน</div>
+          <div class="sl">${sig ? `<img src="${sig.imageDataUrl}" alt="">` : ""}</div>
+          <div>ลงชื่อ <span class="sgn">${sig?.signerName ? esc(sig.signerName) : ""}</span> ผู้จ่ายเงิน</div>
           <div class="date"><b>${esc(dmy(c.issueDate))}</b></div>
           <div class="hint">(วัน เดือน ปี ที่ออกหนังสือรับรองฯ)</div>
         </div>
@@ -228,7 +230,7 @@ export function whtDocumentHtml(certs: WhtCertificate[], options: WhtPrintOption
     return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${OFFICIAL_FORM_STYLE}</style></head><body>${body}</body></html>`;
   }
   // 1 ใบ = 2 หน้าเหมือนกัน (ฉบับที่ 1 + ฉบับที่ 2) เพื่อไม่ต้องถ่ายเอกสารเพิ่ม
-  const body = certs.flatMap((c) => [pageHtml(c), pageHtml(c)]).join("\n");
+  const body = certs.flatMap((c) => [pageHtml(c, options), pageHtml(c, options)]).join("\n");
   const title = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo}` : `50 ทวิ ${certs.length} ใบ`;
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title>${FONT_LINK}<style>${STYLE}</style></head><body>${body}</body></html>`;
 }

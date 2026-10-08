@@ -12,6 +12,7 @@ import {
   WHT_INCOME_LABEL,
   WHT_OTHER_INCOME_TYPES,
   WHT_PAY_METHOD_LABEL,
+  type PayslipSignature,
   type Supplier,
   type WhtSeries,
   type WhtCertificate,
@@ -343,6 +344,7 @@ export function WhtIssuePage() {
   const [truncated, setTruncated] = useState(false);
   const [series, setSeries] = useState<WhtSeries | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [signature, setSignature] = useState<PayslipSignature | null>(null);
   const [kind, setKind] = useState("");
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
@@ -374,6 +376,10 @@ export function WhtIssuePage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  useEffect(() => {
+    hrApi.getSignature().then(setSignature).catch(() => setSignature(null));
+  }, []);
 
   const eligible = (rows ?? []).filter((r) => !r.certificate && r.idValid);
 
@@ -542,7 +548,7 @@ export function WhtIssuePage() {
             ค้นหา (ชื่อ / เลขประจำตัว / เลขที่)
             <input value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
-          <button type="button" disabled={printable.length === 0} onClick={() => printWhtCertificates(printable)}>
+          <button type="button" disabled={printable.length === 0} onClick={() => printWhtCertificates(printable, { signature })}>
             🖨 พิมพ์ที่เลือก ({printable.length})
           </button>
         </div>
@@ -609,7 +615,7 @@ export function WhtIssuePage() {
                     )}
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    <button type="button" onClick={() => printWhtCertificates([c])}>
+                    <button type="button" onClick={() => printWhtCertificates([c], { signature })}>
                       พิมพ์
                     </button>{" "}
                     <button type="button" onClick={() => setDialog({ type: "history", cert: c })}>
