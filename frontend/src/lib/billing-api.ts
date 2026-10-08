@@ -294,6 +294,8 @@ export interface BillingVehicle {
   receiptAmountSource: "RECEIPT" | "BILL_ESTIMATE" | "NONE"; // BILL_ESTIMATE = พนักงานไม่ได้กรอกยอดใบเสร็จ ใช้ยอด Bill ที่ระบบคำนวณแทน
   receiptImageIds: string[]; // รูปใบเสร็จของการยื่นล่าสุด (ใหม่สุดก่อน) - แสดงในช่อง "แก้" ให้เทียบยอด
   receiptEstimate: number | null; // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ - ไม่ตรงกับใบเสร็จจริง = หน้าวางบิลเตือน (ผู้ใช้ 2026-09-28)
+  // ยอด Bill ถ้าเรื่องขอใช้เป็นตรงข้ามกับข้อมูลรถ - ใบเสร็จตรงกับยอดนี้ = เสนอปุ่ม "ใช้ตามใบเสร็จ" (ผู้ใช้ 2026-10-09)
+  receiptEstimateFlipped?: number | null;
   requestedPlateNumber: boolean;
   suggestedRateId: string | null;
   suggestedServiceFee: number | null; // ราคาหลัก + ค่าเพิ่มที่ระบบเลือก (ก่อนหักยอด)

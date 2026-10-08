@@ -329,6 +329,12 @@ const feeRows = (rows: Array<{ key: string; amount: unknown }>) => rows.map((r) 
 
 // ยอด Bill ที่ควรเป็นจากข้อมูลรถ "ล่าสุด" + ตัวเลือกตอนยื่น (ผู้ใช้ 2026-09-28): แก้จังหวัดหลังยื่นแล้ว ยอดที่ใช้เทียบใบเสร็จตามไปด้วย
 // คำนวณแบบเดียวกับตอนยื่น (computeDocumentFees) + ภาษีที่ยื่นไว้ - คำนวณไม่ได้ (ไม่มีภาษี / ไม่มีตารางอัตรา) = null ให้ใช้ยอดตอนยื่นแทน
+// ข้อมูลรถชุดเดียวกันแต่เรื่องขอใช้ (จังหวัดที่จด ≠ จังหวัดเจ้าของรถ) กลับเป็นตรงข้าม - จังหวัดเจ้าของรถใช้ตัดสินแค่เรื่องนี้
+// (document-fee-calculator) จึงสลับที่ช่องนั้น ไม่แตะจังหวัดที่จดซึ่งมีผลกับค่าตรวจสภาพ/ซับ · ไม่เขียนกลับฐานข้อมูล
+export function flipOtherProvince<T extends { registrationProvince: string | null; ownerProvince: string | null }>(vehicle: T, otherProvince: boolean): T {
+  return { ...vehicle, ownerProvince: otherProvince ? vehicle.registrationProvince : `ไม่ใช่ ${vehicle.registrationProvince ?? ''}` };
+}
+
 function currentBillEstimate(
   vehicle: { body: string | null; registrationProvince: string | null; ownerProvince: string | null },
   sub: {
@@ -560,6 +566,9 @@ export class BillingService {
               // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ (ค่าธรรมเนียม + ภาษี) - หน้าวางบิลเทียบกับยอดใบเสร็จจริง ไม่ตรง = เตือน
               // (ผู้ใช้ 2026-09-28: พบรถ 2 คันที่ใบเสร็จเป็นขอใช้แต่จังหวัดในข้อมูลรถบอกไม่ใช่ ค่าบริการเลยผิดคันละ 100)
               receiptEstimate: currentBillEstimate(v, sub, feeRules) ?? estimate,
+              // ยอด Bill ถ้าเรื่องขอใช้เป็นตรงข้ามกับข้อมูลรถ (ผู้ใช้ 2026-10-09 "ใบเสร็จถูกเสมอ"): ใบเสร็จจริงตรงกับยอดนี้
+              // = ใบเสร็จบอกว่าขอใช้/ไม่ขอใช้ต่างจากข้อมูลรถ หน้าวางบิลเสนอปุ่ม "ใช้ตามใบเสร็จ" · คำนวณไม่ได้ = null (ไม่เสนอ)
+              receiptEstimateFlipped: currentBillEstimate(flipOtherProvince(v, otherProvince), sub, feeRules),
               receiptImageIds: sub?.receipts?.map((r) => r.id) ?? [],
               // ขอใช้เลขทะเบียน - เผื่อเคสลูกค้าชำระค่าขอใช้เลขเอง; SWAP_* (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข (ผู้ใช้ 2026-09-27)
               requestedPlateNumber,

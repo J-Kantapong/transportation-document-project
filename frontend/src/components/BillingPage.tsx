@@ -304,6 +304,20 @@ export function BillingPage() {
     return `ใบเสร็จ ${formatMoney(receipt)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(v.receiptEstimate)} (ต่าง ${diff > 0 ? "+" : ""}${formatMoney(diff)})${hint}`;
   };
 
+  // ใบเสร็จถูกเสมอ (ผู้ใช้ 2026-10-09): ยอดใบเสร็จไม่ตรงกับที่คำนวณจากข้อมูลรถ แต่ตรงพอดีกับยอดถ้าเรื่องขอใช้เป็นตรงข้าม
+  // = ใบเสร็จบอกว่าคันนี้ขอใช้ / ไม่ขอใช้ต่างจากข้อมูลรถ -> เสนอปุ่ม "ใช้ตามใบเสร็จ" ที่ติ๊ก/เอาติ๊กค่าเพิ่มขอใช้ให้ และปลดคำเตือน
+  // บัญชีต้องกดเอง (ยอดใบเสร็จในระบบมาจาก AI อ่าน/คนพิมพ์ ผิดได้) · มีผลกับบิลนี้เท่านั้น ไม่แก้จังหวัดในข้อมูลรถ
+  const receiptSaysOf = (v: BillingVehicle): { otherProvince: boolean; addOnIds: string[] } | null => {
+    const row = rows[v.id];
+    const receipt = row ? money(row.receiptText) : null;
+    const flipped = v.receiptEstimateFlipped ?? null;
+    if (!row || receipt === null || flipped === null || v.receiptEstimate === null || receipt === v.receiptEstimate || receipt !== flipped) return null;
+    const otherProvince = !v.otherProvince;
+    const provinceAddOns = ratesFor(v, "ADD_ON").filter((r) => r.kind === "OTHER_PROVINCE").map((r) => r.id);
+    const rest = row.addOnIds.filter((id) => !provinceAddOns.includes(id));
+    return { otherProvince, addOnIds: otherProvince ? [...rest, ...provinceAddOns] : rest };
+  };
+
   // งานสลับเลขของรถคันนี้ (ผู้ใช้ 2026-09-28): เก็บค่าใบเสร็จกรมฯ ของรถเก่าเพิ่มอีกยอด ยังไม่กรอก = วางบิลไม่ได้
   const swapProblemOf = (v: BillingVehicle): string | null => {
     if (!v.plateSwap) return null;
@@ -321,7 +335,7 @@ export function BillingPage() {
     const swapProblem = swapProblemOf(v);
     if (swapProblem) return swapProblem;
     const mismatch = receiptMismatchOf(v);
-    if (mismatch) return `${mismatch} - กด แก้ ตรวจกับใบเสร็จจริง`;
+    if (mismatch) return `${mismatch} - กด แก้ ${receiptSaysOf(v) ? 'แล้วกด "ใช้ตามใบเสร็จ"' : "ตรวจกับใบเสร็จจริง"}`;
     if (serviceFeeOf(v) !== null) return null;
     if (row.rateId === CUSTOM_RATE) return `ไม่มีราคาที่ตรงกับรถคันนี้${v.cc === null ? " (ไม่มีข้อมูล cc)" : ""} - กด แก้ แล้วเลือกราคา`;
     return "ราคาไม่ถูกต้อง (ใบเสร็จแพงกว่าราคาเหมารวม?) - กด แก้ แล้วตรวจ";
@@ -816,6 +830,33 @@ export function BillingPage() {
                                 }}
                               >
                                 {receiptMismatchOf(v) ?? `ใบเสร็จ ${formatMoney(receipt)} ไม่ตรงกับที่ระบบคำนวณ ${formatMoney(v.receiptEstimate)}`}
+                                {(() => {
+                                  const says = receiptSaysOf(v);
+                                  if (!says || row.rateId === CUSTOM_RATE) return null;
+                                  const applied = row.receiptChecked && sameIds(row.addOnIds, says.addOnIds);
+                                  const hasAddOn = ratesFor(v, "ADD_ON").some((r) => r.kind === "OTHER_PROVINCE");
+                                  return (
+                                    <div style={{ marginTop: 6 }}>
+                                      <b>
+                                        ยอดใบเสร็จตรงกับแบบ{says.otherProvince ? "ขอใช้" : "ไม่ขอใช้"}พอดี ({formatMoney(v.receiptEstimateFlipped ?? 0)}) แต่ข้อมูลรถเป็น
+                                        {v.otherProvince ? "ขอใช้" : "ไม่ขอใช้"}
+                                      </b>
+                                      <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                        <button
+                                          type="button"
+                                          className="primary"
+                                          disabled={applied}
+                                          onClick={() => patchRow(v.id, { addOnIds: says.addOnIds, receiptChecked: true })}
+                                        >
+                                          {applied ? "✓ ใช้ตามใบเสร็จแล้ว" : `ใช้ตามใบเสร็จ (${says.otherProvince ? "คิดค่าขอใช้" : "ไม่คิดค่าขอใช้"})`}
+                                        </button>
+                                        <span style={{ fontSize: 12 }}>
+                                          {hasAddOn ? "มีผลกับค่าบริการของบิลนี้เท่านั้น ไม่แก้จังหวัดในข้อมูลรถ" : "ลูกค้านี้ไม่มีค่าเพิ่มขอใช้ในตารางราคา ค่าบริการจึงไม่เปลี่ยน"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
                                   <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
                                   ตรวจกับใบเสร็จจริงแล้ว ยอดถูกต้อง (และติ๊ก/เอาติ๊ก &quot;ขอใช้&quot; ให้ตรงใบเสร็จแล้ว)

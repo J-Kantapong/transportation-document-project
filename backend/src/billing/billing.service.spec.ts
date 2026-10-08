@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { BillingService, isInvoiceNoConflict } from './billing.service.js';
+import { BillingService, flipOtherProvince, isInvoiceNoConflict } from './billing.service.js';
 import { requestContext } from '../auth/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -1006,5 +1006,31 @@ describe('BillingService.createInvoice - งานสลับเลข', () => 
     await expect(svc.createInvoice(dto(swapLine({ swapReceiptAmount: undefined })))).rejects.toMatchObject({
       response: { error: expect.stringContaining('ต้องมาคู่กับงานสลับเลข') },
     });
+  });
+});
+
+// ผู้ใช้ 2026-10-09 "ใบเสร็จถูกเสมอ": ยอด Bill อีกแบบ (ขอใช้กลับเป็นตรงข้าม) ใช้เทียบกับใบเสร็จจริงในหน้าวางบิล
+describe('flipOtherProvince', () => {
+  // เงื่อนไขขอใช้เดียวกับ document-fee-calculator / queue()
+  const other = (v: { registrationProvince: string | null; ownerProvince: string | null }) =>
+    !!v.registrationProvince && !!v.ownerProvince && v.registrationProvince !== v.ownerProvince;
+
+  it('ขอใช้ -> ไม่ขอใช้ และกลับกัน โดยไม่แตะจังหวัดที่จด', () => {
+    const asking = { id: 'v1', registrationProvince: 'กรุงเทพมหานคร', ownerProvince: 'ชลบุรี' };
+    const flipped = flipOtherProvince(asking, other(asking));
+    expect(other(flipped)).toBe(false);
+    expect(flipped).toMatchObject({ id: 'v1', registrationProvince: 'กรุงเทพมหานคร' });
+    expect(asking.ownerProvince).toBe('ชลบุรี'); // ไม่แก้ของเดิม
+
+    const normal = { registrationProvince: 'กรุงเทพมหานคร', ownerProvince: 'กรุงเทพมหานคร' };
+    expect(other(flipOtherProvince(normal, other(normal)))).toBe(true);
+    // ไม่มีจังหวัดเจ้าของรถ = ข้อมูลรถนับเป็นไม่ขอใช้ สลับแล้วต้องเป็นขอใช้
+    const noOwner = { registrationProvince: 'สมุทรปราการ', ownerProvince: null };
+    expect(other(flipOtherProvince(noOwner, other(noOwner)))).toBe(true);
+  });
+
+  it('ไม่มีจังหวัดที่จด: สลับไม่ได้ ยอดสองแบบเท่ากัน หน้าวางบิลจึงไม่เสนอปุ่ม', () => {
+    const unknown = { registrationProvince: null, ownerProvince: 'ชลบุรี' };
+    expect(other(flipOtherProvince(unknown, other(unknown)))).toBe(false);
   });
 });
