@@ -25,6 +25,8 @@ export interface PlateCopyCustomer {
   company: string | null;
 }
 
+import type { PlateCopyType } from "@/lib/plate-copy-fee";
+
 export interface PlateCopy {
   id: string;
   customer: PlateCopyCustomer | null;
@@ -35,6 +37,7 @@ export interface PlateCopy {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
+  copyType: PlateCopyType;
   billTotal: string;
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม
@@ -57,6 +60,7 @@ export interface CreatePlateCopyInput {
   brand: string;
   plateCategory: string;
   plateNumber: string;
+  copyType: PlateCopyType;
   submitDate: string;
 }
 
@@ -68,6 +72,7 @@ export interface UpdatePlateCopyInput {
   brand: string;
   plateCategory: string;
   plateNumber: string;
+  copyType: PlateCopyType;
   submitDate: string;
   returnedDate?: string;
   remark: string;

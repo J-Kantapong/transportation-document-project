@@ -128,6 +128,16 @@ describe('PlateCopyService.create', () => {
     expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 205, noBillTotal: 100, dutyAmount: 10 });
   });
 
+  it('คัดป้ายใบเดียว: เลขขาวดำปกติ Bill 100 / ประมูล Bill 600 ส่วน No Bill และค่าอากรเท่าเดิม และชนิดที่ไม่รู้จักถูกปฏิเสธ', async () => {
+    const a = service(null);
+    await a.svc.create({ ...validDto, copyType: 'SINGLE_NORMAL' });
+    expect(a.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_NORMAL', billTotal: 100, noBillTotal: 100, dutyAmount: 10 });
+    const b = service(null);
+    await b.svc.create({ ...validDto, copyType: 'SINGLE_AUCTION' });
+    expect(b.create.mock.calls[0][0].data).toMatchObject({ copyType: 'SINGLE_AUCTION', billTotal: 600 });
+    await expect(service(null).svc.create({ ...validDto, copyType: 'X' })).rejects.toThrow();
+  });
+
   it('ต้องเลือกเจ้าของงานและกรอกครบทุกช่อง', async () => {
     const { svc, create } = service(null);
     await expect(svc.create({ ...validDto, customerId: '' })).rejects.toMatchObject({ response: { error: 'กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)' } });

@@ -858,6 +858,8 @@ model PlateCopy {
 
   submitDate DateTime // วันที่ยื่น
 
+  copyType String @default("BOTH") // BOTH = คัดทั้งคู่ (Bill 205) | SINGLE_NORMAL = ใบเดียวเลขขาวดำปกติ (Bill 100) | SINGLE_AUCTION = ใบเดียวประมูล (Bill 600)
+
   billTotal   Decimal @default(0) @db.Decimal(12, 2) // Bill - ตายตัว 205 บาท (snapshot ตอนยื่น)
   noBillTotal Decimal @default(0) @db.Decimal(12, 2) // No Bill - ตายตัว 100 บาท (ไม่รวมค่าอากร)
   dutyAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าอากร 10 บาท แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม

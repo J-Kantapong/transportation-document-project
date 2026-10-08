@@ -23,7 +23,7 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-ex
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
-import { PLATE_COPY_BILL_FEE, PLATE_COPY_DUTY_FEE, PLATE_COPY_NO_BILL_FEE } from './plate-copy-fee.js';
+import { PLATE_COPY_DUTY_FEE, PLATE_COPY_NO_BILL_FEE, PLATE_COPY_TYPES, type PlateCopyType, plateCopyBillFee } from './plate-copy-fee.js';
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - ทำเหมือนยกเลิกการใช้รถ: กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่)
 // แต่ "รถยนต์เท่านั้น" (จักรยานยนต์ยังไม่เปิด) และมีขั้นรับป้ายต่อท้าย
@@ -52,6 +52,7 @@ export interface PlateCopyRow {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
+  copyType: PlateCopyType;
   billTotal: string;
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหากจาก billTotal / noBillTotal
@@ -77,6 +78,7 @@ export interface CreatePlateCopyDto {
   brand?: unknown;
   plateCategory?: unknown;
   plateNumber?: unknown;
+  copyType?: unknown; // BOTH (ค่าเริ่มต้น) | SINGLE_NORMAL | SINGLE_AUCTION
   submitDate?: unknown;
 }
 
@@ -88,12 +90,19 @@ export interface UpdatePlateCopyDto {
   brand?: unknown;
   plateCategory?: unknown;
   plateNumber?: unknown;
+  copyType?: unknown;
   submitDate?: unknown;
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
   remark?: unknown;
   expectedUpdatedAt?: unknown;
 }
 
+
+export function parseCopyType(value: unknown): PlateCopyType {
+  if (value === undefined || value === null || value === '') return 'BOTH';
+  if (PLATE_COPY_TYPES.includes(value as PlateCopyType)) return value as PlateCopyType;
+  throw new BadRequestException({ error: 'ชนิดการคัดป้ายต้องเป็น BOTH, SINGLE_NORMAL หรือ SINGLE_AUCTION' });
+}
 
 export function parseVehicleClass(value: unknown): PlateCopyVehicleClass {
   if (value === undefined || value === null || value === '') return 'CAR';
@@ -124,6 +133,7 @@ interface PlateCopyRecord {
   plateCategory: string;
   plateNumber: string;
   submitDate: Date;
+  copyType?: string;
   billTotal: Prisma.Decimal | number;
   noBillTotal: Prisma.Decimal | number;
   dutyAmount: Prisma.Decimal | number;
@@ -150,6 +160,7 @@ export function serializePlateCopy(row: PlateCopyRecord): PlateCopyRow {
     plateCategory: row.plateCategory,
     plateNumber: row.plateNumber,
     submitDate: row.submitDate.toISOString().slice(0, 10),
+    copyType: parseCopyType(row.copyType),
     billTotal: String(row.billTotal),
     noBillTotal: String(row.noBillTotal),
     dutyAmount: String(row.dutyAmount),
@@ -224,12 +235,13 @@ export class PlateCopyService {
     const brand = await this.resolveBrandName(dto?.brand);
     const plateCategory = requiredText(dto?.plateCategory, 'หมวดทะเบียน', 10);
     const plateNumber = requiredText(dto?.plateNumber, 'เลขทะเบียน', 10);
+    const copyType = parseCopyType(dto?.copyType);
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
 
     // ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02: Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ และแก้ภายหลังไม่ได้
     const row = await this.prisma.plateCopy.create({
-      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, billTotal: PLATE_COPY_BILL_FEE, noBillTotal: PLATE_COPY_NO_BILL_FEE, dutyAmount: PLATE_COPY_DUTY_FEE },
+      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, copyType, billTotal: plateCopyBillFee(copyType), noBillTotal: PLATE_COPY_NO_BILL_FEE, dutyAmount: PLATE_COPY_DUTY_FEE },
       include: plateCopyInclude,
     });
     return { plateCopy: serializePlateCopy(row) };
@@ -345,10 +357,13 @@ export class PlateCopyService {
       brand: has('brand') ? await this.resolveBrandName(dto.brand) : existing.brand,
       plateCategory: has('plateCategory') ? requiredText(dto.plateCategory, 'หมวดทะเบียน', 10) : existing.plateCategory,
       plateNumber: has('plateNumber') ? requiredText(dto.plateNumber, 'เลขทะเบียน', 10) : existing.plateNumber,
+      copyType: has('copyType') ? parseCopyType(dto.copyType) : parseCopyType(existing.copyType),
       submitDate,
       returnedDate,
     };
-    const changes: AuditChanges = diffChanges(existing, next);
+    // เปลี่ยนชนิดการคัดป้าย = คิด Bill ใหม่ตามชนิด (ชนิดเดิมคง snapshot เดิม)
+    const billTotal = next.copyType !== parseCopyType(existing.copyType) ? plateCopyBillFee(next.copyType) : Number(existing.billTotal);
+    const changes: AuditChanges = diffChanges({ ...existing, copyType: parseCopyType(existing.copyType), billTotal: Number(existing.billTotal) }, { ...next, billTotal });
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
 
     await this.prisma.$transaction(async (tx) => {
@@ -356,7 +371,7 @@ export class PlateCopyService {
         .update({
           // เงื่อนไข updatedAt ที่ฟอร์มโหลดมา: อีกคนแก้/รับกลับไปก่อน -> 409 ไม่ทับของเขา
           where: { id, cancelledAt: null, updatedAt: expectedUpdatedAt ?? existing.updatedAt },
-          data: next,
+          data: billTotal === Number(existing.billTotal) ? next : { ...next, billTotal },
         })
         .catch(staleIfMissing);
       await writeAudit(tx, { entity: 'PlateCopy', entityId: id, action: 'update', remark, changes });
