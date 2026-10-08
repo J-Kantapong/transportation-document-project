@@ -30,11 +30,11 @@ export class SecretaryService {
     return origin && /^https?:\/\//i.test(origin) ? origin.replace(/\/+$/, '') : undefined;
   }
 
-  private async morningMessage(): Promise<LineMessage> {
+  private async morningMessage(): Promise<LineMessage[]> {
     return buildMorningMessage(await this.overviewService.overview(), this.baseUrl());
   }
 
-  private async eveningMessage(): Promise<LineMessage> {
+  private async eveningMessage(): Promise<LineMessage[]> {
     const overview = await this.overviewService.overview();
     const staff = await this.staffActivity(overview.today);
     return buildEveningMessage({ ...overview, staff }, this.baseUrl());
@@ -55,20 +55,20 @@ export class SecretaryService {
   }
 
   async sendMorning(): Promise<void> {
-    await pushLine([await this.morningMessage()]);
+    await pushLine(await this.morningMessage());
   }
 
   async sendEvening(): Promise<void> {
-    await pushLine([await this.eveningMessage()]);
+    await pushLine(await this.eveningMessage());
   }
 
   // คำตอบของคำสั่งในไลน์ (แบบ A: ไม่ใช้ AI)
   async answer(command: Command): Promise<LineMessage[]> {
     switch (command) {
       case 'morning':
-        return [await this.morningMessage()];
+        return this.morningMessage();
       case 'evening':
-        return [await this.eveningMessage()];
+        return this.eveningMessage();
       case 'overdue':
         return [textMessage(overdueText(await this.overviewService.overview()))];
       case 'stuck':

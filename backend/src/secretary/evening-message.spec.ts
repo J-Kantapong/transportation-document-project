@@ -33,7 +33,7 @@ const allText = (value: unknown): string[] => {
 };
 
 function flexOf(input: EveningInput, url?: string) {
-  const message = buildEveningMessage(input, url);
+  const [message] = buildEveningMessage(input, url);
   if (message.type !== 'flex') throw new Error('ต้องเป็น flex');
   return message;
 }
@@ -66,12 +66,55 @@ describe('buildEveningMessage', () => {
     expect(texts.some((t) => t.includes('ใบเสนอราคารอ PO') && t.startsWith('●'))).toBe(false);
   });
 
-  it('พรุ่งนี้อย่าลืม: ตามเงิน 2 รายแรกก่อน แล้วเติมเรื่องไม่ด่วน รวมไม่เกิน 3', () => {
+  it('พรุ่งนี้อย่าลืม: ตามเงินครบทุกราย แล้วตามด้วยเรื่องไม่ด่วนครบทุกเรื่อง (ผู้ใช้ 2026-10-08: ข้อมูลควรครบก่อน)', () => {
     const texts = allText(flexOf(base).contents);
     expect(texts).toContain('1. ตามเงิน TWE ฿86,400');
     expect(texts).toContain('2. ตามเงิน SPI ฿30,000');
-    expect(texts).toContain('3. ใบเสนอราคารอ PO - 1 ใบ');
-    expect(texts.some((t) => t.includes('ตามเงิน X'))).toBe(false);
+    expect(texts).toContain('3. ตามเงิน X ฿5');
+    expect(texts).toContain('4. ใบเสนอราคารอ PO - 1 ใบ');
+  });
+
+  it('ครบทุกรายการ ไม่ตัด: งานที่ทำ 12 ขั้น พนักงาน 8 คน ปัญหา 6 เรื่อง อยู่ในการ์ดใบเดียว ไม่มี "และอีก"', () => {
+    const full: EveningInput = {
+      ...base,
+      process: Array.from({ length: 12 }, (_, i) => ({ label: `ขั้นที่ ${i + 1}`, done: { car: i + 1, moto: 0 } })),
+      staff: Array.from({ length: 8 }, (_, i) => ({ name: `คนที่ ${i + 1}`, entered: 0, submitted: 0, received: 0, edits: i + 1, slips: 0 })),
+      alerts: Array.from({ length: 6 }, (_, i) => ({ severity: 'high', title: `ปัญหาที่ ${i + 1}`, detail: '' })),
+    };
+    const messages = buildEveningMessage(full);
+    expect(messages).toHaveLength(1);
+    const texts = allText(flexOf(full).contents);
+    for (let i = 1; i <= 12; i += 1) expect(texts).toContain(`ขั้นที่ ${i} ${i}`);
+    for (let i = 1; i <= 8; i += 1) expect(texts).toContain(`คนที่ ${i}: แก้/ยกเลิก ${i} ครั้ง`);
+    for (let i = 1; i <= 6; i += 1) expect(texts).toContain(`● ปัญหาที่ ${i}`);
+    expect(texts.some((t) => t.startsWith('และอีก'))).toBe(false);
+  });
+
+  it('ยาวเกินเพดานของการ์ด: ส่วนที่เกินไปต่อในข้อความถัดไป ไม่มีอะไรหาย และการ์ดไม่เกินขนาดที่ LINE รับ', () => {
+    const huge: EveningInput = {
+      ...base,
+      process: Array.from({ length: 30 }, (_, i) => ({ label: `งานโอนตรวจรถ (รอผลตรวจ) ขั้นที่ ${i + 1}`, done: { car: 100 - i, moto: 0 } })),
+      staff: Array.from({ length: 30 }, (_, i) => ({ name: `พนักงานชื่อยาวนามสกุลยาว ${i + 1}`, entered: 40, submitted: 30, received: 20, edits: 100 - i, slips: 3 })),
+      alerts: [
+        ...Array.from({ length: 30 }, (_, i) => ({ severity: 'high', title: `ปัญหาเรื่องที่ ${i + 1}`, detail: 'ตรวจไม่ผ่าน 1 คัน · ผลตรวจหมดอายุ 0 คัน', href: '/registration/new-vehicle/inspection' })),
+        ...Array.from({ length: 30 }, (_, i) => ({ severity: 'medium', title: `เรื่องไม่ด่วนที่ ${i + 1}`, detail: 'ตรวจว่าอัตราค่าธรรมเนียมยังถูกต้อง', href: '/accounting/billing' })),
+      ],
+    };
+    const messages = buildEveningMessage(huge, 'https://app.example.com');
+    const [card, ...rest] = messages;
+    if (card.type !== 'flex') throw new Error('ต้องเป็น flex');
+    expect(Buffer.byteLength(JSON.stringify(card.contents))).toBeLessThan(30_000);
+    expect(messages.length).toBeLessThanOrEqual(5);
+    expect(rest.length).toBeGreaterThan(0);
+    for (const m of rest) expect(m.type === 'text' && m.text.length <= 5000).toBe(true);
+    const everything = [...allText(card.contents), ...rest.flatMap((m) => (m.type === 'text' ? m.text.split('\n') : []))];
+    for (let i = 1; i <= 30; i += 1) {
+      expect(everything.some((t) => t.startsWith(`งานโอนตรวจรถ (รอผลตรวจ) ขั้นที่ ${i} `))).toBe(true);
+      expect(everything.some((t) => t.startsWith(`พนักงานชื่อยาวนามสกุลยาว ${i}:`))).toBe(true);
+      expect(everything.some((t) => t.startsWith(`● ปัญหาเรื่องที่ ${i} `))).toBe(true);
+      expect(everything.some((t) => t.includes(`. เรื่องไม่ด่วนที่ ${i} `))).toBe(true);
+    }
+    expect(allText(card.contents)).toContain('และอีก 15 รายการ (ต่อในข้อความถัดไป)');
   });
 
   it('วันเงียบ: บอกว่าไม่มีปัญหา/ไม่มีงาน และไม่มีหัวข้อพนักงานกับพรุ่งนี้', () => {

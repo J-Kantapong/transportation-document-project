@@ -89,7 +89,40 @@ export function bubble(title: string, today: string, body: unknown[], baseUrl?: 
   return out;
 }
 
-// เกินจำนวนที่โชว์ -> บอกว่ามีอีกกี่รายการ (การ์ดต้องสั้น ผู้ใช้ปวดหัวถ้ายาว)
-export function moreLine(total: number, shown: number) {
-  return total > shown ? [text(`และอีก ${total - shown} รายการ`, { size: 'xs', color: '#888888' })] : [];
+// ผู้ใช้ 2026-10-08: "ข้อมูลควรครบก่อน" - การ์ดแสดงทุกรายการ ไม่ตัดเหลือ 3-5 บรรทัดเหมือนเดิม
+// เพดานต่อหัวข้อมีไว้กันการ์ดเกินขนาดที่ LINE รับ (bubble ละ 30 KB) เท่านั้น - ส่วนที่เกินเพดานไม่หาย ไปต่อในข้อความถัดไป (overflowText)
+export const SECTION_MAX = 15;
+
+export interface Listed<T> {
+  shown: T[];
+  rest: T[];
+}
+
+export function capList<T>(items: T[], max = SECTION_MAX): Listed<T> {
+  return { shown: items.slice(0, max), rest: items.slice(max) };
+}
+
+// เกินเพดาน -> บอกในการ์ดว่ามีต่อในข้อความถัดไป
+export function moreLine(rest: number) {
+  return rest > 0 ? [text(`และอีก ${rest} รายการ (ต่อในข้อความถัดไป)`, { size: 'xs', color: '#888888' })] : [];
+}
+
+// ข้อความต่อท้ายการ์ด: รายการที่เกินเพดานของแต่ละหัวข้อ ครบทุกบรรทัด - ไม่มีอะไรเกิน = ไม่ส่ง
+// แบ่งเป็นหลายข้อความเมื่อยาวเกินที่ LINE รับต่อข้อความ (5,000 ตัวอักษร) โดยตัดที่ขึ้นบรรทัดใหม่
+const TEXT_CHUNK = 4500;
+
+export function overflowTexts(title: string, sections: Array<{ title: string; lines: string[] }>): string[] {
+  const lines = sections.filter((s) => s.lines.length > 0).flatMap((s) => ['', `${s.title} (ต่อ)`, ...s.lines]);
+  if (lines.length === 0) return [];
+  const chunks: string[] = [];
+  let current = `${title} (ต่อ)`;
+  for (const line of lines) {
+    if (current.length + 1 + line.length > TEXT_CHUNK) {
+      chunks.push(current);
+      current = `${title} (ต่อ)`;
+    }
+    current += `\n${line}`;
+  }
+  chunks.push(current);
+  return chunks;
 }
