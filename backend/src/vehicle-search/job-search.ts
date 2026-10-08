@@ -48,6 +48,7 @@ export interface JobSearchResult {
 const PER_TYPE = 30;
 const JOB_READ_ROLES = ['ADMIN', 'STAFF_CAR', 'STAFF_MOTO', 'ACCOUNTANT'];
 const isoOf = (d: Date) => d.toISOString().slice(0, 10);
+const dmy = (d: Date) => `${isoOf(d).slice(8)}/${isoOf(d).slice(5, 7)}/${isoOf(d).slice(0, 4)}`; // วว/ดด/ปปปป ในข้อความสถานะ (เหมือนช่องวันที่อื่นในหน้า)
 const plateText = (category: string | null, number: string | null) => (category && number ? `${category} ${number}` : null);
 const classKind = (vehicleClass: string): VehicleKind => (vehicleClass === 'MOTO' ? 'moto' : 'car');
 
@@ -173,7 +174,7 @@ export async function searchJobs(
       engine: j.oldEngine,
       plate: [plateText(j.oldPlateCategory, j.oldPlateNumber), newPlate ? `→ ${newPlate}` : null].filter(Boolean).join(' ') || null,
       brandName: j.oldBrand,
-      status: j.returnedDate ? `รับเอกสารกลับแล้ว ${isoOf(j.returnedDate)}` : 'รอรับเอกสารกลับ',
+      status: j.returnedDate ? `รับเอกสารกลับแล้ว ${dmy(j.returnedDate)}` : 'รอรับเอกสารกลับ',
       done: !!j.returnedDate,
       cancelled: !!j.cancelledAt,
       href: `/registration/plate-swap/${cls}/${pair}/receive-receipt`,
@@ -209,7 +210,7 @@ export async function searchJobs(
         engine: j.engine,
         plate: plateText(j.plateCategory, j.plateNumber),
         brandName: j.brand,
-        status: j.returnedDate ? `รับใบเสร็จแล้ว ${isoOf(j.returnedDate)}` : 'รอรับใบเสร็จ',
+        status: j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)}` : 'รอรับใบเสร็จ',
         done: !!j.returnedDate,
         cancelled: !!j.cancelledAt,
         href: path.replace('{cls}', cls),
@@ -233,7 +234,7 @@ export async function searchJobs(
       engine: j.engine,
       plate: plateText(j.plateCategory, j.plateNumber),
       brandName: j.brand,
-      status: !j.returnedDate ? 'รอรับใบเสร็จ' : waitingPlate ? 'รับใบเสร็จแล้ว รอรับป้าย' : `รับป้ายแล้ว ${isoOf(j.plateReceivedDate!)}`,
+      status: !j.returnedDate ? 'รอรับใบเสร็จ' : waitingPlate ? 'รับใบเสร็จแล้ว รอรับป้าย' : `รับป้ายแล้ว ${dmy(j.plateReceivedDate!)}`,
       done: !!j.returnedDate && !waitingPlate,
       cancelled: !!j.cancelledAt,
       href: !j.returnedDate ? '/registration/other/plate-copy/return' : '/registration/other/plate-copy/receive-plate',
@@ -255,7 +256,7 @@ export async function searchJobs(
       status = 'ตรวจไม่ผ่าน';
       href = '/registration/transfer/inspection/inspect';
     } else {
-      status = j.returnedDate ? `รับใบเสร็จแล้ว ${isoOf(j.returnedDate)}` : 'รอรับใบเสร็จ';
+      status = j.returnedDate ? `รับใบเสร็จแล้ว ${dmy(j.returnedDate)}` : 'รอรับใบเสร็จ';
     }
     jobs.push({
       ...base('TRANSFER'),
@@ -293,7 +294,7 @@ export async function searchJobs(
       plate: plateText(j.plateCategory, j.plateNumber),
       brandName: null,
       status: j.deliveredDate
-        ? `ส่งคืนลูกค้าแล้ว ${isoOf(j.deliveredDate)}`
+        ? `ส่งคืนลูกค้าแล้ว ${dmy(j.deliveredDate)}`
         : j.receivedDate
           ? 'รับป้ายภาษีแล้ว รอส่งคืน'
           : j.paymentDate
