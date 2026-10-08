@@ -1,4 +1,5 @@
 import { request } from "@/lib/api";
+import type { PersonalPayee } from "@/lib/company-profile";
 import type { BillingAccount, Invoice, InvoiceItemKind, RateKind, RateVehicleKind } from "@/lib/billing-api";
 
 // ใบเสนอราคา (ผู้ใช้ 2026-10-01) - ดู backend/src/billing/quotation.service.ts
@@ -24,6 +25,7 @@ export interface QuotationCustomer {
   branch: string | null;
   address: string | null;
   taxId: string | null;
+  payee?: PersonalPayee; // ผู้รับเงินบัญชีบุคคล ณ วันออก (ว่าง = ผู้รับเงินตั้งต้น)
 }
 
 export interface QuotationItem {

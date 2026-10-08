@@ -1,4 +1,5 @@
 import { request } from "@/lib/api";
+import type { PersonalPayee } from "@/lib/company-profile";
 
 // ส่งงานลูกค้า (พนักงาน) - ดู backend/src/delivery/delivery.service.ts
 // DONE = ส่งเล่มและป้ายครบแล้ว (อยู่ในรายการคันอื่นของใบยื่น / ตอบ 409 ถ้าหน้าที่เปิดค้างไว้บันทึกซ้ำ)
@@ -97,6 +98,12 @@ export interface AccountPeriod {
   remark: string;
   createdBy: string | null;
   createdAt: string;
+}
+
+export interface AccountPeriods {
+  current: BillingAccount;
+  payee: { name: string | null; bank: string | null; accountNo: string | null };
+  periods: AccountPeriod[];
 }
 
 export interface BillingTerms {
@@ -431,7 +438,7 @@ export interface Invoice {
   invoiceNo: string;
   issueDate: string;
   customerId: string;
-  customer: { name: string; branch: string | null; address: string | null; taxId: string | null };
+  customer: { name: string; branch: string | null; address: string | null; taxId: string | null; payee?: PersonalPayee };
   jobLabel: string;
   extras: Array<{ label: string; amount: number }>;
   vatRate: number;
@@ -595,10 +602,12 @@ export const billingApi = {
   updateTerms: (customerId: string, terms: BillingTerms & { remark: string }) =>
     request<{ terms: BillingTerms }>(`/api/billing/customers/${customerId}/terms`, json("PATCH", terms)),
   // บัญชีรับเงินพร้อมวันเริ่มใช้ (remark บังคับ) - ADMIN + ACCOUNTANT
-  accountPeriods: (customerId: string) =>
-    request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`),
+  accountPeriods: (customerId: string) => request<AccountPeriods>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`),
   setAccount: (customerId: string, data: { account: BillingAccount; effectiveFrom: string; remark: string }) =>
-    request<{ current: BillingAccount; periods: AccountPeriod[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`, json("POST", data)),
+    request<AccountPeriods>(`/api/billing/customers/${encodeURIComponent(customerId)}/account`, json("POST", data)),
+  // ผู้รับเงินของบิลบัญชีบุคคล (ผู้ใช้ 2026-10-08) - ล้างทั้งสามช่อง = ใช้ผู้รับเงินตั้งต้น, remark บังคับ
+  setPersonalPayee: (customerId: string, data: { name: string; bank: string; accountNo: string; remark: string }) =>
+    request<AccountPeriods>(`/api/billing/customers/${encodeURIComponent(customerId)}/personal-payee`, json("PUT", data)),
   // ตั้งราคาล่วงหน้าให้ลูกค้าที่ยังไม่มีรถในคิววางบิล (ผู้ใช้ 2026-09-28)
   getRates: (customerId: string) => request<{ rates: ServiceFeeRate[] }>(`/api/billing/customers/${encodeURIComponent(customerId)}/rates`),
   replaceRates: (customerId: string, rates: ServiceFeeRateInput[]) =>

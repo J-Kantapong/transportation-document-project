@@ -139,6 +139,9 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [payee, setPayee] = useState({ name: "", bank: "", accountNo: "" });
+  const [payeeRemark, setPayeeRemark] = useState("");
+  const [payeeMessage, setPayeeMessage] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -148,6 +151,7 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
         if (!alive) return;
         setPeriods(r.periods);
         setCurrent(r.current);
+        setPayee({ name: r.payee.name ?? "", bank: r.payee.bank ?? "", accountNo: r.payee.accountNo ?? "" });
         setAccount(r.current === "COMPANY" ? "PERSONAL" : "COMPANY");
       })
       .catch((err) => alive && setError(err instanceof ApiError ? err.message : "โหลดบัญชีไม่สำเร็จ"));
@@ -170,6 +174,22 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
       onSaved(r.current);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSavePayee() {
+    if (!payeeRemark.trim()) return setPayeeMessage("ใส่เหตุผลที่ตั้งผู้รับเงิน");
+    setSaving(true);
+    setPayeeMessage("");
+    try {
+      const r = await billingApi.setPersonalPayee(customerId, { ...payee, remark: payeeRemark.trim() });
+      setPayee({ name: r.payee.name ?? "", bank: r.payee.bank ?? "", accountNo: r.payee.accountNo ?? "" });
+      setPayeeRemark("");
+      setPayeeMessage("บันทึกผู้รับเงินแล้ว (บิลที่ออกไปแล้วไม่เปลี่ยน)");
+    } catch (err) {
+      setPayeeMessage(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -232,6 +252,40 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
             {error}
           </div>
         )}
+      </div>
+      <div style={{ paddingTop: 14, borderTop: "1px solid #f0f2f6", display: "grid", gap: 14 }}>
+        <p style={{ fontSize: 14 }}>
+          <b style={{ fontWeight: 600 }}>ผู้รับเงินของบิลบัญชีบุคคล</b>
+          <span className="muted"> — ว่างทั้งหมด = ใช้ผู้รับเงินตั้งต้น (น.ส. อารี) · บิลและใบเสนอราคาที่ออกไปแล้วไม่เปลี่ยน</span>
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 14 }}>
+          <label className="field">
+            ชื่อบัญชี (ตามสมุดบัญชี)
+            <input type="text" value={payee.name} onChange={(e) => setPayee({ ...payee, name: e.target.value })} maxLength={120} />
+          </label>
+          <label className="field">
+            ธนาคาร
+            <input type="text" value={payee.bank} onChange={(e) => setPayee({ ...payee, bank: e.target.value })} placeholder="เช่น กสิกรไทย" maxLength={80} />
+          </label>
+          <label className="field">
+            เลขที่บัญชี
+            <input type="text" inputMode="numeric" value={payee.accountNo} onChange={(e) => setPayee({ ...payee, accountNo: e.target.value })} maxLength={40} />
+          </label>
+        </div>
+        <label className="field">
+          เหตุผล *
+          <input type="text" value={payeeRemark} onChange={(e) => setPayeeRemark(e.target.value)} placeholder="เช่น SPI โอนเข้าบัญชีนายจิรฤทธิ์" maxLength={500} />
+        </label>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <button className="primary" disabled={saving || !periods} onClick={handleSavePayee}>
+            บันทึกผู้รับเงิน
+          </button>
+          {payeeMessage && (
+            <div className={`customer-message${payeeMessage.startsWith("บันทึกผู้รับเงินแล้ว") ? "" : " error"}`} role="alert">
+              {payeeMessage}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

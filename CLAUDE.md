@@ -227,6 +227,13 @@ This private repository is the shared development surface for the user, Claude C
   = the account of its vehicles (one bill may not mix accounts). Personal-account bills never have VAT (WHT still per
   customer), number in their own series (`suggestedPersonalInvoiceNo`), and print the personal issuer (name as on the
   bank account, no tax ID, no address yet) with its bank account: `PERSONAL_PROFILE` in `frontend/src/lib/company-profile.ts`.
+  Per-customer payee (user 2026-10-08: SPI is paid into a different person's account, YMAC stays on the default one;
+  migration `20261008130000_customer_personal_payee`): `Customer.personalPayeeName/Bank/AccountNo` (all null = the
+  `PERSONAL_PROFILE` default). Set in the "บัญชีรับเงิน" editor on the billing page (`PUT /api/billing/customers/:id/personal-payee`
+  `{ name, bank, accountNo, remark }`, name + account number together or all empty, AuditLog `set-personal-payee`; `GET .../account`
+  returns `payee`). Invoices and quotations of a PERSONAL account copy it into `customerSnapshot.payee` at issue
+  (`payeeSnapshot` in `billing.service.ts`), so reprints never change; `personalIssuerOf(payee)` builds the printed name + payment lines.
+  The bank account number itself is data entered in the UI, never committed.
   `ServiceFeeRate.includesReceipt` (user 2026-09-27, YMAC): the price already includes the DLT receipt, so the service
   fee = price − that vehicle's actual receipt (`serviceFeeFromRate`; the billing page recalculates when the receipt is
   edited). YMAC prices (all-in): new motorcycle 650 (receipt 340), 300cc 1,200 (not used yet), tax renewal 150 (100),

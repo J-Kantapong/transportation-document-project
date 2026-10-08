@@ -1,5 +1,5 @@
 import type { RateKind } from "@/lib/billing-api";
-import { COMPANY_PROFILE, PERSONAL_PROFILE } from "@/lib/company-profile";
+import { COMPANY_PROFILE, personalIssuerOf } from "@/lib/company-profile";
 import { bahtText, formatMoney, isoToThaiDate, round2 } from "@/lib/invoice";
 import { escapeHtml, PRINT_CSS, printHtml } from "@/lib/invoice-print";
 import type { PayslipSignature } from "@/lib/hr-api";
@@ -56,7 +56,7 @@ export function rateConditionText(it: Pick<QuotationItem, "rateKind" | "vehicleK
 
 function issuerHtml(q: PrintableQuotation): string {
   if (q.account === "PERSONAL") {
-    const p = PERSONAL_PROFILE;
+    const p = personalIssuerOf(q.customer.payee);
     return `<div><b>${escapeHtml(p.name)}</b>${p.addressLines.length ? `<br><span class="k">${p.addressLines.map(escapeHtml).join("<br>")}</span>` : ""}</div>`;
   }
   const co = COMPANY_PROFILE;

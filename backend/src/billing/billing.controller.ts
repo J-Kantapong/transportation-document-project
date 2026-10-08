@@ -28,6 +28,11 @@ export class BillingController {
     return this.billingService.accountPeriods(id);
   }
 
+  @Put('customers/:id/personal-payee')
+  setPersonalPayee(@Param('id') id: string, @Body() body: { name?: unknown; bank?: unknown; accountNo?: unknown; remark?: unknown }) {
+    return this.billingService.setPersonalPayee(id, body ?? {});
+  }
+
   @Post('customers/:id/account')
   setAccount(@Param('id') id: string, @Body() body: { account?: unknown; effectiveFrom?: unknown; remark?: unknown }) {
     return this.billingService.setAccount(id, body ?? {});

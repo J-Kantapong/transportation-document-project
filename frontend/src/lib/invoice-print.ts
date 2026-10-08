@@ -1,5 +1,5 @@
 import { editableItems, JOB_LABEL, sourceItems, type Invoice, type JobSnapshot, type JobType } from "@/lib/billing-api";
-import { COMPANY_PROFILE, PERSONAL_PROFILE } from "@/lib/company-profile";
+import { COMPANY_PROFILE, personalIssuerOf } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceContentSummary, invoiceFaceLines, isoToThaiDate, jobsOfItems, round2, sortLinesByPlate } from "@/lib/invoice";
 
 // ใบวางบิล/ใบแจ้งหนี้ + เอกสารแนบรายคัน (A4 แนวตั้ง) ตามแบบที่บริษัทใช้อยู่ใน Google Sheet "Invoice Tradeinter":
@@ -32,7 +32,7 @@ const isPersonal = (inv: PrintableInvoice) => inv.account === "PERSONAL";
 // หัวผู้ออกบิล: บัญชีบริษัท = บริษัท + เลขผู้เสียภาษี, บัญชีบุคคล = ชื่อตามบัญชีธนาคาร ไม่มีเลขผู้เสียภาษี (ผู้ใช้ 2026-09-27)
 function issuerHtml(inv: PrintableInvoice): string {
   if (isPersonal(inv)) {
-    const p = PERSONAL_PROFILE;
+    const p = personalIssuerOf(inv.customer.payee);
     return `<div><b>${escapeHtml(p.name)}</b>${p.addressLines.length ? `<br><span class="k">${p.addressLines.map(escapeHtml).join("<br>")}</span>` : ""}</div>`;
   }
   const co = COMPANY_PROFILE;
@@ -40,7 +40,7 @@ function issuerHtml(inv: PrintableInvoice): string {
 <span class="k">เลขที่เสียภาษี ${escapeHtml(co.taxId)}<br>${co.addressLines.map(escapeHtml).join("<br>")}<br>โทร ${escapeHtml(co.phone)} · ${escapeHtml(co.email)}</span></div>`;
 }
 
-const paymentLinesOf = (inv: PrintableInvoice) => (isPersonal(inv) ? PERSONAL_PROFILE.paymentLines : COMPANY_PROFILE.paymentLines);
+const paymentLinesOf = (inv: PrintableInvoice) => (isPersonal(inv) ? personalIssuerOf(inv.customer.payee).paymentLines : COMPANY_PROFILE.paymentLines);
 
 export const ATTACHMENT_ROWS_PER_PAGE = 40;
 

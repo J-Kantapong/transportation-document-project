@@ -307,6 +307,16 @@ export const toPeriods = (rows: Array<{ account: string; effectiveFrom: Date }>)
   rows.map((p) => ({ account: p.account, effectiveFrom: iso(p.effectiveFrom)! }));
 
 // บิลบัญชีบุคคลไม่มี VAT เสมอ (ผู้ใช้ 2026-09-27) ไม่ว่าเงื่อนไข VAT ของลูกค้าจะตั้งไว้อย่างไร - หัก ณ ที่จ่ายยังตามลูกค้า (SPI หัก, YMAC ไม่หัก)
+// ผู้รับเงินของบิลบัญชีบุคคล (ผู้ใช้ 2026-10-08): เก็บใน customerSnapshot.payee ตอนออกบิล เพื่อให้บิลที่ออกไปแล้วพิมพ์ซ้ำได้เหมือนเดิมแม้เปลี่ยนผู้รับเงินทีหลัง
+// ลูกค้าที่ไม่ได้ตั้งผู้รับเงิน (หรือบัญชีบริษัท) ไม่มี payee -> หน้าพิมพ์ใช้ผู้รับเงินตั้งต้น
+export const payeeSnapshot = (
+  account: string,
+  c: { personalPayeeName?: string | null; personalPayeeBank?: string | null; personalPayeeAccountNo?: string | null },
+) =>
+  account === 'PERSONAL' && c.personalPayeeName && c.personalPayeeAccountNo
+    ? { payee: { name: c.personalPayeeName, bank: c.personalPayeeBank ?? null, accountNo: c.personalPayeeAccountNo } }
+    : {};
+
 export const termsFor = (account: string, terms: BillingTerms): BillingTerms => (account === 'PERSONAL' ? { ...terms, vat: false } : terms);
 
 const feeRows = (rows: Array<{ key: string; amount: unknown }>) => rows.map((r) => ({ key: r.key, amount: r.amount === null ? null : Number(r.amount) }));
@@ -622,11 +632,15 @@ export class BillingService {
       where: { id: customerId },
       select: {
         accountPeriods: { orderBy: { effectiveFrom: 'asc' }, include: { createdBy: { select: { name: true, displayName: true } } } },
+        personalPayeeName: true,
+        personalPayeeBank: true,
+        personalPayeeAccountNo: true,
       },
     });
     if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
     const rows = customer.accountPeriods;
     return {
+      payee: { name: customer.personalPayeeName, bank: customer.personalPayeeBank, accountNo: customer.personalPayeeAccountNo },
       current: accountOn(toPeriods(rows), bangkokToday()),
       periods: rows.map((p) => ({
         id: p.id,
@@ -673,6 +687,38 @@ export class BillingService {
         remark,
         changes: { [`บัญชีรับเงิน ตั้งแต่ ${fromIso}`]: { from: sameDay?.account ?? before, to: account } },
       });
+    });
+    return this.accountPeriods(customerId);
+  }
+
+  // ตั้งผู้รับเงินของบิลบัญชีบุคคลของลูกค้า (ผู้ใช้ 2026-10-08) - ชื่อ + เลขบัญชีต้องมีคู่กัน, ล้างทั้งสามช่อง = กลับไปใช้ผู้รับเงินตั้งต้น
+  // เหตุผลบังคับ + AuditLog · บิล/ใบเสนอราคาที่ออกไปแล้วไม่เปลี่ยน
+  async setPersonalPayee(customerId: string, dto: { name?: unknown; bank?: unknown; accountNo?: unknown; remark?: unknown }) {
+    const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่ตั้งผู้รับเงิน');
+    if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
+    const text = (v: unknown, label: string, max: number) => {
+      if (v === undefined || v === null || v === '') return null;
+      if (typeof v !== 'string') throw bad(`${label}ไม่ถูกต้อง`);
+      const t = v.trim();
+      if (t.length > max) throw bad(`${label}ยาวเกิน ${max} ตัวอักษร`);
+      return t || null;
+    };
+    const name = text(dto.name, 'ชื่อผู้รับเงิน', 120);
+    const bank = text(dto.bank, 'ธนาคาร', 80);
+    const accountNo = text(dto.accountNo, 'เลขที่บัญชี', 40);
+    if (accountNo && !/^[0-9-]+$/.test(accountNo)) throw bad('เลขที่บัญชีใช้ได้เฉพาะตัวเลขและขีด');
+    if (Boolean(name) !== Boolean(accountNo)) throw bad('ต้องกรอกชื่อผู้รับเงินและเลขที่บัญชีคู่กัน (หรือเว้นว่างทั้งหมดเพื่อใช้ค่าตั้งต้น)');
+    if (!name && bank) throw bad('ธนาคารต้องกรอกพร้อมชื่อและเลขที่บัญชี');
+    const data = { personalPayeeName: name, personalPayeeBank: bank, personalPayeeAccountNo: accountNo };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} FOR UPDATE`;
+      const current = await tx.customer.findUnique({ where: { id: customerId } });
+      if (!current) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+      const changes = diffChanges(current, data);
+      if (!Object.keys(changes).length) throw bad('ผู้รับเงินเหมือนเดิม - ไม่มีอะไรต้องแก้');
+      await tx.customer.update({ where: { id: customerId }, data });
+      await writeAudit(tx, { entity: 'Customer', entityId: customerId, action: 'set-personal-payee', remark, changes });
     });
     return this.accountPeriods(customerId);
   }
@@ -802,7 +848,7 @@ export class BillingService {
               dueDate: dueDateOf(issueDate, customer.billingCreditDays),
               account,
               customerId: customer.id,
-              customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
+              customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
               jobLabel,
               extras,
               vatRate: totals.vatRate,
@@ -856,7 +902,7 @@ export class BillingService {
           dueDate: dueDateOf(issueDate, customer.billingCreditDays),
           account,
           customerId: customer.id,
-          customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
+          customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
           jobLabel,
           ...(quotation ? { quotationId: quotation.quotationId, quotationNo: quotation.quotationNo, poNumber: quotation.poNumber } : {}),
           extras: [],
@@ -1164,7 +1210,7 @@ export class BillingService {
               dueDate: dueDateOf(issueDate, customer.billingCreditDays),
               account,
               customerId: customer.id,
-              customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId },
+              customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
               jobLabel,
               extras: [],
               vatRate: totals.vatRate,
@@ -1722,7 +1768,7 @@ export class BillingService {
       invoiceNo: i.invoiceNo,
       issueDate: iso(i.issueDate),
       customerId: i.customerId,
-      customer: i.customerSnapshot as { name: string; branch: string | null; address: string | null; taxId: string | null },
+      customer: i.customerSnapshot as { name: string; branch: string | null; address: string | null; taxId: string | null; payee?: { name: string; bank: string | null; accountNo: string } },
       jobLabel: i.jobLabel,
       extras: i.extras as Array<{ label: string; amount: number }>,
       vatRate: Number(i.vatRate),

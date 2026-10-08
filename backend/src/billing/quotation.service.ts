@@ -18,6 +18,7 @@ import {
   parseItems,
   parseMoney,
   parseWhtOverride,
+  payeeSnapshot,
   termsFor,
   toPeriods,
   toTerms,
@@ -69,7 +70,7 @@ const Q_INCLUDE = {
 } as const;
 type QRow = Prisma.QuotationGetPayload<{ include: typeof Q_INCLUDE }>;
 
-type Snapshot = { name: string; branch: string | null; address: string | null; taxId: string | null };
+type Snapshot = { name: string; branch: string | null; address: string | null; taxId: string | null; payee?: { name: string; bank: string | null; accountNo: string } };
 
 type ItemData = {
   kind: string;
@@ -354,8 +355,8 @@ export class QuotationService {
       const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
       if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
       customerId = customer.id;
-      snapshot = { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId };
       account = accountOn(toPeriods(customer.accountPeriods ?? []), issueIso);
+      snapshot = { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) };
       terms = toTerms(customer);
     } else {
       snapshot = parseTypedCustomer(dto.customer);
