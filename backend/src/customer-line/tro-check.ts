@@ -33,7 +33,7 @@ export function parseTroPostback(data: string | undefined): TroKind | null {
   return kind === 'car' || kind === 'moto' ? kind : null;
 }
 
-function validIso(iso: string): boolean {
+export function validIso(iso: string): boolean {
   const match = ISO_DATE.exec(iso);
   if (!match) return false;
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
@@ -60,6 +60,15 @@ function typedYear(text: string): number | null {
   return year >= 2400 ? year - 543 : year;
 }
 
+// วันที่ที่ลูกค้าพิมพ์ (วัน/เดือน/ปี พ.ศ. หรือ ค.ศ.) -> YYYY-MM-DD · null = ไม่มีวันที่ในข้อความ · '' = มีแต่อ่านไม่ได้/ไม่มีจริง
+export function parseTypedDate(text: string): string | null {
+  const match = TYPED_DATE.exec(text);
+  if (!match) return null;
+  const year = typedYear(match[3]);
+  const iso = year === null ? '' : `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  return validIso(iso) ? iso : '';
+}
+
 export interface TypedTro {
   kind: TroKind | null; // null = ลูกค้าไม่ได้บอกประเภทรถ (หรือบอกทั้งสอง)
   date: string | null; // null = ไม่มีวันที่ในข้อความ · '' = มีแต่อ่านไม่ได้/ไม่มีจริง
@@ -71,15 +80,11 @@ export function parseTypedTro(text: string): TypedTro {
   const moto = MOTO_WORDS.some((word) => text.includes(word));
   const kind = car === moto ? null : car ? 'car' : 'moto';
 
-  const match = TYPED_DATE.exec(text);
-  if (!match) return { kind, date: null };
-  const year = typedYear(match[3]);
-  const iso = year === null ? '' : `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
-  return { kind, date: validIso(iso) ? iso : '' };
+  return { kind, date: parseTypedDate(text) };
 }
 
 // วัน/เดือน/ปี พ.ศ. - ลูกค้าอ่านวันที่จากเล่มทะเบียนเป็น พ.ศ.
-function thaiDate(iso: string): string {
+export function thaiDate(iso: string): string {
   const [year, month, day] = iso.split('-');
   return `${day}/${month}/${Number(year) + 543}`;
 }
