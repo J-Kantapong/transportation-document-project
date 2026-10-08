@@ -300,7 +300,7 @@ export function OtherJobsBillingPage() {
           <label className="field" style={{ maxWidth: 420 }}>
             ลูกค้า *
             <select value={customerId} onChange={(e) => chooseCustomer(e.target.value)}>
-              <option value="">— เลือกลูกค้า —</option>
+              <option value="">ทุกลูกค้า (ดูงานค้างทั้งหมด)</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.company || c.name}
@@ -315,6 +315,44 @@ export function OtherJobsBillingPage() {
               </span>
             )}
           </label>
+
+          {/* ยังไม่เลือกลูกค้า = โชว์งานค้างของทุกคนรวมกัน กันลืมวางบิล (ผู้ใช้ 2026-10-08) */}
+          {!customerId && queue && (
+            <div style={{ display: "grid", gap: 14 }}>
+              {queue.customers.filter((c) => c.jobs.length > 0).length === 0 && <div className="empty-customers">ไม่มีงานรอวางบิล</div>}
+              {queue.customers
+                .filter((c) => c.jobs.length > 0)
+                .map((c) => (
+                  <div key={c.id} style={{ border: "1px solid #e3e8f0", borderRadius: 10, padding: "10px 14px", display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <b>
+                        {c.company || c.name} <span className="muted">({c.jobs.length} งานรอวางบิล)</span>
+                      </b>
+                      <button type="button" className="primary-button" onClick={() => chooseCustomer(c.id)}>
+                        วางบิลลูกค้านี้ →
+                      </button>
+                    </div>
+                    <div className="table-wrap">
+                      <table>
+                        <tbody>
+                          {c.jobs.map((j) => (
+                            <tr key={keyOf(j)}>
+                              <td>{isoToDisplayDate(j.doneDate)}</td>
+                              <td>{j.typeLabel}</td>
+                              <td>
+                                {j.plateText || "—"} <span className="muted">{j.chassis}</span>
+                              </td>
+                              <td>{j.ownerName || "—"}</td>
+                              <td style={{ textAlign: "right" }}>{formatMoney(j.fee)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
 
           {message.text && (
             <div className={`customer-message${message.error ? " error" : " success"}`} role="status">

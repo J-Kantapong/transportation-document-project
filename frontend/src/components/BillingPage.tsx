@@ -530,6 +530,21 @@ export function BillingPage() {
   return (
     <section className="content">
       <h1 tabIndex={-1}>วางบิล</h1>
+      {/* สรุปงานอื่นๆ ที่รอวางบิลของทุกลูกค้า กันลืม (ผู้ใช้ 2026-10-08) */}
+      {otherJobs.some((c) => c.jobs.length > 0) && (
+        <Link
+          href="/accounting/billing/jobs"
+          style={{ display: "block", marginTop: 8, padding: "10px 14px", borderRadius: 8, background: "#fff7e6", border: "1px solid #f5d28a", color: "#7a4b00", textDecoration: "none", fontSize: 14 }}
+        >
+          <b>มีงานอื่นรอวางบิล {otherJobs.reduce((n, c) => n + c.jobs.length, 0)} งาน</b>
+          {" ("}
+          {otherJobs
+            .filter((c) => c.jobs.length > 0)
+            .map((c) => `${c.company || c.name} ${c.jobs.length}`)
+            .join(", ")}
+          {") - กดเพื่อดูและวางบิล →"}
+        </Link>
+      )}
       <p>
         รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน - คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด
         &quot;ปิดงาน&quot; พร้อมหมายเหตุ
