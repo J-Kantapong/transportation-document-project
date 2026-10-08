@@ -7,6 +7,7 @@ import {
   api,
   ApiError,
   VEHICLE_SEARCH_STAGES,
+  type JobSearchResult,
   type VehicleSearchParams,
   type VehicleSearchResult,
   type VehicleSearchRow,
@@ -107,6 +108,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
   const [error, setError] = useState("");
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [photoRow, setPhotoRow] = useState<VehicleSearchRow | null>(null);
+  const [jobs, setJobs] = useState<JobSearchResult | null>(null);
 
   const appliedKey = queryString(applied);
   const filtered = Boolean(applied.q || applied.from || applied.to || applied.kind);
@@ -144,6 +146,25 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
     // appliedKey แทน applied ทั้งก้อน - object ใหม่ที่เงื่อนไขเหมือนเดิมไม่ต้องค้นซ้ำ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedKey]);
+
+  // งานอื่นๆ ที่ตรงกับคำค้น (ผู้ใช้ 2026-10-08) - ค้นแยก ไม่กระทบจำนวน/ตัวกรองสถานะของรถจดใหม่ และไม่แสดงเมื่อกรองสถานะรถจดใหม่อยู่
+  const jobsKey = JSON.stringify([applied.q ?? "", applied.from ?? "", applied.to ?? "", applied.kind ?? ""]);
+  useEffect(() => {
+    if (!applied.q?.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ล้างผลเก่าเมื่อไม่มีคำค้น
+      setJobs(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .searchJobs({ q: applied.q, from: applied.from, to: applied.to, kind: applied.kind })
+      .then((data) => !cancelled && setJobs(data))
+      .catch(() => !cancelled && setJobs(null)); // ค้นงานอื่นไม่สำเร็จ = ไม่แสดงส่วนนี้ (ผลรถจดใหม่ยังใช้ได้)
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobsKey]);
 
   // พิมพ์ = แทนที่ URL เดิม (ย้อนกลับไม่ต้องไล่ทีละตัวอักษร) / กดปุ่มกรองสถานะหรือล้าง = เพิ่มประวัติ
   function apply(next: VehicleSearchParams, history: "push" | "replace" = "replace") {
@@ -209,7 +230,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
       <div className="heading">
         <div>
           <h1>ค้นหารถ</h1>
-          <p>พิมพ์แล้วกรองให้ทันที เช่น พิมพ์ MLHKF5 จะเห็นทุกคันที่เลขตัวถังมี MLHKF5 พร้อมสถานะของแต่ละคัน</p>
+          <p>พิมพ์แล้วกรองให้ทันที เช่น พิมพ์ MLHKF5 จะเห็นทุกคันที่เลขตัวถังมี MLHKF5 พร้อมสถานะของแต่ละคัน (ค้นงานสลับเลข ยกเลิกการใช้รถ ย้ายออก คัดป้าย งานโอน ต่อภาษี ให้ด้วย)</p>
         </div>
       </div>
 
@@ -300,7 +321,10 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
             {error}
           </div>
         ) : !rows.length ? (
-          <div className="empty-customers">ไม่พบรถที่ตรงกับเงื่อนไข</div>
+          <div className="empty-customers">
+            ไม่พบรถจดใหม่ที่ตรงกับเงื่อนไข
+            {!applied.status && jobs && jobs.jobs.length > 0 ? " · แต่พบในงานอื่นๆ ด้านล่าง" : ""}
+          </div>
         ) : (
           <div className="table-wrap" style={{ opacity: searching ? 0.55 : 1, transition: "opacity .15s" }}>
             <table>
@@ -383,6 +407,70 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
           </div>
         )}
       </section>
+      {!applied.status && jobs && jobs.jobs.length > 0 && (
+        <section className="panel customer-list">
+          <div className="panel-head">
+            <h2>งานอื่นๆ ที่ตรงกับคำค้น</h2>
+            <span className="sub">
+              {jobs.jobs.length.toLocaleString()} งาน · สลับเลข / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / งานโอน / ต่อภาษี
+              {jobs.truncated ? " · แสดงเฉพาะล่าสุดของแต่ละประเภท พิมพ์คำค้นให้เจาะจงขึ้น" : ""}
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>วันที่ยื่น</th>
+                  <th>ประเภทงาน</th>
+                  <th>ชื่อลูกค้า</th>
+                  <th>ชื่อเจ้าของ</th>
+                  <th>เลขตัวถัง / เลขเครื่อง</th>
+                  <th>ทะเบียน</th>
+                  <th>ยี่ห้อ</th>
+                  <th>สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.jobs.map((j) => (
+                  <tr key={j.key} style={j.cancelled ? { opacity: 0.6 } : undefined}>
+                    <td>{isoToDisplayDate(j.date)}</td>
+                    <td>
+                      <span className="badge">{j.typeLabel}</span>
+                      <div className="sub">{j.kind === "moto" ? "จักรยานยนต์" : "รถยนต์"}</div>
+                    </td>
+                    <td>{j.customerName ? <Highlight text={j.customerName} query={applied.q} /> : "—"}</td>
+                    <td>{j.ownerName ? <Highlight text={j.ownerName} query={applied.q} /> : "—"}</td>
+                    <td>
+                      <Highlight text={j.chassis} query={applied.q} />
+                      {j.engine && (
+                        <div className="sub">
+                          <Highlight text={j.engine} query={applied.q} />
+                        </div>
+                      )}
+                    </td>
+                    <td>{j.plate ? <Highlight text={j.plate} query={applied.q} /> : "—"}</td>
+                    <td>{j.brandName ?? "—"}</td>
+                    <td>
+                      {j.cancelled ? (
+                        <span className="badge warn">ยกเลิกแล้ว</span>
+                      ) : j.done ? (
+                        <span className="badge done">{j.status}</span>
+                      ) : (
+                        <span className="badge">→ {j.status}</span>
+                      )}
+                      {canAccessPage(j.href, roles) && (
+                        <Link className="text-button" href={focusHref(j.href, j.chassis)}>
+                          ไปที่งาน →
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <PhotoDialog row={photoRow} onClose={() => setPhotoRow(null)} />
     </div>
   );

@@ -5,7 +5,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 // (GET /api/vehicle-search) - q ค้นจากเลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อลูกค้า / ผู้ถือกรรมสิทธิ์ / ผู้ครอบครอง
 // from/to (ค.ศ. YYYY-MM-DD รวมวันปลายทั้งสองด้าน) กรอง "วันที่" ของรถ (Vehicle.date) - ไม่รวมรถที่ถูกลบ
 
-function parseDateParam(raw: string | undefined, name: string): Date | null {
+export function parseDateParam(raw: string | undefined, name: string): Date | null {
   const value = raw?.trim();
   if (!value) return null;
   const date = new Date(`${value}T00:00:00.000Z`);
