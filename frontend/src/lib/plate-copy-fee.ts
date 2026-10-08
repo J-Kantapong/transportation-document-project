@@ -46,5 +46,20 @@ export function calculatePlateCopyFees(vehicleClass: PlateCopyVehicleClass, copy
   };
 }
 
-// ปกติป้ายออกภายใน 15 (วัน) นับจากวันที่ยื่น (ผู้ใช้ 2026-10-02) - ใช้บอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน ไม่ได้บังคับขั้นตอนใด
+// ปกติป้ายออกภายใน 15 วันทำการ นับจากวันที่ยื่น (ผู้ใช้ 2026-10-02 / ยืนยันว่าเป็น "วันทำการ" 2026-10-09)
+// ใช้บอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน ไม่ได้บังคับขั้นตอนใด
+// นับเฉพาะจันทร์-ศุกร์ ข้ามเสาร์อาทิตย์ - ระบบยังไม่รู้จักวันหยุดนักขัตฤกษ์ ช่วงหยุดยาวจึงยังเตือนเร็วไปเท่าจำนวนวันหยุดนั้น
 export const PLATE_COPY_EXPECTED_DAYS = 15;
+// 15 วันทำการ = 21 วันตามปฏิทินพอดี เมื่อยื่นในวันทำการ (ขนส่งรับยื่นเฉพาะวันทำการ) - ใช้เป็นกำหนดของขั้น "รอรับป้าย" ในภาพรวม ซึ่งนับเป็นวันปฏิทิน
+export const PLATE_COPY_EXPECTED_CALENDAR_DAYS = 21;
+
+// วันที่คาดว่าจะได้ป้าย = วันที่ยื่น (YYYY-MM-DD) + 15 วันทำการ - คิดเป็น UTC ล้วนไม่ให้เขตเวลาเลื่อนวัน
+export function plateCopyDueDate(submitIso: string): string {
+  const date = new Date(`${submitIso}T00:00:00.000Z`);
+  for (let left = PLATE_COPY_EXPECTED_DAYS; left > 0; ) {
+    date.setUTCDate(date.getUTCDate() + 1);
+    const day = date.getUTCDay();
+    if (day !== 0 && day !== 6) left -= 1;
+  }
+  return date.toISOString().slice(0, 10);
+}

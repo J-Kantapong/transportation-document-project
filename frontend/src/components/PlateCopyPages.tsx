@@ -9,6 +9,7 @@ import { formatBaht } from "@/lib/plate-swap-fee";
 import {
   PLATE_COPY_DUTY_FEE,
   PLATE_COPY_EXPECTED_DAYS,
+  plateCopyDueDate,
   PLATE_COPY_MOTO_TYPE,
   PLATE_COPY_REQUEST_FEE,
   type PlateCopyType,
@@ -1140,15 +1141,9 @@ function ReturnRow({
 // หน้ารับป้าย (ผู้ใช้ 2026-10-02: คัดแผ่นป้ายต้องมีรับป้ายกลับมาด้วย และถ่ายรูปป้ายในการ์ดยืนยันรับป้าย)
 // การ์ดละงาน: ถ่าย/เลือกรูปป้ายที่ได้รับ + วันที่รับ -> ดูตัวอย่างรูป -> กด "ยืนยันรับป้าย" จึงบันทึก (รูปจำเป็นเสมอ)
 // ไม่ใช้ AI ไม่ผูกกับ returnedDate (แนบได้แม้ยังไม่รับใบเสร็จ) เหมือนรับป้ายงานสลับเลข
-// ปกติป้ายออกภายใน 15 วันนับจากวันที่ยื่น: การ์ดบอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน (ไม่ได้บังคับขั้นตอนใด)
+// ปกติป้ายออกภายใน 15 วันทำการนับจากวันที่ยื่น: การ์ดบอกวันที่คาดว่าจะได้ป้ายและเตือนเมื่อเกิน (ไม่ได้บังคับขั้นตอนใด)
 // ---------------------------------------------------------------------------------------------
 
-// วันที่ ISO (YYYY-MM-DD) บวกจำนวนวัน - คิดเป็น UTC ล้วนไม่ให้เขตเวลาเลื่อนวัน
-const addDaysIso = (iso: string, days: number) => {
-  const d = new Date(`${iso}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
 const daysBetweenIso = (fromIso: string, toIso: string) => Math.round((Date.parse(`${toIso}T00:00:00.000Z`) - Date.parse(`${fromIso}T00:00:00.000Z`)) / 86400000);
 
 async function openPlatePhoto(plateCopyId: string) {
@@ -1184,7 +1179,7 @@ function ReceivePlateCard({
   const [dialog, setDialog] = useState<"date" | "detach" | null>(null);
   const received = Boolean(item.plateReceivedDate);
 
-  const dueIso = addDaysIso(item.submitDate, PLATE_COPY_EXPECTED_DAYS);
+  const dueIso = plateCopyDueDate(item.submitDate);
   const overdueDays = !received ? daysBetweenIso(dueIso, todayIso()) : 0;
 
   // ตัวอย่างรูปที่เลือก - คืนหน่วยความจำของ object URL เมื่อเปลี่ยนรูป/ออกจากการ์ด
@@ -1247,7 +1242,7 @@ function ReceivePlateCard({
           ) : (
             <>
               <div className="sub">
-                คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วัน)
+                คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
               </div>
               {overdueDays > 0 && (
                 <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>

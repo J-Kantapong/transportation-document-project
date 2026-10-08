@@ -1,4 +1,4 @@
-import { calculatePlateCopyFees, plateCopyBillFee, plateCopyNoBillFee, plateCopyUrgentFee } from './plate-copy-fee.js';
+import { calculatePlateCopyFees, plateCopyBillFee, plateCopyDueDate, plateCopyNoBillFee, plateCopyUrgentFee } from './plate-copy-fee.js';
 
 describe('plate-copy-fee', () => {
   it('รถยนต์: Bill ตามชนิดการคัดป้าย / ลงขัน 100 / ค่าอากร 10 แยก (เท่าเดิม)', () => {
@@ -23,5 +23,12 @@ describe('plate-copy-fee', () => {
     expect(calculatePlateCopyFees('MOTO', 'SINGLE_NORMAL', true)).toEqual({ billTotal: 105, noBillTotal: 110, dutyAmount: 10 });
     expect(plateCopyNoBillFee('MOTO', true)).toBe(110);
     expect(plateCopyUrgentFee('MOTO')).toBe(50);
+  });
+
+  it('วันที่คาดว่าได้ป้าย = 15 วันทำการ ข้ามเสาร์อาทิตย์', () => {
+    expect(plateCopyDueDate('2026-10-09')).toBe('2026-10-30'); // ยื่นวันศุกร์ -> ศุกร์อีก 3 สัปดาห์ (21 วันปฏิทิน)
+    expect(plateCopyDueDate('2026-10-05')).toBe('2026-10-26'); // ยื่นวันจันทร์ -> จันทร์
+    expect(plateCopyDueDate('2026-10-10')).toBe('2026-10-30'); // ยื่นวันเสาร์ (ไม่ควรเกิด) เริ่มนับจากวันจันทร์
+    expect(plateCopyDueDate('2026-12-21')).toBe('2027-01-11'); // ข้ามปี
   });
 });
