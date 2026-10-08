@@ -12,6 +12,7 @@ import { DocumentSubmissionModule } from './document-submission/document-submiss
 import { HrModule } from './hr/hr.module.js';
 import { FinanceCompaniesModule } from './finance-companies/finance-companies.module.js';
 import { OverviewModule } from './overview/overview.module.js';
+import { ActivityModule } from './activity/activity.module.js';
 import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
 import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
@@ -57,6 +58,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     DeliveryModule,
     BillingModule,
     OverviewModule,
+    ActivityModule,
     HrModule,
     VehicleSearchModule,
     SecretaryModule,
