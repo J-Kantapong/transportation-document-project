@@ -6,7 +6,7 @@ import { api, fetchAuthedBlob, plateCopyPlatePhotoImageUrl } from "@/lib/api";
 import { getCachedUser, getToken, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
-import { PLATE_COPY_BILL_FEE, PLATE_COPY_DUTY_FEE, PLATE_COPY_EXPECTED_DAYS, PLATE_COPY_NO_BILL_FEE } from "@/lib/plate-copy-fee";
+import { PLATE_COPY_DUTY_FEE, PLATE_COPY_EXPECTED_DAYS, PLATE_COPY_NO_BILL_FEE, type PlateCopyType, plateCopyBillFee } from "@/lib/plate-copy-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   plateCopyApi,
@@ -88,7 +88,14 @@ interface FormState {
   brand: string;
   plateCategory: string;
   plateNumber: string;
+  copyType: PlateCopyType;
 }
+
+const COPY_TYPE_LABELS: Record<PlateCopyType, string> = {
+  BOTH: "คัดทั้งคู่ (หน้า-หลัง)",
+  SINGLE_NORMAL: "คัดใบเดียว · เลขขาวดำปกติ",
+  SINGLE_AUCTION: "คัดใบเดียว · ประมูล",
+};
 
 const EMPTY_FORM: FormState = {
   customerId: "",
@@ -98,6 +105,7 @@ const EMPTY_FORM: FormState = {
   brand: "",
   plateCategory: "",
   plateNumber: "",
+  copyType: "BOTH",
 };
 
 type Option = { id: string; label: string };
@@ -210,12 +218,25 @@ function VehicleFormFields({
         </div>
       </div>
 
+      <div className="customer-grid" style={{ marginTop: 14 }}>
+        <label className="field">
+          ชนิดการคัดป้าย *
+          <select value={form.copyType} onChange={(e) => onChange({ copyType: e.target.value as PlateCopyType })}>
+            {(Object.keys(COPY_TYPE_LABELS) as PlateCopyType[]).map((t) => (
+              <option key={t} value={t}>
+                {COPY_TYPE_LABELS[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
       {/* ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02) - ไม่ต้องกรอก ระบบเก็บยอดตามอัตรานี้ตอนบันทึก */}
       <div className="customer-grid">
         <div>
           <strong>Bill (ใบเสร็จ)</strong>
-          <div>{formatBaht(PLATE_COPY_BILL_FEE)} บาท</div>
+          <div>{formatBaht(plateCopyBillFee(form.copyType))} บาท</div>
         </div>
         <div>
           <strong>No Bill</strong>
@@ -228,7 +249,7 @@ function VehicleFormFields({
         <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
           <strong>รวม (Bill + No Bill)</strong>
           <span style={{ textAlign: "right" }}>
-            <strong>{formatBaht(PLATE_COPY_BILL_FEE + PLATE_COPY_NO_BILL_FEE)} บาท</strong>
+            <strong>{formatBaht(plateCopyBillFee(form.copyType) + PLATE_COPY_NO_BILL_FEE)} บาท</strong>
             <div className="muted">แยกค่าอากร {formatBaht(PLATE_COPY_DUTY_FEE)} บาท</div>
           </span>
         </div>
@@ -270,6 +291,7 @@ function EditDialog({
     brand: item.brand,
     plateCategory: item.plateCategory,
     plateNumber: item.plateNumber,
+    copyType: item.copyType ?? "BOTH",
   });
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
   const [returnedDateText, setReturnedDateText] = useState(() => (item.returnedDate ? isoToDisplayDate(item.returnedDate) : ""));
@@ -302,6 +324,7 @@ function EditDialog({
         brand: form.brand,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
+        copyType: form.copyType,
         // ส่งเฉพาะตอนเลือกไว้จริง - งานที่ไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
         ...(form.customerId ? { customerId: form.customerId } : {}),
         submitDate,
@@ -436,6 +459,7 @@ export function PlateCopySubmitPage() {
         brand: form.brand,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
+        copyType: form.copyType,
         submitDate,
       });
       setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
@@ -531,7 +555,10 @@ export function PlateCopySubmitPage() {
                         <div className="job">{item.ownerName}</div>
                         <div className="sub">{vehicleText(item)}</div>
                       </td>
-                      <td>{plateText(item)}</td>
+                      <td>
+                        {plateText(item)}
+                        {item.copyType !== "BOTH" && <div className="sub">{COPY_TYPE_LABELS[item.copyType]}</div>}
+                      </td>
                       <td>{formatBaht(Number(item.billTotal))}</td>
                       <td>{formatBaht(Number(item.noBillTotal))}</td>
                       <td>{formatBaht(Number(item.dutyAmount))}</td>

@@ -386,7 +386,7 @@ This private repository is the shared development surface for the user, Claude C
   API `/api/plate-copies` (`GET ?status&month`, `POST`, `PATCH /:id`, `PATCH /:id/return`, `POST /:id/undo-return`,
   `POST /:id/cancel`, `POST/DELETE /:id/receipts`, `PATCH /:id/receipt-fields`, `GET /plate-queue?status`,
   `POST /:id/plate-photo` (multipart `file`, `date`), `PATCH /:id/plate-photo/date`, `POST /:id/plate-photo/detach`,
-  `GET /:id/plate-photo/image`). Not built (user did not ask): Delivery, billing, executive overview, motorcycles.
+  `GET /:id/plate-photo/image`). Single plate (user 2026-10-08, migration `20261008100000_plate_copy_type`): `PlateCopy.copyType` = `BOTH` (default, Bill 205) | `SINGLE_NORMAL` (คัดใบเดียวเลขขาวดำปกติ, Bill 100) | `SINGLE_AUCTION` (ประมูล, Bill 600); No Bill 100 and duty 10 unchanged (Claude choice, the user gave one amount per type); `plateCopyBillFee` in both fee files; create/update take `copyType`, changing it on edit recomputes Bill. Not built (user did not ask): Delivery, billing, executive overview, motorcycles.
 - Vehicle transfer (งานโอน, user 2026-10-02, migration `20261002180000_vehicle_transfer`, code in `backend/src/vehicle-transfer/`, pages
   `/registration/transfer/{owner,inspection}/{submit,inspect,return}`): replaces the empty placeholder and supersedes the older
   "reuse Vehicle + job intake pool" plan. Built like vehicle use cancellation (own table `VehicleTransfer`, vehicle keyed in by hand: job
