@@ -201,8 +201,9 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/other/move-out/car', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   { prefix: '/registration/other/move-out/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
   { prefix: '/registration/other/move-out', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
-  // คัดแผ่นป้ายทะเบียน (หมวดอื่นๆ, ผู้ใช้ 2026-10-02): รถยนต์เท่านั้น = STAFF_CAR (+ACCOUNTANT อ่าน) - backend: /api/plate-copies
-  { prefix: '/registration/other/plate-copy', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  // คัดแผ่นป้ายทะเบียน (หมวดอื่นๆ, ผู้ใช้ 2026-10-02; มอเตอร์ไซค์ 2026-10-09): รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO รวมในหน้าเดียวกัน
+  // (+ACCOUNTANT อ่าน) backend เช็คสิทธิ์ตามประเภทรถของงานจริง (PlateCopyService.assertClassScope) - backend: /api/plate-copies
+  { prefix: '/registration/other/plate-copy', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02): กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO, รวมในหน้าเดียวกัน) + ACCOUNTANT อ่าน
   // backend เช็คสิทธิ์ตามประเภทรถของงานจริง (VehicleTransferService.assertClassScope) - backend: /api/vehicle-transfers
   { prefix: '/registration/transfer', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
