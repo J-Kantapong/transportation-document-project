@@ -1,0 +1,36 @@
+# ปลุก backend production ไม่ให้หลับในเวลาทำงาน (ผู้ใช้ 2026-10-09)
+# Render แผนฟรีหลับเมื่อไม่มีคำขอ 15 นาที แล้วตื่นช้า (ปกติราว 1 นาที, 2026-10-09 เจอเกิน 8 นาที)
+# จึงยิง GET / (health check, ไม่แตะข้อมูล) ทุก 10 นาที จันทร์-เสาร์ 07:00-19:00 เวลาไทย
+# GitHub ตั้งเวลาทำงานเฉพาะไฟล์ที่อยู่บน default branch (master) เท่านั้น - บน dev จะไม่รันเอง
+# ใช้ secret SECRETARY_BACKEND_URL ตัวเดียวกับ secretary.yml (ที่อยู่ backend ไม่มี / ท้าย)
+# นอกเวลานี้เซิร์ฟเวอร์ยังหลับตามปกติ เพื่อไม่กินโควตาชั่วโมงฟรีของ Render (750 ชม./เดือน ใช้ร่วมกันทั้ง workspace)
+name: keep-awake
+
+on:
+  schedule:
+    - cron: '*/10 0-11 * * 1-6' # 00:00-11:50 UTC = 07:00-18:50 เวลาไทย จันทร์-เสาร์
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keep-awake
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping backend
+        env:
+          BACKEND_URL: ${{ secrets.SECRETARY_BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "ยังไม่ได้ตั้ง secret SECRETARY_BACKEND_URL" >&2
+            exit 1
+          fi
+          curl --silent --show-error --fail --output /dev/null \
+            --retry 3 --retry-delay 15 --retry-all-errors --max-time 60 \
+            --write-out 'code=%{http_code} time=%{time_total}s\n' \
+            "${BACKEND_URL%/}/"

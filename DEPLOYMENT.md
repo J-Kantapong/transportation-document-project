@@ -49,7 +49,10 @@ unbuilt TypeScript directly via `nest start` and will fail with "property does n
 type PrismaService" errors since the Prisma client and compiled output were never produced).
 
 Free-tier Render web services spin down after ~15 minutes idle; the first request after that
-takes a few seconds (cold start). Fine for a prototype, worth upgrading the plan before real use.
+takes about a minute (cold start; over 8 minutes was seen on 2026-10-09). To avoid that during
+office hours, `.github/workflows/keep-awake.yml` calls `GET /` on the production backend every
+10 minutes, Monday to Saturday 07:00-19:00 Thai time (secret `SECRETARY_BACKEND_URL`; runs only
+from `master`). Outside those hours the service still sleeps. Upgrading the plan removes the need.
 
 ## 3. Vercel (frontend)
 
