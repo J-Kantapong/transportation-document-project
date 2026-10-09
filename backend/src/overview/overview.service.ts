@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.service.js';
 import { WHT_OVERDUE_DAYS } from '../billing/tax-invoice.service.js';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -284,7 +285,20 @@ export class OverviewService {
           receiptDate: { gte: toDate(addDays(asOf, -(SERIES_DAYS - 1))), lte: day }, // วันที่ในใบเสร็จ (ผู้ใช้ 2026-09-25)
           vehicle: live,
         },
-        select: { id: true, receiptDate: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, vehicle: { select: vehicleRef } },
+        select: {
+          id: true,
+          receiptDate: true,
+          receiptAmount: true,
+          billFeeTotal: true,
+          taxAmount: true,
+          plateNumberOption: true,
+          includePlateFee: true,
+          newPlateOption: true,
+          relocateAddon: true,
+          stopUseRelocateOut: true,
+          urgent: true,
+          vehicle: { select: { ...vehicleRef, registrationProvince: true, ownerProvince: true } },
+        },
       }),
       // --- รถที่ยังไม่จบงาน (ยังไม่ส่งงาน / ป้ายค้างส่ง / ยังไม่วางบิล) -> คิวค้าง + คันที่ติดขัด ---
       // ปิดงาน - วางบิลนอกระบบแล้ว = ไม่ค้างวางบิล (ผู้ใช้ 2026-09-27)
@@ -977,8 +991,11 @@ export class OverviewService {
     const quoteExpired = quoteExpiredList.length;
     const quoteApprovedOpen = quoteApprovedList.length;
     // ส่วนต่างมากสุดขึ้นก่อน (ไม่ปัดเศษตรงนี้ ยอดรวมในข้อความจึงเท่าเดิม)
+    // เทียบกับยอดที่ควรเป็นจากข้อมูลรถ "ล่าสุด" (แก้จังหวัดหลังยื่นแล้วต้องไม่เตือนซ้ำ) - คำนวณไม่ได้ใช้ยอดที่จดไว้ตอนยื่น
+    const feeRules = await loadDocumentFeeRules(this.prisma);
+    const expectedOf = (r: (typeof receiptRows)[number]) => currentBillEstimate(r.vehicle, r, feeRules) ?? num(r.billFeeTotal) + num(r.taxAmount);
     const varianceRows = receiptRows
-      .map((r) => ({ ...r, diff: num(r.receiptAmount) - (num(r.billFeeTotal) + num(r.taxAmount)) }))
+      .map((r) => ({ ...r, expected: expectedOf(r), diff: num(r.receiptAmount) - expectedOf(r) }))
       .filter((r) => Math.abs(r.diff) >= 1)
       .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
     const variance = varianceRows.map((r) => r.diff);
@@ -1170,7 +1187,7 @@ export class OverviewService {
           amount: round2(r.diff),
           dateLabel: 'ใบเสร็จ',
           date: r.receiptDate ? isoOf(r.receiptDate) : null,
-          note: `ใบเสร็จ ${fmt(num(r.receiptAmount))} · ระบบคำนวณ ${fmt(num(r.billFeeTotal) + num(r.taxAmount))}`,
+          note: `ใบเสร็จ ${fmt(num(r.receiptAmount))} · ระบบคำนวณ ${fmt(r.expected)}`,
           href: focusUrl(receiptPage(r.vehicle.body), r.vehicle.chassis),
         })),
       },

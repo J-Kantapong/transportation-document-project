@@ -338,7 +338,22 @@ export function flipOtherProvince<T extends { registrationProvince: string | nul
   return { ...vehicle, ownerProvince: otherProvince ? vehicle.registrationProvince : `ไม่ใช่ ${vehicle.registrationProvince ?? ''}` };
 }
 
-function currentBillEstimate(
+// ตารางกฎค่าธรรมเนียมสำหรับคำนวณ Bill ใหม่ - อ่านไม่ได้ = null (ผู้เรียกใช้ยอดที่เก็บไว้แทน)
+export async function loadDocumentFeeRules(prisma: PrismaService): Promise<DocumentFeeRuleSet | null> {
+  try {
+    const [carBill, carNoBill, motoBill, motoNoBill] = await Promise.all([
+      prisma.feeCarBillParam.findMany(),
+      prisma.feeCarNoBillParam.findMany(),
+      prisma.feeMotorcycleBillParam.findMany(),
+      prisma.feeMotorcycleNoBillParam.findMany(),
+    ]);
+    return { carBill: feeRows(carBill), carNoBill: feeRows(carNoBill), motoBill: feeRows(motoBill), motoNoBill: feeRows(motoNoBill) };
+  } catch {
+    return null;
+  }
+}
+
+export function currentBillEstimate(
   vehicle: { body: string | null; registrationProvince: string | null; ownerProvince: string | null },
   sub: {
     taxAmount: unknown;
@@ -1729,18 +1744,8 @@ export class BillingService {
   }
 
   // ตารางอัตราค่าธรรมเนียมขั้นยื่นเอกสาร (ชุดเดียวกับ DocumentSubmissionService.loadRuleSet) - โหลดไม่ได้ = null (ใช้ยอดตอนยื่น)
-  private async loadFeeRules(): Promise<DocumentFeeRuleSet | null> {
-    try {
-      const [carBill, carNoBill, motoBill, motoNoBill] = await Promise.all([
-        this.prisma.feeCarBillParam.findMany(),
-        this.prisma.feeCarNoBillParam.findMany(),
-        this.prisma.feeMotorcycleBillParam.findMany(),
-        this.prisma.feeMotorcycleNoBillParam.findMany(),
-      ]);
-      return { carBill: feeRows(carBill), carNoBill: feeRows(carNoBill), motoBill: feeRows(motoBill), motoNoBill: feeRows(motoNoBill) };
-    } catch {
-      return null;
-    }
+  private loadFeeRules(): Promise<DocumentFeeRuleSet | null> {
+    return loadDocumentFeeRules(this.prisma);
   }
 
   private editLog(tx:Pick<Prisma.TransactionClient, 'vehicleEditLog'>, vehicleId: string, remark: string, changes: Record<string, unknown>) {
