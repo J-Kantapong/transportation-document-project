@@ -19,6 +19,8 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { computeTotals, effectiveWhtRate, formatMoney, round2 } from "@/lib/invoice";
 import { printInvoice } from "@/lib/invoice-print";
 import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
+import { ClosedJobsPanel, CloseJobDialog } from "@/components/OtherJobClosing";
+import { getCachedUser } from "@/lib/auth";
 import { DateInput } from "@/components/DateInput";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
 
@@ -78,6 +80,10 @@ export function OtherJobsBillingPage() {
   const [whtValue, setWhtValue] = useState<number | null>(null);
   const [whtChecked, setWhtChecked] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-10-13): งานที่กำลังปิด / นับรอบโหลดรายการที่ปิดแล้วใหม่ / เปิดกลับได้เฉพาะ ADMIN
+  const [closing, setClosing] = useState<OtherJob | null>(null);
+  const [closedReload, setClosedReload] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean }>({ text: "", error: false });
@@ -121,6 +127,12 @@ export function OtherJobsBillingPage() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [load]);
+
+  // อ่านบทบาทหลัง mount (cookie/localStorage ไม่มีตอน render ฝั่งเซิร์ฟเวอร์) - เปิดงานที่ปิดไว้กลับได้เฉพาะ ADMIN
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsAdmin((getCachedUser()?.roles ?? []).includes("ADMIN"));
+  }, []);
 
   const queueCustomer = queue?.customers.find((c) => c.id === customerId) ?? null;
   const jobs = useMemo(() => queueCustomer?.jobs ?? [], [queueCustomer]);
@@ -374,7 +386,7 @@ export function OtherJobsBillingPage() {
               {ratesOpen && (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                    ราคาก่อน VAT ต่อ 1 งาน (ติ๊ก "รวมใบเสร็จ" = ราคาเหมารวมค่าธรรมเนียมแล้ว ค่าบริการ = ราคา - ค่าธรรมเนียมจริงของงานนั้น) · ระบบใช้แถวแรกที่ตรงประเภทงาน ชนิดรถ และแบบงาน (งานโอนแยกแบบได้) · ไม่มีแถวที่ตรง = ต้องกรอกค่าบริการเองก่อนออกบิล · เปลี่ยนราคาไม่กระทบบิลที่ออกไปแล้ว
+                    ราคาก่อน VAT ต่อ 1 งาน (ติ๊ก “รวมใบเสร็จ” = ราคาเหมารวมค่าธรรมเนียมแล้ว ค่าบริการ = ราคา - ค่าธรรมเนียมจริงของงานนั้น) · ระบบใช้แถวแรกที่ตรงประเภทงาน ชนิดรถ และแบบงาน (งานโอนแยกแบบได้) · ไม่มีแถวที่ตรง = ต้องกรอกค่าบริการเองก่อนออกบิล · เปลี่ยนราคาไม่กระทบบิลที่ออกไปแล้ว
                   </p>
                   {rateRows.map((r, i) => (
                     <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
@@ -465,6 +477,7 @@ export function OtherJobsBillingPage() {
                       <th>เจ้าของรถ</th>
                       <th style={{ textAlign: "right" }}>ค่าธรรมเนียม</th>
                       <th style={{ textAlign: "right" }}>ค่าบริการ (ก่อน VAT)</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -515,6 +528,11 @@ export function OtherJobsBillingPage() {
                               </div>
                             ))}
                             {blocked && <div style={{ fontSize: 12, color: "#c0392b", textAlign: "right" }}>{blocked}</div>}
+                          </td>
+                          <td>
+                            <button type="button" className="text-button" onClick={() => setClosing(j)} title="งานนี้วางบิลที่อื่นแล้ว - เอาออกจากคิวนี้">
+                              ปิดงาน
+                            </button>
                           </td>
                         </tr>
                       );
@@ -600,6 +618,21 @@ export function OtherJobsBillingPage() {
           )}
         </section>
       )}
+      {closing && (
+        <CloseJobDialog
+          job={closing}
+          customerName={queueCustomer?.company || queueCustomer?.name || ""}
+          onClose={() => setClosing(null)}
+          onClosed={() => {
+            setPicked((prev) => new Set([...prev].filter((k) => k !== keyOf(closing))));
+            setMessage({ text: `ปิดงาน ${closing.typeLabel} ${closing.plateText || closing.chassis} แล้ว - งานออกจากคิวรอวางบิล`, error: false });
+            setClosedReload((n) => n + 1);
+            void load();
+          }}
+          onRefused={() => void load()}
+        />
+      )}
+      <ClosedJobsPanel reloadKey={closedReload} canReopen={isAdmin} onReopened={() => void load()} />
     </section>
   );
 }

@@ -1092,13 +1092,19 @@ export class BillingService {
       });
       for (const r of rows) billed.set(`${r.sourceType}:${r.sourceId}`, r.invoice.invoiceNo);
     }
-    return jobs.map((j) => ({ ...j, billedInvoiceNo: billed.get(`${j.type}:${j.id}`) ?? null }));
+    // งานที่ปิดงาน - วางบิลนอกระบบแล้ว (JobBillingClosure) ไม่อยู่ในคิวและลงบิลในระบบไม่ได้จนกว่า ADMIN เปิดกลับ
+    const closed = new Map<string, string>();
+    if (jobs.length) {
+      const rows = await db.jobBillingClosure.findMany({ where: { jobId: { in: jobs.map((j) => j.id) } }, select: { jobType: true, jobId: true, note: true } });
+      for (const r of rows) closed.set(`${r.jobType}:${r.jobId}`, r.note);
+    }
+    return jobs.map((j) => ({ ...j, billedInvoiceNo: billed.get(`${j.type}:${j.id}`) ?? null, closedNote: closed.get(`${j.type}:${j.id}`) ?? null }));
   }
 
   // คิวงานอื่นๆ รอวางบิล จัดกลุ่มตามลูกค้า พร้อมราคาค่าบริการที่ระบบเสนอ (จากตารางราคาของลูกค้า) - ไม่มีราคาที่ตรง = เสนอ null ให้บัญชีกรอกเอง
   async otherJobsQueue() {
     const [all, numbers] = await Promise.all([this.loadJobs(this.prisma, {}), this.nextInvoiceNumbers()]);
-    const waiting = all.filter((j) => !j.billedInvoiceNo);
+    const waiting = all.filter((j) => !j.billedInvoiceNo && j.closedNote === null);
     const customerIds = [...new Set(waiting.map((j) => j.customerId))];
     const customers = await this.prisma.customer.findMany({
       where: { id: { in: customerIds } },
@@ -1223,6 +1229,7 @@ export class BillingService {
       if (!job) throw bad(`${JOB_LABEL[p.type]}บางงานไม่พร้อมวางบิล (ถูกยกเลิก ยังไม่รับใบเสร็จกลับ หรือไม่ใช่ของลูกค้ารายนี้) กรุณาโหลดรายการใหม่`);
       const target = job.plateText || job.chassis;
       if (job.billedInvoiceNo) throw bad(`${JOB_LABEL[job.type]} ${target} อยู่ในบิล ${job.billedInvoiceNo} แล้ว`);
+      if (job.closedNote !== null) throw bad(`${JOB_LABEL[job.type]} ${target} ปิดงาน (วางบิลนอกระบบ) ไปแล้ว`);
       const fee = feeOf(job).amount;
       if (fee <= 0 && p.serviceFee <= 0) throw bad(`${JOB_LABEL[job.type]} ${target} ไม่มียอดให้วางบิล`);
       items.push(...jobItems(job, p.serviceFee, fee, p.serviceLabel, firstSortOrder + items.length));
@@ -1677,6 +1684,106 @@ export class BillingService {
     const offset = Math.max(0, Number.parseInt(params.offset ?? '0', 10) || 0);
     const rows = await this.closedRows({}, offset, CLOSED_PAGE + 1);
     return { vehicles: rows.slice(0, CLOSED_PAGE), hasMore: rows.length > CLOSED_PAGE };
+  }
+
+  // ---------- ปิดงาน - วางบิลนอกระบบ ของงานอื่นๆ (ผู้ใช้ 2026-10-13, เหมือนของรถ) ----------
+  // งานที่ส่งงานลูกค้าแล้ว (พร้อมวางบิล) แต่วางบิลที่อื่น: ADMIN / ACCOUNTANT ปิดพร้อมหมายเหตุ -> ออกจากคิววางบิลงานอื่นๆ และลงบิลในระบบไม่ได้
+  // เปิดกลับได้เฉพาะ ADMIN พร้อมเหตุผล (access-policy.ts) · ทุกครั้งบันทึกลง AuditLog ของงานนั้น (entity = ชื่อโมเดลงาน)
+  private async lockJobRow(tx: Prisma.TransactionClient, type: JobType, id: string) {
+    // ชื่อตารางมาจาก JOB_TABLE (ค่าคงที่) ไม่ใช่ข้อมูลจากผู้ใช้ - ล็อกแถวเหมือนตอนออกบิล กันปิดงานพร้อมกับออกบิลงานเดียวกัน
+    await tx.$queryRawUnsafe(`SELECT "id" FROM "${JOB_TABLE[type]}" WHERE "id" = $1 FOR UPDATE`, id);
+  }
+
+  async closeJobBilling(dto: { type?: unknown; id?: unknown; note?: unknown }) {
+    if (!isJobType(dto?.type) || typeof dto.id !== 'string' || !dto.id) throw bad('ต้องระบุประเภทงานและงานที่จะปิด');
+    const type = dto.type;
+    const id = dto.id;
+    const note = requireRemark(dto.note, 'กรุณาระบุหมายเหตุการปิดงาน เช่น วางบิลที่ไหน เลขที่อะไร');
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockJobRow(tx, type, id);
+      const [job] = await this.loadJobs(tx, { ids: new Map([[type, [id]]]) });
+      if (!job) throw bad(`${JOB_LABEL[type]}นี้ยังไม่พร้อมวางบิล (ยังไม่ได้ส่งงานลูกค้า ถูกยกเลิก หรือไม่มีเจ้าของงาน) กรุณาโหลดรายการใหม่`);
+      const target = job.plateText || job.chassis;
+      if (job.billedInvoiceNo) throw bad(`${JOB_LABEL[type]} ${target} อยู่ในบิล ${job.billedInvoiceNo} แล้ว`);
+      if (job.closedNote !== null) throw bad(`${JOB_LABEL[type]} ${target} ปิดงานไปแล้ว`);
+      try {
+        await tx.jobBillingClosure.create({ data: { jobType: type, jobId: id, note, closedById: currentUser()?.id ?? null } });
+      } catch (err) {
+        if ((err as { code?: string }).code === 'P2002') throw conflict(`${JOB_LABEL[type]} ${target} เพิ่งถูกปิดงาน กรุณาโหลดรายการใหม่`);
+        throw err;
+      }
+      await writeAudit(tx, {
+        entity: JOB_TABLE[type],
+        entityId: id,
+        action: 'billing-close',
+        remark: note,
+        changes: { 'ปิดงาน - วางบิลนอกระบบ': { from: null, to: note } },
+      });
+    });
+    return { type, id, closed: true };
+  }
+
+  async reopenJobBilling(dto: { type?: unknown; id?: unknown; remark?: unknown }) {
+    if (!isJobType(dto?.type) || typeof dto.id !== 'string' || !dto.id) throw bad('ต้องระบุประเภทงานและงานที่จะเปิดกลับ');
+    const type = dto.type;
+    const id = dto.id;
+    const remark = requireRemark(dto.remark, 'กรุณาระบุเหตุผลที่เปิดงานกลับ');
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockJobRow(tx, type, id);
+      const closure = await tx.jobBillingClosure.findUnique({ where: { jobType_jobId: { jobType: type, jobId: id } } });
+      if (!closure) throw bad(`${JOB_LABEL[type]}นี้ไม่ได้ปิดงานไว้ (อาจถูกเปิดกลับไปแล้ว) กรุณาโหลดรายการใหม่`);
+      const { count } = await tx.jobBillingClosure.deleteMany({ where: { id: closure.id } });
+      if (count !== 1) throw conflict(`${JOB_LABEL[type]}นี้ถูกเปิดงานกลับไปแล้ว กรุณาโหลดรายการใหม่`);
+      await writeAudit(tx, {
+        entity: JOB_TABLE[type],
+        entityId: id,
+        action: 'billing-reopen',
+        remark,
+        changes: { 'ปิดงาน - วางบิลนอกระบบ': { from: closure.note, to: null } },
+      });
+    });
+    return { type, id, reopened: true };
+  }
+
+  // งานอื่นๆ ที่ปิดงานไว้ ใหม่สุดก่อนทีละ 100 งาน (งานที่ถูกยกเลิก/แก้จนไม่พร้อมวางบิลแล้วยังแสดง เพื่อให้ ADMIN เปิดกลับได้)
+  async listClosedJobs(params: { offset?: string } = {}) {
+    const offset = Math.max(0, Number.parseInt(params.offset ?? '0', 10) || 0);
+    const closures = await this.prisma.jobBillingClosure.findMany({
+      orderBy: [{ closedAt: 'desc' }, { id: 'desc' }],
+      skip: offset,
+      take: CLOSED_PAGE + 1,
+      include: { closedBy: { select: { name: true, displayName: true } } },
+    });
+    const page = closures.slice(0, CLOSED_PAGE);
+    const ids = new Map<JobType, string[]>();
+    for (const c of page) if (isJobType(c.jobType)) ids.set(c.jobType, [...(ids.get(c.jobType) ?? []), c.jobId]);
+    const jobs = ids.size ? await this.loadJobs(this.prisma, { ids }) : [];
+    const byKey = new Map(jobs.map((j) => [`${j.type}:${j.id}`, j]));
+    const customers = await this.prisma.customer.findMany({
+      where: { id: { in: [...new Set(jobs.map((j) => j.customerId))] } },
+      select: { id: true, name: true, company: true },
+    });
+    const customerName = new Map(customers.map((c) => [c.id, c.company || c.name]));
+    return {
+      jobs: page.map((c) => {
+        const job = byKey.get(`${c.jobType}:${c.jobId}`);
+        const type = isJobType(c.jobType) ? c.jobType : null;
+        return {
+          type: c.jobType,
+          typeLabel: type ? JOB_LABEL[type] : c.jobType,
+          id: c.jobId,
+          chassis: job?.chassis ?? null,
+          plateText: job?.plateText ?? '',
+          brand: job?.brand ?? null,
+          customerName: job ? (customerName.get(job.customerId) ?? null) : null,
+          deliveredDate: job?.deliveredDate ?? null,
+          closedAt: c.closedAt.toISOString(),
+          note: c.note,
+          closedBy: nameOf(c.closedBy),
+        };
+      }),
+      hasMore: closures.length > CLOSED_PAGE,
+    };
   }
 
   private async closedRows(where: { id?: string }, skip = 0, take?: number) {

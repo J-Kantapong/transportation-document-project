@@ -414,6 +414,21 @@ export interface JobFeeRate {
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จ: ค่าบริการ = ราคา - ค่าธรรมเนียมของงานนั้น
 }
 
+// งานอื่นๆ ที่ปิดงาน - วางบิลนอกระบบไว้ (งานที่ถูกยกเลิก/แก้จนไม่พร้อมวางบิลแล้วจะไม่มีเลขตัวถัง ฯลฯ แต่ยังเปิดกลับได้)
+export interface ClosedBillingJob {
+  type: string;
+  typeLabel: string;
+  id: string;
+  chassis: string | null;
+  plateText: string;
+  brand: string | null;
+  customerName: string | null;
+  deliveredDate: string | null;
+  closedAt: string; // ISO timestamp
+  note: string;
+  closedBy: string | null;
+}
+
 export interface OtherJob {
   type: JobType;
   id: string;
@@ -663,6 +678,10 @@ export const billingApi = {
   invoiceLiveLines: (id: string) => request<{ lines: InvoiceLiveLine[] }>(`/api/billing/invoices/${encodeURIComponent(id)}/live-lines`),
   customerTerms: (customerId: string) => request<{ terms: BillingTerms }>(`/api/billing/customers/${encodeURIComponent(customerId)}/terms`),
   // ปิดงาน - วางบิลนอกระบบ (ADMIN + ACCOUNTANT) / เปิดงานกลับ (ADMIN) - รายการรถที่ปิดไว้ใหม่สุดก่อนทีละ 100 คัน
+  // ปิดงาน - วางบิลนอกระบบ ของงานอื่นๆ (ผู้ใช้ 2026-10-13): ปิด = ADMIN + ACCOUNTANT, เปิดกลับ = ADMIN
+  closedJobs: (offset = 0) => request<{ jobs: ClosedBillingJob[]; hasMore: boolean }>(`/api/billing/other-jobs/closed?offset=${offset}`),
+  closeJobBilling: (type: JobType, id: string, note: string) => request<{ type: JobType; id: string; closed: boolean }>("/api/billing/other-jobs/close", json("POST", { type, id, note })),
+  reopenJobBilling: (type: string, id: string, remark: string) => request<{ type: string; id: string; reopened: boolean }>("/api/billing/other-jobs/reopen", json("POST", { type, id, remark })),
   closedVehicles: (offset = 0) => request<{ vehicles: ClosedBillingVehicle[]; hasMore: boolean }>(`/api/billing/vehicles/closed?offset=${offset}`),
   closeVehicleBilling: (vehicleId: string, note: string) =>
     request<{ vehicle: ClosedBillingVehicle }>(`/api/billing/vehicles/${encodeURIComponent(vehicleId)}/close`, json("POST", { note })),

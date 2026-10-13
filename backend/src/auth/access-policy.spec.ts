@@ -89,6 +89,17 @@ describe('access policy billing corrections', () => {
     expect(isAllowed(accessFor('/api/billing/vehicles/v1/reopen', 'POST'), ['ADMIN'])).toBe(true);
     expect(isAllowed(accessFor('/api/billing/invoices/i1/unpay', 'PATCH'), ['STAFF_CAR'])).toBe(false);
   });
+
+  // ผู้ใช้ 2026-10-13: งานอื่นๆ ปิดงานได้เหมือนรถ - บัญชีปิดได้ เปิดกลับได้เฉพาะ ADMIN
+  it('lets ACCOUNTANT close other jobs but only ADMIN reopen them', () => {
+    const accountant: ['ACCOUNTANT'] = ['ACCOUNTANT'];
+    expect(isAllowed(accessFor('/api/billing/other-jobs/close', 'POST'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/other-jobs/closed', 'GET'), accountant)).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/other-jobs/reopen', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/API/Billing/Other-Jobs/Reopen/', 'POST'), accountant)).toBe(false);
+    expect(isAllowed(accessFor('/api/billing/other-jobs/reopen', 'POST'), ['ADMIN'])).toBe(true);
+    expect(isAllowed(accessFor('/api/billing/other-jobs/close', 'POST'), ['STAFF_CAR'])).toBe(false);
+  });
 });
 
 // ผู้ใช้ 2026-09-27: "✎ แก้" แจ้งย้าย/ตัดบัญชีที่ดำเนินการแล้ว สิทธิ์เดียวกับการบันทึก (ENTRY + STAFF_MOTO ที่ service กรองจักรยานยนต์)

@@ -104,7 +104,10 @@ const transferRow = {
   transfereeName: 'B',
 };
 
-function setup(opts: { billedBy?: string; transfers?: unknown[]; customerOverride?: Record<string, unknown> } = {}) {
+function setup(opts: { billedBy?: string; closedNote?: string; transfers?: unknown[]; customerOverride?: Record<string, unknown> } = {}) {
+  const closureCreate = vi.fn().mockResolvedValue({});
+  const closureDelete = vi.fn().mockResolvedValue({ count: 1 });
+  const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
   const create = vi.fn().mockImplementation(async ({ data }) => ({
     id: 'i1',
     status: 'ISSUED',
@@ -122,6 +125,13 @@ function setup(opts: { billedBy?: string; transfers?: unknown[]; customerOverrid
     invoiceItem: {
       findMany: vi.fn().mockResolvedValue(opts.billedBy ? [{ sourceType: 'TRANSFER', sourceId: 't1', invoice: { invoiceNo: opts.billedBy } }] : []),
     },
+    jobBillingClosure: {
+      findMany: vi.fn().mockResolvedValue(opts.closedNote ? [{ jobType: 'TRANSFER', jobId: 't1', note: opts.closedNote }] : []),
+      findUnique: vi.fn().mockResolvedValue(opts.closedNote ? { id: 'c9', jobType: 'TRANSFER', jobId: 't1', note: opts.closedNote } : null),
+      create: closureCreate,
+      deleteMany: closureDelete,
+    },
+    auditLog: { create: auditCreate },
     vehicleTransfer: { findMany: vi.fn().mockResolvedValue(opts.transfers ?? [transferRow]) },
     vehicleUseCancellation: { findMany: vi.fn().mockResolvedValue([]) },
     plateCopy: { findMany: vi.fn().mockResolvedValue([]) },
@@ -130,7 +140,7 @@ function setup(opts: { billedBy?: string; transfers?: unknown[]; customerOverrid
     $queryRawUnsafe: queryRawUnsafe,
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
   } as unknown as PrismaService;
-  return { svc: new BillingService(prisma), create, queryRawUnsafe };
+  return { svc: new BillingService(prisma), create, queryRawUnsafe, closureCreate, closureDelete, auditCreate };
 }
 
 const dto = (o: Record<string, unknown> = {}) => ({
@@ -241,6 +251,7 @@ describe('BillingService.createInvoice with other jobs', () => {
       customer: { findUnique: vi.fn().mockResolvedValue({ ...customer, accountPeriods: opts.periods ?? [] }) },
       invoice: { findUnique: vi.fn().mockResolvedValue(null), create },
       invoiceItem: { findMany: vi.fn().mockResolvedValue([]) },
+      jobBillingClosure: { findMany: vi.fn().mockResolvedValue([]) },
       vehicle: { findMany: vi.fn().mockResolvedValue([vehicle]) },
       plateSwap: { findMany: vi.fn().mockResolvedValue([]) },
       vehicleTransfer: { findMany: vi.fn().mockResolvedValue([transferRow]) },
@@ -360,5 +371,40 @@ describe('suggestedJobServiceFee', () => {
   });
   it('ค่าธรรมเนียมแพงกว่าราคาเหมา = null ให้บัญชีกรอกเอง', () => {
     expect(suggestedJobServiceFee({ amount: 800, includesReceipt: true }, 900)).toBeNull();
+  });
+});
+
+describe('BillingService other jobs: ปิดงาน - วางบิลนอกระบบ', () => {
+  it('leaves a closed job out of the queue and refuses to bill it', async () => {
+    const { svc } = setup({ closedNote: 'วางบิลใน Google Sheet IV2026-130' });
+    const queue = await svc.otherJobsQueue();
+    expect(queue.customers).toEqual([]);
+    await expect(
+      svc.createJobInvoice({ customerId: 'c1', invoiceNo: 'IV2026-121', issueDate: '2026-10-10', jobs: [{ type: 'TRANSFER', id: 't1', serviceFee: 400, serviceLabel: '' }] }),
+    ).rejects.toMatchObject({ response: { error: expect.stringMatching(/ปิดงาน/) } });
+  });
+
+  it('closes a delivered job with a note, locking the row and writing the audit log of that job', async () => {
+    const { svc, closureCreate, auditCreate, queryRawUnsafe } = setup();
+    await svc.closeJobBilling({ type: 'TRANSFER', id: 't1', note: 'วางบิลใน Google Sheet IV2026-130' });
+    expect(queryRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('"VehicleTransfer"'), 't1');
+    expect(closureCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ jobType: 'TRANSFER', jobId: 't1', note: 'วางบิลใน Google Sheet IV2026-130' }) });
+    expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ entity: 'VehicleTransfer', entityId: 't1', action: 'billing-close' }) }));
+  });
+
+  it('needs a note, and refuses a job already billed or already closed', async () => {
+    await expect(setup().svc.closeJobBilling({ type: 'TRANSFER', id: 't1', note: '  ' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/หมายเหตุ/) } });
+    await expect(setup().svc.closeJobBilling({ type: 'NOPE', id: 't1', note: 'x' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/ประเภทงาน/) } });
+    await expect(setup({ billedBy: 'IV2026-100' }).svc.closeJobBilling({ type: 'TRANSFER', id: 't1', note: 'x' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/IV2026-100/) } });
+    await expect(setup({ closedNote: 'เดิม' }).svc.closeJobBilling({ type: 'TRANSFER', id: 't1', note: 'x' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/ปิดงานไปแล้ว/) } });
+  });
+
+  it('reopens a closed job with a reason and logs it; refuses a job that is not closed', async () => {
+    const closed = setup({ closedNote: 'เดิม' });
+    await closed.svc.reopenJobBilling({ type: 'TRANSFER', id: 't1', remark: 'ปิดผิดงาน' });
+    expect(closed.closureDelete).toHaveBeenCalledWith({ where: { id: 'c9' } });
+    expect(closed.auditCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ entity: 'VehicleTransfer', action: 'billing-reopen', remark: 'ปิดผิดงาน' }) }));
+    await expect(closed.svc.reopenJobBilling({ type: 'TRANSFER', id: 't1', remark: '' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/เหตุผล/) } });
+    await expect(setup().svc.reopenJobBilling({ type: 'TRANSFER', id: 't1', remark: 'x' })).rejects.toMatchObject({ response: { error: expect.stringMatching(/ไม่ได้ปิดงาน/) } });
   });
 });

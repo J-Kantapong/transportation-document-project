@@ -92,6 +92,7 @@ model User {
   cancelledPlateCopies      PlateCopy[]              @relation("PlateCopyCancels")
   cancelledTransfers        VehicleTransfer[]        @relation("VehicleTransferCancels")
   billingClosures           Vehicle[]                @relation("VehicleBillingClosures")
+  jobBillingClosures        JobBillingClosure[]      @relation("JobBillingClosures")
   accountPeriods            CustomerAccountPeriod[]  @relation("CustomerAccountPeriods")
   paymentsCreated           CustomerPayment[]        @relation("CustomerPaymentsCreated")
   paymentsCancelled         CustomerPayment[]        @relation("CustomerPaymentsCancelled")
@@ -1547,6 +1548,22 @@ model InvoiceItem {
 // ตารางค่าบริการต่อลูกค้า ต่อประเภทงานอื่นๆ (ผู้ใช้ 2026-10-07: "ราคาแต่ละเจ้าไม่เท่ากัน") - แยกจาก ServiceFeeRate ของรถจดใหม่ ไม่กระทบการจับคู่ราคาเดิม
 // จับคู่: jobType เท่ากัน + vehicleClass ตรง (หรือ ANY) + variant ตรง (หรือว่าง = ทุกแบบ) แถวที่ sortOrder น้อยสุดที่เข้าเงื่อนไขชนะ
 // amount = ค่าบริการก่อน VAT (ส่วนค่าธรรมเนียมราชการอ่านจากใบเสร็จของงานเอง)
+// ปิดงาน - วางบิลนอกระบบ ของงานอื่นๆ (ผู้ใช้ 2026-10-13, เหมือน Vehicle.billingClosed*): งานที่ส่งงานลูกค้าแล้วแต่วางบิลที่อื่น
+// ออกจากคิววางบิลงานอื่นๆ แถวเดียวต่องาน (เปิดกลับ = ลบแถว + AuditLog) jobType/jobId ชี้งานโดยไม่มี FK เหมือน InvoiceItem.sourceType/sourceId
+model JobBillingClosure {
+  id         String   @id @default(cuid())
+  jobType    String // TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL
+  jobId      String
+  note       String // หมายเหตุตอนปิด เช่น วางบิลที่ไหน เลขที่อะไร
+  closedAt   DateTime @default(now())
+  closedById String?
+
+  closedBy User? @relation("JobBillingClosures", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@unique([jobType, jobId])
+  @@index([closedAt])
+}
+
 model JobFeeRate {
   id           String   @id @default(cuid())
   customerId   String

@@ -77,6 +77,22 @@ export class BillingController {
     return { invoice: await this.billingService.createJobInvoice(body ?? {}) };
   }
 
+  // ปิดงาน - วางบิลนอกระบบ ของงานอื่นๆ (ผู้ใช้ 2026-10-13): ปิด = ADMIN + ACCOUNTANT, เปิดกลับ = ADMIN เท่านั้น (access-policy.ts)
+  @Get('other-jobs/closed')
+  listClosedJobs(@Query('offset') offset?: string) {
+    return this.billingService.listClosedJobs({ offset });
+  }
+
+  @Post('other-jobs/close')
+  closeJobBilling(@Body() body: { type?: unknown; id?: unknown; note?: unknown }) {
+    return this.billingService.closeJobBilling(body ?? {});
+  }
+
+  @Post('other-jobs/reopen')
+  reopenJobBilling(@Body() body: { type?: unknown; id?: unknown; remark?: unknown }) {
+    return this.billingService.reopenJobBilling(body ?? {});
+  }
+
   @Get('customers/:id/job-rates')
   async getJobRates(@Param('id') id: string) {
     return { rates: await this.billingService.getJobRates(id) };
