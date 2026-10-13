@@ -13,7 +13,7 @@ import type { CreateDocumentSubmissionDto } from './dto/create-document-submissi
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
 import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEntryDto } from './dto/preview-bulk-document-submission.dto.js';
 import type { GovernmentTaxOwnerInput, GovernmentTaxRuleSet } from '../tax/government-tax-calculator.js';
-import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason, OPEN_PLATE_SWAP_WHERE } from './submission-eligibility.js';
+import { ACTIVE_SUBMISSION_STATUSES, getSubmitBlockReason, SUBMIT_BLOCKING_SWAP_WHERE } from './submission-eligibility.js';
 import { lockSubmissions } from './submission-lock.js';
 import { SUPPLIER_FEE_KEYS, SUPPLIER_FEE_LABELS, withoutOfficeOnlyOptions } from './supplier-route.js';
 import {
@@ -223,7 +223,7 @@ export class DocumentSubmissionService {
       orderBy: { createdAt: 'desc' },
     });
     const plateSwap = checkPlateSwap
-      ? await client.plateSwap.findFirst({ where: { newVehicleId: vehicle.id, ...OPEN_PLATE_SWAP_WHERE }, select: { returnedDate: true } })
+      ? await client.plateSwap.findFirst({ where: { newVehicleId: vehicle.id, ...SUBMIT_BLOCKING_SWAP_WHERE }, select: { returnedDate: true, vehicleClass: true } })
       : null;
     const reason = getSubmitBlockReason({ ...vehicle, activeSubmissionStatus: active?.status ?? null, plateSwap }, submitDate);
     if (reason) throw new BadRequestException({ error: reason });

@@ -57,6 +57,7 @@ export interface PlateSwapSummary {
   newPlateNumber: string | null;
   submitDate: string; // YYYY-MM-DD
   returnedDate: string | null;
+  vehicleClass: string; // CAR | MOTO - สลับเลขมอเตอร์ไซค์ไม่ล็อกการยื่นของรถใหม่
 }
 
 // คำเตือนตอนแก้ข้อมูลรถที่ผ่านขั้นตอนถัดไปแล้ว (ผู้ใช้ 2026-09-27) - tax = ภาษีที่ยื่นไว้ + ข้อมูลใหม่สำหรับ preview ภาษี
@@ -409,6 +410,7 @@ export class VehiclesService {
           newPlateNumber: true,
           submitDate: true,
           returnedDate: true,
+          vehicleClass: true,
         },
       });
       const map = new Map<string, PlateSwapSummary>();
@@ -423,6 +425,7 @@ export class VehiclesService {
           newPlateNumber: swap.newPlateNumber,
           submitDate: swap.submitDate.toISOString().slice(0, 10),
           returnedDate: swap.returnedDate?.toISOString().slice(0, 10) ?? null,
+          vehicleClass: swap.vehicleClass,
         });
       }
       return map;

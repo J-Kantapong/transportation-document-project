@@ -29,13 +29,17 @@ export interface SubmissionEligibilityInput {
   activeSubmissionStatus: string | null;
   // งานสลับเลขที่รถคันนี้รอรับเลขอยู่ (ผู้ใช้ 2026-09-23) - ต้องยืนยันรับเอกสารกลับของงานสลับเลขก่อนจึงยื่นได้
   // ไม่มีงานสลับเลข = undefined/null (รถทั่วไปไม่กระทบ) · ผู้เรียกส่งงานที่ยังเปิดอยู่มาก่อนเสมอ (ดู OPEN_PLATE_SWAP_WHERE)
-  plateSwap?: { returnedDate: Date | string | null } | null;
+  plateSwap?: { returnedDate: Date | string | null; vehicleClass?: string | null } | null;
 }
 
 // งานสลับเลขที่ "ยังเปิดอยู่" = ยังไม่ยืนยันรับเอกสารกลับ และไม่ได้ยกเลิก - รถใหม่ที่มีงานแบบนี้แม้งานเดียวยื่นเอกสารไม่ได้
 // (ผู้ใช้ 2026-09-27: กฎเดียวกับหน้างานสลับเลข/ค้นหารถ/ภาพรวม - เดิมคิวยื่นกับการยื่นดูแค่งานล่าสุดของรถคันนั้น
 // งานเก่าที่ยังค้างอยู่จึงไม่ล็อก หน้าจอบอกสถานะไม่ตรงกัน)
 export const OPEN_PLATE_SWAP_WHERE = { returnedDate: null, cancelledAt: null } satisfies Prisma.PlateSwapWhereInput;
+
+// งานที่ล็อกการยื่นของรถใหม่ (ผู้ใช้ 2026-10-13): เฉพาะสลับเลขรถยนต์ - มอเตอร์ไซค์ยื่นงานสลับเลขแล้ว รถใหม่ยื่นเอกสารได้เลย
+// ไม่ต้องรอรับใบเสร็จรถเก่า (งานมอเตอร์ไซค์ยังนับเป็น "งานที่เปิดอยู่" ตอนผูกรถใหม่ - ใช้ OPEN_PLATE_SWAP_WHERE ตามเดิม)
+export const SUBMIT_BLOCKING_SWAP_WHERE = { ...OPEN_PLATE_SWAP_WHERE, vehicleClass: { not: 'MOTO' } } satisfies Prisma.PlateSwapWhereInput;
 
 export const PLATE_SWAP_PENDING_REASON = 'รถคันนี้รับเลขจากงานสลับเลข - ต้องยืนยันรับเอกสารกลับในหน้างานสลับเลขก่อนจึงจะยื่นเอกสารได้';
 
@@ -55,7 +59,7 @@ export function getSubmitBlockReason(vehicle: SubmissionEligibilityInput, submit
   if (!vehicle.transferDone) {
     return 'ยังไม่ผ่านขั้นตอนแจ้งย้าย/ตัดบัญชี';
   }
-  if (vehicle.plateSwap && !vehicle.plateSwap.returnedDate) {
+  if (vehicle.plateSwap && !vehicle.plateSwap.returnedDate && vehicle.plateSwap.vehicleClass !== 'MOTO') {
     return PLATE_SWAP_PENDING_REASON;
   }
   if (isSupplierProvince(vehicle.registrationProvince)) {
