@@ -199,7 +199,7 @@ export class MyWorkService {
             take: 1,
             select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true, _count: { select: { receipts: true } } },
           },
-          plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null }, take: 1, select: { id: true } },
+          plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null, vehicleClass: { not: 'MOTO' } }, take: 1, select: { id: true } },
           invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
           billingClosedAt: true,
         },

@@ -38,6 +38,9 @@ describe('งานสลับเลขที่ยังเปิดอยู�
     expect(getSubmitBlockReason({ ...PASSED, plateSwap: { returnedDate: null } }, day('2026-06-10'))).toBe(PLATE_SWAP_PENDING_REASON);
     expect(getSubmitBlockReason({ ...PASSED, plateSwap: null }, day('2026-06-10'))).toBeNull();
     expect(getSubmitBlockReason({ ...PASSED, plateSwap: { returnedDate: '2026-06-05' } }, day('2026-06-10'))).toBeNull();
+    // สลับเลขมอเตอร์ไซค์: ยังไม่รับใบเสร็จรถเก่าก็ยื่นได้ (ผู้ใช้ 2026-10-13)
+    expect(getSubmitBlockReason({ ...PASSED, plateSwap: { returnedDate: null, vehicleClass: 'MOTO' } }, day('2026-06-10'))).toBeNull();
+    expect(getSubmitBlockReason({ ...PASSED, plateSwap: { returnedDate: null, vehicleClass: 'CAR' } }, day('2026-06-10'))).toBe(PLATE_SWAP_PENDING_REASON);
   });
 });
 

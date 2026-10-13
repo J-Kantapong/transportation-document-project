@@ -122,7 +122,7 @@ export class VehicleSearchService {
           },
         },
         // งานสลับเลขที่ยกเลิกแล้ว (cancelledAt) ไม่ทำให้รถรอ (ผู้ใช้ 2026-09-27: ยกเลิกแบบไม่ลบแถว)
-        plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null }, take: 1, select: { id: true } },
+        plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null, vehicleClass: { not: 'MOTO' } }, take: 1, select: { id: true } },
         invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },
         billingClosedAt: true,
       },
