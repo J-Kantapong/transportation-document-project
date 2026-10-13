@@ -411,6 +411,7 @@ export interface JobFeeRate {
   variant: "OWNER" | "INSPECTION" | null; // งานโอนเท่านั้น (null = ทุกแบบ)
   label: string;
   amount: number;
+  includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จ: ค่าบริการ = ราคา - ค่าธรรมเนียมของงานนั้น
 }
 
 export interface OtherJob {

@@ -1,9 +1,9 @@
 import { vi } from 'vitest';
 import { BillingService } from './billing.service.js';
-import { feeOf, jobItems, matchJobRate, type BillableJob, type JobRateRow } from './other-jobs.js';
+import { feeOf, jobItems, matchJobRate, suggestedJobServiceFee, type BillableJob, type JobRateRow } from './other-jobs.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-const rate = (o: Partial<JobRateRow> = {}): JobRateRow => ({ id: 'r1', jobType: 'TRANSFER', vehicleClass: 'ANY', variant: null, label: '', amount: 500, sortOrder: 0, ...o });
+const rate = (o: Partial<JobRateRow> = {}): JobRateRow => ({ id: 'r1', jobType: 'TRANSFER', vehicleClass: 'ANY', variant: null, label: '', amount: 500, includesReceipt: false, sortOrder: 0, ...o });
 
 const job = (o: Partial<BillableJob> = {}): BillableJob => ({
   type: 'TRANSFER',
@@ -346,5 +346,19 @@ describe('BillingService.updateInvoice keeps linked job lines', () => {
       svc.updateInvoice('i3', { items: [{ kind: 'GOODS', description: 'ขายอะไหล่', quantity: 1, unitPrice: 1000 }], remark: 'ไม่มีอะไรเปลี่ยน', expectedUpdatedAt: UPDATED_AT.toISOString() }),
     ).rejects.toMatchObject({ response: { error: expect.stringContaining('ไม่มีข้อมูลที่เปลี่ยน') } });
     expect(itemDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('suggestedJobServiceFee', () => {
+  it('ราคาปกติ = ราคาตามตาราง ไม่สนค่าธรรมเนียม', () => {
+    expect(suggestedJobServiceFee({ amount: 500, includesReceipt: false }, 105)).toBe(500);
+  });
+  it('ราคาเหมารวมใบเสร็จ = ราคา - ค่าธรรมเนียม (YMAC โอน 800 - 105)', () => {
+    expect(suggestedJobServiceFee({ amount: 800, includesReceipt: true }, 105)).toBe(695);
+    expect(suggestedJobServiceFee({ amount: 1000, includesReceipt: true }, 305)).toBe(695);
+    expect(suggestedJobServiceFee({ amount: 150, includesReceipt: true }, 100)).toBe(50);
+  });
+  it('ค่าธรรมเนียมแพงกว่าราคาเหมา = null ให้บัญชีกรอกเอง', () => {
+    expect(suggestedJobServiceFee({ amount: 800, includesReceipt: true }, 900)).toBeNull();
   });
 });

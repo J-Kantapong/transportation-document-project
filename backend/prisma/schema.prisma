@@ -1555,6 +1555,8 @@ model JobFeeRate {
   variant      String? // งานโอน: OWNER | INSPECTION (ว่าง = ทุกแบบ)
   label        String   @default("") // ข้อความต่อท้ายชื่อรายการบนบิล
   amount       Decimal  @db.Decimal(12, 2)
+  // ราคาเหมารวมค่าใบเสร็จแล้ว (YMAC, ผู้ใช้ 2026-10-13): ค่าบริการ = amount - ใบเสร็จจริงของงานนั้น เหมือน ServiceFeeRate.includesReceipt
+  includesReceipt Boolean @default(false)
   sortOrder    Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
