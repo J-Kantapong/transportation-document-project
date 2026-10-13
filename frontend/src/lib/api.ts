@@ -87,6 +87,10 @@ export async function fetchAuthedBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
+export type ReceiptSizeHint =
+  | { field: 'body'; current: string | null; suggested: string }
+  | { field: 'cc' | 'weight'; current: number | null; from: number; to: number };
+
 export interface Customer {
   id: string;
   name: string;
@@ -961,6 +965,9 @@ export const api = {
     return request<{ submissions: DocumentSubmission[]; hasMore?: boolean }>(`/api/vehicles/document-submission${query ? `?${query}` : ''}`);
   },
   // วันที่ยื่นทั้งหมดพร้อมจำนวนรายการ (ใหม่สุดก่อน) - หน้าดูข้อมูลที่ยื่นแล้วเลือกวันแล้วโหลดรายการด้วย listDocumentSubmissions(date)
+  // ข้อเสนอว่า CC / น้ำหนัก / ประเภทรถ น่าจะคีย์ผิดตรงไหน เมื่อยอดใบเสร็จไม่ตรง Bill (hints ว่าง = ไม่พบค่าที่ตรงยอด)
+  receiptSizeHints: (submissionId: string, amount: string) =>
+    request<{ hints: ReceiptSizeHint[] }>(`/api/vehicles/document-submission/${submissionId}/size-hint?amount=${encodeURIComponent(amount)}`),
   listDocumentSubmissionDates: () => request<{ dates: Array<{ date: string; count: number }> }>('/api/vehicles/document-submission/dates'),
 
   // kind = กรองประเภทรถที่ backend (หน้า /car, /moto) - ดำเนินการแล้ว: ทีละ 100 คัน ล่าสุดที่แนบก่อน, q = ค้นเลขตัวถัง/ทะเบียน/ลูกค้า/เลขที่ใบเสร็จ

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, api, type DocumentSubmission, type ReceiptCheckEntry, type ReceiptFieldsFixResult, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
+import { ApiError, api, type DocumentSubmission, type ReceiptSizeHint, type ReceiptCheckEntry, type ReceiptFieldsFixResult, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { useAutoRefresh, usePendingReceipts } from "@/lib/receipt-upload";
@@ -86,6 +86,9 @@ const toIso = (display: string) => displayDateToIso(display.replace(/\D/g, ""));
 
 function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission; amountText: string; canEditVehicle: boolean }) {
   const text = amountText.trim();
+  const billNow = billOf(s);
+  const mismatched = AMOUNT_RE.test(text) && billNow !== null && Math.round((Number(text) - billNow) * 100) !== 0;
+  const sizeHints = useSizeHints(s.id, mismatched ? text : "");
   if (!text) return null;
   if (!AMOUNT_RE.test(text)) return <span className="badge warn">ตัวเลขไม่ถูกต้อง</span>;
   const bill = billOf(s);
@@ -101,6 +104,7 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
       </span>
       {/* ข้อมูลรถผิดที่ต้นทาง (ผู้ใช้ 2026-09-28) - บอกว่าน่าจะผิดตรงไหน + ปุ่มไปแก้ข้อมูลรถ (เฉพาะคนที่แก้ข้อมูลรถได้) */}
       {hint && <div style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{hint}</div>}
+      {sizeHints.map((h) => (<div key={sizeHintText(h)} style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{sizeHintText(h)}</div>))}
       {canEditVehicle ? (
         <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 11 }}>
           แก้ข้อมูลรถ ↗
@@ -110,6 +114,39 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
       )}
     </>
   );
+}
+
+// ยอดใบเสร็จตรงกับ Bill ถ้า CC / น้ำหนัก / ประเภทรถ เป็นอีกค่าหนึ่ง = ข้อมูลรถอาจคีย์ผิด (ผู้ใช้ 2026-10-13) - backend ลองแทนค่าให้
+function useSizeHints(submissionId: string, amountText: string): ReceiptSizeHint[] {
+  // เก็บผลพร้อมคำถามที่ถาม (key) - ยอดเปลี่ยนแล้วผลเก่าไม่ถูกแสดงจนกว่าคำตอบของยอดใหม่จะมา
+  const key = amountText ? `${submissionId}:${amountText}` : "";
+  const [result, setResult] = useState<{ key: string; hints: ReceiptSizeHint[] }>({ key: "", hints: [] });
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .receiptSizeHints(submissionId, amountText)
+        .then((r) => {
+          if (!cancelled) setResult({ key, hints: r.hints });
+        })
+        .catch(() => {
+          if (!cancelled) setResult({ key, hints: [] });
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [key, submissionId, amountText]);
+  return key && result.key === key ? result.hints : [];
+}
+
+function sizeHintText(h: ReceiptSizeHint): string {
+  if (h.field === 'body') return `ยอดใบเสร็จตรงกับประเภทรถ "${h.suggested}" (ตอนนี้คีย์ "${h.current ?? '-'}") - ตรวจประเภทรถ / CC`;
+  const name = h.field === 'cc' ? 'CC' : 'น้ำหนัก';
+  const range = h.from === h.to ? money(h.from) : `${money(h.from)} - ${money(h.to)}`;
+  return `ยอดใบเสร็จตรงกับ${name} ${range} (ตอนนี้คีย์ ${h.current === null ? '-' : money(h.current)}) - ตรวจ${name}ของรถคันนี้`;
 }
 
 // ใบเสร็จแพงกว่า Bill แต่ระบบคิดเป็นจังหวัดเดียวกัน = น่าจะเป็นรถขอใช้ที่จังหวัดเจ้าของรถลงผิด (และกลับกัน) - ค่าบริการตอนวางบิลขึ้นกับข้อนี้

@@ -59,3 +59,29 @@ describe('getVehicleRowErrors', () => {
     expect(getVehicleRowErrors(validRow({ date: '' }))).toEqual(['วันที่ต้องเป็น วว/ดด/ปปปป ที่ถูกต้อง']);
   });
 });
+
+describe('มอเตอร์ไซค์: CC ต้องอยู่ในช่วงของประเภทรถ', () => {
+  const moto = { body: 'รย.12-300-799cc', cc: '367.6' };
+
+  it('CC อยู่ในช่วง = ผ่าน', () => {
+    expect(getVehicleRowErrors(validRow(moto))).toEqual([]);
+    expect(getVehicleRowErrors(validRow({ body: 'รย.12-น้อยกว่า 300cc', cc: '149.5' }))).toEqual([]);
+  });
+
+  it('149.5cc แต่เลือก 300-799cc = ไม่ผ่าน บอกช่วงที่ถูก', () => {
+    const errors = getVehicleRowErrors(validRow({ ...moto, cc: '149.5' }));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('รย.12-น้อยกว่า 300cc');
+  });
+
+  it('เส้นแบ่ง 300 / 800 / 1000', () => {
+    expect(getVehicleRowErrors(validRow({ body: 'รย.12-น้อยกว่า 300cc', cc: '300' }))).toHaveLength(1);
+    expect(getVehicleRowErrors(validRow({ body: 'รย.12-300-799cc', cc: '300' }))).toEqual([]);
+    expect(getVehicleRowErrors(validRow({ body: 'รย.12-800-999cc', cc: '799.9' }))).toHaveLength(1);
+    expect(getVehicleRowErrors(validRow({ body: 'รย.12-1000cc ขึ้นไป', cc: '1000' }))).toEqual([]);
+  });
+
+  it('รย.17 ไม่มีช่วง CC', () => {
+    expect(getVehicleRowErrors(validRow({ body: 'รย.17-จักรยานยนต์สาธารณะ', cc: '110' }))).toEqual([]);
+  });
+});
