@@ -4,6 +4,7 @@
 // ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย (JobFeeRate - ผู้ใช้: "ราคาแต่ละเจ้าไม่เท่ากัน") บัญชีแก้ได้ก่อนออกบิล
 // ค่าอากรไม่ขึ้นบิลเป็นบรรทัดแยก (ผู้ใช้ไม่ได้สั่ง) นับเป็นต้นทุนของบรรทัดค่าบริการ เหมือนที่ใช้คิดกำไร: ต้นทุน = No Bill + ค่าอากร
 
+import type { AuditEntity } from '../audit/audit-log.js';
 import { round2, serviceFeeFromRate } from './billing-calculator.js';
 
 export const JOB_TYPES = ['TRANSFER', 'USE_CANCEL', 'PLATE_COPY', 'MOVE_OUT', 'TAX_RENEWAL'] as const;
@@ -20,7 +21,7 @@ export const JOB_LABEL: Record<JobType, string> = {
 };
 
 // ชื่อตาราง - ใช้ล็อกแถว (SELECT ... FOR UPDATE) เท่านั้น มาจากรายการนี้เสมอ ไม่รับจากผู้ใช้
-export const JOB_TABLE: Record<JobType, string> = {
+export const JOB_TABLE: Record<JobType, AuditEntity> = {
   TRANSFER: 'VehicleTransfer',
   USE_CANCEL: 'VehicleUseCancellation',
   PLATE_COPY: 'PlateCopy',

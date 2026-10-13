@@ -48,6 +48,7 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/supplier-rates(\/|$)/, access: ['ADMIN'] },
   // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
+  { pattern: /^\/api\/billing\/other-jobs\/reopen$/, access: ['ADMIN'] },
   // ตั้งเลขเริ่มใบกำกับภาษี (= เปิดใช้ใบกำกับในระบบ) ADMIN เท่านั้น (ผู้ใช้ 2026-09-28)
   { pattern: /^\/api\/billing\/tax-invoices\/series\/set$/, access: ['ADMIN'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
