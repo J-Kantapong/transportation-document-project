@@ -17,4 +17,6 @@ export interface UpdateVehicleDto {
   // (มีขั้นตอนเพิ่มจากที่เห็น เช่น มีคนยื่นเอกสารระหว่างนั้น หรือสถานะของขั้นตอนเดิมเปลี่ยน = เตือนใหม่อีกครั้ง)
   confirm?: unknown;
   confirmedSteps?: unknown;
+  // คำเตือนข้อมูลน่าจะคีย์ผิดที่เกิดจากการแก้ครั้งนี้ (dataWarnings[].key ใน 409) - ดู vehicle-data-check.ts
+  confirmedWarnings?: unknown;
 }

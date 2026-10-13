@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { ApiError, type VehicleEditWarning } from "@/lib/api";
 import { canAccessPage, canEditSubmitSteps, type UserRole } from "@/lib/auth";
 import { isoToDisplayDate } from "@/lib/date";
 import { formatMoney } from "@/lib/invoice";
 import { FOCUS_PARAM } from "@/lib/vehicle-focus";
+import { DataWarningCheck } from "@/components/VehicleDataCheck";
 
 // แก้ข้อมูลรถหลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ 2026-09-27): PATCH /api/vehicles/:id ตอบ 409 needsConfirm พร้อมขั้นตอนที่กระทบ
 // หน้าจอแสดงคำเตือน ให้ผู้ใช้กดยืนยันแล้วส่งซ้ำ (confirm) - ระบบไม่คิดค่าใช้จ่าย/ภาษีใหม่ให้ รายการยื่นที่รอใบเสร็จต้องไป
@@ -18,7 +20,8 @@ export function editWarningOf(error: unknown): VehicleEditWarning | null {
   if (!(error instanceof ApiError) || error.status !== 409 || error.details?.needsConfirm !== true) return null;
   const affected = Array.isArray(error.details.affected) ? (error.details.affected as VehicleEditWarning["affected"]) : [];
   const taxPreview = error.details.taxPreview as VehicleEditWarning["taxPreview"] | undefined;
-  return { affected, ...(taxPreview ? { taxPreview } : {}) };
+  const dataWarnings = Array.isArray(error.details.dataWarnings) ? (error.details.dataWarnings as VehicleEditWarning["dataWarnings"]) : [];
+  return { affected, dataWarnings, ...(taxPreview ? { taxPreview } : {}) };
 }
 
 function taxLine(preview: NonNullable<VehicleEditWarning["taxPreview"]>) {
@@ -61,21 +64,42 @@ export function EditImpactWarning({
   const recordsHref = recordsParams ? `${RECORDS_PATH}?${recordsParams}` : RECORDS_PATH;
   // STAFF_ENTRY เปิดหน้ารายการที่ยื่นแล้วไม่ได้ และยกเลิกรายการยื่นไม่ได้ (ADMIN / STAFF_CAR / STAFF_MOTO เท่านั้น)
   const canCancelSubmission = canAccessPage(RECORDS_PATH, roles) && canEditSubmitSteps(roles);
+  // ข้อมูลน่าจะคีย์ผิด (ผู้ใช้ 2026-10-13): ต้องติ๊กว่าตรวจกับเอกสารแล้วจึงยืนยันได้ - คำเตือนชุดใหม่ = component ถูกสร้างใหม่ (key ที่ผู้เรียก)
+  const [dataChecked, setDataChecked] = useState(false);
+  const hasImpact = warning.affected.length > 0;
+  const hasData = warning.dataWarnings.length > 0;
 
   return (
     <div
       role="alert"
       style={{ marginTop: 16, padding: "12px 16px", border: "1px solid #f0d9ae", background: "#fffaf0", borderRadius: 8, fontSize: 13 }}
     >
-      <strong style={{ color: "#bb8527" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
-      <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 6 }}>
-        {warning.affected.map((a) => (
-          <li key={a.step}>
-            <strong>{a.label}</strong> · ช่องที่แก้: {a.fields.join(", ")}
-            <div style={{ color: "#5a6885" }}>{a.note}</div>
-          </li>
-        ))}
-      </ul>
+      {hasData && (
+        <>
+          <strong style={{ color: "#bb8527" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
+          <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 4 }}>
+            {warning.dataWarnings.map((w) => (
+              <li key={w.key}>{w.message}</li>
+            ))}
+          </ul>
+          <div style={{ marginBottom: 12 }}>
+            <DataWarningCheck checked={dataChecked} onChange={setDataChecked} />
+          </div>
+        </>
+      )}
+      {hasImpact && (
+        <>
+          <strong style={{ color: "#bb8527" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
+          <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 6 }}>
+            {warning.affected.map((a) => (
+              <li key={a.step}>
+                <strong>{a.label}</strong> · ช่องที่แก้: {a.fields.join(", ")}
+                <div style={{ color: "#5a6885" }}>{a.note}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {warning.taxPreview && <p style={{ margin: "0 0 8px", fontWeight: 600 }}>{taxLine(warning.taxPreview)}</p>}
       {pending && (
         <p style={{ margin: "0 0 8px" }}>
@@ -94,9 +118,9 @@ export function EditImpactWarning({
           {pending.submitDate ? ` (รายการวันที่ยื่น ${isoToDisplayDate(pending.submitDate)})` : ""}
         </p>
       )}
-      <p style={{ margin: "0 0 12px", color: "#5a6885" }}>ระบบไม่คิดค่าใช้จ่าย/ค่าธรรมเนียม/ภาษีของขั้นตอนเดิมใหม่ให้อัตโนมัติ</p>
+      {hasImpact && <p style={{ margin: "0 0 12px", color: "#5a6885" }}>ระบบไม่คิดค่าใช้จ่าย/ค่าธรรมเนียม/ภาษีของขั้นตอนเดิมใหม่ให้อัตโนมัติ</p>}
       <div className="form-actions" style={{ marginTop: 0 }}>
-        <button type="button" className="primary" disabled={saving} onClick={onConfirm}>
+        <button type="button" className="primary" disabled={saving || (hasData && !dataChecked)} onClick={onConfirm}>
           ยืนยันบันทึกการแก้ไข
         </button>
         <button type="button" className="text-button" disabled={saving} onClick={onCancel}>

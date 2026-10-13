@@ -26,6 +26,16 @@ import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
 import { DeleteVehicleDto } from './dto/delete-vehicle.dto.js';
 import { getVehicleRowErrors, normalizeVehicleRow, NormalizedVehicleRow } from './vehicle-validation.js';
 import { OWNER_TYPE_CHOICES } from './vehicle-reference-data.js';
+import {
+  buildKnownModels,
+  chassisWarnings,
+  DATA_WARNING_ERROR,
+  dataWarningsFor,
+  isDataWarningsConfirmed,
+  modelPrefix,
+  type DataWarning,
+  type KnownModel,
+} from './vehicle-data-check.js';
 import { cancelledSubmitDate, resubmitWindow, type ResubmitWindow, type SubmitAttempt } from './resubmit-window.js';
 import { OwnerType } from '../generated/prisma/enums.js';
 import { addDays, bangkokToday, isoOf, toDate } from '../overview/overview-calculator.js';
@@ -53,6 +63,7 @@ export interface PlateSwapSummary {
 // (เฉพาะรายการยื่นที่รอใบเสร็จและช่องที่ใช้คิดภาษีเปลี่ยน)
 interface EditWarning {
   affected: AffectedStep[];
+  dataWarnings: DataWarning[]; // ข้อมูลน่าจะคีย์ผิดที่เกิดจากการแก้ครั้งนี้และยังไม่ได้ยืนยัน (ว่าง = ไม่มี)
   tax: { old: number | null; vehicle: GovernmentTaxVehicleInput; owner: GovernmentTaxOwnerInput } | null;
 }
 
@@ -107,6 +118,11 @@ function ownerTypeLabel(type: string | null | undefined): string {
 // ผู้แก้สำหรับ VehicleEditLog.editedById (ผู้ใช้ 2026-09-24) - นอกคำขอ HTTP (script/test) เป็น null
 function editorId(): string | null {
   return currentUser()?.id ?? null;
+}
+
+// ข้อความใน VehicleEditLog ของคันที่พนักงานยืนยันข้ามคำเตือนข้อมูลน่าจะคีย์ผิด (ดู vehicle-data-check.ts)
+function confirmedWarningRemark(when: string, warnings: DataWarning[]): string {
+  return `ยืนยันข้ามคำเตือน${when}: ${warnings.map((w) => w.message).join(' / ')}`;
 }
 
 // ข้อความสำหรับ VehicleEditLog - เทียบเจ้าของเดิมกับใหม่ว่าเปลี่ยนจริงไหม
@@ -565,7 +581,7 @@ export class VehiclesService {
 
     const [customers, brands, financeCompanies] = await Promise.all([
       this.prisma.customer.findMany({ select: { id: true } }),
-      this.prisma.brand.findMany({ select: { id: true } }),
+      this.prisma.brand.findMany({ select: { id: true, name: true } }),
       this.prisma.financeCompany.findMany({ select: { id: true, name: true } }),
     ]);
     const customerIds = new Set(customers.map((c) => c.id));
@@ -596,6 +612,17 @@ export class VehiclesService {
 
     await this.assertChassisAvailable(rows);
 
+    // ข้อมูลน่าจะคีย์ผิด (เลขตัวถังไม่ครบ 17 หลัก / ยี่ห้อ CC ประเภทรถ ไม่ตรงรุ่นที่เคยคีย์) - ยังไม่ยืนยัน = ไม่บันทึกอะไร ตอบ 409
+    const brandNames = new Map(brands.map((b) => [b.id, b.name]));
+    const models = await this.knownModelsFor(rows.map((row) => row.chassis));
+    const warned = rows
+      .map((row, index) => ({ row: index + 1, chassis: row.chassis, warnings: dataWarningsFor(row, models, (id) => brandNames.get(id) ?? '-') }))
+      .filter((entry) => entry.warnings.length > 0);
+    const allWarnings = warned.flatMap((entry) => entry.warnings);
+    if (!isDataWarningsConfirmed(allWarnings, body?.confirmedWarnings)) {
+      throw new ConflictException({ error: DATA_WARNING_ERROR, needsConfirm: true, warnings: warned });
+    }
+
     // createMany is one SQL statement instead of one round trip per row - a $transaction of up
     // to MAX_BATCH_SIZE individual .create() calls was blowing past Prisma's 5s default
     // transaction timeout on batches above ~80 rows against the remote DB. เจ้าของรถ (VehicleOwner)
@@ -608,7 +635,20 @@ export class VehiclesService {
         });
         // ผู้ทำ (ผู้ใช้ 2026-10-08): คนที่กดบันทึก - เฉพาะตอนสร้าง ไม่เขียนทับตอนแก้ไข (ดู toCreateData ที่ใช้ตอนแก้ด้วย)
         const createdById = currentUser()?.id ?? null;
-        await tx.vehicle.createMany({ data: rows.map((row, index) => ({ ...this.toCreateData(row, owners[index].id), createdById })) });
+        const created = await tx.vehicle.createManyAndReturn({
+          data: rows.map((row, index) => ({ ...this.toCreateData(row, owners[index].id), createdById })),
+          select: { id: true, chassis: true },
+        });
+        // คันที่พนักงานยืนยันข้ามคำเตือน: เก็บว่าใครยืนยันและเตือนเรื่องอะไร (ตรวจย้อนหลังได้ในประวัติแก้ไขของรถ)
+        if (warned.length) {
+          const idByChassis = new Map(created.map((v) => [v.chassis, v.id]));
+          await tx.vehicleEditLog.createMany({
+            data: warned.flatMap((entry) => {
+              const vehicleId = idByChassis.get(entry.chassis);
+              return vehicleId ? [{ vehicleId, remark: confirmedWarningRemark('ตอนคีย์', entry.warnings), changes: '{}', editedById: createdById }] : [];
+            }),
+          });
+        }
       });
     } catch (err) {
       if (!isChassisConflict(err)) throw err;
@@ -618,6 +658,33 @@ export class VehiclesService {
     }
 
     return { count: rows.length };
+  }
+
+  // รุ่นที่รู้จักของเลขตัวถังชุดนี้ (ดู vehicle-data-check.ts) - อ่านรถในระบบที่เลขตัวถัง 8 ตัวแรกเหมือนกัน ไม่นับคันที่กำลังแก้ (excludeId)
+  private async knownModelsFor(chassisList: string[], excludeId?: string): Promise<Map<string, KnownModel>> {
+    const prefixes = Array.from(new Set(chassisList.map((chassis) => modelPrefix(chassis)).filter((p): p is string => p !== null)));
+    const samples: Array<{ chassis: string; brandId: string; brandName: string; cc: number | null; body: string | null }> = [];
+    // ไฟล์ Batch 1,000 แถวอาจมีหลายร้อยรุ่น - แบ่งคำค้นไม่ให้ OR ยาวเกินไป
+    for (let i = 0; i < prefixes.length; i += 200) {
+      const found = await this.prisma.vehicle.findMany({
+        where: {
+          deletedAt: null,
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+          OR: prefixes.slice(i, i + 200).map((prefix) => ({ chassis: { startsWith: prefix } })),
+        },
+        select: { chassis: true, brandId: true, cc: true, body: true, brand: { select: { name: true } } },
+      });
+      samples.push(...found.map((v) => ({ chassis: v.chassis, brandId: v.brandId, brandName: v.brand.name, cc: v.cc === null ? null : Number(v.cc), body: v.body })));
+    }
+    return buildKnownModels(samples);
+  }
+
+  // หน้าคีย์รถ: พิมพ์เลขตัวถังแล้วบอกว่ารุ่นนี้เคยคีย์เป็นยี่ห้อ / CC / ประเภทรถ อะไร (ปุ่ม "ใช้ค่านี้") + คำเตือนของเลขตัวถังเอง
+  async knownModel(chassisRaw: unknown, excludeId?: string): Promise<{ model: KnownModel | null; warnings: DataWarning[] }> {
+    const chassis = typeof chassisRaw === 'string' ? chassisRaw : '';
+    const prefix = modelPrefix(chassis);
+    const models = prefix ? await this.knownModelsFor([chassis], excludeId || undefined) : new Map<string, KnownModel>();
+    return { model: (prefix && models.get(prefix)) || null, warnings: chassisWarnings(chassis) };
   }
 
   // เลขตัวถังต้องไม่ซ้ำกับรถที่ยังไม่ถูกลบ - เทียบแบบไม่สนตัวพิมพ์ (พบ 2026-09-27: เดิม "abc" กับ "ABC" นับเป็นคนละคัน
@@ -660,7 +727,10 @@ export class VehiclesService {
     const remark = typeof body?.remark === 'string' ? body.remark.trim() : '';
     if (!remark) throw new BadRequestException({ error: 'กรุณาระบุเหตุผลที่แก้ไข (Remark)' });
 
-    const existing = await this.prisma.vehicle.findFirst({ where: { id, deletedAt: null }, select: { id: true, chassis: true } });
+    const existing = await this.prisma.vehicle.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, chassis: true, brandId: true, cc: true, body: true },
+    });
     if (!existing) throw new NotFoundException({ error: 'ไม่พบข้อมูลรถ' });
 
     const row = normalizeVehicleRow(body as unknown as Record<string, unknown>);
@@ -688,6 +758,14 @@ export class VehiclesService {
     }
 
     const nextOwner = ownerDataFor(row, financeCompany?.name ?? null);
+
+    // ข้อมูลน่าจะคีย์ผิด: เตือนเฉพาะข้อที่เกิดจากการแก้ครั้งนี้ - รถเก่าที่มีข้ออยู่แล้ว (เช่น เลขตัวถัง 16 หลัก) แก้ช่องอื่นได้โดยไม่ถูกถามซ้ำ
+    const models = await this.knownModelsFor([row.chassis, existing.chassis], id);
+    const brandNameOf = (brandId: string) => (brandId === brand.id ? brand.name : '-');
+    const existingData = { chassis: existing.chassis, brandId: existing.brandId, cc: existing.cc?.toString() ?? null, body: existing.body };
+    const before = new Set(dataWarningsFor(existingData, models, brandNameOf).map((w) => w.key));
+    const newDataWarnings = dataWarningsFor(row, models, brandNameOf).filter((w) => !before.has(w.key));
+    const dataConfirmed = isDataWarningsConfirmed(newDataWarnings, body?.confirmedWarnings);
 
     let warning: EditWarning | null;
     try {
@@ -736,9 +814,11 @@ export class VehiclesService {
         // ชื่อเจ้าของนับแยกจากส่วนที่มีผลกับภาษี: ใบส่งงานอ่านชื่อตอนพิมพ์ (ผู้ใช้ 2026-09-27 รอบตรวจ)
         const changed = changedStepFields(current, data, ownerTaxChanged(currentOwner, nextOwner), ownerNameChanged(currentOwner, nextOwner));
         const affected = affectedSteps(changed, state, current, data);
-        if (!isImpactConfirmed(affected, body?.confirm, body?.confirmedSteps)) {
+        if (!isImpactConfirmed(affected, body?.confirm, body?.confirmedSteps) || !dataConfirmed) {
           return {
             affected,
+            // ส่งทุกข้อเสมอ (รวมข้อที่ยืนยันมาแล้ว) - หน้าจอส่ง key ของทุกข้อที่เห็นกลับมาพร้อมการยืนยันขั้นตอน
+            dataWarnings: newDataWarnings,
             tax: needsTaxPreview(changed, state)
               ? {
                   old: submission?.taxAmount == null ? null : Number(submission.taxAmount),
@@ -758,7 +838,9 @@ export class VehiclesService {
           data: {
             vehicleId: id,
             // แก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (ผู้ใช้ยืนยันคำเตือนแล้ว) - เก็บว่าเตือนขั้นตอนไหนไว้กับเหตุผลด้วย
-            remark: affected.length ? `ยืนยันแก้หลัง ${affected.map((a) => a.label).join(', ')}: ${remark}` : remark,
+            remark:
+              (affected.length ? `ยืนยันแก้หลัง ${affected.map((a) => a.label).join(', ')}: ${remark}` : remark) +
+              (newDataWarnings.length ? ` · ${confirmedWarningRemark('ตอนแก้', newDataWarnings)}` : ''),
             changes: JSON.stringify(changes),
             editedById: editorId(),
           },
@@ -779,9 +861,10 @@ export class VehiclesService {
         taxPreview = { old: warning.tax.old, new: preview?.amount ?? null, reason: preview?.reason ?? null };
       }
       throw new ConflictException({
-        error: 'รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบผลกระทบแล้วกดยืนยันเพื่อบันทึก',
+        error: warning.affected.length ? 'รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบผลกระทบแล้วกดยืนยันเพื่อบันทึก' : DATA_WARNING_ERROR,
         needsConfirm: true,
         affected: warning.affected,
+        dataWarnings: warning.dataWarnings,
         ...(taxPreview ? { taxPreview } : {}),
       });
     }

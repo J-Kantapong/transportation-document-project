@@ -3,6 +3,8 @@ import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.se
 import { WHT_OVERDUE_DAYS } from '../billing/tax-invoice.service.js';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { findSuspectVehicles } from '../vehicles/vehicle-data-check.js';
+import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
 import {
   addDays,
   agingBuckets,
@@ -154,6 +156,46 @@ function tally<T>(rows: T[], kindOf: (row: T) => VehicleKind, valueOf: (row: T) 
 @Injectable()
 export class OverviewService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // รถที่ข้อมูลน่าจะคีย์ผิดและยังไม่วางบิล (ผู้ใช้ 2026-10-13, กฎอยู่ใน vehicles/vehicle-data-check.ts) คีย์ล่าสุดก่อน
+  // อ่านรถทุกคันเพราะ "รุ่นที่รู้จัก" เรียนจากรถทั้งระบบ - เลือกมาแค่ช่องที่ใช้เทียบ
+  private async suspectVehicles() {
+    const rows = await this.prisma.vehicle.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        chassis: true,
+        brandId: true,
+        cc: true,
+        body: true,
+        ownerId: true,
+        createdAt: true,
+        billingClosedAt: true,
+        brand: { select: { name: true } },
+        customer: { select: { name: true } },
+        invoiceLines: { where: NOT_VOID, select: { id: true }, take: 1 },
+      },
+    });
+    return findSuspectVehicles(
+      rows.map((v) => ({
+        id: v.id,
+        chassis: v.chassis,
+        brandId: v.brandId,
+        brandName: v.brand.name,
+        cc: v.cc === null ? null : Number(v.cc),
+        body: v.body,
+        hasOwner: v.ownerId !== null,
+        open: v.invoiceLines.length === 0 && v.billingClosedAt === null,
+        customerName: v.customer.name,
+        createdAt: v.createdAt,
+      })),
+      (v) => {
+        const mismatch = v.body && v.cc !== null ? motorcycleCcMismatch(v.body, String(v.cc)) : null;
+        return mismatch ? [`CC ${v.cc} ไม่อยู่ในช่วงของ ${v.body}`] : [];
+      },
+    );
+  }
 
   async overview(dateRaw?: unknown) {
     const today = bangkokToday();
@@ -1041,6 +1083,7 @@ export class OverviewService {
     const flags = (f: Flag) => flagged(f).length;
     const late = (key: StageKey) => lateAt(key).length;
     const withItems = (list: StuckItem[]) => ({ items: list.slice(0, ALERT_ITEM_LIMIT), itemTotal: list.length });
+    const suspects = await this.suspectVehicles();
 
     const alerts = [
       overdueAr.length && {
@@ -1189,6 +1232,24 @@ export class OverviewService {
           date: r.receiptDate ? isoOf(r.receiptDate) : null,
           note: `ใบเสร็จ ${fmt(num(r.receiptAmount))} · ระบบคำนวณ ${fmt(r.expected)}`,
           href: focusUrl(receiptPage(r.vehicle.body), r.vehicle.chassis),
+        })),
+      },
+      suspects.length && {
+        key: 'data-suspect',
+        severity: 'medium',
+        title: 'ข้อมูลรถน่าจะคีย์ผิด',
+        detail: `${suspects.length} คันที่ยังไม่วางบิล - เทียบกับเอกสารแล้วแก้ก่อนวางบิล`,
+        href: '/vehicles',
+        ...withDocs(suspects, (s) => ({
+          id: s.vehicle.id,
+          title: s.vehicle.chassis,
+          customerName: s.vehicle.customerName,
+          amount: null,
+          dateLabel: 'คีย์',
+          date: bangkokToday(s.vehicle.createdAt),
+          note: s.notes.join(' · '),
+          // เปิดฟอร์มแก้ไขของคันนั้นในหน้าคีย์รถ (ช่องเดียวกับปุ่ม "แก้ไข" ของหน้าค้นหารถ)
+          href: focusUrl('/registration/new-vehicle/entry', s.vehicle.chassis, { edit: '1' }),
         })),
       },
       taxMissing && {

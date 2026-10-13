@@ -46,15 +46,17 @@ const openVehicle = (id: string, body: string, date: string) => ({
 
 type Where = Record<string, unknown> & { status?: { not?: string; in?: string[] }; OR?: Array<Record<string, unknown>> };
 
-function service(o: { spendSubs?: unknown[]; inProcessSubs?: unknown[]; openVehicles?: unknown[] } = {}) {
+// allVehicles = คำค้นของ "ข้อมูลรถน่าจะคีย์ผิด" (รถทุกคัน คำค้นเดียวที่เลือกช่อง brandId - ดู OverviewService.suspectVehicles)
+function service(o: { spendSubs?: unknown[]; inProcessSubs?: unknown[]; openVehicles?: unknown[]; allVehicles?: unknown[] } = {}) {
   const subFind = vi.fn(async ({ where }: { where: Where }) => {
     if (where.status?.not === 'FAILED') return o.spendSubs ?? [];
     if (where.status?.in) return o.inProcessSubs ?? [];
     return [];
   });
-  const vehicleFind = vi.fn(async ({ where }: { where: Where }) =>
-    where.OR?.some((c) => 'plateDeliveredDate' in c && c.plateDeliveredDate === null) ? (o.openVehicles ?? []) : [],
-  );
+  const vehicleFind = vi.fn(async ({ where, select }: { where: Where; select?: Record<string, unknown> }) => {
+    if (select?.brandId) return o.allVehicles ?? [];
+    return where.OR?.some((c) => 'plateDeliveredDate' in c && c.plateDeliveredDate === null) ? (o.openVehicles ?? []) : [];
+  });
   const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
   const prisma = {
     documentSubmission: { findMany: subFind },
@@ -339,6 +341,49 @@ describe('OverviewService.overview', () => {
     expect(alert('quotation-approved-open').docs).toMatchObject([{ title: 'QT-q1', note: 'รอออกใบวางบิล', date: '2026-09-25', href: '/accounting/quotations/view?id=q1' }]);
     expect(alert('quotation-expired').docs).toMatchObject([{ title: 'QT-q2', note: 'หมดอายุมา 7 วัน' }]);
     expect(alerts.some((a) => a.key === 'quotation-waiting')).toBe(false); // มีใบหมดอายุแล้ว เรื่องรอตอบรวมอยู่ในข้อความของเรื่องนั้น
+  });
+
+  // ผู้ใช้ 2026-10-13: รายงานรถที่ข้อมูลน่าจะคีย์ผิดและยังไม่วางบิล กดแล้วเปิดฟอร์มแก้ไขของคันนั้น
+  it('ข้อมูลรถน่าจะคีย์ผิด: รายงานคันที่ยังไม่วางบิล พร้อมลิงก์ไปแก้คันนั้น', async () => {
+    const row = (n: number, o: Record<string, unknown> = {}) => ({
+      id: `v${n}`,
+      chassis: `MLTZT1509TX0010${String(n).padStart(2, '0')}`,
+      brandId: 'zontes',
+      cc: '149.50',
+      body: 'รย.12-น้อยกว่า 300cc',
+      ownerId: 'o1',
+      createdAt: new Date('2026-10-12T03:42:00.000Z'),
+      billingClosedAt: null,
+      brand: { name: 'Zontes' },
+      customer: { name: 'ลูกค้า ก' },
+      invoiceLines: [],
+      ...o,
+    });
+    const { svc } = service({
+      allVehicles: [
+        // รถรุ่นเดียวกัน 8 คันที่คีย์ตรงกัน = รุ่นที่รู้จัก (ค่าที่เชื่อต้องเป็นอย่างน้อย 80% ของรุ่น)
+        ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => row(n)),
+        row(9, { brandId: 'yamaha', brand: { name: 'Yamaha' } }), // ยี่ห้อไม่ตรงรุ่น ยังไม่วางบิล
+        row(10, { brandId: 'yamaha', brand: { name: 'Yamaha' }, invoiceLines: [{ id: 'l1' }] }), // วางบิลแล้ว ไม่รายงาน
+        row(11, { body: 'รย.12-300-799cc' }), // CC ไม่อยู่ในช่วงของประเภทรถ
+      ],
+    });
+    const alert = (await svc.overview()).alerts.find((a) => a.key === 'data-suspect')!;
+    expect(alert.itemTotal).toBe(2);
+    expect(alert.docs!.map((x) => x.title)).toEqual(['MLTZT1509TX001009', 'MLTZT1509TX001011']);
+    expect(alert.docs![0]).toMatchObject({
+      customerName: 'ลูกค้า ก',
+      date: '2026-10-12',
+      note: 'ยี่ห้อ Yamaha (รุ่นนี้ปกติ Zontes)',
+      href: '/registration/new-vehicle/entry?edit=1&focus=MLTZT1509TX001009',
+    });
+    expect(alert.docs![1].note).toContain('ประเภทรถ รย.12-300-799cc (รุ่นนี้ปกติ รย.12-น้อยกว่า 300cc)');
+    expect(alert.docs![1].note).toContain('CC 149.5 ไม่อยู่ในช่วงของ รย.12-300-799cc');
+  });
+
+  it('ข้อมูลรถปกติทั้งหมด = ไม่มีเรื่องข้อมูลน่าจะคีย์ผิด', async () => {
+    const { svc } = service();
+    expect((await svc.overview()).alerts.some((a) => a.key === 'data-suspect')).toBe(false);
   });
 
   // ผู้ใช้ 2026-09-27: งานสลับเลข / ต่อภาษี / ยามาฮ่าที่ยกเลิกแล้ว (cancelledAt) ไม่นับทุกยอดในภาพรวม

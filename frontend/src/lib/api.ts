@@ -1,5 +1,6 @@
 import { getToken, redirectToLogin } from './auth';
 import type { DeliveryKind, DeliveryRow, DeliverySlip, DeliverySource } from './billing-api';
+import type { DataWarning, KnownModel } from './vehicle-data-check';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
@@ -605,6 +606,8 @@ export interface VehicleEditAffectedStep {
 
 export interface VehicleEditWarning {
   affected: VehicleEditAffectedStep[];
+  // ข้อมูลน่าจะคีย์ผิดที่เกิดจากการแก้ครั้งนี้ (ผู้ใช้ 2026-10-13) - ยืนยันด้วย confirmedWarnings = key ของทุกข้อ
+  dataWarnings: DataWarning[];
   // ภาษีที่ยื่นไว้ (รายการรอใบเสร็จ) เทียบกับภาษีตามข้อมูลใหม่ (preview ไม่บันทึก) - new = null พร้อม reason ถ้าคิดไม่ได้
   taxPreview?: { old: number | null; new: number | null; reason: string | null };
 }
@@ -907,13 +910,24 @@ export const api = {
     const qs = search.toString();
     return request<{ vehicles: Vehicle[]; hasMore: boolean }>(`/api/vehicles${qs ? `?${qs}` : ''}`);
   },
-  createVehicles: (vehicles: Record<string, string>[]) =>
-    request<{ count: number }>('/api/vehicles', { method: 'POST', body: JSON.stringify({ vehicles }) }),
+  // 409 + details.needsConfirm + details.warnings = ข้อมูลน่าจะคีย์ผิด (lib/vehicle-data-check.ts) - ส่งซ้ำพร้อม confirmedWarnings
+  createVehicles: (vehicles: Record<string, string>[], confirmedWarnings?: string[]) =>
+    request<{ count: number }>('/api/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(confirmedWarnings ? { vehicles, confirmedWarnings } : { vehicles }),
+    }),
+  // รุ่นที่รู้จักของเลขตัวถังนี้ (ยี่ห้อ / CC / ประเภทรถ ที่เคยคีย์) - excludeId = รถคันที่กำลังแก้ ไม่นับตัวเอง
+  knownModel: (chassis: string, excludeId?: string) =>
+    request<{ model: KnownModel | null; warnings: DataWarning[] }>(
+      `/api/vehicles/known-model?${new URLSearchParams({ chassis, ...(excludeId ? { excludeId } : {}) }).toString()}`,
+    ),
   // 409 + details.needsConfirm = แก้หลังขั้นตอนที่ใช้ข้อมูลเดิม (VehicleEditWarning) - ส่งซ้ำพร้อม confirm/confirmedSteps
-  updateVehicle: (id: string, data: Record<string, string>, confirm?: { confirmedSteps: string[] }) =>
+  updateVehicle: (id: string, data: Record<string, string>, confirm?: { confirmedSteps: string[]; confirmedWarnings: string[] }) =>
     request<{ id: string }>(`/api/vehicles/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(confirm ? { ...data, confirm: true, confirmedSteps: confirm.confirmedSteps } : data),
+      body: JSON.stringify(
+        confirm ? { ...data, confirm: true, confirmedSteps: confirm.confirmedSteps, confirmedWarnings: confirm.confirmedWarnings } : data,
+      ),
     }),
 
   // ลบข้อมูลรถ (ซ่อน ไม่ลบจริง) / กู้คืน / รายการที่ลบไว้ - ADMIN เท่านั้น ต้องระบุเหตุผลที่ลบทุกครั้ง

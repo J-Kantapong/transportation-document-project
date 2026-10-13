@@ -75,9 +75,10 @@ function service(vehicle: ReturnType<typeof current>) {
   };
   const prisma = {
     customer: { findUnique: vi.fn().mockResolvedValue({ id: 'c1' }) },
-    brand: { findUnique: vi.fn().mockResolvedValue({ id: 'b1' }) },
+    brand: { findUnique: vi.fn().mockResolvedValue({ id: 'b1', name: 'Toyota' }) },
     financeCompany: { findUnique: vi.fn().mockResolvedValue(null) },
-    vehicle: { findFirst },
+    // findMany = รถรุ่นเดียวกันในระบบ (คำเตือนข้อมูลน่าจะคีย์ผิด - ดู vehicle-data-check.ts) ไม่มี = ไม่มีรุ่นให้เทียบ
+    vehicle: { findFirst, findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   } as unknown as PrismaService;
   const previewMany = vi.fn().mockResolvedValue([{ amount: 1797, reason: null }]);
