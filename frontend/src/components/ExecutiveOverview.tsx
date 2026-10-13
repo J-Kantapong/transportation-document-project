@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { DateInput } from "./DateInput";
+import { AnimatedNumber } from "./AnimatedNumber";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { overviewApi, type AgingBucket, type Overview, type OverviewAlert } from "@/lib/overview-api";
 import { ChartLegend, GroupedBarChart, type ChartSeries } from "./OverviewCharts";
@@ -224,7 +225,7 @@ export function ExecutiveOverview() {
         <div className="stat">
           <div className="stat-top">ใช้เงิน{dayWord}</div>
           <div className="num">
-            {baht(spend.today.total)}
+            <AnimatedNumber value={spend.today.total} format={baht} />
             <small>บาท</small>
           </div>
           <div className="foot">
@@ -244,7 +245,7 @@ export function ExecutiveOverview() {
         <div className="stat">
           <div className="stat-top">รับเงิน{dayWord}</div>
           <div className="num">
-            {baht(cash.collectedToday)}
+            <AnimatedNumber value={cash.collectedToday} format={baht} />
             <small>บาท</small>
           </div>
           <div className="foot">
@@ -256,7 +257,7 @@ export function ExecutiveOverview() {
         <div className="stat">
           <div className="stat-top">เงินสุทธิ 30 วัน</div>
           <div className={`num ${net30 < 0 ? "exec-neg" : "exec-pos"}`}>
-            {signed(net30)}
+            <AnimatedNumber value={net30} format={signed} />
             <small>บาท</small>
           </div>
           <div className="foot">
@@ -268,7 +269,7 @@ export function ExecutiveOverview() {
         <div className="stat">
           <div className="stat-top">เงินจมรอเรียกคืน{liveNote && ` (${liveNote})`}</div>
           <div className="num">
-            {baht(wc.total)}
+            <AnimatedNumber value={wc.total} format={baht} />
             <small>บาท</small>
           </div>
           <div className="foot">

@@ -551,3 +551,20 @@ tr.row-selected td{background:#f3f6ff}
 @media (max-width:900px){.mw-kpis{grid-template-columns:1fr}}
 .date-input-weekday{flex:none;font-size:12px;color:#6b7690;white-space:nowrap}
 .date-input-weekday.weekend{color:#c2410c;font-weight:600}
+
+/* Motion ของภาพรวมผู้บริหาร (ผู้ใช้ขอ 2026-10-13): การ์ดเลขหลักและแผงค่อยๆ ลอยขึ้นทีละใบ · แท่งกราฟโตจากศูนย์ · ปิดทั้งหมดเมื่อผู้ใช้ลดการเคลื่อนไหว */
+@keyframes exec-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes exec-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes exec-pulse{0%,100%{box-shadow:0 0 0 0 rgba(180,52,52,.35)}50%{box-shadow:0 0 0 6px rgba(180,52,52,0)}}
+.exec .exec-kpis .stat{animation:exec-rise .5s cubic-bezier(.2,.7,.2,1) backwards}
+.exec .exec-kpis .stat:nth-child(2){animation-delay:.07s}
+.exec .exec-kpis .stat:nth-child(3){animation-delay:.14s}
+.exec .exec-kpis .stat:nth-child(4){animation-delay:.21s}
+.exec .exec-panel{animation:exec-rise .55s cubic-bezier(.2,.7,.2,1) .25s backwards}
+.exec .exec-hbar-fill{transform-origin:left;animation:exec-grow .8s cubic-bezier(.2,.7,.2,1) .35s both}
+.exec .exec-alert{transition:background-color .15s}
+.exec .exec-alert:hover{background:#f8faff}
+.exec .exec-alert--high .exec-alert-chip b{animation:exec-pulse 2.2s ease-out infinite}
+.exec .exec-kpis .stat{transition:transform .18s,box-shadow .18s}
+.exec .exec-kpis .stat:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(24,36,60,.08)}
+@media(prefers-reduced-motion:reduce){.exec *,.exec .stat{animation:none!important;transition:none!important;transform:none!important}}
