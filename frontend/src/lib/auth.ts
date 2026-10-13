@@ -142,19 +142,15 @@ const ENTRY_STAFF: UserRole[] = ['ADMIN', 'STAFF_ENTRY'];
 const SUBMIT_STAFF: UserRole[] = ['ADMIN', 'STAFF_CAR', 'STAFF_MOTO'];
 // ทุกกลุ่มที่ทำงานหลังบ้าน (อ่านหน้าขั้น 1-3 และรายชื่อลูกค้าได้)
 const ALL_STAFF: UserRole[] = ['ADMIN', 'STAFF_ENTRY', 'STAFF_CAR', 'STAFF_MOTO', 'ACCOUNTANT'];
+// งานของฉัน (ผู้ใช้ 2026-10-13): พนักงานทุกฝ่าย + ส่งของ - backend: GET /api/my-work
+export const MY_WORK_ROLES: UserRole[] = [...ALL_STAFF, 'DELIVERY'];
 
-// หน้าแรกของแต่ละบทบาทหลังล็อกอิน (พนักงานไม่เห็นภาพรวม - ผู้ใช้ 2026-09-22)
+// หน้าแรกของแต่ละบทบาทหลังล็อกอิน: ADMIN = ภาพรวมผู้บริหาร, พนักงานทุกฝ่าย = "งานของฉัน" (ภาพรวมงานติดขัดของบทบาทตัวเอง ไม่มีราคา
+// ผู้ใช้ 2026-10-13 - ก่อนหน้านี้พนักงานลงที่หน้างานของตัวเองโดยตรง เพราะไม่ควรเห็นภาพรวมผู้บริหาร ผู้ใช้ 2026-09-22)
 export function homeFor(roles: UserRole[]): string {
   if (roles.includes('CUSTOMER')) return '/portal';
   if (roles.includes('ADMIN')) return '/';
-  const entry = roles.includes('STAFF_ENTRY');
-  const submit = roles.includes('STAFF_CAR') || roles.includes('STAFF_MOTO');
-  if (entry && submit) return '/registration/new-vehicle';
-  if (entry) return '/registration/new-vehicle/entry';
-  if (submit) return '/registration/new-vehicle/submit-documents';
-  if (roles.includes('ACCOUNTANT')) return '/accounting/billing';
-  if (roles.includes('DELIVERY')) return '/delivery';
-  return '/';
+  return roles.some((r) => MY_WORK_ROLES.includes(r)) ? '/my-work' : '/';
 }
 
 interface PageRule {
@@ -174,6 +170,7 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/hr', roles: ['ADMIN'] },
   // ภาพรวมการทำงาน (ผู้ใช้ 2026-10-08): มีราคา ADMIN เท่านั้น - backend: /api/activity
   { prefix: '/activity', roles: ['ADMIN'] },
+  { prefix: '/my-work', roles: MY_WORK_ROLES },
   { prefix: '/accounting', roles: ['ADMIN', 'ACCOUNTANT'] },
   // รายงานส่งงาน / ใบส่งงาน: ACCOUNTANT อ่านได้ไว้ตรวจก่อนวางบิล แต่หน้า Delivery (คิวบันทึกส่ง) ไม่ได้ (ผู้ใช้ 2026-09-27)
   { prefix: '/delivery/report', roles: [...SUBMIT_STAFF, 'DELIVERY', 'ACCOUNTANT'] },
