@@ -181,6 +181,9 @@ export function computeDocumentFees(
     noBillItems.push(
       options.stopUseRelocateOut
         ? { label: 'ลงขัน (จดใหม่ หยุดใช้ย้ายออก)', amount: lookupFee(noBill, 'ลงขัน - จดใหม่ หยุดใช้ย้ายออก') }
+        : requestsPlateNumber(options.plateNumberOption) || isSwapPlateOption(options.plateNumberOption)
+          ? // ขอใช้เลข / สลับเลข: ลงขันมอเตอร์ไซค์ 100 บาท (ผู้ใช้ 2026-10-13) ใช้แถวเดียวกับสมุทรปราการ
+            { label: 'ลงขัน (ขอใช้เลข/สลับเลข)', amount: lookupFee(noBill, MOTO_SAMUT_PRAKAN_NO_BILL_KEY) }
         : vehicle.registrationProvince === SAMUT_PRAKAN
           ? // จดที่สมุทรปราการ (ออฟฟิศจดเอง): ลงขัน 100 บาท ค่าอากรคิดแบบกรุงเทพฯ ปกติ 10 / ขอใช้ 30 (ผู้ใช้ 2026-10-08)
             { label: 'ลงขัน (จดสมุทรปราการ)', amount: lookupFee(noBill, MOTO_SAMUT_PRAKAN_NO_BILL_KEY) }

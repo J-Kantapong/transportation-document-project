@@ -124,6 +124,13 @@ describe('computeDocumentFees - จดใหม่ หยุดใช้ย้�
     expect(result.noBillItems.find((i) => i.label.includes('ลงขัน'))?.amount).toBe(250);
   });
 
+  it('มอเตอร์ไซค์ขอใช้เลข หรือสลับเลข -> ลงขัน 100', () => {
+    for (const plateNumberOption of ['NORMAL', 'SWAP_NORMAL'] as const) {
+      const result = computeDocumentFees(motoVehicle(), baseOptions({ plateNumberOption }), baseRules());
+      expect(result.noBillItems.find((i) => i.label.includes('ลงขัน'))?.amount).toBe(100);
+    }
+  });
+
   it('รถยนต์ไม่มีตัวเลือกนี้ - ลงขันคงเดิมตามประเภทรถแม้ flag จะถูกส่งมา (defensive gating)', () => {
     const options = baseOptions({ stopUseRelocateOut: true }) as DocumentSubmissionOptionsInput;
     const result = computeDocumentFees(carVehicle(), options, baseRules());
