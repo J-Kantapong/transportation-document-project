@@ -42,6 +42,7 @@ import {
   type JobItem,
   type JobPick,
   type JobRateRow,
+  suggestedJobServiceFee,
   type JobSnapshot,
   type JobType,
 } from './other-jobs.js';
@@ -423,13 +424,14 @@ export function parseJobPicks(raw: unknown): JobPick[] {
 // ชื่องานตั้งต้นของบิลที่มีแต่งานอื่นๆ เช่น "งานโอน / ต่อภาษี" (ตามลำดับที่เลือก)
 const jobTypeLabels = (picks: JobPick[]) => [...new Set(picks.map((p) => p.type))].map((t) => JOB_LABEL[t]).join(' / ');
 
-const toJobRate = (r: { id: string; jobType: string; vehicleClass: string; variant: string | null; label: string; amount: unknown; sortOrder: number }): JobRateRow => ({
+const toJobRate = (r: { id: string; jobType: string; vehicleClass: string; variant: string | null; label: string; amount: unknown; includesReceipt: boolean; sortOrder: number }): JobRateRow => ({
   id: r.id,
   jobType: r.jobType,
   vehicleClass: r.vehicleClass,
   variant: r.variant,
   label: r.label,
   amount: Number(r.amount),
+  includesReceipt: r.includesReceipt,
   sortOrder: r.sortOrder,
 });
 
@@ -1130,6 +1132,10 @@ export class BillingService {
                 warnings.push(`ใบเสร็จ ${fee.amount} ไม่ตรงกับยอด Bill ที่ระบบคิดไว้ ${round2(j.billTotal)}`);
               }
               if (!rate) warnings.push(`ยังไม่ได้ตั้งราคาค่าบริการ${JOB_LABEL[j.type]}ของลูกค้ารายนี้`);
+              const suggestedServiceFee = rate ? suggestedJobServiceFee(rate, fee.amount) : null;
+              if (rate?.includesReceipt && suggestedServiceFee === null) {
+                warnings.push(`ราคาเหมา ${rate.amount} ต่ำกว่าค่าธรรมเนียม ${fee.amount} คิดค่าบริการไม่ได้ กรุณากรอกเอง`);
+              }
               if (fee.amount <= 0 && !rate) warnings.push('ไม่มียอดให้วางบิล');
               return {
                 ...j,
@@ -1138,7 +1144,7 @@ export class BillingService {
                 fee: fee.amount,
                 feeSource: fee.source,
                 suggestedRateId: rate?.id ?? null,
-                suggestedServiceFee: rate ? rate.amount : null,
+                suggestedServiceFee,
                 suggestedServiceLabel: rate?.label ?? '',
                 warnings,
               };
@@ -1177,13 +1183,14 @@ export class BillingService {
         variant: variant as string | null,
         label: optionalText(r.label, `${row}ข้อความต่อท้าย`) ?? '',
         amount,
+        includesReceipt: r.includesReceipt === true,
         sortOrder: i,
       };
     });
     const exists = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
     if (!exists) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
     await this.prisma.$transaction(async (tx) => {
-      const before = await tx.jobFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' }, select: { jobType: true, vehicleClass: true, variant: true, label: true, amount: true } });
+      const before = await tx.jobFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' }, select: { jobType: true, vehicleClass: true, variant: true, label: true, amount: true, includesReceipt: true } });
       await tx.jobFeeRate.deleteMany({ where: { customerId } });
       if (rows.length) await tx.jobFeeRate.createMany({ data: rows });
       await writeAudit(tx, {

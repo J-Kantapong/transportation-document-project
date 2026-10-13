@@ -53,6 +53,7 @@ interface RateRow {
   variant: "OWNER" | "INSPECTION" | null;
   label: string;
   amountText: string;
+  includesReceipt: boolean;
 }
 
 const rateRowOf = (r: JobFeeRate): RateRow => ({
@@ -61,6 +62,7 @@ const rateRowOf = (r: JobFeeRate): RateRow => ({
   variant: r.variant,
   label: r.label,
   amountText: formatMoney(r.amount),
+  includesReceipt: r.includesReceipt,
 });
 
 export function OtherJobsBillingPage() {
@@ -265,7 +267,7 @@ export function OtherJobsBillingPage() {
     try {
       const saved = await billingApi.replaceJobRates(
         customerId,
-        rateRows.map((r) => ({ jobType: r.jobType, vehicleClass: r.vehicleClass, variant: r.variant, label: r.label.trim(), amount: parseMoney(r.amountText) ?? 0 })),
+        rateRows.map((r) => ({ jobType: r.jobType, vehicleClass: r.vehicleClass, variant: r.variant, label: r.label.trim(), amount: parseMoney(r.amountText) ?? 0, includesReceipt: r.includesReceipt })),
         rateRemark.trim(),
       );
       setRateRows(saved.rates.map(rateRowOf));
@@ -372,7 +374,7 @@ export function OtherJobsBillingPage() {
               {ratesOpen && (
                 <div style={{ display: "grid", gap: 8 }}>
                   <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                    ราคาก่อน VAT ต่อ 1 งาน · ระบบใช้แถวแรกที่ตรงประเภทงาน ชนิดรถ และแบบงาน (งานโอนแยกแบบได้) · ไม่มีแถวที่ตรง = ต้องกรอกค่าบริการเองก่อนออกบิล · เปลี่ยนราคาไม่กระทบบิลที่ออกไปแล้ว
+                    ราคาก่อน VAT ต่อ 1 งาน (ติ๊ก "รวมใบเสร็จ" = ราคาเหมารวมค่าธรรมเนียมแล้ว ค่าบริการ = ราคา - ค่าธรรมเนียมจริงของงานนั้น) · ระบบใช้แถวแรกที่ตรงประเภทงาน ชนิดรถ และแบบงาน (งานโอนแยกแบบได้) · ไม่มีแถวที่ตรง = ต้องกรอกค่าบริการเองก่อนออกบิล · เปลี่ยนราคาไม่กระทบบิลที่ออกไปแล้ว
                   </p>
                   {rateRows.map((r, i) => (
                     <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
@@ -413,6 +415,10 @@ export function OtherJobsBillingPage() {
                         style={{ width: 110, textAlign: "right" }}
                         aria-label="ราคาก่อน VAT"
                       />
+                      <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 13 }} title="ติ๊ก = ราคานี้รวมค่าธรรมเนียมใบเสร็จแล้ว ค่าบริการ = ราคา - ค่าธรรมเนียมของงานนั้น">
+                        <input type="checkbox" checked={r.includesReceipt} onChange={(e) => patchRate(i, { includesReceipt: e.target.checked })} />
+                        รวมใบเสร็จ
+                      </label>
                       <button type="button" className="text-button" onClick={() => setRateRows((prev) => prev.filter((_, n) => n !== i))}>
                         ลบ
                       </button>
@@ -422,7 +428,7 @@ export function OtherJobsBillingPage() {
                     <button
                       type="button"
                       className="text-button"
-                      onClick={() => setRateRows((prev) => [...prev, { jobType: "TRANSFER", vehicleClass: "ANY", variant: null, label: "", amountText: "" }])}
+                      onClick={() => setRateRows((prev) => [...prev, { jobType: "TRANSFER", vehicleClass: "ANY", variant: null, label: "", amountText: "", includesReceipt: false }])}
                     >
                       + เพิ่มแถวราคา
                     </button>

@@ -4,7 +4,7 @@
 // ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย (JobFeeRate - ผู้ใช้: "ราคาแต่ละเจ้าไม่เท่ากัน") บัญชีแก้ได้ก่อนออกบิล
 // ค่าอากรไม่ขึ้นบิลเป็นบรรทัดแยก (ผู้ใช้ไม่ได้สั่ง) นับเป็นต้นทุนของบรรทัดค่าบริการ เหมือนที่ใช้คิดกำไร: ต้นทุน = No Bill + ค่าอากร
 
-import { round2 } from './billing-calculator.js';
+import { round2, serviceFeeFromRate } from './billing-calculator.js';
 
 export const JOB_TYPES = ['TRANSFER', 'USE_CANCEL', 'PLATE_COPY', 'MOVE_OUT', 'TAX_RENEWAL'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
@@ -39,7 +39,14 @@ export interface JobRateRow {
   variant: string | null;
   label: string;
   amount: number;
+  includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จแล้ว: ค่าบริการ = amount - ค่าธรรมเนียมของงานนั้น
   sortOrder: number;
+}
+
+// ค่าบริการ (ก่อน VAT) ที่เสนอจากแถวราคา - เหมารวมใบเสร็จ = ราคา - ค่าธรรมเนียมที่จะขึ้นบิล (โอน 800 - 105 = 695)
+// ค่าธรรมเนียมแพงกว่าราคา = null ให้บัญชีกรอกเอง (ดีกว่าเดาราคาติดลบ)
+export function suggestedJobServiceFee(rate: Pick<JobRateRow, 'amount' | 'includesReceipt'>, fee: number): number | null {
+  return serviceFeeFromRate({ amount: rate.amount, vatInclusive: false, includesReceipt: rate.includesReceipt }, fee);
 }
 
 // แถวราคาแรก (เรียงตาม sortOrder) ที่ประเภทงาน ชนิดรถ และแบบตรงกับงาน - ไม่เจอ = null (ให้บัญชีกรอกเอง ดีกว่าเดาราคาผิด)
