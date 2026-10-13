@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
+import { WEEKEND_WARNING, isWeekend, weekdayName } from "@/lib/date-check";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
 import { ChecksNote } from "@/components/submit-flow/ChecksNote";
 import { EligibilityNotice } from "@/components/submit-flow/EligibilityNotice";
@@ -92,6 +93,8 @@ export default function SubmitReviewPage() {
   const sum = (key: "bill" | "noBill" | "duty" | "total") => lines.reduce((acc, l) => acc + (l.amounts?.[key] ?? 0), 0);
   // วันที่ยื่นไม่ใช่วันนี้ (กรอกล่วงหน้า/ย้อนหลัง) - เตือนสีส้มในหน้าต่างยืนยันแบบเดียวกับหน้า Delivery
   const dayDiff = submitDate && today ? Math.round((Date.parse(submitDate) - Date.parse(today)) / DAY_MS) : 0;
+  // วันที่ยื่นตรงกับเสาร์-อาทิตย์ (ขนส่งปิด) - เตือนสีส้มในหน้าต่างยืนยัน (ผู้ใช้ 2026-10-13)
+  const submitWeekend = Boolean(submitDate) && isWeekend(submitDate);
   // คันที่ยื่นไม่ได้ ณ วันที่ยื่นแจ้งแยก (EligibilityNotice) ไม่นับเป็น "ยอดเปลี่ยน"
   const changedCount = selected.filter((v) => changedIds.has(v.id) && !checks.dateBlockedIds.includes(v.id)).length;
   // ส่งทีละชุด (50 คัน) - บอกความคืบหน้าระหว่างชุด ไม่ให้ดูเหมือนค้าง
@@ -220,10 +223,11 @@ export default function SubmitReviewPage() {
           {checks.taxPendingCount > 0 ? ` (${checks.taxPendingCount} คันยังไม่รวมภาษี)` : ""}
         </p>
         {/* วันที่ยื่นอยู่ในหน้าต่างยืนยันด้วย - ไม่ใช่วันนี้ขึ้นสีส้มพร้อมจำนวนวัน (พบ 2026-09-27: เปิดค้างข้ามคืนแล้วยื่นด้วยวันเมื่อวาน) */}
-        <p style={dayDiff !== 0 ? { color: "#c2410c", fontWeight: 600 } : undefined}>
-          วันที่ยื่นเอกสาร {isoToDisplayDate(submitDate) || "—"}
+        <p style={dayDiff !== 0 || submitWeekend ? { color: "#c2410c", fontWeight: 600 } : undefined}>
+          วันที่ยื่นเอกสาร {submitDate ? `${weekdayName(submitDate)}ที่ ${isoToDisplayDate(submitDate)}` : "—"}
           {dayDiff !== 0 ? ` (ไม่ใช่วันนี้ – ${dayDiff > 0 ? `อีก ${dayDiff} วัน` : `ย้อนหลัง ${-dayDiff} วัน`})` : " (วันนี้)"}
         </p>
+        {submitWeekend && <p style={{ color: "#c2410c", fontWeight: 600 }}>⚠ {WEEKEND_WARNING}</p>}
         {submitProgress && (
           <p className="muted" role="status">
             ส่งไปยื่นแล้ว {submitProgress.done} จาก {submitProgress.total} คัน - อย่ารีเฟรชหรือปิดหน้านี้จนกว่าจะเสร็จ

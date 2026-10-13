@@ -549,3 +549,5 @@ tr.row-selected td{background:#f3f6ff}
 .mw-more{padding:8px 16px 12px;margin:0}
 .mw-row-empty td{color:#b0b8c6}
 @media (max-width:900px){.mw-kpis{grid-template-columns:1fr}}
+.date-input-weekday{flex:none;font-size:12px;color:#6b7690;white-space:nowrap}
+.date-input-weekday.weekend{color:#c2410c;font-weight:600}

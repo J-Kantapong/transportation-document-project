@@ -6,6 +6,7 @@ import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { confirmDates } from "@/lib/date-check";
 import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { TransferReceiptAttachButton, TransferReceiptCell } from "@/components/TransferNoticeReceipts";
 
@@ -174,6 +175,7 @@ function PendingVehicleTable({
                 </td>
                 <td>
                   <DateInput
+                    weekday
                     value={row.completedDateText}
                     disabled={readOnly}
                     onChange={(value) =>
@@ -382,6 +384,9 @@ export default function TransferNoticePage() {
       return;
     }
 
+    // วันที่เสร็จตรงกับเสาร์-อาทิตย์ = ถามยืนยันก่อน (ผู้ใช้ 2026-10-13 ดู lib/date-check.ts)
+    if (row.done && completedDateIso && !confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", [completedDateIso])) return;
+
     patchRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
       await api.updateTransferNotice(id, {
@@ -424,6 +429,10 @@ export default function TransferNoticePage() {
       setBulkMessage({ text: "ไม่มีรายการที่เปลี่ยนแปลง" });
       return;
     }
+
+    // บันทึกหลายคัน: ยืนยันวันที่เสร็จทุกครั้ง (วันที่ผิดทั้งชุดต้องตามแก้ทีละคัน)
+    const doneDates = parsed.filter((p) => p.done && p.completedDateIso).map((p) => p.completedDateIso);
+    if (!confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", doneDates, { always: true })) return;
 
     setBulkSaving(true);
     setBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -508,6 +517,7 @@ export default function TransferNoticePage() {
       }
       const cost = correction.costText.trim();
       if (cost && !/^\d+(\.\d+)?$/.test(cost)) return fail("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
+      if (!confirmDates("แก้วันที่เสร็จ", [completedDateIso])) return;
       body = { done: true, completedDate: completedDateIso, cost: cost || null, remark };
     }
 
@@ -623,6 +633,7 @@ export default function TransferNoticePage() {
           <label className="field" style={{ margin: 0 }}>
             วันที่รับงาน
             <DateInput
+              weekday
               value={dateText}
               onChange={(value) => handleDateTextChange(value)}
               style={{ width: 130 }}
@@ -848,6 +859,7 @@ export default function TransferNoticePage() {
                   <label className="field" style={{ margin: 0 }}>
                     วันที่เสร็จ *
                     <DateInput
+                      weekday
                       value={correction.dateText}
                       onChange={(value) => patchCorrection({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                       style={{ width: 130 }}
