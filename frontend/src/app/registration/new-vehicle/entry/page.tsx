@@ -24,6 +24,8 @@ import { DateInput } from "@/components/DateInput";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
+import { ChassisCounter, DataWarningBox, KnownModelHint } from "@/components/VehicleDataCheck";
+import { rowWarningsOf, warningKeys, type RowDataWarnings } from "@/lib/vehicle-data-check";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -63,6 +65,7 @@ function VehicleFieldsFieldset({
   financeCompanies,
   financeOn,
   onFinanceToggle,
+  excludeId,
 }: {
   row: NormalizedVehicleRow;
   dateText: string;
@@ -73,6 +76,7 @@ function VehicleFieldsFieldset({
   financeCompanies: FinanceCompany[];
   financeOn: boolean;
   onFinanceToggle: (checked: boolean) => void;
+  excludeId?: string; // ฟอร์มแก้ไข: รถคันที่กำลังแก้ ไม่นับตัวเองเป็นรุ่นที่เคยคีย์
 }) {
   // CC หรือ น้ำหนัก บังคับตามประเภทรถ + เชื้อเพลิงที่เลือก (ใช้คำนวณภาษี) - ดู requiredSizeField
   const sizeField = requiredSizeField(row.body, row.fuel);
@@ -100,7 +104,9 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        เลขตัวถัง *
+        <span>
+          เลขตัวถัง * <ChassisCounter chassis={row.chassis} />
+        </span>
         {/* บันทึกเป็นตัวพิมพ์ใหญ่ไม่มีช่องว่างเสมอ (normalizeVehicleRow) - แสดงตัวใหญ่ให้เห็นตั้งแต่ตอนพิมพ์ */}
         <input
           maxLength={250}
@@ -114,6 +120,19 @@ function VehicleFieldsFieldset({
         เลขเครื่อง *
         <input maxLength={250} required value={row.engine} onChange={(e) => onFieldChange("engine", e.target.value)} />
       </label>
+      {/* รุ่นที่รู้จัก (ผู้ใช้ 2026-10-13): รถในระบบที่เลขตัวถังขึ้นต้นเหมือนกันเคยคีย์เป็นยี่ห้อ / CC / ประเภทรถ อะไร - กดเติมค่าได้ */}
+      <KnownModelHint
+        chassis={row.chassis}
+        excludeId={excludeId}
+        brandId={row.brandId}
+        cc={row.cc}
+        body={row.body}
+        onApply={(values) => {
+          if (values.brandId !== undefined) onFieldChange("brandId", values.brandId);
+          if (values.cc !== undefined) onFieldChange("cc", values.cc);
+          if (values.body !== undefined) onFieldChange("body", values.body);
+        }}
+      />
       <label className="field">
         ยี่ห้อ *
         <select required value={row.brandId} onChange={(e) => onFieldChange("brandId", e.target.value)}>
@@ -357,10 +376,13 @@ export default function VehicleEntryPage() {
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const [singleSaving, setSingleSaving] = useState(false);
   const [singleMessage, setSingleMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  // ข้อมูลน่าจะคีย์ผิด (ผู้ใช้ 2026-10-13): ตั้งจาก 409 needsConfirm ของ POST /api/vehicles แก้ช่องใดๆ ต่อ = ล้าง
+  const [singleWarnings, setSingleWarnings] = useState<RowDataWarnings[] | null>(null);
 
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMessage, setBatchMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [batchWarnings, setBatchWarnings] = useState<RowDataWarnings[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -550,6 +572,7 @@ export default function VehicleEntryPage() {
 
   function updateSingle<K extends keyof NormalizedVehicleRow>(key: K, value: string) {
     setSingle((prev) => ({ ...prev, [key]: value }));
+    setSingleWarnings(null);
   }
 
   // เอาติ๊กไฟแนนซ์ออก = ล้างบริษัทและชื่อผู้ครอบครองที่กรอกไว้ด้วย ไม่งั้นค่าเก่าจะถูกส่งไปทั้งที่ผู้ใช้ไม่เห็นช่องแล้ว
@@ -612,8 +635,9 @@ export default function VehicleEntryPage() {
     }
   }
 
-  async function handleSingleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // confirmed = กดยืนยันในกล่องคำเตือนข้อมูลน่าจะคีย์ผิด - ส่งซ้ำพร้อม key ของคำเตือนที่เห็น (คำเตือนเปลี่ยน = backend เตือนชุดใหม่)
+  async function handleSingleSubmit(event?: FormEvent<HTMLFormElement>, confirmed?: RowDataWarnings[]) {
+    event?.preventDefault();
     if (!lookupReady) return;
     const row = normalizeVehicleRow(single);
     const errors = getVehicleRowErrors(row);
@@ -626,14 +650,21 @@ export default function VehicleEntryPage() {
     setSingleSaving(true);
     setSingleMessage({ text: "กำลังบันทึก…" });
     try {
-      await api.createVehicles([row]);
+      await api.createVehicles([row], confirmed ? warningKeys(confirmed) : undefined);
+      setSingleWarnings(null);
       setSingle({ ...EMPTY_SINGLE, date: todayIso() });
       setSingleFinanceOn(false);
       setDateText(isoToDisplayDate(todayIso()));
       setSingleMessage({ text: "บันทึกข้อมูลรถเรียบร้อยแล้ว" });
       await loadVehicles();
     } catch (error) {
-      setSingleMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+      const warnings = rowWarningsOf(error);
+      if (warnings) {
+        setSingleWarnings(warnings);
+        setSingleMessage({ text: "ยังไม่ได้บันทึก - ตรวจคำเตือนด้านล่าง", error: true });
+      } else {
+        setSingleMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
+      }
     } finally {
       setSingleSaving(false);
     }
@@ -642,6 +673,7 @@ export default function VehicleEntryPage() {
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     if (batchBusy) return;
     setBatchRows([]);
+    setBatchWarnings(null);
     const file = event.target.files?.[0];
     if (!file) return;
     setBatchBusy(true);
@@ -745,7 +777,7 @@ export default function VehicleEntryPage() {
     }
   }
 
-  async function handleBatchSave() {
+  async function handleBatchSave(confirmed?: RowDataWarnings[]) {
     if (batchBusy || !batchRows.length) return;
     setBatchBusy(true);
     setBatchMessage({ text: "กำลังบันทึก…" });
@@ -753,13 +785,19 @@ export default function VehicleEntryPage() {
       const payload = batchRows.map((row) =>
         Object.fromEntries(VEHICLE_COLUMNS.map(([key]) => [key, row[key]])),
       );
-      const result = await api.createVehicles(payload);
+      const result = await api.createVehicles(payload, confirmed ? warningKeys(confirmed) : undefined);
       setBatchMessage({ text: `บันทึกแล้ว ${result.count} รายการ` });
+      setBatchWarnings(null);
       setBatchRows([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await loadVehicles();
     } catch (error) {
-      if (error instanceof ApiError) {
+      const warnings = rowWarningsOf(error);
+      if (warnings) {
+        // ยังไม่บันทึกอะไร - แสดงคำเตือนในตารางรายแถว แล้วให้ติ๊กยืนยันทั้งชุด
+        setBatchWarnings(warnings);
+        setBatchMessage({ text: `ยังไม่ได้บันทึก - พบ ${warnings.length} แถวที่ข้อมูลน่าจะคีย์ผิด ตรวจคำเตือนในตารางแล้วยืนยันด้านล่าง`, error: true });
+      } else if (error instanceof ApiError) {
         const rowsText = error.rows
           ?.map((r) => `แถว ${batchRows[r.row - 1]?.sourceRow ?? r.row + 1}: ${r.errors.join(", ")}`)
           .join(" / ");
@@ -869,7 +907,9 @@ export default function VehicleEntryPage() {
         editingId,
         { ...row, remark },
         // ส่ง confirmKey ของคำเตือนที่เห็น - สถานะของขั้นตอนเปลี่ยนระหว่างนั้น (เช่น ได้ใบเสร็จแล้ว) = backend เตือนใหม่
-        confirmed ? { confirmedSteps: confirmed.affected.map((a) => a.confirmKey) } : undefined,
+        confirmed
+          ? { confirmedSteps: confirmed.affected.map((a) => a.confirmKey), confirmedWarnings: confirmed.dataWarnings.map((w) => w.key) }
+          : undefined,
       );
       setEditWarning(null);
       setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
@@ -887,7 +927,7 @@ export default function VehicleEntryPage() {
         // ยังไม่บันทึก - แสดงผลกระทบให้ผู้ใช้ตัดสินใจ (ยืนยันแล้วมีขั้นตอนเพิ่มจากที่เห็น = เตือนชุดใหม่)
         setEditWarning(warning);
         setEditMessage({
-          text: confirmed ? "มีขั้นตอนที่กระทบเพิ่มระหว่างนั้น - ตรวจสอบคำเตือนอีกครั้ง" : "ยังไม่ได้บันทึก - ตรวจสอบผลกระทบด้านล่างแล้วกดยืนยัน",
+          text: confirmed ? "คำเตือนเปลี่ยนระหว่างนั้น - ตรวจสอบคำเตือนอีกครั้ง" : "ยังไม่ได้บันทึก - ตรวจสอบคำเตือนด้านล่างแล้วกดยืนยัน",
           error: true,
         });
       } else {
@@ -951,6 +991,7 @@ export default function VehicleEntryPage() {
   }
 
   const batchHasErrors = batchRows.some((r) => r.issues.length > 0);
+  const batchWarningsByChassis = new Map((batchWarnings ?? []).map((r) => [r.chassis, r.warnings]));
 
   return (
     <section className="content">
@@ -1047,10 +1088,26 @@ export default function VehicleEntryPage() {
                   financeOn={singleFinanceOn}
                   onFinanceToggle={toggleSingleFinance}
                 />
+                {singleWarnings && (
+                  <DataWarningBox
+                    key={warningKeys(singleWarnings).join("|")}
+                    messages={singleWarnings.flatMap((r) => r.warnings.map((w) => w.message))}
+                    saving={singleSaving}
+                    confirmLabel="ยืนยันบันทึกข้อมูลรถ"
+                    onConfirm={() => handleSingleSubmit(undefined, singleWarnings)}
+                    onCancel={() => {
+                      setSingleWarnings(null);
+                      setSingleMessage({ text: "" });
+                    }}
+                  />
+                )}
                 <div className="form-actions">
-                  <button type="submit" className="primary" disabled={singleSaving}>
-                    บันทึกข้อมูลรถ
-                  </button>
+                  {/* มีคำเตือนอยู่ = ใช้ปุ่มยืนยันในคำเตือนแทน */}
+                  {!singleWarnings && (
+                    <button type="submit" className="primary" disabled={singleSaving}>
+                      บันทึกข้อมูลรถ
+                    </button>
+                  )}
                   <span
                     className={`customer-message${singleMessage.error ? " error" : singleMessage.text ? " success" : ""}`}
                     role="status"
@@ -1126,6 +1183,11 @@ export default function VehicleEntryPage() {
                             <td>{row.body}</td>
                             <td className={row.issues.length ? "import-error" : "import-ok"}>
                               {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
+                              {(batchWarningsByChassis.get(row.chassis) ?? []).map((w) => (
+                                <div key={w.key} style={{ color: "#b5651d" }}>
+                                  ⚠ {w.short}
+                                </div>
+                              ))}
                             </td>
                           </tr>
                         ))}
@@ -1133,14 +1195,28 @@ export default function VehicleEntryPage() {
                     </table>
                   </div>
                 )}
-                <button
-                  className="primary"
-                  style={{ marginTop: 22 }}
-                  disabled={!batchRows.length || batchHasErrors || batchBusy}
-                  onClick={handleBatchSave}
-                >
-                  บันทึกรายการที่ตรวจสอบแล้ว
-                </button>
+                {batchWarnings ? (
+                  <DataWarningBox
+                    key={warningKeys(batchWarnings).join("|")}
+                    messages={batchWarnings.flatMap((r) => r.warnings.map((w) => w.message))}
+                    saving={batchBusy}
+                    confirmLabel={`ยืนยันบันทึกทั้ง ${batchRows.length} รายการ`}
+                    onConfirm={() => handleBatchSave(batchWarnings)}
+                    onCancel={() => {
+                      setBatchWarnings(null);
+                      setBatchMessage({ text: "แก้ไฟล์แล้วเลือกไฟล์ใหม่ หรือกดบันทึกอีกครั้ง" });
+                    }}
+                  />
+                ) : (
+                  <button
+                    className="primary"
+                    style={{ marginTop: 22 }}
+                    disabled={!batchRows.length || batchHasErrors || batchBusy}
+                    onClick={() => handleBatchSave()}
+                  >
+                    บันทึกรายการที่ตรวจสอบแล้ว
+                  </button>
+                )}
               </div>
             </section>
           )}
@@ -1432,6 +1508,7 @@ export default function VehicleEntryPage() {
             financeCompanies={financeCompanies}
             financeOn={editFinanceOn}
             onFinanceToggle={toggleEditFinance}
+            excludeId={editingId ?? undefined}
           />
           <label className="field" style={{ marginTop: 20 }}>
             เหตุผลที่แก้ไข (Remark) *
@@ -1445,6 +1522,7 @@ export default function VehicleEntryPage() {
           </label>
           {editWarning && (
             <EditImpactWarning
+              key={editWarning.dataWarnings.map((w) => w.key).join("|")}
               warning={editWarning}
               roles={roles}
               isMotorcycle={isMotorcycleBody(editRow.body)}

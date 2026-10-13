@@ -43,6 +43,12 @@ export class VehiclesController {
     return { vehicles: await this.vehiclesService.searchByChassis(chassis, submitDate) };
   }
 
+  // หน้าคีย์รถ: รุ่นที่รู้จักของเลขตัวถังนี้ (ยี่ห้อ / CC / ประเภทรถ ที่เคยคีย์) - ดู VehiclesService.knownModel
+  @Get('known-model')
+  knownModel(@Query('chassis') chassis?: string, @Query('excludeId') excludeId?: string) {
+    return this.vehiclesService.knownModel(chassis, excludeId);
+  }
+
   @Post('lookup-by-chassis')
   lookupByChassis(@Body() body: { chassisList?: unknown; submitDate?: unknown }) {
     const chassisList = Array.isArray(body?.chassisList) ? body.chassisList.filter((c): c is string => typeof c === 'string') : [];

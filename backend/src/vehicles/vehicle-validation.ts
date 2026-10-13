@@ -45,6 +45,24 @@ export function requiredSizeField(body: string, fuel: string): 'cc' | 'weight' |
   return null;
 }
 
+// ประเภทรถมอเตอร์ไซค์ (รย.12) แบ่งตามช่วง CC - CC ที่คีย์ต้องอยู่ในช่วงของประเภทที่เลือก (พบ 2026-10-12: Zontes 149.5cc ถูกเลือกเป็น
+// "300-799cc" ทำให้ค่าธรรมเนียมคิดผิดช่วง) · รย.17 ไม่มีช่วง CC · ไม่ใช่ error ของ Bill แต่ของข้อมูลรถ จึงกันตั้งแต่ตอนคีย์
+const MOTORCYCLE_CC_RANGES: Record<string, [number, number]> = {
+  'รย.12-น้อยกว่า 300cc': [0, 300],
+  'รย.12-300-799cc': [300, 800],
+  'รย.12-800-999cc': [800, 1000],
+  'รย.12-1000cc ขึ้นไป': [1000, Infinity],
+};
+
+export function motorcycleCcMismatch(body: string, cc: string): string | null {
+  const range = MOTORCYCLE_CC_RANGES[body];
+  if (!range || !cc || !isValidNumeric(cc)) return null;
+  const value = Number(cc);
+  if (!(value > 0) || (value >= range[0] && value < range[1])) return null;
+  const expected = Object.entries(MOTORCYCLE_CC_RANGES).find(([, [from, to]]) => value >= from && value < to)?.[0];
+  return `ขนาด CC ${cc} ไม่อยู่ในช่วงของ ${body}${expected ? ` (ช่วงนี้คือ ${expected})` : ''} - ตรวจ CC หรือประเภทรถอีกครั้ง`;
+}
+
 export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   const errors: string[] = [];
 
@@ -90,6 +108,8 @@ export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   if (sizeField && row[sizeField] && isValidNumeric(row[sizeField]) && !(Number(row[sizeField]) > 0)) {
     errors.push(sizeField === 'cc' ? 'ขนาด CC ต้องมากกว่า 0' : 'น้ำหนักรถต้องมากกว่า 0');
   }
+  const ccMismatch = motorcycleCcMismatch(row.body, row.cc);
+  if (ccMismatch) errors.push(ccMismatch);
 
   for (const [key, label] of VEHICLE_COLUMNS) {
     if (row[key].length > 250) errors.push(`${label}ยาวเกิน 250 ตัวอักษร`);

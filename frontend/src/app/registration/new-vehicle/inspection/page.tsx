@@ -10,6 +10,7 @@ import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
 import { DateInput } from "@/components/DateInput";
+import { confirmDates } from "@/lib/date-check";
 
 // หัวกระดาษที่แก้ไขล่าสุดจำไว้ในเบราว์เซอร์นี้ - ถ้าอ่านไม่ได้ใช้ค่าเริ่มต้น
 const PRINT_HEADER_STORAGE_KEY = "inspection-print-header";
@@ -379,6 +380,7 @@ function SendPanel({
                 <label>
                   วันที่ (ใช้กับที่เลือกทั้งหมด)
                   <DateInput
+                    weekday
                     value={selectAllDateText}
                     onChange={(value) => onSelectAllDateTextChange(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
                     style={{ width: 100 }}
@@ -481,6 +483,7 @@ function SendPanel({
                           </td>
                           <td>
                             <DateInput
+                              weekday
                               className="inspect-input inspect-input--date"
                               aria-label="วันที่ส่งตรวจ"
                               value={row.dateText}
@@ -655,6 +658,7 @@ function ResultPanel({
                           </td>
                           <td>
                             <DateInput
+                              weekday
                               className="inspect-input inspect-input--date"
                               aria-label="วันที่ทราบผล"
                               value={row.dateText}
@@ -714,6 +718,8 @@ function ReferencePanel<T extends { id: string }>({
   error,
   action,
   rowActions,
+  selection,
+  toolbar,
 }: {
   title: string;
   columns: Array<[string, (v: T) => string]>;
@@ -722,8 +728,12 @@ function ReferencePanel<T extends { id: string }>({
   error: string;
   action?: ReactNode;
   rowActions?: (v: T) => ReactNode;
+  // ติ๊กเลือกแถว (ผู้ใช้ 2026-10-13: แก้วันที่ส่งตรวจหลายคันพร้อมกัน) - ช่องที่หัวตารางเลือก/ล้างทุกคันในรายการ รวมหน้าอื่น
+  selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (checked: boolean) => void };
+  toolbar?: ReactNode; // แถบเหนือตาราง (ปุ่มเลือกตามวันที่ / ปุ่มแก้ที่เลือก)
 }) {
   const { pageItems, page, setPage, totalPages } = usePagedList(vehicles);
+  const allSelected = !!selection && vehicles.length > 0 && vehicles.every((v) => selection.selected.has(v.id));
 
   return (
     <section className="panel customer-list" style={{ marginBottom: 24 }}>
@@ -741,10 +751,22 @@ function ReferencePanel<T extends { id: string }>({
         <div className="empty-customers">ไม่มีรายการ</div>
       ) : (
         <>
+          {toolbar}
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
+                  {selection && (
+                    <th style={{ width: 36 }}>
+                      <input
+                        type="checkbox"
+                        aria-label="เลือกทุกคันในรายการ"
+                        title="เลือกทุกคันในรายการ (รวมหน้าอื่น)"
+                        checked={allSelected}
+                        onChange={(e) => selection.onToggleAll(e.target.checked)}
+                      />
+                    </th>
+                  )}
                   {columns.map(([label]) => (
                     <th key={label}>{label}</th>
                   ))}
@@ -754,6 +776,11 @@ function ReferencePanel<T extends { id: string }>({
               <tbody>
                 {pageItems.map((v) => (
                   <tr key={v.id}>
+                    {selection && (
+                      <td>
+                        <input type="checkbox" aria-label="เลือกคันนี้" checked={selection.selected.has(v.id)} onChange={() => selection.onToggle(v.id)} />
+                      </td>
+                    )}
                     {columns.map(([label, getValue]) => (
                       <td key={label}>{getValue(v)}</td>
                     ))}
@@ -940,6 +967,13 @@ export default function InspectionPage() {
   // แก้การส่งตรวจ / ยกเลิกส่งตรวจ ของรถที่ยังรอผล (ต้องระบุเหตุผล - backend เก็บลงประวัติการแก้ไข)
   const sentDialogRef = useRef<HTMLDialogElement>(null);
   const [editSent, setEditSent] = useState<EditSentState | null>(null);
+  // แก้วันที่ส่งตรวจหลายคันพร้อมกันด้วยเหตุผลเดียว (ผู้ใช้ 2026-10-13: เคยต้องแก้ทีละคัน 54 ครั้งเมื่อเลื่อนวันส่งตรวจ)
+  const [sentSelected, setSentSelected] = useState<Set<string>>(new Set());
+  const [bulkSent, setBulkSent] = useState<{ dateText: string; remarkText: string } | null>(null);
+  const [bulkSentSaving, setBulkSentSaving] = useState(false);
+  const [bulkSentMessage, setBulkSentMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [sentListMessage, setSentListMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const bulkSentDialogRef = useRef<HTMLDialogElement>(null);
   const [sentSaving, setSentSaving] = useState(false);
   const [sentMessage, setSentMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
 
@@ -1076,6 +1110,9 @@ export default function InspectionPage() {
       return;
     }
 
+    // วันที่ตรงกับเสาร์-อาทิตย์ = ถามยืนยันก่อน (ผู้ใช้ 2026-10-13 ดู lib/date-check.ts)
+    if (!confirmDates("บันทึกส่งตรวจ", [dateIso])) return;
+
     patchSendRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
       await api.updateInspectionSent(id, {
@@ -1111,14 +1148,12 @@ export default function InspectionPage() {
         return;
       }
     }
-    // เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู - ยืนยันจำนวนแยกประเภทก่อนบันทึก (พบ 2026-09-27)
-    if (parsed.length > PAGE_SIZE) {
-      const out = parsed.filter((p) => p.type === "ส่งตรวจนอก").length;
-      const ok = window.confirm(
-        `บันทึกส่งตรวจ ${parsed.length} คัน (ส่งตรวจนอก ${out} · เอารถมาตรวจเอง ${parsed.length - out}) รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู - ยืนยันบันทึก?`,
-      );
-      if (!ok) return;
-    }
+    // บันทึกหลายคัน: ยืนยันวันที่ทุกครั้ง (ผู้ใช้ 2026-10-13: เคยลงวันส่งตรวจผิดทั้งชุด 54 คัน แล้วต้องแก้ทีละคัน)
+    // เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู - บอกจำนวนแยกประเภทในข้อความยืนยันด้วย (พบ 2026-09-27)
+    const sentOut = parsed.filter((p) => p.type === "ส่งตรวจนอก").length;
+    const sendNote =
+      `ส่งตรวจนอก ${sentOut} · เอารถมาตรวจเอง ${parsed.length - sentOut}` + (parsed.length > PAGE_SIZE ? " · รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู" : "");
+    if (!confirmDates("บันทึกส่งตรวจ", parsed.map((p) => p.dateIso), { always: true, note: sendNote })) return;
 
     setSendBulkSaving(true);
     setSendBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -1193,6 +1228,8 @@ export default function InspectionPage() {
       return;
     }
 
+    if (!confirmDates("บันทึกผลตรวจ", [dateIso])) return;
+
     patchResultRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
       await api.updateInspectionResult(id, {
@@ -1230,14 +1267,12 @@ export default function InspectionPage() {
         return;
       }
     }
-    // เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู - ยืนยันจำนวนแยกผลก่อนบันทึก (พบ 2026-09-27)
-    if (parsed.length > PAGE_SIZE) {
-      const pass = parsed.filter((p) => p.result === "ผ่าน").length;
-      const ok = window.confirm(
-        `บันทึกผลตรวจ ${parsed.length} คัน (ผ่าน ${pass} · ไม่ผ่าน ${parsed.length - pass}) รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู - ยืนยันบันทึก?`,
-      );
-      if (!ok) return;
-    }
+    // บันทึกหลายคัน: ยืนยันวันที่ทุกครั้ง (ผู้ใช้ 2026-10-13) - เลือกทั้งหมดติ๊กรถทุกหน้า รวมหน้าที่ยังไม่ได้เปิดดู
+    // จึงบอกจำนวนแยกผลในข้อความยืนยันด้วย (พบ 2026-09-27)
+    const passed = parsed.filter((p) => p.result === "ผ่าน").length;
+    const resultNote =
+      `ผ่าน ${passed} · ไม่ผ่าน ${parsed.length - passed}` + (parsed.length > PAGE_SIZE ? " · รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู" : "");
+    if (!confirmDates("บันทึกผลตรวจ", parsed.map((p) => p.dateIso), { always: true, note: resultNote })) return;
 
     setResultBulkSaving(true);
     setResultBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -1297,6 +1332,7 @@ export default function InspectionPage() {
       setEditMessage({ text: "กรุณาระบุเหตุผลที่แก้ไขผลตรวจ", error: true });
       return;
     }
+    if (!confirmDates("แก้วันที่ทราบผล", [dateIso])) return;
 
     setEditSaving(true);
     setEditMessage({ text: "กำลังบันทึก…" });
@@ -1353,6 +1389,7 @@ export default function InspectionPage() {
       setSentMessage({ text: editSent.mode === "edit" ? "กรุณาระบุเหตุผลที่แก้การส่งตรวจ" : "กรุณาระบุเหตุผลที่ยกเลิกส่งตรวจ", error: true });
       return;
     }
+    if (editSent.mode === "edit" && !confirmDates("แก้วันที่ส่งตรวจ", [dateIso])) return;
 
     setSentSaving(true);
     setSentMessage({ text: "กำลังบันทึก…" });
@@ -1371,6 +1408,76 @@ export default function InspectionPage() {
       if (err instanceof ApiError && err.status === 409) await reloadAll();
     } finally {
       setSentSaving(false);
+    }
+  }
+
+  // รถรอผลตรวจที่ติ๊กไว้ (id ที่หายจากรายการแล้ว เช่น บันทึกผลไปแล้ว ไม่นับ) และกลุ่มวันที่ส่งตรวจสำหรับปุ่มเลือกทั้งวัน
+  const selectedSentVehicles = pendingResultVehicles.filter((v) => sentSelected.has(v.id));
+  const sentDateGroups = [...new Set(pendingResultVehicles.flatMap((v) => (v.inspectionSentDate ? [v.inspectionSentDate] : [])))]
+    .sort((a, b) => b.localeCompare(a))
+    .map((date) => ({ date, ids: pendingResultVehicles.filter((v) => v.inspectionSentDate === date).map((v) => v.id) }));
+
+  function toggleSentSelected(ids: string[], checked: boolean) {
+    setSentSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function openBulkSent() {
+    if (!selectedSentVehicles.length) return;
+    setBulkSent({ dateText: "", remarkText: "" });
+    setBulkSentMessage({ text: "" });
+    bulkSentDialogRef.current?.showModal();
+  }
+
+  // แก้วันที่ส่งตรวจของทุกคันที่เลือกเป็นวันเดียวกัน - ประเภทการส่งตรวจของแต่ละคันคงเดิม เหตุผลเดียวกันถูกบันทึกในประวัติของทุกคัน
+  // ใช้ API แก้รายคันเดิม (ตรวจวันที่ / สิทธิ์ / มีคนแก้ไปก่อน ตามเดิม) คันที่ไม่สำเร็จบอกเหตุผลในข้อความสรุป
+  async function handleSaveBulkSent() {
+    if (!bulkSent || bulkSentSaving || !selectedSentVehicles.length) return;
+    const remark = bulkSent.remarkText.trim();
+    const parsed: Array<{ vehicle: InspectionVehicle; dateIso: string }> = [];
+    for (const vehicle of selectedSentVehicles) {
+      try {
+        parsed.push({ vehicle, dateIso: parseSendDate(bulkSent.dateText, vehicle) });
+      } catch (err) {
+        setBulkSentMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${(err as Error).message}`, error: true });
+        return;
+      }
+    }
+    if (!remark) {
+      setBulkSentMessage({ text: "กรุณาระบุเหตุผลที่แก้", error: true });
+      return;
+    }
+    const changing = parsed.filter((p) => p.vehicle.inspectionSentDate !== p.dateIso);
+    if (!changing.length) {
+      setBulkSentMessage({ text: "วันที่ใหม่ตรงกับวันที่ส่งตรวจเดิมของทุกคันที่เลือก", error: true });
+      return;
+    }
+    const skipped = parsed.length - changing.length;
+    const note = `เหตุผล: ${remark}` + (skipped ? ` · ข้าม ${skipped} คันที่เป็นวันนี้อยู่แล้ว` : "");
+    if (!confirmDates("แก้วันที่ส่งตรวจ", changing.map((p) => p.dateIso), { always: true, note })) return;
+
+    setBulkSentSaving(true);
+    setBulkSentMessage({ text: "กำลังบันทึก…" });
+    try {
+      const results = await Promise.allSettled(
+        changing.map((p) =>
+          api.correctInspectionSent(p.vehicle.id, { sentType: p.vehicle.inspectionSentType ?? "ส่งตรวจนอก", sentDate: p.dateIso, remark }),
+        ),
+      );
+      setSentListMessage(bulkResultMessage(results, changing.map((p) => p.vehicle.chassis)));
+      bulkSentDialogRef.current?.close();
+      setBulkSent(null);
+      // คันที่ไม่สำเร็จยังติ๊กค้างไว้ให้ลองใหม่ได้
+      setSentSelected(new Set(changing.filter((_, i) => results[i].status === "rejected").map((p) => p.vehicle.id)));
+      await reloadAll();
+    } finally {
+      setBulkSentSaving(false);
     }
   }
 
@@ -1451,6 +1558,52 @@ export default function InspectionPage() {
               <button className="primary" disabled={resultLoading || !sentOutPendingVehicles.length} onClick={openPrintDialog}>
                 พิมพ์รายการส่งตรวจ (PDF)
               </button>
+            }
+            selection={
+              canEdit
+                ? {
+                    selected: sentSelected,
+                    onToggle: (id) => toggleSentSelected([id], !sentSelected.has(id)),
+                    onToggleAll: (checked) => toggleSentSelected(pendingResultVehicles.map((v) => v.id), checked),
+                  }
+                : undefined
+            }
+            toolbar={
+              canEdit ? (
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 12px", padding: "12px 20px" }}>
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    เลือกตามวันที่ส่งตรวจ:
+                  </span>
+                  {sentDateGroups.map((group) => {
+                    const picked = group.ids.every((id) => sentSelected.has(id));
+                    return (
+                      <button
+                        key={group.date}
+                        type="button"
+                        className={picked ? "badge done" : "badge"}
+                        style={{ cursor: "pointer", border: "none" }}
+                        aria-pressed={picked}
+                        onClick={() => toggleSentSelected(group.ids, !picked)}
+                      >
+                        {isoToDisplayDate(group.date)} · {group.ids.length} คัน
+                      </button>
+                    );
+                  })}
+                  <button type="button" className="primary" disabled={!selectedSentVehicles.length} onClick={openBulkSent}>
+                    แก้วันที่ส่งตรวจที่เลือก ({selectedSentVehicles.length} คัน)
+                  </button>
+                  {selectedSentVehicles.length > 0 && (
+                    <button type="button" className="text-button" onClick={() => setSentSelected(new Set())}>
+                      ล้างที่เลือก
+                    </button>
+                  )}
+                  {sentListMessage.text && (
+                    <span className={`customer-message${sentListMessage.error ? " error" : " success"}`} role="status" style={{ flexBasis: "100%" }}>
+                      {sentListMessage.text}
+                    </span>
+                  )}
+                </div>
+              ) : undefined
             }
             rowActions={
               canEdit
@@ -1569,6 +1722,7 @@ export default function InspectionPage() {
               <label className="field">
                 วันที่ทราบผล
                 <DateInput
+                  weekday
                   value={editResult.dateText}
                   onChange={(value) => patchEditResult({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                 />
@@ -1651,6 +1805,7 @@ export default function InspectionPage() {
                   <label className="field">
                     วันที่ส่งตรวจ
                     <DateInput
+                      weekday
                       value={editSent.dateText}
                       onChange={(value) => patchEditSent({ dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
                     />
@@ -1688,6 +1843,69 @@ export default function InspectionPage() {
                 onClick={handleSaveEditSent}
               >
                 {editSent.mode === "edit" ? "บันทึกการแก้ไข" : "ยืนยันยกเลิกส่งตรวจ"}
+              </button>
+            </div>
+          </>
+        )}
+      </dialog>
+
+      {/* แก้วันที่ส่งตรวจหลายคันพร้อมกัน (ผู้ใช้ 2026-10-13) - วันที่ใหม่วันเดียว เหตุผลเดียว ใช้กับทุกคันที่ติ๊กในตารางรอผลตรวจ */}
+      <dialog
+        ref={bulkSentDialogRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget && !bulkSentSaving) bulkSentDialogRef.current?.close();
+        }}
+      >
+        <button className="close" aria-label="ปิด" disabled={bulkSentSaving} onClick={() => bulkSentDialogRef.current?.close()}>
+          ×
+        </button>
+        {bulkSent && (
+          <>
+            <h2>แก้วันที่ส่งตรวจ {selectedSentVehicles.length} คัน</h2>
+            <div style={{ display: "grid", gap: 16 }}>
+              <div style={{ fontSize: 13 }}>
+                <div className="muted">วันที่ส่งตรวจเดิมของคันที่เลือก</div>
+                {sentDateGroups
+                  .map((group) => ({ date: group.date, n: group.ids.filter((id) => sentSelected.has(id)).length }))
+                  .filter((group) => group.n > 0)
+                  .map((group) => (
+                    <div key={group.date}>
+                      {isoToDisplayDate(group.date)} · {group.n} คัน
+                    </div>
+                  ))}
+              </div>
+              <label className="field">
+                วันที่ส่งตรวจใหม่ (ใช้กับทุกคันที่เลือก)
+                <DateInput
+                  weekday
+                  value={bulkSent.dateText}
+                  onChange={(value) => setBulkSent({ ...bulkSent, dateText: formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)) })}
+                />
+              </label>
+              <label className="field">
+                เหตุผลที่แก้ (บังคับ - บันทึกในประวัติของทุกคัน)
+                <input
+                  type="text"
+                  placeholder="เช่น เลื่อนวันส่งตรวจ วันเดิมตรงกับวันหยุด"
+                  value={bulkSent.remarkText}
+                  onChange={(e) => setBulkSent({ ...bulkSent, remarkText: e.target.value })}
+                />
+              </label>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                ประเภทการส่งตรวจและราคาของแต่ละคันคงเดิม เปลี่ยนเฉพาะวันที่
+              </p>
+              {bulkSentMessage.text && (
+                <div className={`customer-message${bulkSentMessage.error ? " error" : " success"}`} role="status">
+                  {bulkSentMessage.text}
+                </div>
+              )}
+              <button
+                className="primary"
+                style={{ justifySelf: "end" }}
+                disabled={bulkSentSaving || !bulkSent.remarkText.trim() || !bulkSent.dateText.trim()}
+                onClick={handleSaveBulkSent}
+              >
+                บันทึกการแก้ไข {selectedSentVehicles.length} คัน
               </button>
             </div>
           </>

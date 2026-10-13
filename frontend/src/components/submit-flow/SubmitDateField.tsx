@@ -29,7 +29,7 @@ export function SubmitDateField({ label = "วันที่ยื่นเอ�
     <>
       <label className="submit-date-field">
         {label}
-        <DateInput value={dateText} onChange={changeDate} aria-invalid={!typedDate} />
+        <DateInput weekday value={dateText} onChange={changeDate} aria-invalid={!typedDate} />
       </label>
       {!typedDate ? <span className="field-error">วันที่ไม่ถูกต้อง (ยังใช้ {isoToDisplayDate(submitDate)})</span> : null}
     </>

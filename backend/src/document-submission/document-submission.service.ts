@@ -1,5 +1,5 @@
 import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
-import { assertVehicleInScope, currentWriteScope, isVehicleInScope, scopeErrorMessage, vehicleTypeWhere } from '../auth/vehicle-scope.js';
+import { assertVehicleInScope, assertVehicleReadable, currentWriteScope, isVehicleInScope, scopeErrorMessage, vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { OwnerType } from '../generated/prisma/enums.js';
@@ -7,7 +7,8 @@ import { currentUser } from '../auth/request-context.js';
 import { TaxService } from '../tax/tax.service.js';
 import { bangkokToday, isoOf, toDate } from '../overview/overview-calculator.js';
 import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
-import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeeParamRow } from './document-fee-calculator.js';
+import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeeParamRow, type NewPlateOption, type PlateNumberOption } from './document-fee-calculator.js';
+import { suggestSizeFixes, type SizeHint } from './receipt-size-hint.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
 import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEntryDto } from './dto/preview-bulk-document-submission.dto.js';
@@ -295,6 +296,45 @@ export class DocumentSubmissionService {
     return {
       results: computed.map((c) => ('fee' in c ? { vehicleId: c.vehicleId, fee: c.fee, tax: taxByEntry.get(c) } : c)),
     };
+  }
+
+  // เดาว่า CC / น้ำหนัก / ประเภทรถ คีย์ผิดตรงไหน จากยอดบนใบเสร็จ (ผู้ใช้ 2026-10-13) - อ่านอย่างเดียว ไม่แก้ข้อมูลรถ
+  // ยอดไม่ตรง Bill แต่ลองแทนค่าแล้วมีค่าที่ให้ยอดเท่าใบเสร็จ = เสนอให้ไปตรวจข้อมูลรถ · ไม่มีค่าไหนตรง = hints ว่าง
+  async receiptSizeHints(submissionId: string, amountRaw: unknown): Promise<{ hints: SizeHint[] }> {
+    const amount = typeof amountRaw === 'string' && /^\d+(\.\d{1,2})?$/.test(amountRaw.trim()) ? Number(amountRaw) : NaN;
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException({ error: 'ยอดใบเสร็จไม่ถูกต้อง' });
+    const sub = await this.prisma.documentSubmission.findUnique({ where: { id: submissionId }, include: { vehicle: { include: { owner: true } } } });
+    if (!sub || sub.vehicle.deletedAt) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleReadable(sub.vehicle.body);
+    const v = sub.vehicle;
+    const [feeRules, taxRules] = await Promise.all([this.loadRuleSet(), this.taxService.loadRuleSet()]);
+    const owner: GovernmentTaxOwnerInput | null = v.owner
+      ? { ownerType: v.owner.ownerType, isHirePurchaseBusiness: v.owner.isHirePurchaseBusiness, hirerType: v.owner.hirerType }
+      : null;
+    const hints = suggestSizeFixes({
+      vehicle: {
+        body: v.body,
+        fuel: v.fuel,
+        cc: v.cc?.toString() ?? null,
+        weight: v.weight?.toString() ?? null,
+        registrationProvince: v.registrationProvince,
+        ownerProvince: v.ownerProvince,
+        firstRegistrationDate: v.firstRegistrationDate,
+      },
+      owner,
+      options: {
+        plateNumberOption: sub.plateNumberOption as PlateNumberOption,
+        includePlateFee: sub.includePlateFee,
+        newPlateOption: sub.newPlateOption as NewPlateOption | null,
+        relocateAddon: sub.relocateAddon,
+        stopUseRelocateOut: sub.stopUseRelocateOut,
+        urgent: sub.urgent,
+      },
+      receiptAmount: amount,
+      feeRules,
+      taxRules,
+    });
+    return { hints };
   }
 
   // ยื่นรถ 1 คัน: บันทึก DocumentSubmission (snapshot ค่าธรรมเนียม) + TaxCalculation และเจ้าของรถ/เลขทะเบียนบน Vehicle

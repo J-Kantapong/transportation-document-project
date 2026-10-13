@@ -31,14 +31,19 @@ const chassisConflict = Object.assign(new Error('Unique constraint failed'), {
   meta: { target: 'Vehicle_chassis_active_key' },
 });
 
-function service(options: { existing?: Array<{ chassis: string }>[]; createError?: unknown; duplicate?: unknown; current?: unknown } = {}) {
-  const vehicleFindMany = vi.fn();
-  for (const result of options.existing ?? [[]]) vehicleFindMany.mockResolvedValueOnce(result);
-  vehicleFindMany.mockResolvedValue([]);
-  const createMany = vi.fn().mockImplementation(async () => {
+// sameModel = รถในระบบที่เลขตัวถัง 8 ตัวแรกเหมือนกัน (คำค้นของ "รุ่นที่รู้จัก" - where.OR startsWith ดู vehicle-data-check.ts)
+function service(
+  options: { existing?: Array<{ chassis: string }>[]; createError?: unknown; duplicate?: unknown; current?: unknown; sameModel?: unknown[] } = {},
+) {
+  const existingQueue = [...(options.existing ?? [[]])];
+  const vehicleFindMany = vi
+    .fn()
+    .mockImplementation(async (args: { where: { OR?: unknown } }) => (args.where.OR ? (options.sameModel ?? []) : (existingQueue.shift() ?? [])));
+  const createMany = vi.fn().mockImplementation(async (args: { data: Array<{ chassis: string }> }) => {
     if (options.createError) throw options.createError;
-    return { count: 1 };
+    return args.data.map((v, i) => ({ id: `v${i + 1}`, chassis: v.chassis }));
   });
+  const editLogCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const update = vi.fn().mockImplementation(async () => {
     if (options.createError) throw options.createError;
     return { id: 'v1' };
@@ -49,19 +54,30 @@ function service(options: { existing?: Array<{ chassis: string }>[]; createError
   );
   const tx = {
     vehicleOwner: { createManyAndReturn: vi.fn().mockResolvedValue([{ id: 'o1' }]), create: vi.fn().mockResolvedValue({ id: 'o2' }) },
-    vehicle: { createMany, update, findFirst },
+    vehicle: { createManyAndReturn: createMany, update, findFirst },
     // แก้ไขรถล็อกแถวรถก่อนอ่านสถานะขั้นตอน (ผู้ใช้ 2026-09-27 - เตือนเมื่อแก้หลังขั้นตอนที่ใช้ข้อมูลเดิม)
     $queryRaw: vi.fn().mockResolvedValue([]),
-    vehicleEditLog: { create: vi.fn().mockResolvedValue({ id: 'log1' }) },
+    vehicleEditLog: { create: vi.fn().mockResolvedValue({ id: 'log1' }), createMany: editLogCreateMany },
   };
   const prisma = {
     customer: { findMany: vi.fn().mockResolvedValue([{ id: 'c1' }]), findUnique: vi.fn().mockResolvedValue({ id: 'c1' }) },
-    brand: { findMany: vi.fn().mockResolvedValue([{ id: 'b1' }]), findUnique: vi.fn().mockResolvedValue({ id: 'b1' }) },
+    brand: { findMany: vi.fn().mockResolvedValue([{ id: 'b1', name: 'Toyota' }]), findUnique: vi.fn().mockResolvedValue({ id: 'b1', name: 'Toyota' }) },
     financeCompany: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
     vehicle: { findMany: vehicleFindMany, findFirst },
     $transaction: vi.fn().mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   } as unknown as PrismaService;
-  return { service: new VehiclesService(prisma), vehicleFindMany, createMany, update, findFirst };
+  return { service: new VehiclesService(prisma), vehicleFindMany, createMany, update, findFirst, editLogCreateMany };
+}
+
+// คำตอบทั้งก้อนของ error (409 needsConfirm ของคำเตือนข้อมูลน่าจะคีย์ผิดมี warnings / dataWarnings)
+async function responseOf(promise: Promise<unknown>): Promise<{ status?: number; body?: Record<string, unknown> }> {
+  try {
+    await promise;
+    return {};
+  } catch (e) {
+    const err = e as { getStatus?: () => number; response?: Record<string, unknown> };
+    return { status: err.getStatus?.(), body: err.response };
+  }
 }
 
 async function failureOf(promise: Promise<unknown>): Promise<{ status?: number; error?: string; errors?: unknown }> {
@@ -156,5 +172,96 @@ describe('VehiclesService.updateVehicle', () => {
       status: 409,
       error: 'เลขตัวถังนี้มีอยู่แล้ว',
     });
+  });
+});
+
+// คำเตือนข้อมูลน่าจะคีย์ผิด (ผู้ใช้ 2026-10-13): เลขตัวถังผิดหลัก / ยี่ห้อ CC ประเภทรถ ไม่ตรงรุ่นที่เคยคีย์ - เตือนแล้วให้ยืนยัน ไม่ห้าม
+describe('คำเตือนข้อมูลน่าจะคีย์ผิด', () => {
+  // รถ 3 คันในระบบที่เลขตัวถังขึ้นต้น MR0HA3CD เป็นยี่ห้อ b2 (Honda) 1,498 cc
+  const sameModel = [1, 2, 3].map((n) => ({
+    chassis: `MR0HA3CD10000000${n}`,
+    brandId: 'b2',
+    cc: '1498',
+    body: 'รย.1-เก๋ง 2 ตอน',
+    brand: { name: 'Honda' },
+  }));
+  const keysOf = (body: Record<string, unknown> | undefined, field: 'warnings' | 'dataWarnings') =>
+    field === 'warnings'
+      ? (body?.warnings as Array<{ warnings: Array<{ key: string }> }>).flatMap((entry) => entry.warnings.map((w) => w.key))
+      : (body?.dataWarnings as Array<{ key: string }>).map((w) => w.key);
+
+  it('คีย์ใหม่: เลขตัวถัง 16 หลัก ตอบ 409 พร้อมคำเตือนรายแถว ไม่บันทึกอะไร', async () => {
+    const { service: svc, createMany } = service();
+    const failure = await responseOf(svc.createBatch({ vehicles: [row({ chassis: 'MR0HA3CD10012345' })] }));
+    expect(failure.status).toBe(409);
+    expect(failure.body).toMatchObject({ needsConfirm: true, warnings: [{ row: 1, chassis: 'MR0HA3CD10012345', warnings: [{ code: 'CHASSIS_LENGTH' }] }] });
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('คีย์ใหม่: ยืนยันคำเตือนที่เห็นแล้วบันทึกได้ และเก็บประวัติว่ายืนยันข้ามคำเตือน', async () => {
+    const { service: svc, createMany, editLogCreateMany } = service();
+    const vehicles = [row({ chassis: 'MR0HA3CD10012345' })];
+    const failure = await responseOf(svc.createBatch({ vehicles }));
+    await expect(svc.createBatch({ vehicles, confirmedWarnings: keysOf(failure.body, 'warnings') })).resolves.toEqual({ count: 1 });
+    expect(createMany).toHaveBeenCalledTimes(1);
+    const log = editLogCreateMany.mock.calls[0][0].data[0];
+    expect(log.vehicleId).toBe('v1');
+    expect(log.remark).toContain('ยืนยันข้ามคำเตือนตอนคีย์');
+    expect(log.remark).toContain('16 หลัก');
+  });
+
+  it('คีย์ใหม่: ยืนยันของคำเตือนชุดอื่นใช้ไม่ได้', async () => {
+    const { service: svc, createMany } = service();
+    const failure = await responseOf(svc.createBatch({ vehicles: [row({ chassis: 'MR0HA3CD10012345' })], confirmedWarnings: ['CHASSIS_LENGTH:XXXX'] }));
+    expect(failure.status).toBe(409);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('คีย์ใหม่: ยี่ห้อและ CC ไม่ตรงกับรถรุ่นเดียวกันในระบบ = เตือนทั้งสองข้อ', async () => {
+    const { service: svc } = service({ sameModel });
+    const failure = await responseOf(svc.createBatch({ vehicles: [row()] }));
+    const warnings = (failure.body?.warnings as Array<{ warnings: Array<{ code: string; message: string }> }>)[0].warnings;
+    expect(warnings.map((w) => w.code)).toEqual(['MODEL_BRAND', 'MODEL_CC']);
+    expect(warnings[0].message).toContain('Toyota');
+    expect(warnings[0].message).toContain('Honda');
+  });
+
+  it('คีย์ใหม่: ข้อมูลปกติไม่มีคำเตือน ไม่เขียนประวัติ', async () => {
+    const { service: svc, editLogCreateMany } = service();
+    await expect(svc.createBatch({ vehicles: [row()] })).resolves.toEqual({ count: 1 });
+    expect(editLogCreateMany).not.toHaveBeenCalled();
+  });
+
+  const current = {
+    id: 'v1',
+    chassis: 'MR0HA3CD100123456',
+    brandId: 'b1',
+    cc: '1598',
+    body: 'รย.1-เก๋ง 2 ตอน',
+    ownerId: 'o1',
+    owner: null,
+    deletedAt: null,
+    transferDone: false,
+    inspectionSentDate: null,
+    documentSubmissions: [],
+    deliverySlipItems: [],
+    invoiceLines: [],
+  };
+
+  it('แก้ไข: แก้เลขตัวถังจนเหลือ 16 หลัก ตอบ 409 พร้อม dataWarnings แล้วยืนยันจึงบันทึก', async () => {
+    const { service: svc, update } = service({ current });
+    const body = { ...row({ chassis: 'MR0HA3CD10012345' }), remark: 'แก้เลขตัวถัง' };
+    const failure = await responseOf(svc.updateVehicle('v1', body));
+    expect(failure.status).toBe(409);
+    expect(failure.body).toMatchObject({ needsConfirm: true, affected: [], dataWarnings: [{ code: 'CHASSIS_LENGTH' }] });
+    expect(update).not.toHaveBeenCalled();
+    await expect(svc.updateVehicle('v1', { ...body, confirm: true, confirmedWarnings: keysOf(failure.body, 'dataWarnings') })).resolves.toEqual({ id: 'v1' });
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('แก้ไข: รถเก่าที่เลขตัวถังผิดหลักอยู่แล้ว แก้ช่องอื่นได้โดยไม่ถูกถามซ้ำ', async () => {
+    const { service: svc, update } = service({ current: { ...current, chassis: 'MR0HA3CD10012345' } });
+    await expect(svc.updateVehicle('v1', { ...row({ chassis: 'MR0HA3CD10012345', color: 'ขาว' }), remark: 'แก้สี' })).resolves.toEqual({ id: 'v1' });
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });

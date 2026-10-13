@@ -15,6 +15,7 @@ import { SupplierRatesModule } from './supplier-rates/supplier-rates.module.js';
 import { TransferNoticeReceiptsModule } from './transfer-notice-receipts/transfer-notice-receipts.module.js';
 import { OverviewModule } from './overview/overview.module.js';
 import { ActivityModule } from './activity/activity.module.js';
+import { MyWorkModule } from './my-work/my-work.module.js';
 import { VehicleSearchModule } from './vehicle-search/vehicle-search.module.js';
 import { PortalModule } from './portal/portal.module.js';
 import { PlatePhotosModule } from './plate-photos/plate-photos.module.js';
@@ -64,6 +65,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     BillingModule,
     OverviewModule,
     ActivityModule,
+    MyWorkModule,
     HrModule,
     VehicleSearchModule,
     SecretaryModule,

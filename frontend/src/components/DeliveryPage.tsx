@@ -12,6 +12,7 @@ import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { DateInput } from "@/components/DateInput";
+import { WEEKEND_WARNING, isWeekend, weekdayName } from "@/lib/date-check";
 
 // ส่งงานลูกค้า (พนักงาน): หน้านี้ไม่มีราคา/ยอดบิล เรื่องวางบิลฝ่ายบัญชีทำต่อที่ /accounting/billing (ผู้ใช้ 2026-09-21)
 // รถเข้าคิวเมื่อได้รับใบเสร็จ + เล่มแล้ว ป้ายตามทีหลังได้
@@ -377,11 +378,11 @@ export function DeliveryPage() {
             <div className="queue-filter">
               <label className="field">
                 <span>วันที่ยื่น ตั้งแต่</span>
-                <DateInput value={fromText} onChange={(v) => setFromText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
+                <DateInput weekday value={fromText} onChange={(v) => setFromText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
               </label>
               <label className="field">
                 <span>ถึง</span>
-                <DateInput value={toText} onChange={(v) => setToText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
+                <DateInput weekday value={toText} onChange={(v) => setToText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
               </label>
               <label className="field">
                 <span>เจ้าของงาน</span>
@@ -650,7 +651,7 @@ export function DeliveryPage() {
               </div>
               <label className="field">
                 <span>วันที่ส่ง</span>
-                <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} style={{ width: 130 }} />
+                <DateInput weekday value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} style={{ width: 130 }} />
               </label>
               <label className="field">
                 <span>ผู้รับงาน</span>
@@ -750,9 +751,14 @@ function DeliveryConfirmDialog({
       <h2>ยืนยันบันทึกส่งงาน</h2>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
         <div>
-          วันที่ส่ง: <b style={{ fontSize: 20, color: days === 0 ? undefined : "#bb6a00" }}>{isoToDisplayDate(dateIso)}</b>{" "}
+          วันที่ส่ง:{" "}
+          <b style={{ fontSize: 20, color: days === 0 && !isWeekend(dateIso) ? undefined : "#bb6a00" }}>
+            {weekdayName(dateIso)}ที่ {isoToDisplayDate(dateIso)}
+          </b>{" "}
           <span className={days === 0 ? "badge done" : "badge warn"}>{dayNote}</span>
         </div>
+        {/* ผู้ใช้ 2026-10-13: ใบส่งงาน 61 คันเคยลงวันเสาร์ ทั้งที่ส่งจริงวันจันทร์ */}
+        {isWeekend(dateIso) && <div style={{ color: "#c2410c", fontWeight: 600 }}>⚠ {WEEKEND_WARNING}</div>}
         <div>ลูกค้า: {customerName}</div>
         <div>ผู้รับ: {recipient}</div>
         <div>

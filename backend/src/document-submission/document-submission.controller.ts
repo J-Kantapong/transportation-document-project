@@ -38,6 +38,12 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.listByDate(date, status, { kind, q, offset });
   }
 
+  // ข้อเสนอว่า CC / น้ำหนัก / ประเภทรถ น่าจะคีย์ผิดตรงไหน เมื่อยอดใบเสร็จไม่ตรง Bill - ดู receiptSizeHints
+  @Get('document-submission/:id/size-hint')
+  sizeHint(@Param('id') id: string, @Query('amount') amount?: string) {
+    return this.documentSubmissionService.receiptSizeHints(id, amount);
+  }
+
   // หน้ารับใบเสร็จ: บันทึกผลตรวจทั้งใบยื่น - ดู DocumentSubmissionService.saveReceiptCheck
   @Post('document-submission/receipt-check')
   saveReceiptCheck(@Body() body: { receivedDate?: unknown; entries?: unknown }) {
