@@ -448,6 +448,15 @@ export function BillingPage() {
             plateSwapId: l.plateSwapId,
             swapReceiptAmount: l.swapReceiptAmount,
             transferReceiptAmount: l.transferReceiptAmount,
+            swap: l.vehicle.plateSwap
+              ? {
+                  oldChassis: l.vehicle.plateSwap.oldChassis,
+                  oldPlateText: l.vehicle.plateSwap.oldPlateText,
+                  oldBrand: l.vehicle.plateSwap.oldBrand,
+                  oldOwnerName: l.vehicle.plateSwap.oldOwnerName,
+                  receiptNo: l.vehicle.plateSwap.receiptNo,
+                }
+              : null,
           })),
         }
       : null;
