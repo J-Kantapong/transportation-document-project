@@ -290,6 +290,8 @@ ${body.join("\n")}${p === pageCount - 1 ? notes : ""}</section>`,
 export const PRINT_CSS = `  @page { size: A4 portrait; margin: 12mm 14mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
+  /* iOS Safari ขยายตัวอักษรบางก้อนเองตอนวาด PDF/พิมพ์จากมือถือ (ชื่อลูกค้า หัวใบแนบใหญ่กว่าส่วนอื่น, ผู้ใช้ 2026-10-14) - ปิดให้ขนาดตาม CSS ทุกเครื่อง */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body { font-family: "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif; color: #111; font-size: 10pt; line-height: 1.5; font-variant-numeric: tabular-nums; }
   .page { position: relative; page-break-after: always; break-after: page; }
   .void-mark { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 110pt; font-weight: 600; color: rgba(190, 0, 0, .16); transform: rotate(-30deg); pointer-events: none; z-index: 1; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
