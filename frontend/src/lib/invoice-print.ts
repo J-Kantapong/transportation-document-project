@@ -313,9 +313,9 @@ export const PRINT_CSS = `  @page { size: A4 portrait; margin: 12mm 14mm; }
   .tot .g { border-top: 1px solid #111; margin-top: 1mm; padding-top: 2mm; font-weight: 600; font-size: 11.5pt; }
   .baht { text-align: right; margin-top: 2mm; color: #555; }
   .sign { display: flex; justify-content: space-between; gap: 20mm; margin-top: 22mm; text-align: center; }
-  /* ช่องเซ็นผู้ออกบิล/ผู้รับชิดขอบล่างของหน้าบิล (ผู้ใช้ 2026-09-28) - หน้าบิลสูงเกือบเต็มพื้นที่พิมพ์ A4 (297 - ขอบ 24 = 273mm)
-     เผื่อไว้ 5mm ไม่ให้ล้นเป็นหน้าว่าง · ช่องเซ็นดันลงล่างด้วย margin-top: auto */
-  @media print { .face { display: flex; flex-direction: column; min-height: 268mm; } .face .sign { margin-top: auto; padding-top: 22mm; } }
+  /* ช่องเซ็นผู้ออกบิล/ผู้รับชิดขอบล่างของหน้าบิล (ผู้ใช้ 2026-09-28) - พื้นที่พิมพ์ A4 ในคอม = 297 - ขอบ 24 = 273mm แต่ iOS Safari มีหัวท้ายหน้ากินที่ จึงเผื่อไว้เหลือ 250mm
+     (268mm เคยล้นเป็น 3 หน้าบนมือถือ, ผู้ใช้ 2026-10-14) · ช่องเซ็นดันลงล่างด้วย margin-top: auto */
+  @media print { .face { display: flex; flex-direction: column; min-height: 250mm; } .face .sign { margin-top: auto; padding-top: 22mm; break-inside: avoid; page-break-inside: avoid; } }
   .sign div { flex: 1; border-top: 1px solid #999; padding-top: 2mm; }
   .atthead { display: flex; justify-content: space-between; align-items: flex-end; gap: 6mm; margin-bottom: 3mm; }
   .atthead > .k:last-child { white-space: nowrap; flex-shrink: 0; }
