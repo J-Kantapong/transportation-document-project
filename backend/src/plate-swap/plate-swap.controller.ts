@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { type CreatePlateSwapDto, type CreatePlateSwapPairDto, PlateSwapService, type UpdatePlateSwapDto } from './plate-swap.service.js';
 
-// การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - สิทธิ์กลุ่มยื่นเอกสาร (STAFF_CAR) ดู access-policy.ts
+// การสลับเลข รถเก่า <-> รถใหม่ - สิทธิ์กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO) ดู access-policy.ts
 // ผู้ใช้ 2026-09-27: ไม่มีการลบงานแล้ว (DELETE /:id ถูกถอด) ใช้ POST /:id/cancel { remark } ยกเลิกแบบเก็บแถวไว้แทน
 @Controller('api/plate-swaps')
 export class PlateSwapController {

@@ -68,7 +68,7 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/vehicles\/deleted$/, access: ['ADMIN'] },
   { pattern: /^\/api\/vehicles\/[^/]+\/restore$/, access: ['ADMIN'] },
   { pattern: /^\/api\/vehicles\/[^/]+$/, method: 'DELETE', access: ['ADMIN'] },
-  // ขั้น 4-8: ยื่นเอกสาร / ภาษี / ใบเสร็จ / ป้าย / เล่ม / คิวรับของ + งานสลับเลข (ยื่น/รับเอกสารกลับ - กลุ่มเดียวกัน, รถยนต์ = STAFF_CAR)
+  // ขั้น 4-8: ยื่นเอกสาร / ภาษี / ใบเสร็จ / ป้าย / เล่ม / คิวรับของ + งานสลับเลข (ยื่น/รับเอกสารกลับ - กลุ่มเดียวกัน, รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO)
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|document-submission|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },

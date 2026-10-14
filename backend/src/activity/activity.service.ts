@@ -59,6 +59,8 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'set-password': 'ตั้งรหัสผ่านใหม่',
   'job-rates': 'ตั้งราคางาน',
   'set-account': 'เปลี่ยนบัญชีรับเงิน',
+  'billing-close': 'ปิดงาน - วางบิลนอกระบบ',
+  'billing-reopen': 'เปิดงานกลับ (วางบิล)',
   issue: 'ออกเอกสาร',
 };
 const classKind = (vehicleClass: string): VehicleKind => (vehicleClass === 'MOTO' ? 'moto' : 'car');
@@ -236,7 +238,7 @@ export class ActivityService {
       add({ id: `vlog-${l.id}`, at: l.editedAt, type: 'vehicle-edit', group: 'edit', kind: v ? vehicleKindOf(v.body) : null, title: 'แก้ไข/ยกเลิกข้อมูลรถ', ref: v?.chassis ?? null, customer: cname(v?.customerId), detail: l.remark, actor: person(l.editedBy), href: v ? vehicleHref(v.chassis) : '/vehicles' });
     }
     for (const l of auditLogs) {
-      add({ id: `alog-${l.id}`, at: l.createdAt, type: 'audit', group: 'edit', title: auditTitle(l.entity, l.action), detail: l.remark, actor: person(l.editedBy), href: '/' });
+      add({ id: `alog-${l.id}`, at: l.createdAt, type: 'audit', group: 'edit', title: auditTitle(l.entity, l.action), detail: l.remark, actor: person(l.editedBy), href: l.action === 'billing-close' || l.action === 'billing-reopen' ? '/accounting/billing/jobs' : '/' });
     }
 
     events.sort((a, b) => (a.timed === b.timed ? a.at.localeCompare(b.at) : a.timed ? -1 : 1));
