@@ -63,6 +63,14 @@ const bad = (error: string) => new BadRequestException({ error });
 const conflict = (error: string) => new ConflictException({ error });
 const iso = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
 const num = (d: unknown) => (d === null || d === undefined ? null : Number(d));
+
+// ค่าตรวจรถ (ส่งตรวจนอก) ตั้งแต่เท่านี้ขึ้นไป ลูกค้า (เช่น SPI) จ่ายแยก ไม่ใช่ต้นทุนของเรา (ผู้ใช้ 2026-10-07 / ยืนยันใช้กับหน้าวางบิล 2026-10-14)
+// หน้าวางบิลเสนอให้เพิ่มเป็นบรรทัดค่าธรรมเนียมในบิล (ไม่มี VAT ไม่หัก ณ ที่จ่าย) เพื่อไม่ให้ตกหล่น - ไม่ได้บวกเองอัตโนมัติ
+export const INSPECTION_SEPARATE_FROM = 1000;
+const inspectionSeparateOf = (cost: unknown): number | null => {
+  const n = num(cost);
+  return n !== null && n >= INSPECTION_SEPARATE_FROM ? n : null;
+};
 const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const nameOf = (u: { name: string; displayName: string | null } | null) => (u ? u.displayName || u.name : null);
 const plateOf = (v: { plateCategory: string | null; plateNumber: string | null }) => (v.plateCategory && v.plateNumber ? `${v.plateCategory} ${v.plateNumber}` : '');
@@ -607,6 +615,8 @@ export class BillingService {
               // ส่วนของคันนี้ในใบเสร็จแจ้งย้าย (ขั้น 2) - ระบบบวกเข้าค่าธรรมเนียมของบิลเองตอนออกบิล (ผู้ใช้ 2026-10-08)
               transferReceiptAmount: num(v.transferBillCost),
               transferReceiptId: v.transferReceiptId,
+              // ค่าตรวจที่ลูกค้าจ่ายแยก (ตั้งแต่ INSPECTION_SEPARATE_FROM) - null = ไม่มี · หน้าวางบิลเสนอเพิ่มเป็นบรรทัดค่าธรรมเนียม
+              inspectionSeparate: inspectionSeparateOf(v.inspectionSentCost),
               // งานสลับเลขของรถคันนี้ - swapReceiptAmount ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ หน้าจอจะไม่ให้ติ๊กวางบิล
               plateSwap: swap,
               // จับคู่ราคาอัตโนมัติจากข้อมูลรถ (ผู้ใช้ 2026-09-28): ราคาหลักตามชนิดรถ/CC + ค่าเพิ่มขอใช้ (จดจังหวัดอื่น) / ด่วนตามการยื่นล่าสุด
