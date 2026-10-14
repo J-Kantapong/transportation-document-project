@@ -249,7 +249,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink href="/delivery/report" icon="stack" label="รายงานส่งงาน / ใบรวมทุกงาน" pathname={pathname} onClick={close} />
               </>
             )}
-            {has("ADMIN", "ACCOUNTANT", "STAFF_CAR") && (
+            {has("ADMIN", "ACCOUNTANT") && (
               <>
                 <div className="label">งานบัญชี</div>
                 {has("ADMIN", "ACCOUNTANT") && <NavLink href="/accounting/quotations" icon="stack" label="ใบเสนอราคา" pathname={pathname} onClick={close} />}

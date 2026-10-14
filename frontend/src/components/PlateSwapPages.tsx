@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, fetchAuthedBlob, plateSwapBookPhotoImageUrl, plateSwapPlatePhotoImageUrl, receiptImageUrl } from "@/lib/api";
-import { getCachedUser, getToken } from "@/lib/auth";
+import { getCachedUser, getToken, submitWriteScopeFor } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import {
   plateSwapApi,
@@ -35,7 +35,7 @@ import { DateInput } from "@/components/DateInput";
 // แล้วยืนยันวันที่รับเอกสารกลับ - "งานเสร็จ" ยังตัดสินด้วยขั้นนี้อย่างเดียวเหมือนเดิม (ผู้ใช้ 2026-09-28)
 // หน้ารับป้าย/รับเล่ม (PlateSwapReceivePlatePage / PlateSwapReceiveBookPage, ใหม่ 2026-09-28): แนบรูปแล้วบันทึกทันที
 // ไม่ใช้ AI (เหมือน Step 6/7) เฉพาะฝั่งรถเก่าของงานเอง ไม่ผูกกับ returnedDate/กฎใดๆ
-// แก้/ยกเลิก (ผู้ใช้ 2026-09-27): ADMIN + STAFF_CAR แก้ข้อมูลงาน (✎ แก้) ยกเลิกรับกลับ และยกเลิกงานได้ ต้องระบุเหตุผลเสมอ
+// แก้/ยกเลิก (ผู้ใช้ 2026-09-27): ADMIN + STAFF_CAR / STAFF_MOTO (ตามประเภทรถ) แก้ข้อมูลงาน (✎ แก้) ยกเลิกรับกลับ และยกเลิกงานได้ ต้องระบุเหตุผลเสมอ
 // (เก็บประวัติ) - ไม่มีการลบงานแล้ว งานที่ยกเลิกหายจากรายการและยอดรวม แต่ยังอยู่ในฐานข้อมูล
 // รถใหม่รับ "ทะเบียนเก่า" ของรถเก่า ส่วน "ทะเบียนใหม่" คือเลขที่รถเก่าได้รับ (ผู้ใช้ยืนยัน 2026-09-27)
 
@@ -68,14 +68,15 @@ export const errorText = (err: unknown, fallback: string) => (err instanceof Api
 const TYPING_DELAY_MS = 300;
 const MIN_VEHICLE_QUERY = 2;
 
-// บันทึกได้เฉพาะ ADMIN / STAFF_CAR (backend กันอีกชั้น) - บัญชี (ACCOUNTANT) อ่านอย่างเดียว จึงซ่อนฟอร์ม/ปุ่มบันทึก
-function useCanWrite(): boolean | null {
+// บันทึกได้เฉพาะ ADMIN และ STAFF_CAR (รถยนต์) / STAFF_MOTO (มอเตอร์ไซค์) ตามประเภทรถของหน้า (backend กันอีกชั้น)
+// บัญชี (ACCOUNTANT) อ่านอย่างเดียว จึงซ่อนฟอร์ม/ปุ่มบันทึก (พบ 2026-10-14: STAFF_MOTO ลงใบเสร็จมอเตอร์ไซค์ไม่ได้)
+function useCanWrite(vehicleClass: PlateSwapVehicleClass): boolean | null {
   const [canWrite, setCanWrite] = useState<boolean | null>(null);
   useEffect(() => {
-    const roles = getCachedUser()?.roles ?? [];
+    const scope = submitWriteScopeFor(getCachedUser()?.roles ?? []);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
-    setCanWrite(roles.includes("ADMIN") || roles.includes("STAFF_CAR"));
-  }, []);
+    setCanWrite(scope === "ALL" || scope === vehicleClass);
+  }, [vehicleClass]);
   return canWrite;
 }
 
@@ -824,7 +825,7 @@ function CancelSwapDialog({ swap, onClose, onCancelled }: { swap: PlateSwap; onC
   );
 }
 
-// ปุ่มแก้/ยกเลิกท้ายแถว (ADMIN / STAFF_CAR)
+// ปุ่มแก้/ยกเลิกท้ายแถว (ADMIN / STAFF_CAR / STAFF_MOTO ตามประเภทรถ)
 function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCancel: () => void; children?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
@@ -857,7 +858,7 @@ const EMPTY_FORM = {
 type RowDialog = { kind: "edit" | "cancel"; swap: PlateSwap } | null;
 
 export function PlateSwapSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: PlateSwapVehicleClass }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWrite(vehicleClass);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
@@ -1398,7 +1399,7 @@ export function PlateSwapReturnPage({
   vehicleClass?: PlateSwapVehicleClass;
 }) {
   const home = caseHome(vehicleClass, swapKind);
-  const canWrite = useCanWrite();
+  const canWrite = useCanWrite(vehicleClass);
   const [status, setStatus] = useState<Exclude<PlateSwapStatusFilter, "all">>("pending");
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1946,7 +1947,7 @@ function PlateSwapReceivePlateOrBookPage({
   vehicleClass: PlateSwapVehicleClass;
 }) {
   const home = caseHome(vehicleClass, swapKind);
-  const canWrite = useCanWrite();
+  const canWrite = useCanWrite(vehicleClass);
   const label = PLATE_OR_BOOK_LABEL[kind];
   const [status, setStatus] = useState<"pending" | "received">("pending");
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
@@ -2251,7 +2252,7 @@ function OldOldRow({ swap, canWrite, onEdit, onCancel }: { swap: PlateSwap; canW
 }
 
 export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: PlateSwapVehicleClass }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWrite(vehicleClass);
   const [carA, setCarA] = useState<PairCar>(EMPTY_PAIR_CAR);
   const [carB, setCarB] = useState<PairCar>(EMPTY_PAIR_CAR);
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
