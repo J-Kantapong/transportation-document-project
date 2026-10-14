@@ -332,7 +332,11 @@ export const PRINT_CSS = `  @page { size: A4 portrait; margin: 12mm 14mm; }
   @media screen { body { padding: 10mm 12mm; } .page { margin-bottom: 10mm; padding-bottom: 10mm; border-bottom: 1px dashed #bbb; } .page:last-child { border-bottom: 0; } }
 `;
 
-export function buildInvoiceHtml(inv: PrintableInvoice): string {
+// forPdf = วาดเป็นภาพลงไฟล์ PDF (pdf-export.ts) ซึ่งใช้สไตล์หน้าจอ ไม่ใช่ @media print: ตัดขอบหน้าจอที่ซ้อนกับขอบกระดาษ และจัดหน้าบิลให้ช่องเซ็นชิดล่างเหมือนตอนพิมพ์
+const PDF_CSS = `  @media screen { body { padding: 0; } .page { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; } .face { display: flex; flex-direction: column; min-height: 250mm; } .face .sign { margin-top: auto; padding-top: 22mm; } }
+`;
+
+export function buildInvoiceHtml(inv: PrintableInvoice, forPdf = false): string {
   return `<!doctype html>
 <html lang="th">
 <head>
@@ -342,7 +346,7 @@ export function buildInvoiceHtml(inv: PrintableInvoice): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
 <style>
-${PRINT_CSS}</style>
+${PRINT_CSS}${forPdf ? PDF_CSS : ""}</style>
 </head>
 <body>
 ${invoicePageHtml(inv)}
@@ -354,6 +358,12 @@ ${hasAttachment(inv) ? attachmentPagesHtml(inv).join("\n") : ""}
 // พิมพ์ผ่าน iframe ที่ซ่อนไว้ (วิธีเดียวกับใบส่งงาน) - เลือกเครื่องพิมพ์หรือ "บันทึกเป็น PDF" ได้จากหน้าต่างพิมพ์ของเบราว์เซอร์
 export function printInvoice(inv: PrintableInvoice): void {
   printHtml(buildInvoiceHtml(inv));
+}
+
+// บันทึกเป็นไฟล์ PDF โดยตรง (ผู้ใช้ 2026-10-14) - ใช้ตัวสร้าง PDF เดียวกับใบส่งงาน โหลดไลบรารีตอนกดเท่านั้น
+export async function downloadInvoicePdf(inv: PrintableInvoice): Promise<void> {
+  const { downloadHtmlAsPdf } = await import("@/lib/pdf-export");
+  await downloadHtmlAsPdf(buildInvoiceHtml(inv, true), `${inv.invoiceNo || "ใบวางบิล"}.pdf`, { orientation: "portrait", marginMm: 12 });
 }
 
 export function printHtml(html: string): void {

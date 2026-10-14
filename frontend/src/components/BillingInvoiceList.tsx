@@ -18,7 +18,7 @@ import {
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
 import { computeTotals, effectiveWhtRate, formatMoney, jobsOfItems, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
-import { printInvoice } from "@/lib/invoice-print";
+import { downloadInvoicePdf, printInvoice } from "@/lib/invoice-print";
 import Link from "next/link";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
 import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, SourceItemsNotice, type ItemRow } from "@/components/InvoiceItemsEditor";
@@ -337,6 +337,9 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                         {/* บิลที่ยกเลิกแล้วพิมพ์ออกมามีลายน้ำ "ยกเลิก" (lib/invoice-print.ts) */}
                         <button className="text-button" onClick={() => printInvoice(i)}>
                           พิมพ์
+                        </button>
+                        <button className="text-button" onClick={() => void downloadInvoicePdf(i).catch(() => setError("บันทึก PDF ไม่สำเร็จ ลองอีกครั้งหรือใช้ปุ่มพิมพ์แล้วเลือกบันทึกเป็น PDF"))}>
+                          บันทึก PDF
                         </button>
                         {i.status === "ISSUED" && (
                           <>
