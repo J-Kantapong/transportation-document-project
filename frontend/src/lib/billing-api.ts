@@ -332,6 +332,14 @@ export interface BillingCustomer {
   vehicles: BillingVehicle[];
 }
 
+export interface InvoiceLineSwap {
+  oldChassis: string;
+  oldPlateText: string;
+  oldBrand: string;
+  oldOwnerName: string;
+  receiptNo: string | null;
+}
+
 export interface InvoiceLine {
   id: string;
   vehicleId: string;
@@ -353,6 +361,8 @@ export interface InvoiceLine {
   // ส่วนของรถคันนี้ในใบเสร็จแจ้งย้าย ขั้น 2 (ผู้ใช้ 2026-10-08) - ระบบใส่ตอนออกบิล รวมอยู่ในค่าธรรมเนียมของบิล แก้ที่หน้าแก้บิลไม่ได้
   // ยอดค่าธรรมเนียมของบรรทัด = receiptAmount + swapReceiptAmount + transferReceiptAmount · null/ไม่มี = ไม่มีใบเสร็จแจ้งย้าย
   transferReceiptAmount?: number | null;
+  // รถเก่าของงานสลับเลข (อ่านสดจากงาน) - ใบแนบพิมพ์หมายเหตุ "จดพร้อมสลับเลข" · null/ไม่มี = ไม่ใช่งานสลับเลข
+  swap?: InvoiceLineSwap | null;
   // ใบยื่นล่าสุดของรถ (อ่านสด ไม่ได้ snapshot) - ใช้เรียงใบแนบ; null = หาใบยื่นไม่เจอ / ข้อมูลจากหน้าจอที่ยังไม่บันทึก
   submitDate?: string | null;
   submitUrgent?: boolean | null;

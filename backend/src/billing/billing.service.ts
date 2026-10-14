@@ -235,6 +235,8 @@ const itemsOf = (rows: ItemDbRow[]): Item[] =>
 const INVOICE_INCLUDE = {
   lines: {
     include: {
+      // รถเก่าของงานสลับเลข - ใบแนบพิมพ์หมายเหตุ "จดพร้อมสลับเลข" (ผู้ใช้ 2026-10-14)
+      plateSwap: { select: { oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, oldBrand: true, oldOwnerName: true, receiptNo: true } },
       vehicle: {
         select: { documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { submitDate: true, urgent: true, createdAt: true } } },
       },
@@ -1943,6 +1945,7 @@ export class BillingService {
       plateSwapId: string | null;
       swapReceiptAmount: unknown;
       transferReceiptAmount: unknown;
+      plateSwap?: { oldChassis: string; oldPlateCategory: string | null; oldPlateNumber: string | null; oldBrand: string; oldOwnerName: string; receiptNo: string | null } | null;
       vehicle?: { documentSubmissions: Array<{ submitDate: Date; urgent: boolean; createdAt: Date }> } | null;
     }>;
   }, historyCount?: number) {
@@ -2012,6 +2015,15 @@ export class BillingService {
         plateSwapId: l.plateSwapId,
         swapReceiptAmount: l.swapReceiptAmount === null ? null : Number(l.swapReceiptAmount),
         transferReceiptAmount: l.transferReceiptAmount === null ? null : Number(l.transferReceiptAmount),
+        swap: l.plateSwap
+          ? {
+              oldChassis: l.plateSwap.oldChassis,
+              oldPlateText: [l.plateSwap.oldPlateCategory, l.plateSwap.oldPlateNumber].filter(Boolean).join(" "),
+              oldBrand: l.plateSwap.oldBrand,
+              oldOwnerName: l.plateSwap.oldOwnerName,
+              receiptNo: l.plateSwap.receiptNo,
+            }
+          : null,
         // ใบยื่นของรถคันนี้ (อ่านสด) - ใบแนบเรียงตาม วันที่ยื่น > กลุ่มใบส่งงาน > ทะเบียน
         submitDate: iso(l.vehicle?.documentSubmissions[0]?.submitDate ?? null),
         submitUrgent: l.vehicle?.documentSubmissions[0]?.urgent ?? null,

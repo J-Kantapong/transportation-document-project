@@ -124,10 +124,10 @@ function attachmentTables(inv: PrintableInvoice): AttachmentTable[] {
       feeHead: "ใบเสร็จ",
       refHead: "เลขที่ใบเสร็จ",
       rows: lines.map((l) => ({
-        cells: [escapeHtml(l.brandName.toUpperCase()), escapeHtml(l.chassis), escapeHtml(l.plateText || "—"), escapeHtml(l.receiptNo || "—")],
+        cells: [escapeHtml(l.brandName.toUpperCase()), escapeHtml(l.chassis) + (l.swapReceiptAmount != null ? " *" : ""), escapeHtml(l.plateText || "—"), escapeHtml(l.receiptNo || "—")],
         // แถวรายคัน = ค่าใบเสร็จจดทะเบียน + ใบเสร็จแจ้งย้ายของคันนั้น (ผู้ใช้ 2026-10-08: รวมกัน ไม่เพิ่มคอลัมน์)
-        // ค่าใบเสร็จของรถเก่าในงานสลับเลขยังอยู่ในแถวรวมผ่าน feeCars เหมือนเดิม
-        fee: round2(l.receiptAmount + (l.transferReceiptAmount ?? 0)),
+        // ใบเสร็จของรถเก่าในงานสลับเลขรวมในแถวของรถใหม่ด้วย (ผู้ใช้ 2026-10-14) แถวจึงรวมได้เท่ายอดรวมของตาราง · รายละเอียดอยู่ในหมายเหตุใต้ตาราง
+        fee: round2(l.receiptAmount + (l.swapReceiptAmount ?? 0) + (l.transferReceiptAmount ?? 0)),
         service: l.serviceFee,
       })),
       fee: feeCars,
@@ -269,7 +269,13 @@ function attachmentPagesHtml(inv: PrintableInvoice): string[] {
   const pageCount = pages.length;
   const summary = invoiceContentSummary(inv);
   const deductions = [...new Set(inv.lines.filter((l) => l.deduction > 0).map((l) => `${l.deductionNote || "หักยอด"} ${formatMoney(l.deduction)} บาท`))];
-  const notes = `${deductions.length ? `<div class="k note">* ${deductions.map(escapeHtml).join(" / ")}</div>` : ""}
+  const swapNotes = sortLinesByPlate(inv.lines)
+    .filter((l) => l.swapReceiptAmount !== null && l.swapReceiptAmount !== undefined)
+    .map(
+      (l) =>
+        `จดพร้อมสลับเลข ${l.plateText || l.chassis}: รวมใบเสร็จรถเก่า ${l.swap?.oldChassis ? `${l.swap.oldChassis}${l.swap.oldBrand ? ` (${l.swap.oldBrand})` : ""}${l.swap.oldPlateText ? ` ทะเบียนเดิม ${l.swap.oldPlateText}` : ""}` : ""}${l.swap?.receiptNo ? ` ใบเสร็จเลขที่ ${l.swap.receiptNo}` : ""} ${formatMoney(l.swapReceiptAmount ?? 0)} บาท`,
+    );
+  const notes = `${swapNotes.map((n) => `<div class="k note">* ${escapeHtml(n)}</div>`).join("")}${deductions.length ? `<div class="k note">* ${deductions.map(escapeHtml).join(" / ")}</div>` : ""}
 ${typed.length ? `<div class="k note">รายการอื่นของบิลนี้ ${typed.length} บรรทัด (${typed.map((it) => `${escapeHtml(it.description)} ${formatMoney(it.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้</div>` : ""}
 ${inv.extras.length ? `<div class="k note">ค่าใช้จ่ายอื่นๆ ของบิล (${inv.extras.map((e) => `${escapeHtml(e.label)} ${formatMoney(e.amount)}`).join(", ")}) แสดงในหน้าใบวางบิล ไม่รวมในตารางนี้</div>` : ""}`;
 
