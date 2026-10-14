@@ -73,7 +73,12 @@ type PlateSwapBillingRow = {
   id: string;
   oldChassis: string;
   oldPlateText: string;
+  oldBrand: string;
+  oldOwnerName: string;
+  oldEngine: string;
+  newPlateText: string; // ทะเบียนใหม่ที่รถเก่าได้รับ (ว่าง = ยังไม่ทราบ)
   receiptNo: string | null;
+  receiptImageIds: string[];
   receiptAmount: number | null; // ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ -> หน้าวางบิลไม่ให้ติ๊ก
   receiptEstimate: number | null;
 };
@@ -1828,7 +1833,22 @@ export class BillingService {
     const swaps = await this.prisma.plateSwap.findMany({
       where: { newVehicleId: { in: vehicleIds }, cancelledAt: null, invoiceLines: { none: NOT_VOID } },
       orderBy: { createdAt: 'asc' },
-      select: { id: true, newVehicleId: true, oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, receiptNo: true, receiptAmount: true, billTotal: true },
+      select: {
+        id: true,
+        newVehicleId: true,
+        oldChassis: true,
+        oldPlateCategory: true,
+        oldPlateNumber: true,
+        oldBrand: true,
+        oldOwnerName: true,
+        oldEngine: true,
+        newPlateCategory: true,
+        newPlateNumber: true,
+        receiptNo: true,
+        receiptAmount: true,
+        billTotal: true,
+        receipts: { select: { id: true }, orderBy: { createdAt: 'asc' } },
+      },
     });
     const byVehicle = new Map<string, PlateSwapBillingRow>();
     for (const s of swaps) {
@@ -1837,7 +1857,12 @@ export class BillingService {
         id: s.id,
         oldChassis: s.oldChassis,
         oldPlateText: [s.oldPlateCategory, s.oldPlateNumber].filter(Boolean).join(' '),
+        oldBrand: s.oldBrand,
+        oldOwnerName: s.oldOwnerName,
+        oldEngine: s.oldEngine,
+        newPlateText: [s.newPlateCategory, s.newPlateNumber].filter(Boolean).join(' '),
         receiptNo: s.receiptNo,
+        receiptImageIds: s.receipts.map((r) => r.id),
         receiptAmount: num(s.receiptAmount),
         // ยอด Bill ตอนคิดค่าใช้จ่ายของงานสลับเลข - หน้าวางบิลเทียบกับใบเสร็จจริงเหมือนรถจดใหม่
         receiptEstimate: num(s.billTotal),
