@@ -252,7 +252,12 @@ export interface BillingPlateSwap {
   id: string;
   oldChassis: string;
   oldPlateText: string;
+  oldBrand: string;
+  oldOwnerName: string;
+  oldEngine: string;
+  newPlateText: string; // ทะเบียนใหม่ที่รถเก่าได้รับ (ว่าง = ยังไม่ทราบ)
   receiptNo: string | null;
+  receiptImageIds: string[];
   receiptAmount: number | null; // ว่าง = ยังไม่ได้กรอกยอดใบเสร็จของงานสลับเลข -> ติ๊กวางบิลไม่ได้
   receiptEstimate: number | null; // ยอด Bill ที่ระบบคิดไว้ตอนทำงานสลับเลข - ไม่ตรง = เตือนให้ตรวจ
 }

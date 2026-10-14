@@ -743,7 +743,18 @@ export function BillingPage() {
                           <span>{v.cc === null ? "—" : v.cc}</span>
                           <span>{v.weight === null ? "—" : v.weight.toLocaleString("en-US")}</span>
                           <span style={{ textAlign: "right" }}>
-                            {receipt === null ? "—" : formatMoney(receipt)}
+                            {receipt === null ? "—" : formatMoney(round2(receipt + (v.plateSwap?.receiptAmount ?? 0)))}
+                            {/* ใบเสร็จของรถเก่าในงานสลับเลข - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-14) */}
+                            {v.plateSwap &&
+                              (v.plateSwap.receiptAmount !== null ? (
+                                <span style={{ display: "block", fontSize: 11, color: "#576781" }} title={`ใบเสร็จรถเก่า ${v.plateSwap.oldChassis}${v.plateSwap.receiptNo ? ` เลขที่ ${v.plateSwap.receiptNo}` : ""} รวมอยู่ในค่าธรรมเนียมของบิล`}>
+                                  รวมรถเก่า {formatMoney(v.plateSwap.receiptAmount)} ({receipt === null ? "—" : formatMoney(receipt)} + {formatMoney(v.plateSwap.receiptAmount)})
+                                </span>
+                              ) : (
+                                <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="งานสลับเลขยังไม่มียอดใบเสร็จของรถเก่า">
+                                  ยังไม่มีใบเสร็จรถเก่า
+                                </span>
+                              ))}
                             {/* ใบเสร็จแจ้งย้าย (ขั้น 2) ของคันนี้ - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-08) */}
                             {v.transferReceiptAmount != null ? (
                               <span style={{ display: "block", fontSize: 11, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
@@ -782,6 +793,42 @@ export function BillingPage() {
                         {problem && !open && (
                           <div className="customer-message error" style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
                             {problem}
+                          </div>
+                        )}
+                        {/* ติ๊กรถใหม่ของงานสลับเลข = โผล่รถเก่าอีกคันใต้แถว ให้เทียบข้อมูลและใบเสร็จได้ทันที (ผู้ใช้ 2026-10-14) */}
+                        {row.checked && v.plateSwap && (
+                          <div style={{ margin: "0 23px 10px 53px", padding: "10px 14px", borderRadius: 8, background: "#eef3ff", color: "#243b6b", fontSize: 13, display: "grid", gap: 6 }}>
+                            <div>
+                              <b>รถเก่า (งานสลับเลข)</b> · {v.plateSwap.oldChassis}
+                              {v.plateSwap.oldBrand ? ` · ${v.plateSwap.oldBrand}` : ""}
+                              {v.plateSwap.oldEngine ? ` · เครื่อง ${v.plateSwap.oldEngine}` : ""}
+                            </div>
+                            <div>
+                              เจ้าของ {v.plateSwap.oldOwnerName || "—"} · ทะเบียนเดิม {v.plateSwap.oldPlateText || "—"}
+                              {v.plateSwap.newPlateText ? ` → ทะเบียนใหม่ ${v.plateSwap.newPlateText}` : ""}
+                            </div>
+                            <div>
+                              ใบเสร็จเลขที่ {v.plateSwap.receiptNo || "—"} ·{" "}
+                              {v.plateSwap.receiptAmount === null ? (
+                                <b style={{ color: "#8a4b00" }}>ยังไม่มียอดใบเสร็จ</b>
+                              ) : (
+                                <b>{formatMoney(v.plateSwap.receiptAmount)} บาท</b>
+                              )}{" "}
+                              (รวมในค่าธรรมเนียมของบิล)
+                            </div>
+                            {v.plateSwap.receiptImageIds.length > 0 && (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {v.plateSwap.receiptImageIds.map((id) => (
+                                  <AuthedImage
+                                    key={id}
+                                    src={receiptImageUrl(id)}
+                                    alt={`ใบเสร็จรถเก่า ${v.plateSwap!.oldChassis}`}
+                                    style={{ maxWidth: "100%", maxHeight: 260, objectFit: "contain", border: "1px solid #d6def0", borderRadius: 8, background: "#fff" }}
+                                    linkTitle="เปิดรูปใบเสร็จรถเก่าเต็มในแท็บใหม่"
+                                  />
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                         {open && (
