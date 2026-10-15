@@ -186,8 +186,13 @@ describe('TaxInvoiceService.issue before payment (ยามาฮ่า)', () =>
     await expect(fakeDb({ lastNumber: 1, invoice: allowed, activeTv: { taxInvoiceNo: 'TV2026-001' } }).svc.issue('i1', ok)).rejects.toMatchObject({ status: 409 });
   });
 
-  it('the date still may not be in the future or before the bill', async () => {
-    await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, paidDate: '2026-10-21' })).rejects.toMatchObject({ status: 400 });
+  it('may be dated up to 31 days ahead (the day Yamaha will pay), not further and not before the bill', async () => {
+    const ahead = fakeDb({ lastNumber: 1, invoice: allowed });
+    await ahead.svc.issue('i1', { ...ok, paidDate: '2026-11-20' });
+    expect(ahead.created[0]).toMatchObject({ issueDate: new Date('2026-11-20T00:00:00.000Z'), beforePayment: true });
+    await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, paidDate: '2026-11-21' })).rejects.toMatchObject({ status: 400 });
+    // ออกตอนรับเงินตามปกติยังห้ามวันในอนาคต
+    await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, beforePayment: false, paidDate: '2026-10-21' })).rejects.toMatchObject({ status: 400 });
     await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, paidDate: '2026-09-30' })).rejects.toMatchObject({ status: 400 });
   });
 

@@ -26,6 +26,13 @@ const parseMoney = (text: string): number | null => {
   return text.trim() !== "" && Number.isFinite(n) && n >= 0 ? round2(n) : null;
 };
 
+// ใบกำกับที่ออกก่อนรับเงินลงวันที่ล่วงหน้าได้กี่วัน - ตรงกับ TAX_INVOICE_ADVANCE_DAYS ใน backend/src/billing/tax-invoice.service.ts
+const ADVANCE_DAYS = 31;
+const addDaysIso = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00.000Z`) + days * 86_400_000).toISOString().slice(0, 10);
+// เลขใบกำกับต้องเรียงตามวันที่ - ใบลงวันที่อนาคตทำให้ใบอื่นที่ออกหลังจากนี้ต้องลงวันที่นั้นขึ้นไป
+const futureDateWarning = (iso: string) =>
+  `ใบกำกับนี้ลงวันที่ ${isoToDisplayDate(iso)} (ล่วงหน้า)\n\nเลขใบกำกับต้องเรียงตามวันที่ - หลังออกใบนี้ ใบกำกับของลูกค้ารายอื่นต้องลงวันที่ ${isoToDisplayDate(iso)} ขึ้นไป ลงวันที่ก่อนหน้านั้นไม่ได้\nถ้ามีใบอื่นต้องออกก่อนวันนั้น ให้ออกใบอื่นก่อน\n\nยืนยันออกใบ?`;
+
 function Row({ label, value, strong, muted }: { label: string; value: string; strong?: boolean; muted?: boolean }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "3px 0", fontWeight: strong ? 600 : 400, color: muted ? "#6b7588" : undefined }}>
@@ -86,6 +93,9 @@ export function TaxInvoiceIssueDialog({
 
   // ตัวอย่างหน้าใบตามที่กรอกอยู่ตอนนี้ (วันที่ / ยอดหัก) - ยังไม่ออกเลขจริง
   const draftDate = displayDateToIso(digits(paidDateText)) || todayIso();
+  // ออกก่อนรับเงินลงวันที่ล่วงหน้าได้ (ผู้ใช้ 2026-10-15) - backend ตรวจซ้ำ (TAX_INVOICE_ADVANCE_DAYS)
+  const latestAdvanceDate = addDaysIso(todayIso(), ADVANCE_DAYS);
+  const futureDate = beforePayment && draftDate > todayIso();
   const previewHtml =
     showPreview && preview
       ? buildTaxInvoiceHtml(draftTaxInvoice(invoice, preview, { paidDate: draftDate, whtAmount: wht ?? 0, whtMethod: wht ? whtMethod : "NONE", buyerNotVatRegistered: notRegistered }), "preview")
@@ -96,8 +106,11 @@ export function TaxInvoiceIssueDialog({
     const paidDate = displayDateToIso(digits(paidDateText));
     if (!paidDate) return setError(`${dateLabel}ไม่ถูกต้อง`);
     if (paidDate < invoice.issueDate) return setError(`${dateLabel}ต้องไม่ก่อนวันที่ออกบิล (${isoToDisplayDate(invoice.issueDate)})`);
-    if (paidDate > todayIso()) return setError(`${dateLabel}ต้องไม่เกินวันนี้`);
+    if (beforePayment) {
+      if (paidDate > latestAdvanceDate) return setError(`${dateLabel}ล่วงหน้าได้ไม่เกิน ${ADVANCE_DAYS} วัน (ถึง ${isoToDisplayDate(latestAdvanceDate)})`);
+    } else if (paidDate > todayIso()) return setError(`${dateLabel}ต้องไม่เกินวันนี้`);
     if (wht === null) return setError("ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
+    if (paidDate > todayIso() && !window.confirm(futureDateWarning(paidDate))) return;
     setSaving(true);
     try {
       const { taxInvoice } = await billingApi.issueTaxInvoice(invoice.id, {
@@ -177,7 +190,7 @@ export function TaxInvoiceIssueDialog({
           )}
           {beforePayment && (
             <p className="customer-message" style={{ fontSize: 13 }}>
-              บิลยังเป็น &quot;รอรับเงิน&quot; จนกว่าจะกด &quot;บันทึกรับเงิน&quot; ที่รายการบิล · ภาษีขายเกิดตามวันที่ออกใบนี้ (นับเข้าเดือนนี้แม้ยังไม่ได้เงิน) · ออกแล้วแก้/ยกเลิกบิลไม่ได้จนกว่าจะยกเลิกใบกำกับ
+              บิลยังเป็น &quot;รอรับเงิน&quot; จนกว่าจะกด &quot;บันทึกรับเงิน&quot; ที่รายการบิล · ภาษีขายเกิดตามวันที่บนใบนี้ (นับเข้าเดือนนั้นแม้ยังไม่ได้เงิน) · ลงวันที่ล่วงหน้าได้ไม่เกิน {ADVANCE_DAYS} วัน · ออกแล้วแก้/ยกเลิกบิลไม่ได้จนกว่าจะยกเลิกใบกำกับ
             </p>
           )}
           <div className="field-grid" style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 12px", alignItems: "center", margin: "12px 0" }}>
@@ -208,6 +221,11 @@ export function TaxInvoiceIssueDialog({
               )}
             </span>
           </div>
+          {futureDate && (
+            <p className="customer-message error" style={{ fontSize: 13 }}>
+              ลงวันที่ล่วงหน้า {isoToDisplayDate(draftDate)} - หลังออกใบนี้ ใบกำกับของลูกค้ารายอื่นต้องลงวันที่ {isoToDisplayDate(draftDate)} ขึ้นไป (เลขต้องเรียงตามวันที่) ถ้ามีใบอื่นต้องออกก่อนวันนั้นให้ออกใบอื่นก่อน
+            </p>
+          )}
           {preview.lastIssued && (
             <p className="muted" style={{ fontSize: 12 }}>
               ใบล่าสุด {preview.lastIssued.taxInvoiceNo} วันที่ {isoToDisplayDate(preview.lastIssued.issueDate)} - วันที่ใบนี้ต้องไม่ก่อนหน้านั้น

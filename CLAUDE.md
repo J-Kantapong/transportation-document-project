@@ -344,7 +344,7 @@ This private repository is the shared development surface for the user, Claude C
   `20261015100000_tax_invoice_before_payment`, additive): `Customer.billingTaxInvoiceBeforePayment` (checkbox in the terms editor,
   `taxInvoiceBeforePayment` in the terms API, nobody is set by default: tick it for YM) lets the issue dialog choose "ออกก่อนรับเงิน"
   (default for such a customer) = `POST .../invoices/:id/tax-invoice` with `beforePayment: true`: `paidDate` is then the TV date
-  (<= today, >= bill date, same number/date-order rules), `TaxInvoice.beforePayment` = true, the bill stays ISSUED with
+  (>= bill date; may be a future date up to `TAX_INVOICE_ADVANCE_DAYS` = 31 days ahead, user 2026-10-15, the day Yamaha will pay; same number/date-order rule, so after a future-dated TV every other TV must carry that date or later, and the dialog warns + confirms), `TaxInvoice.beforePayment` = true, the bill stays ISSUED with
   `taxInvoiceNo` set and no `paidDate`, and no 50 ทวิ is attached yet. Output VAT falls in the month of the TV date. When the money
   comes in, "บันทึกรับเงิน" on the invoice list = `PATCH .../invoices/:id/paid` (allowed although the series is enabled because the
   bill has a live TV; the TV number always comes from that TV). A bill with a live TV cannot be edited or voided (409, cancel the TV
