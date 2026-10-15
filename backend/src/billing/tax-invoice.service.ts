@@ -33,6 +33,14 @@ const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`
 // ค้างส่ง 50 ทวิ เกินกี่วันถึงขึ้นสีเตือน (ผู้ใช้ 2026-09-28: 1 เดือน)
 export const WHT_OVERDUE_DAYS = 30;
 
+// ใบกำกับที่รอ 50 ทวิ - ไม่นับใบที่ออกก่อนรับเงินซึ่งบิลยังรอรับเงิน (ลูกค้ายังไม่จ่าย ยังไม่มี 50 ทวิ ให้ทวง, ผู้ใช้ 2026-10-15)
+export const WHT_PENDING_WHERE = {
+  status: 'ISSUED',
+  whtAmount: { gt: 0 },
+  whtCertificateId: null,
+  NOT: { beforePayment: true, invoice: { is: { status: 'ISSUED' } } },
+} satisfies Prisma.TaxInvoiceWhereInput;
+
 function parseIsoDate(raw: unknown, label: string): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw bad(`${label}ต้องเป็น ค.ศ. YYYY-MM-DD`);
   const d = new Date(`${raw}T00:00:00.000Z`);
@@ -145,16 +153,25 @@ export class TaxInvoiceService {
       lastIssued: last ? { taxInvoiceNo: last.taxInvoiceNo, issueDate: iso(last.issueDate) } : null,
       replaces: replaces ? { id: replaces.id, taxInvoiceNo: replaces.taxInvoiceNo, cancelReason: replaces.cancelReason, whtCertificateId: replaces.whtCertificateId } : null,
       defaultWhtMethod: invoice.customer.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
+      // ลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย (ผู้ใช้ 2026-10-15, ยามาฮ่า) - หน้าต่างให้เลือก "ออกก่อนรับเงิน"
+      beforePaymentAllowed: invoice.customer.billingTaxInvoiceBeforePayment ?? false,
     };
   }
 
+  // ออกใบกำกับของบิล { paidDate, whtAmount, whtMethod, buyerNotVatRegistered?, expectedUpdatedAt?, beforePayment? }
+  // ปกติ = รับเงินแล้ว: วันที่ใบ = วันที่รับเงิน บิลเป็นรับเงินแล้ว
+  // beforePayment (ผู้ใช้ 2026-10-15, ยามาฮ่าต้องได้ใบกำกับก่อนถึงจะจ่าย, เฉพาะลูกค้าที่ตั้ง billingTaxInvoiceBeforePayment):
+  //   paidDate = วันที่ออกใบ บิลยังรอรับเงิน เก็บเลข TV ไว้ที่บิล แล้วค่อย "บันทึกรับเงิน" (markPaid) เมื่อเงินเข้า
+  //   ภาษีขายเกิดตามวันที่ออกใบ (ออกใบก่อนรับเงิน = จุดความรับผิดเกิดที่วันออกใบ)
   async issue(
     invoiceId: string,
-    dto: { paidDate?: unknown; whtAmount?: unknown; whtMethod?: unknown; buyerNotVatRegistered?: unknown; expectedUpdatedAt?: unknown },
+    dto: { paidDate?: unknown; whtAmount?: unknown; whtMethod?: unknown; buyerNotVatRegistered?: unknown; expectedUpdatedAt?: unknown; beforePayment?: unknown },
   ) {
-    const paidDate = parseIsoDate(dto?.paidDate, 'วันที่รับเงิน');
+    const beforePayment = dto?.beforePayment === true;
+    const dateLabel = beforePayment ? 'วันที่ออกใบกำกับ' : 'วันที่รับเงิน';
+    const paidDate = parseIsoDate(dto?.paidDate, dateLabel);
     const paidIso = iso(paidDate)!;
-    if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
+    if (paidIso > bangkokToday()) throw bad(`${dateLabel}ต้องไม่เกินวันนี้`);
     const { whtAmount, whtMethod } = parseWht(dto);
     const buyerNotVatRegistered = dto.buyerNotVatRegistered === true;
     const expectedUpdatedAt = typeof dto.expectedUpdatedAt === 'string' ? dto.expectedUpdatedAt : null;
@@ -169,8 +186,12 @@ export class TaxInvoiceService {
         if (invoice.status !== 'ISSUED') throw conflict('ออกใบกำกับได้เฉพาะบิลที่รอรับเงิน');
         if (invoice.account !== 'COMPANY') throw bad('บิลบัญชีบุคคลไม่มีใบกำกับภาษี - ใช้ "รับเงินแล้ว"');
         if (Number(invoice.vatRate) <= 0) throw bad('บิลนี้ไม่มี VAT - ใช้ "รับเงินแล้ว"');
+        // บิลที่ออกใบกำกับก่อนรับเงินไปแล้วยังรอรับเงินอยู่ - ออกซ้ำไม่ได้ (index TaxInvoice_invoice_active_key กันอีกชั้น)
+        const active = await tx.taxInvoice.findFirst({ where: { invoiceId, status: 'ISSUED' }, select: { taxInvoiceNo: true } });
+        if (active) throw conflict(`บิลนี้ออกใบกำกับ ${active.taxInvoiceNo} ไปแล้ว กรุณาโหลดรายการใหม่`);
+        if (beforePayment && !invoice.customer.billingTaxInvoiceBeforePayment) throw bad('ลูกค้ารายนี้ไม่ได้ตั้งให้ออกใบกำกับก่อนรับเงิน');
         const issueIso = iso(invoice.issueDate)!;
-        if (paidIso < issueIso) throw bad(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${dmy(issueIso)})`);
+        if (paidIso < issueIso) throw bad(`${dateLabel}ต้องไม่ก่อนวันที่ออกบิล (${dmy(issueIso)})`);
 
         const buyer = this.buyerOf(invoice.customer);
         const missing = missingBuyerFields(buyer, buyerNotVatRegistered);
@@ -196,6 +217,7 @@ export class TaxInvoiceService {
             invoiceId,
             customerId: invoice.customerId,
             issueDate: paidDate,
+            beforePayment,
             customerSnapshot: buyer,
             sellerSnapshot: SELLER_PROFILE,
             buyerNotVatRegistered,
@@ -214,7 +236,7 @@ export class TaxInvoiceService {
           },
         });
         if (carriedCert) await tx.taxInvoice.update({ where: { id: replaces!.id }, data: { whtCertificateId: null } });
-        await tx.invoice.update({ where: { id: invoiceId }, data: { status: 'PAID', paidDate, taxInvoiceNo } });
+        await tx.invoice.update({ where: { id: invoiceId }, data: beforePayment ? { taxInvoiceNo } : { status: 'PAID', paidDate, taxInvoiceNo } });
         return created.id;
       },
       { timeout: 20_000 },
@@ -344,6 +366,9 @@ export class TaxInvoiceService {
       });
       if (tv.invoiceId && invoice?.status === 'PAID') {
         await tx.invoice.update({ where: { id: tv.invoiceId }, data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null } });
+      } else if (tv.invoiceId && invoice?.status === 'ISSUED') {
+        // ใบที่ออกก่อนรับเงินและยังไม่ได้รับเงิน (ผู้ใช้ 2026-10-15): บิลยังรอรับเงิน ล้างแค่เลข TV ที่บิล แล้วแก้บิล/ออกใบใหม่ได้
+        await tx.invoice.update({ where: { id: tv.invoiceId }, data: { taxInvoiceNo: null } });
       }
       await writeAudit(
         tx,
@@ -354,8 +379,9 @@ export class TaxInvoiceService {
               action: 'cancel-tax-invoice',
               remark,
               changes: {
-                status: { from: invoice?.status ?? null, to: 'ISSUED' },
-                paidDate: { from: invoice?.paidDate ?? null, to: null },
+                ...(invoice?.status === 'PAID'
+                  ? { status: { from: 'PAID', to: 'ISSUED' }, paidDate: { from: invoice.paidDate ?? null, to: null } }
+                  : {}),
                 taxInvoiceNo: { from: current.taxInvoiceNo, to: null },
               },
             }
@@ -411,7 +437,7 @@ export class TaxInvoiceService {
   async whtPending() {
     const today = bangkokToday();
     const rows = await this.prisma.taxInvoice.findMany({
-      where: { status: 'ISSUED', whtAmount: { gt: 0 }, whtCertificateId: null },
+      where: { ...WHT_PENDING_WHERE },
       orderBy: [{ issueDate: 'asc' }, { number: 'asc' }],
       select: {
         id: true,

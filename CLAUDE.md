@@ -340,6 +340,18 @@ This private repository is the shared development surface for the user, Claude C
   PAPER (default) | EWHT, set in the terms editor (`whtMethod` in `PATCH /api/billing/customers/:id/terms`, shown when the customer
   withholds); the issue dialog and the custom tax invoice page preselect it (`defaultWhtMethod` in the preview) and it can be changed
   per invoice. Today YM and Lexus Auto City are e-WHT, everyone else paper. Issued invoices are not affected.
+  Tax invoice before payment (user 2026-10-15, Yamaha must receive the TV before it pays; migration
+  `20261015100000_tax_invoice_before_payment`, additive): `Customer.billingTaxInvoiceBeforePayment` (checkbox in the terms editor,
+  `taxInvoiceBeforePayment` in the terms API, nobody is set by default: tick it for YM) lets the issue dialog choose "ออกก่อนรับเงิน"
+  (default for such a customer) = `POST .../invoices/:id/tax-invoice` with `beforePayment: true`: `paidDate` is then the TV date
+  (<= today, >= bill date, same number/date-order rules), `TaxInvoice.beforePayment` = true, the bill stays ISSUED with
+  `taxInvoiceNo` set and no `paidDate`, and no 50 ทวิ is attached yet. Output VAT falls in the month of the TV date. When the money
+  comes in, "บันทึกรับเงิน" on the invoice list = `PATCH .../invoices/:id/paid` (allowed although the series is enabled because the
+  bill has a live TV; the TV number always comes from that TV). A bill with a live TV cannot be edited or voided (409, cancel the TV
+  first); cancelling an unpaid advance TV only clears the bill's `taxInvoiceNo`; `unpay` is allowed for a paid bill whose TV was
+  issued before payment (the TV stays). Such TVs are left out of the 50 ทวิ pending list / overview / my-work alert while the bill is
+  unpaid (`WHT_PENDING_WHERE`), and out of the "บิลรอรับเงิน - ออกใบกำกับได้" panel. The receivable (Invoice ISSUED) and cash
+  (Invoice PAID) are unchanged. Not browser-tested (migration not on the dev database before push).
   Custom tax invoice (user 2026-10-05, migration `20261005160000_custom_tax_invoice`): a TV for work outside the system, with no
   ใบวางบิล. `TaxInvoice.invoiceId` is nullable and the typed lines live in `TaxInvoiceItem` (kind FEE | SERVICE | GOODS,
   quantity x unitPrice, no cost). Same number series, date-order rule, WHT method and cancel / ใบแทน as the bill-based TV; VAT

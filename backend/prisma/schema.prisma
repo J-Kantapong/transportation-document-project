@@ -121,6 +121,8 @@ model Customer {
   billingWhtSpecialUntil   DateTime? // วันสุดท้ายที่ใช้อัตราพิเศษ (เทียบกับวันที่ออกบิล) - หลังจากนั้นกลับไปอัตราปกติเอง
   // ประเภทหนังสือรับรองหัก ณ ที่จ่ายที่ลูกค้ารายนี้ส่งมาตามปกติ (ผู้ใช้ 2026-10-06: YM และ Lexus = e-WHT ที่เหลือ = กระดาษ) - ตั้งต้นในหน้าต่างออกใบกำกับ แก้รายใบได้
   billingWhtMethod         String    @default("PAPER") // PAPER | EWHT
+  // ออกใบกำกับภาษีก่อนรับเงินได้ (ผู้ใช้ 2026-10-15, ยามาฮ่า: ต้องส่งใบกำกับให้ลูกค้าก่อนลูกค้าถึงจะจ่าย) - บิลยังรอรับเงิน แล้วค่อยบันทึกรับเงินทีหลัง
+  billingTaxInvoiceBeforePayment Boolean @default(false)
   // ผู้รับเงินของบิลบัญชีบุคคล (ผู้ใช้ 2026-10-08: SPI จ่ายเข้านายจิรฤทธิ์ ส่วน YMAC เข้าอารี) - ว่าง = ใช้ผู้รับเงินตั้งต้น (PERSONAL_PROFILE)
   personalPayeeName        String?
   personalPayeeBank        String?
@@ -1343,7 +1345,9 @@ model TaxInvoice {
   number                Int
   invoiceId             String?
   customerId            String
-  issueDate             DateTime // = วันที่รับเงิน
+  issueDate             DateTime // = วันที่รับเงิน (ใบที่ออกก่อนรับเงิน = วันที่ออกใบ)
+  // ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15, ลูกค้าที่ตั้ง billingTaxInvoiceBeforePayment) - บิลยังรอรับเงินจนบันทึกรับเงิน
+  beforePayment         Boolean   @default(false)
   customerSnapshot      Json // { name, branch, address, taxId, email } ข้อมูลลูกค้าปัจจุบัน ณ วันออกใบ
   // ข้อมูลผู้ขาย ณ วันออกใบ (ผู้ใช้ 2026-10-06 เตรียมไว้สำหรับ e-Tax ปี 2027) - null = ใบที่ออกก่อนมีคอลัมน์นี้ ใช้ข้อมูลบริษัทปัจจุบันตอนพิมพ์
   sellerSnapshot        Json?

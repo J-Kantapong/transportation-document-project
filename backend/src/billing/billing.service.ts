@@ -251,7 +251,7 @@ const INVOICE_INCLUDE = {
     },
   },
   items: true,
-  taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true } } } as const;
+  taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true, issueDate: true, beforePayment: true } } } as const;
 
 // วันครบกำหนดชำระ = วันออกบิล + เครดิตเทอมของลูกค้า (ผู้ใช้ 2026-09-28) - ไม่ได้ตั้งเครดิตเทอม = ไม่มีวันครบกำหนด
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
@@ -294,12 +294,21 @@ export function toTerms(c: CustomerTermsRow): BillingTerms {
   return { vat: c.billingVat, whtRate: Number(c.billingWhtRate), whtSpecialRate: num(c.billingWhtSpecialRate), whtSpecialUntil: iso(c.billingWhtSpecialUntil) };
 }
 // เงื่อนไขที่ส่งให้หน้าจอ = เงื่อนไขคิดยอด + เครดิตเทอม (ไม่ใช้คิดยอดบิล จึงไม่อยู่ใน BillingTerms)
-const termsWithCredit = (c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean; billingWhtMethod?: string }) => ({
+const termsWithCredit = (
+  c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean; billingWhtMethod?: string; billingTaxInvoiceBeforePayment?: boolean },
+) => ({
   ...toTerms(c),
   creditDays: c.billingCreditDays,
   requiresQuotation: c.billingRequiresQuotation ?? false,
   whtMethod: c.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
+  taxInvoiceBeforePayment: c.billingTaxInvoiceBeforePayment ?? false,
 });
+
+// บิลที่ออกใบกำกับก่อนรับเงินแล้ว (ผู้ใช้ 2026-10-15) ห้ามแก้/ยกเลิก - ยอดต้องตรงกับใบกำกับที่ส่งลูกค้าไปแล้ว ต้องยกเลิกใบกำกับก่อน
+function assertNoActiveTaxInvoice(taxInvoices: Array<{ taxInvoiceNo: string }> | undefined, action: string) {
+  const tv = taxInvoices?.[0];
+  if (tv) throw conflict(`บิลนี้ออกใบกำกับ ${tv.taxInvoiceNo} ไปแล้ว - ${action}ไม่ได้ ต้องยกเลิกใบกำกับก่อน`);
+}
 
 // ลูกค้าที่ตั้ง "ต้องมีใบเสนอราคาก่อนวางบิล" (ผู้ใช้ 2026-10-01, YM) ออกบิลได้จากใบเสนอราคาที่อนุมัติแล้วเท่านั้น
 export const QUOTATION_REQUIRED_ERROR = 'ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกใบวางบิลจากหน้าใบเสนอราคา';
@@ -642,7 +651,17 @@ export class BillingService {
   // ประวัติแสดงรวมกับการแก้ข้อมูลลูกค้าในหน้าลูกค้า (entity Customer) · บิลที่ออกไปแล้วไม่เปลี่ยน
   async updateTerms(
     customerId: string,
-    dto: { vat?: unknown; whtRate?: unknown; whtSpecialRate?: unknown; whtSpecialUntil?: unknown; creditDays?: unknown; requiresQuotation?: unknown; whtMethod?: unknown; remark?: unknown },
+    dto: {
+      vat?: unknown;
+      whtRate?: unknown;
+      whtSpecialRate?: unknown;
+      whtSpecialUntil?: unknown;
+      creditDays?: unknown;
+      requiresQuotation?: unknown;
+      whtMethod?: unknown;
+      taxInvoiceBeforePayment?: unknown;
+      remark?: unknown;
+    },
   ) {
     const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผลที่แก้เงื่อนไขวางบิล');
     if (remark.length > 500) throw bad('เหตุผลยาวเกิน 500 ตัวอักษร');
@@ -668,6 +687,11 @@ export class BillingService {
     if (dto.requiresQuotation !== undefined) {
       if (typeof dto.requiresQuotation !== 'boolean') throw bad('ต้องระบุว่าต้องมีใบเสนอราคาก่อนวางบิลหรือไม่');
       data.billingRequiresQuotation = dto.requiresQuotation;
+    }
+    // ออกใบกำกับก่อนรับเงินได้ (ผู้ใช้ 2026-10-15, ยามาฮ่า): ไม่ส่ง = คงเดิม
+    if (dto.taxInvoiceBeforePayment !== undefined) {
+      if (typeof dto.taxInvoiceBeforePayment !== 'boolean') throw bad('ต้องระบุว่าออกใบกำกับก่อนรับเงินได้หรือไม่');
+      data.billingTaxInvoiceBeforePayment = dto.taxInvoiceBeforePayment;
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -1389,18 +1413,26 @@ export class BillingService {
   async markPaid(id: string, dto: { paidDate?: unknown; taxInvoiceNo?: unknown }) {
     const paidDate = parseIsoDate(dto?.paidDate, 'วันที่รับเงิน');
     const taxInvoiceNo = optionalText(dto.taxInvoiceNo, 'เลขที่ใบกำกับภาษี');
-    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, issueDate: true, account: true, vatRate: true } });
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      select: { status: true, issueDate: true, account: true, vatRate: true, taxInvoices: { where: { status: 'ISSUED' }, select: { taxInvoiceNo: true } } },
+    });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'ISSUED') throw conflict('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
+    // ออกใบกำกับก่อนรับเงินไปแล้ว (ผู้ใช้ 2026-10-15, ยามาฮ่า): บันทึกแค่วันที่รับเงิน เลข TV คงเป็นใบในระบบเสมอ (ไม่รับเลขที่พิมพ์มา)
+    const advanceTv = invoice.taxInvoices?.[0] ?? null;
     // เปิดใช้ใบกำกับในระบบแล้ว (ผู้ใช้ 2026-09-28): บิลบัญชีบริษัทที่มี VAT ต้องรับเงินพร้อมออกใบกำกับ - กันเลข TV จาก Google Sheet ชนกับเลขในระบบ
-    if (invoice.account === 'COMPANY' && Number(invoice.vatRate) > 0 && (await this.prisma.taxInvoiceSeries.count()) > 0) {
+    if (!advanceTv && invoice.account === 'COMPANY' && Number(invoice.vatRate) > 0 && (await this.prisma.taxInvoiceSeries.count()) > 0) {
       throw bad('บิลนี้ต้องใช้ "รับเงิน + ออกใบกำกับ" (เปิดใช้ใบกำกับภาษีในระบบแล้ว)');
     }
     const paidIso = paidDate.toISOString().slice(0, 10);
     const issuedIso = invoice.issueDate.toISOString().slice(0, 10);
     if (paidIso < issuedIso) throw bad(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${dmy(issuedIso)})`);
     if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
-    const { count } = await this.prisma.invoice.updateMany({ where: { id, status: 'ISSUED' }, data: { status: 'PAID', paidDate, taxInvoiceNo } });
+    const { count } = await this.prisma.invoice.updateMany({
+      where: { id, status: 'ISSUED' },
+      data: { status: 'PAID', paidDate, taxInvoiceNo: advanceTv ? advanceTv.taxInvoiceNo : taxInvoiceNo },
+    });
     if (count === 0) throw conflict('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
     return this.mapInvoice(await this.invoiceWithLines(id));
   }
@@ -1410,9 +1442,10 @@ export class BillingService {
   async voidInvoice(id: string, dto: { reason?: unknown }) {
     const voidReason = optionalText(dto?.reason, 'เหตุผล');
     if (!voidReason) throw bad('ต้องใส่เหตุผลที่ยกเลิกบิล');
-    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true } });
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, taxInvoices: { where: { status: 'ISSUED' }, select: { taxInvoiceNo: true } } } });
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'ISSUED') throw conflict('ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน');
+    assertNoActiveTaxInvoice(invoice.taxInvoices, 'ยกเลิกบิล');
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.invoice.updateMany({ where: { id, status: 'ISSUED' }, data: { status: 'VOID', voidReason } });
       if (count === 0) throw conflict('ยกเลิกได้เฉพาะบิลที่ยังไม่รับเงิน');
@@ -1430,13 +1463,15 @@ export class BillingService {
     if (!invoice) throw new NotFoundException({ error: 'ไม่พบบิล' });
     if (invoice.status !== 'PAID') throw conflict('ยกเลิกการรับเงินได้เฉพาะบิลที่รับเงินแล้ว');
     // ใบกำกับที่ออกในระบบแล้วห้ามล้างเลขทิ้ง (เลขต้องไม่หาย) - ต้องยกเลิกใบกำกับพร้อมเหตุผลแทน ซึ่งย้อนบิลกลับเป็นรอรับเงินให้เอง
-    const activeTv = await this.prisma.taxInvoice.findFirst({ where: { invoiceId: id, status: 'ISSUED' }, select: { taxInvoiceNo: true } });
-    if (activeTv) throw bad(`บิลนี้มีใบกำกับ ${activeTv.taxInvoiceNo} ในระบบ - ใช้ "ยกเลิกใบกำกับ" แทน`);
+    // ยกเว้นใบที่ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15): วันที่รับเงินไม่ได้อยู่บนใบกำกับ ย้อนการรับเงินได้ บิลกลับเป็นรอรับเงินโดยใบกำกับยังอยู่
+    const activeTv = await this.prisma.taxInvoice.findFirst({ where: { invoiceId: id, status: 'ISSUED' }, select: { taxInvoiceNo: true, beforePayment: true } });
+    if (activeTv && !activeTv.beforePayment) throw bad(`บิลนี้มีใบกำกับ ${activeTv.taxInvoiceNo} ในระบบ - ใช้ "ยกเลิกใบกำกับ" แทน`);
+    const keepTvNo = activeTv ? invoice.taxInvoiceNo : null;
     await this.prisma.$transaction(async (tx) => {
       // เงื่อนไขรวมวันที่/เลข TV ที่อ่านมา: ประวัติต้องตรงกับค่าที่ถูกล้างจริง
       const { count } = await tx.invoice.updateMany({
         where: { id, status: 'PAID', paidDate: invoice.paidDate, taxInvoiceNo: invoice.taxInvoiceNo },
-        data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null },
+        data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: keepTvNo },
       });
       if (count === 0) throw conflict('บิลนี้เปลี่ยนสถานะไปแล้ว กรุณาโหลดรายการใหม่');
       await writeAudit(tx, {
@@ -1447,13 +1482,12 @@ export class BillingService {
         changes: {
           status: { from: 'PAID', to: 'ISSUED' },
           paidDate: { from: invoice.paidDate, to: null },
-          taxInvoiceNo: { from: invoice.taxInvoiceNo, to: null },
+          ...(keepTvNo ? {} : { taxInvoiceNo: { from: invoice.taxInvoiceNo, to: null } }),
         },
       });
     });
     return this.mapInvoice(await this.invoiceWithLines(id));
   }
-
   // แก้บิลที่ยังไม่รับเงินโดยใช้เลขที่เดิม (ผู้ใช้ 2026-09-27 เลือกแบบนี้แทนยกเลิกแล้วออกเลขใหม่ ซึ่งทำให้เลข IV กระโดด)
   // แก้ได้: วันที่ออกบิล ชื่องาน ค่าใช้จ่ายอื่นๆ ยอดรายคัน (ค่าใบเสร็จ/ค่าดำเนินการ/ข้อความต่อท้าย/ยอดหัก) เอารถออกจากบิล
   // (รถกลับเข้าคิวรอวางบิล ต้องเหลืออย่างน้อย 1 คัน) และดึงข้อมูลรถล่าสุดลงบิลรายคัน (refreshLineIds: ทะเบียน / เลขที่ใบเสร็จ
@@ -1500,6 +1534,7 @@ export class BillingService {
           throw conflict('บิลนี้ถูกแก้ไขหรือเปลี่ยนสถานะไปแล้ว กรุณาเปิดหน้าแก้ใหม่');
         }
         if (invoice.status !== 'ISSUED') throw conflict('แก้ไขได้เฉพาะบิลที่ยังไม่รับเงิน');
+        assertNoActiveTaxInvoice(invoice.taxInvoices, 'แก้บิล');
         const byId = new Map(invoice.lines.map((l) => [l.id, l]));
         if ([...updates.keys(), ...removeIds, ...refreshIds].some((lid) => !byId.has(lid))) throw bad('รถบางคันไม่อยู่ในบิลนี้แล้ว กรุณาเปิดหน้าแก้ใหม่');
         const kept = invoice.lines.filter((l) => !removeIds.has(l.id));
@@ -1936,7 +1971,7 @@ export class BillingService {
     poNumber?: string | null;
     updatedAt?: Date;
     faceLayout?: string;
-    taxInvoices?: Array<{ id: string; taxInvoiceNo: string }>;
+    taxInvoices?: Array<{ id: string; taxInvoiceNo: string; issueDate?: Date; beforePayment?: boolean }>;
     items: Array<ItemDbRow & { id: string }>;
     lines: Array<{
       id: string;
@@ -2003,7 +2038,10 @@ export class BillingService {
       quotationNo: i.quotationNo ?? null,
       poNumber: i.poNumber ?? null,
       // ใบกำกับภาษีในระบบที่ยังใช้อยู่ของบิลนี้ (null = ยังไม่ออก / ออกจาก Google Sheet ซึ่งเห็นแค่เลขใน taxInvoiceNo)
-      taxInvoice: i.taxInvoices?.[0] ?? null,
+      // beforePayment = ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15) บิลอาจยังรอรับเงินอยู่
+      taxInvoice: i.taxInvoices?.[0]
+        ? { id: i.taxInvoices[0].id, taxInvoiceNo: i.taxInvoices[0].taxInvoiceNo, issueDate: iso(i.taxInvoices[0].issueDate ?? null), beforePayment: i.taxInvoices[0].beforePayment ?? false }
+        : null,
       // หน้าแก้บิลส่งกลับมาเทียบ (expectedUpdatedAt) - รับเงิน/ยกเลิก/แก้ ทำให้ค่านี้เปลี่ยน
       updatedAt: i.updatedAt?.toISOString() ?? null,
       // จำนวนประวัติใน AuditLog - ส่งเฉพาะรายการบิล (listInvoices) หน้าจอโหลดรายการใหม่หลังทุกการกระทำอยู่แล้ว

@@ -130,6 +130,8 @@ export interface BillingTerms {
   requiresQuotation?: boolean;
   // ประเภท 50 ทวิ ตั้งต้นของลูกค้า (ผู้ใช้ 2026-10-06: YM / Lexus = e-WHT ที่เหลือ = กระดาษ)
   whtMethod?: "PAPER" | "EWHT";
+  // ออกใบกำกับภาษีก่อนรับเงินได้ (ผู้ใช้ 2026-10-15, ยามาฮ่า: ต้องส่งใบกำกับให้ก่อนถึงจะจ่าย)
+  taxInvoiceBeforePayment?: boolean;
 }
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) ออกตอนรับเงิน (ผู้ใช้ 2026-09-28) - ดู backend/src/billing/tax-invoice.service.ts
@@ -200,6 +202,8 @@ export interface TaxInvoicePreview {
   nextNo: string | null;
   lastIssued: { taxInvoiceNo: string; issueDate: string } | null;
   replaces: { id: string; taxInvoiceNo: string; cancelReason: string | null; whtCertificateId: string | null } | null;
+  // ลูกค้าที่ออกใบกำกับก่อนรับเงินได้ (ผู้ใช้ 2026-10-15, ยามาฮ่า) - เฉพาะใบจากบิล
+  beforePaymentAllowed?: boolean;
   // เฉพาะหน้าใบกำกับกำหนดเอง (customPreview)
   account?: BillingAccount;
   whtRate?: number;
@@ -514,7 +518,8 @@ export interface Invoice {
   taxInvoiceNo: string | null;
   voidReason: string | null;
   dueDate?: string | null; // วันครบกำหนดชำระ (ผู้ใช้ 2026-09-28) - null = ลูกค้าไม่ได้ตั้งเครดิตเทอมตอนออกบิล
-  taxInvoice?: { id: string; taxInvoiceNo: string } | null; // ใบกำกับในระบบที่ยังใช้อยู่
+  // ใบกำกับในระบบที่ยังใช้อยู่ · beforePayment = ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15) บิลอาจยังรอรับเงินอยู่
+  taxInvoice?: { id: string; taxInvoiceNo: string; issueDate?: string | null; beforePayment?: boolean } | null;
   // บิลที่ออกจากใบเสนอราคา (ผู้ใช้ 2026-10-01) - พิมพ์อ้างอิงเลข QT / PO บนบิล
   quotationId?: string | null;
   quotationNo?: string | null;
@@ -726,7 +731,8 @@ export const billingApi = {
   taxInvoicePreview: (invoiceId: string) => request<TaxInvoicePreview>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice-preview`),
   issueTaxInvoice: (
     invoiceId: string,
-    data: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean; expectedUpdatedAt: string | null },
+    // beforePayment = ออกก่อนรับเงิน: paidDate คือวันที่ออกใบ บิลยังรอรับเงิน
+    data: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean; expectedUpdatedAt: string | null; beforePayment?: boolean },
   ) => request<{ taxInvoice: TaxInvoice }>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice`, json("POST", data)),
   cancelTaxInvoice: (id: string, remark: string) =>
     request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}/cancel`, json("POST", { remark })),

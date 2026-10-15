@@ -455,6 +455,33 @@ describe('BillingService.markPaid / voidInvoice', () => {
     await expect(svc.voidInvoice('i1', { reason: 'คีย์ผิด' })).rejects.toMatchObject({ status: 409 });
     expect(auditCreate).not.toHaveBeenCalled();
   });
+
+  // ผู้ใช้ 2026-10-15 (ยามาฮ่า): ออกใบกำกับก่อนรับเงิน แล้วค่อยบันทึกรับเงิน
+  describe('บิลที่ออกใบกำกับก่อนรับเงินแล้ว', () => {
+    function advanceService() {
+      const current = { ...invoiceRow('i1', 'ISSUED', '2026-09-21'), account: 'COMPANY', vatRate: 7, taxInvoices: [{ taxInvoiceNo: 'TV2026-030' }] };
+      const findUnique = vi.fn().mockImplementation(async ({ include }) => (include ? { ...current, status: 'PAID' } : current));
+      const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+      const prisma: Record<string, unknown> = { invoice: { findUnique, updateMany }, taxInvoiceSeries: { count: vi.fn().mockResolvedValue(1) }, auditLog: { create: vi.fn() } };
+      prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
+      return { svc: new BillingService(prisma as unknown as PrismaService), updateMany };
+    }
+
+    it('บันทึกรับเงินได้ทั้งที่เปิดใช้ใบกำกับแล้ว และเลข TV เป็นใบในระบบเสมอ', async () => {
+      const { svc, updateMany } = advanceService();
+      await svc.markPaid('i1', { paidDate: '2026-09-27', taxInvoiceNo: 'พิมพ์มาผิด' });
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: 'i1', status: 'ISSUED' },
+        data: { status: 'PAID', paidDate: new Date('2026-09-27T00:00:00.000Z'), taxInvoiceNo: 'TV2026-030' },
+      });
+    });
+
+    it('ยกเลิกบิลไม่ได้จนกว่าจะยกเลิกใบกำกับ', async () => {
+      const { svc, updateMany } = advanceService();
+      await expect(svc.voidInvoice('i1', { reason: 'ผิด' })).rejects.toMatchObject({ status: 409 });
+      expect(updateMany).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // ---------- F23: ยกเลิกการรับเงิน (ผู้ใช้ 2026-09-27: ADMIN + ACCOUNTANT พร้อมเหตุผล) ----------
@@ -526,6 +553,13 @@ describe('BillingService.unpayInvoice', () => {
       response: { error: 'บิลนี้มีใบกำกับ TV2026-001 ในระบบ - ใช้ "ยกเลิกใบกำกับ" แทน' },
     });
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ใบกำกับที่ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15) ย้อนรับเงินได้ บิลกลับเป็นรอรับเงินโดยเลข TV ยังอยู่', async () => {
+    const { svc, updateMany, auditCreate } = unpayService('PAID', 1, { taxInvoiceNo: 'TV2026-010', beforePayment: true } as { taxInvoiceNo: string });
+    await asUser(() => svc.unpayInvoice('i1', { remark: 'วันที่รับเงินผิด' }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: 'TV2026-010' } }));
+    expect(auditCreate.mock.calls[0][0].data.changes).not.toHaveProperty('taxInvoiceNo');
   });
 });
 
@@ -906,7 +940,7 @@ describe('BillingService.updateTerms', () => {
   it('บันทึกเงื่อนไขใหม่ ล็อกแถวลูกค้าก่อนอ่าน และเก็บเฉพาะช่องที่เปลี่ยนลงประวัติลูกค้า', async () => {
     const { svc, queryRaw, findUnique, update, auditCreate } = termsService();
     const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: ' หมดโปรอัตราพิเศษ ' }));
-    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false, whtMethod: 'PAPER' });
+    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false, whtMethod: 'PAPER', taxInvoiceBeforePayment: false });
     expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
     expect(update).toHaveBeenCalledWith({

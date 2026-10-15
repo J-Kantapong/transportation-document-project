@@ -37,6 +37,7 @@ function fakeDb(
     replaceable?: Record<string, unknown> | null;
     customer?: Record<string, unknown>;
     tv?: Record<string, unknown>;
+    activeTv?: { taxInvoiceNo: string } | null;
   } = {},
 ) {
   const created: Array<Record<string, unknown>> = [];
@@ -60,7 +61,9 @@ function fakeDb(
       update: vi.fn(async (a: { data: Record<string, unknown> }) => seriesUpdates.push(a.data)),
     },
     taxInvoice: {
-      findFirst: vi.fn(async (a: { where: Record<string, unknown> }) => (a.where.status === 'CANCELLED' ? (opts.replaceable ?? null) : (opts.lastTv ?? null))),
+      findFirst: vi.fn(async (a: { where: Record<string, unknown> }) =>
+        a.where.status === 'CANCELLED' ? (opts.replaceable ?? null) : a.where.invoiceId ? (opts.activeTv ?? null) : (opts.lastTv ?? null),
+      ),
       create: vi.fn(async (a: { data: Record<string, unknown> }) => {
         created.push(a.data);
         return { id: 'tv-new', ...a.data };
@@ -155,6 +158,45 @@ describe('TaxInvoiceService.issue', () => {
     const { svc, created } = fakeDb({ lastNumber: 5, replaceable: { id: 'tv-old', taxInvoiceNo: 'TV2026-005', cancelReason: 'ชื่อผิด', whtCertificateId: 'cert1' } });
     await svc.issue('i1', ok);
     expect(created[0]).toMatchObject({ replacesId: 'tv-old', whtCertificateId: 'cert1', taxInvoiceNo: 'TV2026-006' });
+  });
+});
+
+describe('TaxInvoiceService.issue before payment (ยามาฮ่า)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-20T03:00:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const ok = { paidDate: '2026-10-15', whtAmount: 1148.7, whtMethod: 'EWHT', beforePayment: true };
+  const allowed = { customer: { ...customer, billingTaxInvoiceBeforePayment: true } };
+
+  it('dates the tax invoice on the chosen day and leaves the bill waiting for payment with the TV number', async () => {
+    const { svc, created, invoiceUpdates } = fakeDb({ lastNumber: 20, invoice: allowed });
+    await svc.issue('i1', ok);
+    expect(created[0]).toMatchObject({ taxInvoiceNo: 'TV2026-021', beforePayment: true, issueDate: new Date('2026-10-15T00:00:00.000Z') });
+    expect(invoiceUpdates[0]).toEqual({ taxInvoiceNo: 'TV2026-021' });
+  });
+
+  it('only for customers set to receive the tax invoice first', async () => {
+    await expect(fakeDb({ lastNumber: 1 }).svc.issue('i1', ok)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('a bill that already has a live tax invoice cannot get a second one', async () => {
+    await expect(fakeDb({ lastNumber: 1, invoice: allowed, activeTv: { taxInvoiceNo: 'TV2026-001' } }).svc.issue('i1', ok)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('the date still may not be in the future or before the bill', async () => {
+    await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, paidDate: '2026-10-21' })).rejects.toMatchObject({ status: 400 });
+    await expect(fakeDb({ lastNumber: 1, invoice: allowed }).svc.issue('i1', { ...ok, paidDate: '2026-09-30' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('cancelling it before payment keeps the bill waiting and only clears the TV number', async () => {
+    const { svc, invoiceUpdates, audits } = fakeDb({ lastNumber: 5, invoice: { taxInvoiceNo: 'TV2026-005' } });
+    await asUser(() => svc.cancel('tv1', { remark: 'ยอดผิด' }));
+    expect(invoiceUpdates[0]).toEqual({ taxInvoiceNo: null });
+    expect(audits[0]).toMatchObject({ action: 'cancel-tax-invoice' });
+    expect(audits[0].changes).not.toHaveProperty('status');
   });
 });
 

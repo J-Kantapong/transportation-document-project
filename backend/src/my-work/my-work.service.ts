@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { currentUser } from '../auth/request-context.js';
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
 import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.service.js';
-import { WHT_OVERDUE_DAYS } from '../billing/tax-invoice.service.js';
+import { WHT_OVERDUE_DAYS, WHT_PENDING_WHERE } from '../billing/tax-invoice.service.js';
 import type { UserRole } from '../generated/prisma/enums.js';
 import { addDays, bangkokToday, daysBetween, isoOf, round2, toDate } from '../overview/overview-calculator.js';
 import {
@@ -514,7 +514,7 @@ export class MyWorkService {
   private async accountingChecks(today: string): Promise<WorkCheck[]> {
     const [invoices, whtRows, quotations] = await Promise.all([
       this.prisma.invoice.findMany({ where: { status: 'ISSUED' }, select: { id: true, invoiceNo: true, issueDate: true, dueDate: true, netTotal: true, customerSnapshot: true } }),
-      this.prisma.taxInvoice.findMany({ where: { status: 'ISSUED', whtAmount: { gt: 0 }, whtCertificateId: null }, select: { id: true, taxInvoiceNo: true, issueDate: true, whtAmount: true, customerSnapshot: true } }),
+      this.prisma.taxInvoice.findMany({ where: WHT_PENDING_WHERE, select: { id: true, taxInvoiceNo: true, issueDate: true, whtAmount: true, customerSnapshot: true } }),
       this.prisma.quotation.findMany({
         where: { status: { in: ['ISSUED', 'APPROVED'] } },
         select: { id: true, quotationNo: true, customerSnapshot: true, netTotal: true, status: true, kind: true, validUntil: true, ratesAppliedAt: true, _count: { select: { invoices: { where: NOT_VOID.invoice } } } },
