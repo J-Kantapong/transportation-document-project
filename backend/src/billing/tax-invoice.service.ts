@@ -33,6 +33,10 @@ const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`
 // ค้างส่ง 50 ทวิ เกินกี่วันถึงขึ้นสีเตือน (ผู้ใช้ 2026-09-28: 1 เดือน)
 export const WHT_OVERDUE_DAYS = 30;
 
+// ใบกำกับที่ออกก่อนรับเงินลงวันที่ล่วงหน้าได้กี่วัน (ผู้ใช้ 2026-10-15 เลือกให้ลงวันที่อนาคตได้, จำนวนวัน = Claude เลือก)
+export const TAX_INVOICE_ADVANCE_DAYS = 31;
+const addDaysIso = (isoDate: string, days: number) => new Date(Date.parse(`${isoDate}T00:00:00.000Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
 // ใบกำกับที่รอ 50 ทวิ - ไม่นับใบที่ออกก่อนรับเงินซึ่งบิลยังรอรับเงิน (ลูกค้ายังไม่จ่าย ยังไม่มี 50 ทวิ ให้ทวง, ผู้ใช้ 2026-10-15)
 export const WHT_PENDING_WHERE = {
   status: 'ISSUED',
@@ -171,7 +175,11 @@ export class TaxInvoiceService {
     const dateLabel = beforePayment ? 'วันที่ออกใบกำกับ' : 'วันที่รับเงิน';
     const paidDate = parseIsoDate(dto?.paidDate, dateLabel);
     const paidIso = iso(paidDate)!;
-    if (paidIso > bangkokToday()) throw bad(`${dateLabel}ต้องไม่เกินวันนี้`);
+    if (beforePayment) {
+      // ลงวันที่ล่วงหน้าได้ (ผู้ใช้ 2026-10-15: ลงวันที่ที่ยามาฮ่าจะจ่าย) ไม่เกิน 31 วัน - ใบอื่นที่ออกหลังจากนี้ต้องลงวันที่นี้ขึ้นไป (takeNumber)
+      const latest = addDaysIso(bangkokToday(), TAX_INVOICE_ADVANCE_DAYS);
+      if (paidIso > latest) throw bad(`${dateLabel}ล่วงหน้าได้ไม่เกิน ${TAX_INVOICE_ADVANCE_DAYS} วัน (ถึง ${dmy(latest)})`);
+    } else if (paidIso > bangkokToday()) throw bad(`${dateLabel}ต้องไม่เกินวันนี้`);
     const { whtAmount, whtMethod } = parseWht(dto);
     const buyerNotVatRegistered = dto.buyerNotVatRegistered === true;
     const expectedUpdatedAt = typeof dto.expectedUpdatedAt === 'string' ? dto.expectedUpdatedAt : null;
