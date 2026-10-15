@@ -168,7 +168,8 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
         if (paidDate < invoice.issueDate) return setError(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${isoToDisplayDate(invoice.issueDate)})`);
         if (paidDate > todayIso()) return setError("วันที่รับเงินต้องไม่เกินวันนี้");
         setSaving(true);
-        await billingApi.markInvoicePaid(invoice.id, { paidDate, taxInvoiceNo });
+        // บิลที่ออกใบกำกับก่อนรับเงินแล้ว: เลข TV มาจากใบในระบบเสมอ (backend ไม่รับเลขที่พิมพ์)
+        await billingApi.markInvoicePaid(invoice.id, { paidDate, taxInvoiceNo: invoice.taxInvoice ? "" : taxInvoiceNo });
       } else if (kind === "void") {
         if (!reason.trim()) return setError("ใส่เหตุผลที่ยกเลิก");
         setSaving(true);
@@ -281,6 +282,12 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                         {i.taxInvoiceNo ? ` · ${i.taxInvoiceNo}` : ""}
                       </div>
                     )}
+                    {i.status === "ISSUED" && i.taxInvoice && (
+                      <div className="muted">
+                        ออกใบกำกับแล้ว {i.taxInvoice.taxInvoiceNo}
+                        {i.taxInvoice.issueDate ? ` (${isoToDisplayDate(i.taxInvoice.issueDate)})` : ""} · รอเงินเข้า
+                      </div>
+                    )}
                     {i.status === "VOID" && i.voidReason && <div className="muted">{i.voidReason}</div>}
                   </td>
                   <td>
@@ -295,7 +302,11 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                               style={{ width: 110 }}
                               aria-label="วันที่รับเงิน"
                             />
-                            <input type="text" placeholder="เลขที่ TV (ถ้ามี)" value={taxInvoiceNo} onChange={(e) => setTaxInvoiceNo(e.target.value)} style={{ width: 130 }} aria-label="เลขที่ใบกำกับภาษี" />
+                            {i.taxInvoice ? (
+                              <span className="muted">ใบกำกับ {i.taxInvoice.taxInvoiceNo}</span>
+                            ) : (
+                              <input type="text" placeholder="เลขที่ TV (ถ้ามี)" value={taxInvoiceNo} onChange={(e) => setTaxInvoiceNo(e.target.value)} style={{ width: 130 }} aria-label="เลขที่ใบกำกับภาษี" />
+                            )}
                           </>
                         ) : action.kind === "void" ? (
                           <>
@@ -316,7 +327,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                               aria-label="เหตุผลที่ยกเลิกการรับเงิน"
                             />
                             <div className="muted" style={{ flexBasis: "100%", fontSize: 12 }}>
-                              บิลกลับเป็นรอรับเงิน ล้างวันที่รับเงินและเลข TV (ค่าเดิมเก็บในประวัติ)
+                              {i.taxInvoice ? `บิลกลับเป็นรอรับเงิน ล้างวันที่รับเงิน ใบกำกับ ${i.taxInvoice.taxInvoiceNo} ยังอยู่` : "บิลกลับเป็นรอรับเงิน ล้างวันที่รับเงินและเลข TV (ค่าเดิมเก็บในประวัติ)"}
                             </div>
                           </>
                         )}
@@ -341,7 +352,13 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                         <button className="text-button" onClick={() => void downloadInvoicePdf(i).catch(() => setError("บันทึก PDF ไม่สำเร็จ ลองอีกครั้งหรือใช้ปุ่มพิมพ์แล้วเลือกบันทึกเป็น PDF"))}>
                           บันทึก PDF
                         </button>
-                        {i.status === "ISSUED" && (
+                        {/* ออกใบกำกับก่อนรับเงินแล้ว (ผู้ใช้ 2026-10-15, ยามาฮ่า): รอแค่บันทึกรับเงิน - แก้/ยกเลิกบิลต้องยกเลิกใบกำกับก่อน */}
+                        {i.status === "ISSUED" && i.taxInvoice && (
+                          <button className="text-button" style={{ fontWeight: 600 }} onClick={() => open({ id: i.id, kind: "paid" })}>
+                            บันทึกรับเงิน
+                          </button>
+                        )}
+                        {i.status === "ISSUED" && !i.taxInvoice && (
                           <>
                             {taxInvoiceEnabled && needsTaxInvoice(i) ? (
                               <button
@@ -385,7 +402,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                           </>
                         )}
                         {/* ใบกำกับในระบบ: เลขห้ามหาย - ยกเลิกใบกำกับ (มีเหตุผล) แทนยกเลิกการรับเงิน */}
-                        {i.status === "PAID" && i.taxInvoice && (
+                        {i.taxInvoice && (i.status === "PAID" || i.status === "ISSUED") && (
                           <>
                             <button className="text-button" onClick={() => printTaxInvoiceOf(i)}>
                               พิมพ์ใบกำกับ
@@ -398,7 +415,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                             </button>
                           </>
                         )}
-                        {i.status === "PAID" && !i.taxInvoice && (
+                        {i.status === "PAID" && (!i.taxInvoice || i.taxInvoice.beforePayment) && (
                           <button className="text-button" onClick={() => open({ id: i.id, kind: "unpay" })}>
                             ยกเลิกการรับเงิน
                           </button>

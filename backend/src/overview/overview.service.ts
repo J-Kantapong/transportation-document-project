@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.service.js';
-import { WHT_OVERDUE_DAYS } from '../billing/tax-invoice.service.js';
+import { WHT_OVERDUE_DAYS, WHT_PENDING_WHERE } from '../billing/tax-invoice.service.js';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { findSuspectVehicles } from '../vehicles/vehicle-data-check.js';
@@ -514,7 +514,7 @@ export class OverviewService {
       }),
       // 50 ทวิที่ลูกค้าหักไว้แต่ยังไม่ส่งหลักฐาน (หน้า /accounting/tax-invoices/wht)
       this.prisma.taxInvoice.findMany({
-        where: { status: 'ISSUED', whtAmount: { gt: 0 }, whtCertificateId: null },
+        where: WHT_PENDING_WHERE,
         select: { id: true, taxInvoiceNo: true, issueDate: true, whtAmount: true, customerSnapshot: true },
       }),
       // ใบเสนอราคาที่ยังมีเรื่องต้องตาม: ส่งแล้วรอลูกค้าตอบ / อนุมัติแล้วยังไม่ออกบิลหรือตั้งราคา

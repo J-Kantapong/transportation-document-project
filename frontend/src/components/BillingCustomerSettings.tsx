@@ -38,6 +38,8 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [requiresQuotation, setRequiresQuotation] = useState(terms.requiresQuotation ?? false);
   // ประเภท 50 ทวิ ที่ลูกค้าส่งมาตามปกติ (ผู้ใช้ 2026-10-06)
   const [whtMethod, setWhtMethod] = useState<"PAPER" | "EWHT">(terms.whtMethod === "EWHT" ? "EWHT" : "PAPER");
+  // ออกใบกำกับก่อนรับเงินได้ (ผู้ใช้ 2026-10-15, ยามาฮ่า: ต้องส่งใบกำกับให้ก่อนถึงจะจ่าย)
+  const [taxInvoiceBeforePayment, setTaxInvoiceBeforePayment] = useState(terms.taxInvoiceBeforePayment ?? false);
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -61,7 +63,7 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, whtMethod, remark: remark.trim() });
+      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, whtMethod, taxInvoiceBeforePayment, remark: remark.trim() });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -122,6 +124,10 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
         <input type="checkbox" checked={requiresQuotation} onChange={(e) => setRequiresQuotation(e.target.checked)} />
         ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น)
+      </label>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+        <input type="checkbox" checked={taxInvoiceBeforePayment} onChange={(e) => setTaxInvoiceBeforePayment(e.target.checked)} />
+        ออกใบกำกับภาษีก่อนรับเงินได้ (ลูกค้าต้องได้ใบกำกับก่อนถึงจะจ่าย - ภาษีขายเกิดตามวันที่ออกใบ)
       </label>
       <label className="field">
         เหตุผลที่แก้ *

@@ -35,7 +35,7 @@ export function TaxInvoicesPage() {
       const [list, s, bills] = await Promise.all([billingApi.taxInvoices(m), billingApi.taxInvoiceSeries(), billingApi.listInvoices({ limit: 1 })]);
       setRows(list.taxInvoices);
       setSeries(s);
-      setWaiting(bills.invoices.filter((i) => i.status === "ISSUED" && i.account !== "PERSONAL" && i.vatRate > 0));
+      setWaiting(bills.invoices.filter((i) => i.status === "ISSUED" && !i.taxInvoice && i.account !== "PERSONAL" && i.vatRate > 0));
       setError("");
     } catch (err) {
       setError(errorText(err, "โหลดใบกำกับไม่สำเร็จ"));

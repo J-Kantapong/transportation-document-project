@@ -57,7 +57,8 @@ export class TaxInvoiceController {
     return this.taxInvoices.issuePreview(id);
   }
 
-  // รับเงิน + ออกใบกำกับ { paidDate, whtAmount, whtMethod: NONE|PAPER|EWHT, buyerNotVatRegistered?, expectedUpdatedAt? }
+  // รับเงิน + ออกใบกำกับ { paidDate, whtAmount, whtMethod: NONE|PAPER|EWHT, buyerNotVatRegistered?, expectedUpdatedAt?, beforePayment? }
+  // beforePayment = ออกก่อนรับเงิน (ลูกค้าที่ตั้งไว้ เช่น ยามาฮ่า) paidDate คือวันที่ออกใบ บิลยังรอรับเงิน
   @Post('invoices/:id/tax-invoice')
   async issue(@Param('id') id: string, @Body() body: Record<string, unknown>) {
     return { taxInvoice: await this.taxInvoices.issue(id, body ?? {}) };

@@ -61,12 +61,16 @@ export function TaxInvoiceIssueDialog({
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15, ยามาฮ่าต้องได้ใบกำกับก่อนถึงจะจ่าย) - เลือกได้เฉพาะลูกค้าที่ตั้งไว้ ตั้งต้นเป็นแบบนี้ให้ลูกค้ารายนั้น
+  const [beforePayment, setBeforePayment] = useState(false);
+  const dateLabel = beforePayment ? "วันที่ออกใบกำกับ" : "วันที่รับเงิน";
 
   useEffect(() => {
     billingApi
       .taxInvoicePreview(invoice.id)
       .then((p) => {
         setPreview(p);
+        setBeforePayment(!!p.beforePaymentAllowed);
         // ประเภท 50 ทวิ ตั้งต้นตามที่ตั้งไว้ที่ลูกค้า (แก้ในหน้าต่างได้)
         setWhtMethod(p.defaultWhtMethod === "EWHT" ? "EWHT" : "PAPER");
       })
@@ -90,9 +94,9 @@ export function TaxInvoiceIssueDialog({
   async function handleConfirm() {
     setError("");
     const paidDate = displayDateToIso(digits(paidDateText));
-    if (!paidDate) return setError("วันที่รับเงินไม่ถูกต้อง");
-    if (paidDate < invoice.issueDate) return setError(`วันที่รับเงินต้องไม่ก่อนวันที่ออกบิล (${isoToDisplayDate(invoice.issueDate)})`);
-    if (paidDate > todayIso()) return setError("วันที่รับเงินต้องไม่เกินวันนี้");
+    if (!paidDate) return setError(`${dateLabel}ไม่ถูกต้อง`);
+    if (paidDate < invoice.issueDate) return setError(`${dateLabel}ต้องไม่ก่อนวันที่ออกบิล (${isoToDisplayDate(invoice.issueDate)})`);
+    if (paidDate > todayIso()) return setError(`${dateLabel}ต้องไม่เกินวันนี้`);
     if (wht === null) return setError("ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
     setSaving(true);
     try {
@@ -102,10 +106,13 @@ export function TaxInvoiceIssueDialog({
         whtMethod: wht > 0 ? whtMethod : "NONE",
         buyerNotVatRegistered: notRegistered,
         expectedUpdatedAt: invoice.updatedAt,
+        ...(beforePayment ? { beforePayment: true } : {}),
       });
-      let notice = `ออกใบกำกับ ${taxInvoice.taxInvoiceNo} แล้ว`;
-      // แนบ 50 ทวิ ต่อทันทีถ้าได้มาแล้ว - ไม่สำเร็จก็ไม่กระทบใบกำกับ (แนบใหม่ที่หน้าติดตามได้)
-      const attachNow = wht > 0 && (whtMethod === "PAPER" ? !!certFile : certNo.trim() !== "");
+      let notice = beforePayment
+        ? `ออกใบกำกับ ${taxInvoice.taxInvoiceNo} แล้ว (ก่อนรับเงิน) - บิล ${invoice.invoiceNo} ยังรอรับเงิน เงินเข้าแล้วกด "บันทึกรับเงิน"`
+        : `ออกใบกำกับ ${taxInvoice.taxInvoiceNo} แล้ว`;
+      // แนบ 50 ทวิ ต่อทันทีถ้าได้มาแล้ว - ไม่สำเร็จก็ไม่กระทบใบกำกับ (แนบใหม่ที่หน้าติดตามได้) · ออกก่อนรับเงินยังไม่มี 50 ทวิ
+      const attachNow = !beforePayment && wht > 0 && (whtMethod === "PAPER" ? !!certFile : certNo.trim() !== "");
       if (attachNow) {
         try {
           await billingApi.createWhtCertificate({
@@ -121,7 +128,7 @@ export function TaxInvoiceIssueDialog({
         } catch (err) {
           notice += ` · แนบ 50 ทวิ ไม่สำเร็จ (${errorText(err, "ลองใหม่ที่หน้าติดตาม 50 ทวิ")})`;
         }
-      } else if (wht > 0) {
+      } else if (wht > 0 && !beforePayment) {
         notice += " · รอ 50 ทวิ";
       }
       const fresh = attachNow ? (await billingApi.taxInvoice(taxInvoice.id)).taxInvoice : taxInvoice;
@@ -141,7 +148,7 @@ export function TaxInvoiceIssueDialog({
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
         ×
       </button>
-      <h2>รับเงิน + ออกใบกำกับภาษี</h2>
+      <h2>{beforePayment ? "ออกใบกำกับภาษีก่อนรับเงิน" : "รับเงิน + ออกใบกำกับภาษี"}</h2>
       <p className="muted">
         บิล {invoice.invoiceNo} · ออกวันที่ {isoToDisplayDate(invoice.issueDate)}
       </p>
@@ -158,17 +165,32 @@ export function TaxInvoiceIssueDialog({
         </p>
       ) : (
         <>
+          {preview.beforePaymentAllowed && (
+            <div className="inspect-filter" style={{ padding: 0, marginTop: 10 }} role="group" aria-label="ออกใบกำกับเมื่อไร">
+              <button type="button" className={`filter-chip${beforePayment ? " selected" : ""}`} onClick={() => setBeforePayment(true)}>
+                ออกก่อนรับเงิน (ส่งให้ลูกค้าก่อน)
+              </button>
+              <button type="button" className={`filter-chip${!beforePayment ? " selected" : ""}`} onClick={() => setBeforePayment(false)}>
+                รับเงินแล้ว
+              </button>
+            </div>
+          )}
+          {beforePayment && (
+            <p className="customer-message" style={{ fontSize: 13 }}>
+              บิลยังเป็น &quot;รอรับเงิน&quot; จนกว่าจะกด &quot;บันทึกรับเงิน&quot; ที่รายการบิล · ภาษีขายเกิดตามวันที่ออกใบนี้ (นับเข้าเดือนนี้แม้ยังไม่ได้เงิน) · ออกแล้วแก้/ยกเลิกบิลไม่ได้จนกว่าจะยกเลิกใบกำกับ
+            </p>
+          )}
           <div className="field-grid" style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 12px", alignItems: "center", margin: "12px 0" }}>
             <span>เลขที่ใบกำกับ</span>
             <span>
               <b>{preview.nextNo}</b> <span className="muted">(ระบบให้เลขถัดไป)</span>
             </span>
-            <span>วันที่รับเงิน *</span>
+            <span>{dateLabel} *</span>
             <DateInput
               value={paidDateText}
               onChange={(value) => setPaidDateText(formatDateDigitsCe(digits(value)))}
               style={{ width: 140 }}
-              aria-label="วันที่รับเงิน"
+              aria-label={dateLabel}
             />
             <span>ลูกค้า</span>
             <span>
@@ -219,7 +241,7 @@ export function TaxInvoiceIssueDialog({
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 0" }}>
               <span>
-                ลูกค้าหัก ณ ที่จ่ายจริง
+                {beforePayment ? "ยอดที่ลูกค้าจะหัก ณ ที่จ่าย" : "ลูกค้าหัก ณ ที่จ่ายจริง"}
                 {invoice.whtAmount > 0 && <span className="muted" style={{ fontSize: 12 }}> (ตามบิล {formatMoney(invoice.whtAmount)})</span>}
               </span>
               <input type="text" inputMode="decimal" value={whtText} onChange={(e) => setWhtText(e.target.value)} style={{ width: 110, textAlign: "right" }} aria-label="ยอดหัก ณ ที่จ่ายจริง" />
@@ -228,7 +250,7 @@ export function TaxInvoiceIssueDialog({
             <Row label="เงินที่ต้องเข้าบัญชี" value={received === null ? "—" : formatMoney(received)} strong />
           </div>
 
-          {wht !== null && wht > 0 && (
+          {wht !== null && wht > 0 && !beforePayment && (
             <fieldset style={{ border: "1px solid #e2e6ee", borderRadius: 8, padding: "8px 12px", marginTop: 10 }}>
               <legend style={{ fontSize: 13 }}>หลักฐานหัก ณ ที่จ่าย</legend>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -260,7 +282,7 @@ export function TaxInvoiceIssueDialog({
           </button>
           {previewHtml && <iframe title="ตัวอย่างใบกำกับภาษี" srcDoc={previewHtml} style={{ width: "100%", height: 520, border: "1px solid #e2e6ee", background: "white", marginTop: 6 }} />}
           <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-            วันที่ใบกำกับ = วันที่รับเงิน · ออกแล้วแก้ไม่ได้ ถ้าผิดต้องยกเลิกแล้วออกใบใหม่ · กดยืนยันแล้วจะเปิดหน้าพิมพ์ต้นฉบับ + สำเนาให้ทันที
+            {beforePayment ? "วันที่ใบกำกับ = วันที่ออกใบ" : "วันที่ใบกำกับ = วันที่รับเงิน"} · ออกแล้วแก้ไม่ได้ ถ้าผิดต้องยกเลิกแล้วออกใบใหม่ · กดยืนยันแล้วจะเปิดหน้าพิมพ์ต้นฉบับ + สำเนาให้ทันที
           </p>
         </>
       )}

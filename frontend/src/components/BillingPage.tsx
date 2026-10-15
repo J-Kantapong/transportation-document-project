@@ -376,6 +376,22 @@ export function BillingPage() {
       }, new Map<string, number>())
       .entries(),
   ];
+  // ค่าตรวจรถที่ลูกค้าจ่ายแยก (ตั้งแต่ 1,000, ผู้ใช้ 2026-10-07): เสนอเป็นบรรทัดค่าธรรมเนียมในบิล ให้กดเพิ่มเอง ไม่บวกให้เงียบๆ
+  const inspectionKey = (v: BillingVehicle) => plateText(v) || v.chassis;
+  const inspectionDescription = (v: BillingVehicle) => `ค่าตรวจสภาพรถ ${inspectionKey(v)}`;
+  const inspectionSeparateRows = selected.filter((v) => (v.inspectionSeparate ?? 0) > 0);
+  const inspectionMissing = inspectionSeparateRows.filter((v) => !itemRows.some((r) => r.description === inspectionDescription(v)));
+  const addInspectionRows = () =>
+    setItemRows((prev) => [
+      ...prev,
+      ...inspectionMissing.map((v): ItemRow => ({
+        kind: "FEE",
+        description: inspectionDescription(v),
+        quantityText: "1",
+        unitPriceText: formatMoney(v.inspectionSeparate ?? 0),
+        costText: "",
+      })),
+    ]);
   const draftItems = itemRowsToItems(itemRows);
   // งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล + ที่ติ๊กพ่วงในบิลนี้ (ผู้ใช้ 2026-10-07) - ค่าบริการตามตารางของลูกค้า แก้ได้รายงาน
   const customerJobs = useMemo(() => otherJobs.find((c) => c.id === customer?.id)?.jobs ?? [], [otherJobs, customer?.id]);
@@ -1220,6 +1236,24 @@ export function BillingPage() {
                         </label>
                       );
                     })}
+                  </div>
+                )}
+                {inspectionSeparateRows.length > 0 && (
+                  <div style={{ display: "grid", gap: 6, fontSize: 14, padding: "10px 12px", borderRadius: 8, background: "#fff8e1", border: "1px solid #f0d98a" }}>
+                    <div>
+                      🔍 รถ <b>{inspectionSeparateRows.length}</b> คันมีค่าตรวจรถที่ลูกค้าจ่ายแยก รวม{" "}
+                      <b>{formatMoney(inspectionSeparateRows.reduce((s, v) => s + (v.inspectionSeparate ?? 0), 0))}</b> บาท (ตั้งแต่ 1,000 ขึ้นไป)
+                    </div>
+                    {inspectionMissing.length > 0 ? (
+                      <div>
+                        <button type="button" onClick={addInspectionRows}>
+                          + เพิ่มค่าตรวจ {inspectionMissing.length} คันเป็นบรรทัดค่าธรรมเนียม
+                        </button>{" "}
+                        <span style={{ color: "var(--muted)" }}>ไม่มี VAT ไม่หัก ณ ที่จ่าย · แก้ยอดหรือลบบรรทัดได้ด้านล่าง</span>
+                      </div>
+                    ) : (
+                      <div style={{ color: "var(--muted)" }}>เพิ่มเป็นบรรทัดค่าธรรมเนียมในบิลนี้แล้ว</div>
+                    )}
                   </div>
                 )}
                 <InvoiceItemsEditor rows={itemRows} onChange={setItemRows} addLabel="+ เพิ่มบรรทัดอื่นในบิลนี้ (งานเก่า / ขายสินค้า / ค่าใช้จ่ายอื่น)" />
