@@ -304,7 +304,7 @@ This private repository is the shared development surface for the user, Claude C
   `backend/src/billing/tax-invoice.*`, page `/accounting/tax-invoices` + `/wht`): a ใบกำกับภาษี/ใบเสร็จรับเงิน (`TaxInvoice`)
   is issued when the money comes in, only for COMPANY-account bills with VAT, 1 bill = 1 active TV (partial unique index
   `TaxInvoice_invoice_active_key`). Number `TV{year}-{3 digits}` from `TaxInvoiceSeries` (row-locked, date = paid date, a
-  date before the year's latest live (not cancelled) TV is refused, user 2026-10-06 so a cancelled TV does not block an earlier date); no series row = not enabled yet (old "รับเงินแล้ว" + typed TV no. still
+  date is compared with the year's latest-dated live (not cancelled) TV only, user 2026-10-06 so a cancelled TV does not block an earlier date; user 2026-10-19: a date before it is allowed **within the same month** when the request carries `backdateConfirmed: true` (the dialogs ask first via `checkBackdate` in `frontend/src/lib/tax-invoice-date.ts`; numbers then no longer follow dates inside that month), an earlier month is still refused, for both bill-based and custom TVs; `lastIssued` in the previews is the latest-dated live TV); no series row = not enabled yet (old "รับเงินแล้ว" + typed TV no. still
   works); ADMIN enables it by setting the last Google-Sheet number (`POST /api/billing/tax-invoices/series/set`
   `{ year, lastNumber, remark }`, only while that year has no system TV). Once enabled, `PATCH .../invoices/:id/paid`
   refuses COMPANY+VAT bills and `unpay` refuses bills with a system TV. Issue: `POST /api/billing/invoices/:id/tax-invoice`

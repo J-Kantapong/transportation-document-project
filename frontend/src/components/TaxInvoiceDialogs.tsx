@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type Invoice, type TaxInvoice, type TaxInvoicePreview, type WhtMethod } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
+import { checkBackdate } from "@/lib/tax-invoice-date";
 import { DateInput } from "@/components/DateInput";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { buildTaxInvoiceHtml, draftTaxInvoice, printTaxInvoice } from "@/lib/tax-invoice-print";
@@ -111,10 +112,14 @@ export function TaxInvoiceIssueDialog({
     } else if (paidDate > todayIso()) return setError(`${dateLabel}ต้องไม่เกินวันนี้`);
     if (wht === null) return setError("ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
     if (paidDate > todayIso() && !window.confirm(futureDateWarning(paidDate))) return;
+    const backdate = checkBackdate(preview?.lastIssued, paidDate);
+    if (backdate.kind === "refuse") return setError(backdate.message);
+    if (backdate.kind === "confirm" && !window.confirm(backdate.message)) return;
     setSaving(true);
     try {
       const { taxInvoice } = await billingApi.issueTaxInvoice(invoice.id, {
         paidDate,
+        ...(backdate.kind === "confirm" ? { backdateConfirmed: true } : {}),
         whtAmount: wht,
         whtMethod: wht > 0 ? whtMethod : "NONE",
         buyerNotVatRegistered: notRegistered,
@@ -228,7 +233,7 @@ export function TaxInvoiceIssueDialog({
           )}
           {preview.lastIssued && (
             <p className="muted" style={{ fontSize: 12 }}>
-              ใบล่าสุด {preview.lastIssued.taxInvoiceNo} วันที่ {isoToDisplayDate(preview.lastIssued.issueDate)} - วันที่ใบนี้ต้องไม่ก่อนหน้านั้น
+              ใบล่าสุด {preview.lastIssued.taxInvoiceNo} วันที่ {isoToDisplayDate(preview.lastIssued.issueDate)} - ลงวันที่ก่อนหน้านั้นได้เฉพาะเดือนเดียวกัน (ระบบจะถามยืนยัน)
             </p>
           )}
           {preview.replaces && (

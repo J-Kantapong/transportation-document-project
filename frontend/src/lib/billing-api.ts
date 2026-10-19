@@ -727,12 +727,13 @@ export const billingApi = {
     whtMethod: WhtMethod;
     buyerNotVatRegistered: boolean;
     replacesId?: string;
+    backdateConfirmed?: boolean; // ลงวันที่ก่อนใบล่าสุดในเดือนเดียวกัน (ผู้ใช้ยืนยันแล้ว)
   }) => request<{ taxInvoice: TaxInvoice }>("/api/billing/tax-invoices/custom", json("POST", data)),
   taxInvoicePreview: (invoiceId: string) => request<TaxInvoicePreview>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice-preview`),
   issueTaxInvoice: (
     invoiceId: string,
     // beforePayment = ออกก่อนรับเงิน: paidDate คือวันที่ออกใบ บิลยังรอรับเงิน
-    data: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean; expectedUpdatedAt: string | null; beforePayment?: boolean },
+    data: { paidDate: string; whtAmount: number; whtMethod: WhtMethod; buyerNotVatRegistered: boolean; expectedUpdatedAt: string | null; beforePayment?: boolean; backdateConfirmed?: boolean },
   ) => request<{ taxInvoice: TaxInvoice }>(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/tax-invoice`, json("POST", data)),
   cancelTaxInvoice: (id: string, remark: string) =>
     request<{ taxInvoice: TaxInvoice }>(`/api/billing/tax-invoices/${encodeURIComponent(id)}/cancel`, json("POST", { remark })),

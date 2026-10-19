@@ -116,9 +116,19 @@ describe('TaxInvoiceService.issue', () => {
     expect(created).toHaveLength(0);
   });
 
-  it('keeps numbers in date order: a date before the latest tax invoice is refused', async () => {
-    const { svc, created } = fakeDb({ lastNumber: 10, lastTv: { taxInvoiceNo: 'TV2026-010', issueDate: new Date('2026-10-20T00:00:00.000Z') } });
-    await expect(svc.issue('i1', { ...ok, paidDate: '2026-10-19' })).rejects.toMatchObject({ status: 400 });
+  it('a date before the latest tax invoice in the same month needs confirmation (backdateConfirmed)', async () => {
+    const lastTv = { taxInvoiceNo: 'TV2026-010', issueDate: new Date('2026-10-19T00:00:00.000Z') };
+    const unconfirmed = fakeDb({ lastNumber: 10, lastTv });
+    await expect(unconfirmed.svc.issue('i1', { ...ok, paidDate: '2026-10-15' })).rejects.toMatchObject({ status: 400 });
+    expect(unconfirmed.created).toHaveLength(0);
+    const { svc, created } = fakeDb({ lastNumber: 10, lastTv });
+    await svc.issue('i1', { ...ok, paidDate: '2026-10-15', backdateConfirmed: true });
+    expect(created[0]).toMatchObject({ taxInvoiceNo: 'TV2026-011' });
+  });
+
+  it('a date in an earlier month than the latest tax invoice is refused even when confirmed', async () => {
+    const { svc, created } = fakeDb({ lastNumber: 10, invoice: { issueDate: new Date('2026-09-01T00:00:00.000Z') }, lastTv: { taxInvoiceNo: 'TV2026-010', issueDate: new Date('2026-10-02T00:00:00.000Z') } });
+    await expect(svc.issue('i1', { ...ok, paidDate: '2026-09-30', backdateConfirmed: true })).rejects.toMatchObject({ status: 400 });
     expect(created).toHaveLength(0);
   });
 

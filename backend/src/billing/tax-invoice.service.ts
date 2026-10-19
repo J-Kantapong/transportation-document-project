@@ -17,7 +17,7 @@ import { daysBetween, formatTaxInvoiceNo, missingBuyerFields, taxInvoiceAmounts,
 
 // ใบกำกับภาษี/ใบเสร็จรับเงิน (TV) + หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) - ผู้ใช้ 2026-09-28
 // - ออกตอนรับเงิน เฉพาะบิลบัญชีบริษัทที่มี VAT, บิล 1 ใบ = ใบกำกับที่ใช้อยู่ 1 ใบ, ระบบให้เลขเอง TV{ปี}-{3 หลัก}
-// - วันที่ใบกำกับ = วันที่รับเงิน และต้องไม่ก่อนใบล่าสุดของปีนั้น (เลขเรียงตามวันที่)
+// - วันที่ใบกำกับ = วันที่รับเงิน ต้องไม่ก่อนเดือนของใบล่าสุดของปีนั้น (ย้อนในเดือนเดียวกันได้เมื่อยืนยัน backdateConfirmed)
 // - ออกแล้วแก้ไม่ได้: ยกเลิก (เหตุผลบังคับ เลขเดิมเก็บไว้ บิลกลับเป็นรอรับเงิน) แล้วออกใบใหม่ที่อ้างใบเดิม
 // - ลูกค้าทำต้นฉบับหาย = ใบแทน (เลขเดิม บันทึกวันที่และเหตุผล)
 // - 50 ทวิ ใบเดียวครอบคลุมหลายใบกำกับได้ (บางลูกค้าส่งรวม) · ได้ใบเป็นกระดาษ -> แนบรูป/PDF · e-WHT -> เลขอ้างอิง
@@ -147,7 +147,7 @@ export class TaxInvoiceService {
     ]);
     const year = Number(bangkokToday().slice(0, 4));
     const current = seriesRows.find((s) => s.year === year);
-    const last = await this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    const last = await this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: [{ issueDate: 'desc' }, { number: 'desc' }], select: { taxInvoiceNo: true, issueDate: true } });
     return {
       enabled: seriesRows.length > 0,
       buyer,
@@ -169,7 +169,7 @@ export class TaxInvoiceService {
   //   ภาษีขายเกิดตามวันที่ออกใบ (ออกใบก่อนรับเงิน = จุดความรับผิดเกิดที่วันออกใบ)
   async issue(
     invoiceId: string,
-    dto: { paidDate?: unknown; whtAmount?: unknown; whtMethod?: unknown; buyerNotVatRegistered?: unknown; expectedUpdatedAt?: unknown; beforePayment?: unknown },
+    dto: { paidDate?: unknown; whtAmount?: unknown; whtMethod?: unknown; buyerNotVatRegistered?: unknown; expectedUpdatedAt?: unknown; beforePayment?: unknown; backdateConfirmed?: unknown },
   ) {
     const beforePayment = dto?.beforePayment === true;
     const dateLabel = beforePayment ? 'วันที่ออกใบกำกับ' : 'วันที่รับเงิน';
@@ -212,7 +212,7 @@ export class TaxInvoiceService {
         const amounts = taxInvoiceAmounts({ feeTotal: fee, serviceTotal: service, goodsTotal: goods, vatAmount: vat }, whtAmount);
         if (whtAmount > round2(service + goods)) throw bad('ภาษีหัก ณ ที่จ่ายมากกว่ามูลค่าค่าบริการ - ตรวจยอดอีกครั้ง');
 
-        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso);
+        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso, dto.backdateConfirmed === true);
 
         // ออกแทนใบที่ยกเลิกไปของบิลเดียวกัน - 50 ทวิ ที่แนบไว้กับใบเดิมย้ายมาใบใหม่ (หักภาษีจากการจ่ายเดิม)
         const replaces = await this.replaceableOf(tx, invoiceId);
@@ -263,7 +263,7 @@ export class TaxInvoiceService {
     const buyer = this.buyerOf(customer);
     const [seriesRows, last] = await Promise.all([
       this.prisma.taxInvoiceSeries.findMany(),
-      this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } }),
+      this.prisma.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: [{ issueDate: 'desc' }, { number: 'desc' }], select: { taxInvoiceNo: true, issueDate: true } }),
     ]);
     const current = seriesRows.find((s) => s.year === year);
     return {
@@ -320,7 +320,7 @@ export class TaxInvoiceService {
           if (old.replacedBy) throw conflict('ใบนี้มีใบใหม่ออกแทนไปแล้ว');
           replaces = old;
         }
-        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso);
+        const { number, taxInvoiceNo } = await this.takeNumber(tx, year, paidIso, dto.backdateConfirmed === true);
         const carriedCert = replaces?.whtCertificateId && whtAmount > 0 && replaces.customerId === customer.id ? replaces.whtCertificateId : null;
         const created = await tx.taxInvoice.create({
           data: {
@@ -625,14 +625,21 @@ export class TaxInvoiceService {
   // ---------- ภายใน ----------
 
   // เลขถัดไปของปี - ล็อกแถวปีนั้น ออกพร้อมกัน 2 หน้าจอได้เลขต่อกันไม่ซ้ำไม่ข้าม (ใช้ทั้งใบจากบิลและใบกำหนดเอง เลขชุดเดียวกัน)
-  private async takeNumber(tx: Prisma.TransactionClient, year: number, paidIso: string) {
+  private async takeNumber(tx: Prisma.TransactionClient, year: number, paidIso: string, backdateConfirmed = false) {
     if ((await tx.taxInvoiceSeries.count()) === 0) throw bad('ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มก่อน');
     await tx.$executeRaw`INSERT INTO "TaxInvoiceSeries" ("year", "lastNumber", "updatedAt") VALUES (${year}, 0, NOW()) ON CONFLICT DO NOTHING`;
     const [series] = await tx.$queryRaw<Array<{ lastNumber: number }>>`SELECT "lastNumber" FROM "TaxInvoiceSeries" WHERE "year" = ${year} FOR UPDATE`;
-    const last = await tx.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: { number: 'desc' }, select: { taxInvoiceNo: true, issueDate: true } });
+    const last = await tx.taxInvoice.findFirst({ where: { year, status: 'ISSUED' }, orderBy: [{ issueDate: 'desc' }, { number: 'desc' }], select: { taxInvoiceNo: true, issueDate: true } });
     // เทียบวันที่กับใบที่ "ยังใช้อยู่" เท่านั้น (ผู้ใช้ 2026-10-06): ใบที่ยกเลิกแล้วใช้ไม่ได้ วันที่ของมันไม่ควรกันการออกใบใหม่ที่ลงวันที่ก่อนหน้า
+    // ลงวันที่ย้อนหลังได้เฉพาะเดือนเดียวกับใบล่าสุด และต้องยืนยัน (ผู้ใช้ 2026-10-19: ใบ YM ลง 19/10 ไปแล้ว แต่เงินลูกค้าอื่นเข้า 15-16/10)
+    // ข้ามเดือนยังไม่ได้ เพราะภาษีขายของเดือนที่ผ่านมาแล้วจะเปลี่ยน
     if (last && iso(last.issueDate)! > paidIso) {
-      throw bad(`วันที่ต้องไม่ก่อนใบกำกับล่าสุด ${last.taxInvoiceNo} (${dmy(iso(last.issueDate)!)}) - เลขใบกำกับต้องเรียงตามวันที่`);
+      const lastIso = iso(last.issueDate)!;
+      const ref = `${last.taxInvoiceNo} (${dmy(lastIso)})`;
+      if (lastIso.slice(0, 7) !== paidIso.slice(0, 7)) {
+        throw bad(`วันที่ต้องไม่ก่อนเดือนของใบกำกับล่าสุด ${ref} - ลงวันที่ย้อนข้ามเดือนไม่ได้`);
+      }
+      if (!backdateConfirmed) throw bad(`วันที่ก่อนใบกำกับล่าสุด ${ref} - ต้องยืนยันการลงวันที่ย้อนหลัง (เลขจะไม่เรียงตามวันที่)`);
     }
     const number = series.lastNumber + 1;
     const taxInvoiceNo = formatTaxInvoiceNo(year, number);

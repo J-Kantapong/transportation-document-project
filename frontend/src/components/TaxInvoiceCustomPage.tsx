@@ -8,6 +8,7 @@ import { billingApi, ACCOUNT_LABEL, WHT_METHOD_LABEL, type Invoice, type TaxInvo
 import { DateInput } from "@/components/DateInput";
 import { emptyItemRow, InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
+import { checkBackdate } from "@/lib/tax-invoice-date";
 import { computeTotals, formatMoney, round2 } from "@/lib/invoice";
 import { buildTaxInvoiceHtml, printTaxInvoice } from "@/lib/tax-invoice-print";
 
@@ -135,9 +136,8 @@ export function TaxInvoiceCustomPage() {
     if (preview.account && preview.account !== "COMPANY") return `ลูกค้ารายนี้ใช้${ACCOUNT_LABEL[preview.account]} ณ วันที่นี้ ไม่มีใบกำกับภาษี`;
     if (!paidIso) return "วันที่รับเงินไม่ถูกต้อง (วว/ดด/ปปปป)";
     if (paidIso > todayIso()) return "วันที่รับเงินต้องไม่เกินวันนี้";
-    if (preview.lastIssued && paidIso < preview.lastIssued.issueDate) {
-      return `วันที่ต้องไม่ก่อนใบกำกับล่าสุด ${preview.lastIssued.taxInvoiceNo} (${isoToDisplayDate(preview.lastIssued.issueDate)}) - เลขใบกำกับต้องเรียงตามวันที่`;
-    }
+    const backdate = checkBackdate(preview.lastIssued, paidIso);
+    if (backdate.kind === "refuse") return backdate.message;
     if (missing.length) return `ข้อมูลลูกค้ายังไม่ครบ: ${missing.join(", ")} - แก้ที่หน้าฐานข้อมูลลูกค้าก่อน (ADMIN)`;
     if (rows.length === 0) return "ต้องมีอย่างน้อย 1 บรรทัด";
     const itemError = itemRowsProblem(rows);
@@ -157,10 +157,13 @@ export function TaxInvoiceCustomPage() {
   async function handleSave() {
     const p = problem();
     if (p || wht === null) return setError(p ?? "ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
+    const backdate = checkBackdate(preview?.lastIssued, paidIso);
+    if (backdate.kind === "confirm" && !window.confirm(backdate.message)) return;
     setSaving(true);
     setError("");
     try {
       const { taxInvoice } = await billingApi.issueCustomTaxInvoice({
+        ...(backdate.kind === "confirm" ? { backdateConfirmed: true } : {}),
         customerId,
         issueDate: paidIso,
         items: items.map(({ kind, description, quantity, unitPrice }) => ({ kind, description, quantity, unitPrice })),
@@ -290,7 +293,7 @@ export function TaxInvoiceCustomPage() {
             </div>
             <span className="muted" style={{ fontSize: 12 }}>
               {preview?.lastIssued
-                ? `ใบล่าสุด ${preview.lastIssued.taxInvoiceNo} วันที่ ${isoToDisplayDate(preview.lastIssued.issueDate)} · ระบบให้เลขถัดไป`
+                ? `ใบล่าสุด ${preview.lastIssued.taxInvoiceNo} วันที่ ${isoToDisplayDate(preview.lastIssued.issueDate)} · ระบบให้เลขถัดไป (ลงวันที่ย้อนได้เฉพาะเดือนเดียวกัน)`
                 : "ระบบให้เลขถัดไปเอง"}
             </span>
           </div>
