@@ -17,12 +17,25 @@ interface RowState {
   done: boolean;
   completedDateText: string;
   costText: string;
+  // ข้ามใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-19): ติ๊กแล้วต้องระบุเหตุผล - backend บังคับเหมือนกัน
+  waive: boolean;
+  waiveReason: string;
   saving: boolean;
   message: { text: string; error?: boolean };
 }
 
+// งานแจ้งย้ายที่ยังไม่มีใบเสร็จ: ดำเนินการแล้วได้เมื่อติ๊กข้ามพร้อมเหตุผลเท่านั้น (คืนข้อความ error ถ้ายังไม่ครบ)
+function waiveProblem(v: TransferNoticeVehicle, row: RowState): string | null {
+  if (!row.done || !receiptMissing(v)) return null;
+  if (!row.waive) return "งานแจ้งย้ายต้องแนบใบเสร็จ หรือติ๊กข้ามใบเสร็จพร้อมเหตุผล";
+  if (!row.waiveReason.trim()) return "กรุณาระบุเหตุผลที่ข้ามใบเสร็จแจ้งย้าย";
+  return null;
+}
+
 function toRowState(vehicle: TransferNoticeVehicle): RowState {
   return {
+    waive: false,
+    waiveReason: "",
     done: vehicle.transferDone,
     completedDateText: isoToDisplayDate(vehicle.transferCompletedDate ?? ""),
     costText: vehicle.transferCost ?? vehicle.suggestedCost ?? "",
@@ -34,7 +47,7 @@ function toRowState(vehicle: TransferNoticeVehicle): RowState {
 // แถวที่ผู้ใช้แก้จริงเทียบกับตอนโหลด - "บันทึกทั้งหมด" ส่งเฉพาะแถวเหล่านี้ (พบ 2026-09-27: เดิมส่งทุกแถวบนจอ
 // หน้าที่เปิดค้างไว้จึงบันทึกทับคันที่คนอื่นเพิ่งทำเสร็จให้กลับเป็นยังไม่เสร็จ)
 function isRowChanged(row: RowState, loaded: RowState | undefined): boolean {
-  return !loaded || row.done !== loaded.done || row.completedDateText !== loaded.completedDateText || row.costText !== loaded.costText;
+  return !loaded || row.done !== loaded.done || row.completedDateText !== loaded.completedDateText || row.costText !== loaded.costText || row.waive !== loaded.waive || row.waiveReason !== loaded.waiveReason;
 }
 
 const COMPLETED_DETAIL_FIELDS: Array<[string, (v: TransferNoticeVehicle) => string]> = [
@@ -110,7 +123,7 @@ function PendingVehicleTable({
   onReceiptChanged: () => void;
 }) {
   // "เลือกทั้งหมด" ติ๊กเฉพาะคันที่ติ๊กดำเนินการแล้วได้ (งานแจ้งย้ายต้องแนบใบเสร็จก่อน)
-  const editable = vehicles.filter((v) => canEdit(v) && !receiptMissing(v));
+  const editable = vehicles.filter((v) => canEdit(v) && (!receiptMissing(v) || rows[v.id]?.waive));
   const allSelected = editable.length > 0 && editable.every((v) => rows[v.id]?.done);
 
   return (
@@ -162,13 +175,39 @@ function PendingVehicleTable({
                     onPick={(value) => onPick(v.id, value)}
                     onChanged={onReceiptChanged}
                   />
+                  {/* ข้ามใบเสร็จ (ผู้ใช้ 2026-10-19): แจ้งย้ายไปแล้วนอกระบบ/ไม่มีใบเสร็จ - ต้องระบุเหตุผล บันทึกลงประวัติรถ */}
+                  {!readOnly && receiptMissing(v) && (
+                    <div style={{ marginTop: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                        <input
+                          type="checkbox"
+                          checked={row.waive}
+                          onChange={(e) =>
+                            patchRow(v.id, e.target.checked ? { waive: true } : { waive: false, waiveReason: "", done: false })
+                          }
+                        />
+                        ข้ามใบเสร็จ (ไม่มีใบเสร็จ)
+                      </label>
+                      {row.waive && (
+                        <input
+                          type="text"
+                          value={row.waiveReason}
+                          placeholder="เหตุผล เช่น ทำไปแล้วนอกระบบ"
+                          maxLength={200}
+                          aria-label="เหตุผลที่ข้ามใบเสร็จแจ้งย้าย"
+                          onChange={(e) => patchRow(v.id, { waiveReason: e.target.value })}
+                          style={{ width: 170, marginTop: 2, fontSize: 11 }}
+                        />
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td>
                   <input
                     type="checkbox"
                     checked={row.done}
-                    disabled={readOnly || receiptMissing(v)}
-                    title={receiptMissing(v) ? "แนบใบเสร็จแจ้งย้ายก่อนจึงติ๊กดำเนินการแล้วได้" : undefined}
+                    disabled={readOnly || (receiptMissing(v) && !row.waive)}
+                    title={receiptMissing(v) && !row.waive ? "แนบใบเสร็จแจ้งย้าย หรือติ๊กข้ามใบเสร็จ (ระบุเหตุผล) ก่อนจึงติ๊กดำเนินการแล้วได้" : undefined}
                     onChange={(e) => onDoneChange(v.id, e.target.checked)}
                     aria-label="ดำเนินการแล้ว"
                   />
@@ -364,7 +403,7 @@ export default function TransferNoticePage() {
     const today = isoToDisplayDate(todayIso());
     setRows((prev) => {
       const next = { ...prev };
-      for (const v of vehicles.filter((x) => canEdit(x) && !receiptMissing(x))) {
+      for (const v of vehicles.filter((x) => canEdit(x) && (!receiptMissing(x) || prev[x.id]?.waive))) {
         const row = next[v.id];
         next[v.id] = { ...row, done, completedDateText: done && !row.completedDateText ? today : row.completedDateText };
       }
@@ -379,6 +418,8 @@ export default function TransferNoticePage() {
     let completedDateIso: string;
     try {
       ({ completedDateIso } = validateRow(row));
+      const problem = waiveProblem(vehicle, row);
+      if (problem) throw new Error(problem);
     } catch (err) {
       patchRow(id, { message: { text: (err as Error).message, error: true } });
       return;
@@ -394,6 +435,7 @@ export default function TransferNoticePage() {
         completedDate: completedDateIso || null,
         cost: row.costText || null,
         expectedTransferDone: vehicle.transferDone,
+        waiveReceiptReason: row.done && receiptMissing(vehicle) ? row.waiveReason.trim() : undefined,
       });
       // Reload so a completed row moves out of "ต้องดำเนินการ" into "ตัดบัญชีแล้ว" below.
       await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
@@ -412,14 +454,22 @@ export default function TransferNoticePage() {
   async function handleSaveAll(shown: TransferNoticeVehicle[]) {
     const vehicles = shown.filter(canEdit);
     if (bulkSaving || !vehicles.length) return;
-    const parsed: Array<{ vehicle: TransferNoticeVehicle; done: boolean; completedDateIso: string; cost: string }> = [];
+    const parsed: Array<{ vehicle: TransferNoticeVehicle; done: boolean; completedDateIso: string; cost: string; waiveReason?: string }> = [];
     for (const v of vehicles) {
       const row = rows[v.id];
       // ส่งเฉพาะแถวที่แก้จริง - แถวที่ไม่ได้แตะไม่ถูกบันทึกทับ
       if (!row || !isRowChanged(row, loadedRows[v.id])) continue;
       try {
         const { completedDateIso } = validateRow(row);
-        parsed.push({ vehicle: v, done: row.done, completedDateIso, cost: row.costText });
+        const problem = waiveProblem(v, row);
+        if (problem) throw new Error(problem);
+        parsed.push({
+          vehicle: v,
+          done: row.done,
+          completedDateIso,
+          cost: row.costText,
+          waiveReason: row.done && receiptMissing(v) ? row.waiveReason.trim() : undefined,
+        });
       } catch (err) {
         setBulkMessage({ text: `แถวเลขตัวถัง ${v.chassis}: ${(err as Error).message}`, error: true });
         return;
@@ -444,6 +494,7 @@ export default function TransferNoticePage() {
             completedDate: p.completedDateIso || null,
             cost: p.cost || null,
             expectedTransferDone: p.vehicle.transferDone,
+            waiveReceiptReason: p.waiveReason,
           }),
         ),
       );

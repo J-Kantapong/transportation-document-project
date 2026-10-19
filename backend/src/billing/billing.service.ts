@@ -624,6 +624,7 @@ export class BillingService {
               // ส่วนของคันนี้ในใบเสร็จแจ้งย้าย (ขั้น 2) - ระบบบวกเข้าค่าธรรมเนียมของบิลเองตอนออกบิล (ผู้ใช้ 2026-10-08)
               transferReceiptAmount: num(v.transferBillCost),
               transferReceiptId: v.transferReceiptId,
+              transferReceiptWaivedReason: v.transferReceiptWaivedReason ?? null,
               // ค่าตรวจที่ลูกค้าจ่ายแยก (ตั้งแต่ INSPECTION_SEPARATE_FROM) - null = ไม่มี · หน้าวางบิลเสนอเพิ่มเป็นบรรทัดค่าธรรมเนียม
               inspectionSeparate: inspectionSeparateOf(v.inspectionSentCost),
               // งานสลับเลขของรถคันนี้ - swapReceiptAmount ว่าง = ยังไม่ได้กรอกยอดใบเสร็จ หน้าจอจะไม่ให้ติ๊กวางบิล

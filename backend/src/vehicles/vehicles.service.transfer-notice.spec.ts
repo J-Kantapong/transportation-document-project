@@ -56,8 +56,29 @@ describe('VehiclesService.updateTransferNotice', () => {
       transferDone: true,
       transferCompletedDate: new Date('2026-09-26T00:00:00.000Z'),
       transferCost: '500',
+      transferReceiptWaivedReason: null,
     });
     expect(editLogCreate).not.toHaveBeenCalled();
+  });
+
+  // ผู้ใช้ 2026-10-19: งานที่แจ้งย้ายไปแล้วนอกระบบ ข้ามใบเสร็จได้โดยระบุเหตุผล (เก็บที่คัน + VehicleEditLog)
+  it('ข้ามใบเสร็จแจ้งย้ายได้เมื่อระบุเหตุผล และบันทึกประวัติ', async () => {
+    const row = () => vehicleRow({ registrationProvince: 'ปทุมธานี', transferReceiptId: null });
+
+    const blank = service(row());
+    expect((await failureOf(blank.service.updateTransferNotice('v1', { ...body, waiveReceiptReason: '   ' }))).status).toBe(400);
+    expect(blank.updateMany).not.toHaveBeenCalled();
+
+    const ok = service(row());
+    await expect(ok.service.updateTransferNotice('v1', { ...body, waiveReceiptReason: ' ทำไปแล้วนอกระบบ ' })).resolves.toMatchObject({ transferDone: true });
+    expect(ok.updateMany.mock.calls[0][0].data).toMatchObject({ transferDone: true, transferReceiptWaivedReason: 'ทำไปแล้วนอกระบบ' });
+    expect(ok.editLogCreate.mock.calls[0][0].data).toMatchObject({ vehicleId: 'v1', remark: 'ข้ามใบเสร็จแจ้งย้าย: ทำไปแล้วนอกระบบ' });
+
+    // มีใบเสร็จอยู่แล้ว หรือเป็นตัดบัญชี = ไม่ใช้เหตุผลข้าม ไม่บันทึกประวัติ
+    const withReceipt = service(vehicleRow({ registrationProvince: 'ปทุมธานี', transferReceiptId: 'r1' }));
+    await withReceipt.service.updateTransferNotice('v1', { ...body, waiveReceiptReason: 'x' });
+    expect(withReceipt.updateMany.mock.calls[0][0].data.transferReceiptWaivedReason).toBeNull();
+    expect(withReceipt.editLogCreate).not.toHaveBeenCalled();
   });
 
   // ผู้ใช้ 2026-10-08: งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว - ตัดบัญชี (กรุงเทพฯ) ไม่ต้อง
@@ -191,7 +212,7 @@ describe('VehiclesService.correctTransferNotice', () => {
       transferCompletedDate: null,
       transferCost: null,
     });
-    expect(updateMany.mock.calls[0][0].data).toEqual({ transferDone: false, transferCompletedDate: null, transferCost: null });
+    expect(updateMany.mock.calls[0][0].data).toEqual({ transferReceiptWaivedReason: null, transferDone: false, transferCompletedDate: null, transferCost: null });
     const log = editLogCreate.mock.calls[0][0].data as { remark: string; changes: string };
     expect(log.remark).toBe('ยกเลิกสถานะแจ้งย้าย/ตัดบัญชี: ติ๊กผิดคัน');
     expect(JSON.parse(log.changes)).toEqual({
