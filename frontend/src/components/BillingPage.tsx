@@ -785,6 +785,10 @@ export function BillingPage() {
                               <span style={{ display: "block", fontSize: 11, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
                                 + แจ้งย้าย {formatMoney(v.transferReceiptAmount)}
                               </span>
+                            ) : v.transferReceiptWaivedReason ? (
+                              <span style={{ display: "block", fontSize: 11, color: "#576781" }} title={`ข้ามใบเสร็จแจ้งย้าย: ${v.transferReceiptWaivedReason}`}>
+                                ข้ามใบเสร็จแจ้งย้าย
+                              </span>
                             ) : v.transferNotice ? (
                               <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="รถจดต่างจังหวัดคันนี้ไม่มีใบเสร็จแจ้งย้ายในระบบ - แนบได้ที่หน้าแจ้งย้าย/ตัดบัญชี ก่อนออกบิล">
                                 ไม่มีใบเสร็จแจ้งย้าย

@@ -1054,6 +1054,7 @@ export class VehiclesService {
       transferCompletedDate: Date | null;
       transferCost: unknown;
       transferBillCost?: unknown;
+      transferReceiptWaivedReason?: string | null;
       transferReceipt?: { id: string; totalAmount: unknown; _count: { vehicles: number } } | null;
       inspectionSentDate: Date | null;
       customer: { name: string };
@@ -1081,7 +1082,8 @@ export class VehiclesService {
       transferCost: vehicle.transferCost,
       // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จก่อนติ๊กดำเนินการแล้ว - 1 ใบผูกได้หลายคัน
       // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (Bill) ส่วน transferCost ของคันที่มีใบเสร็จ = No bill อย่างเดียว
-      receiptRequired: status === 'แจ้งย้าย',
+      receiptRequired: status === 'แจ้งย้าย' && !vehicle.transferReceiptWaivedReason,
+      transferReceiptWaivedReason: vehicle.transferReceiptWaivedReason ?? null,
       transferBillCost: vehicle.transferBillCost === null || vehicle.transferBillCost === undefined ? null : String(vehicle.transferBillCost),
       transferReceipt: vehicle.transferReceipt
         ? { id: vehicle.transferReceipt.id, totalAmount: String(vehicle.transferReceipt.totalAmount), vehicleCount: vehicle.transferReceipt._count.vehicles }
@@ -1151,17 +1153,37 @@ export class VehiclesService {
       throw new BadRequestException({ error: 'รถคันนี้ดำเนินการแจ้งย้าย/ตัดบัญชีแล้ว - แก้ได้ที่ปุ่ม "✎ แก้" (ต้องระบุเหตุผล)' });
     }
     // งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จแจ้งย้ายก่อนติ๊กดำเนินการแล้ว (ผู้ใช้ 2026-10-08) - ยอดในใบเสร็จไปขึ้นใบวางบิล
+    // ข้ามได้ถ้าระบุเหตุผล (ผู้ใช้ 2026-10-19: งานที่แจ้งย้ายไปแล้วนอกระบบ/ไม่มีใบเสร็จ) - เก็บเหตุผลที่คัน + VehicleEditLog
+    const waiveReason = typeof dto?.waiveReceiptReason === 'string' ? dto.waiveReceiptReason.trim() : '';
+    let waived: string | null = null;
     if (done && getTransferStatus(vehicle.registrationProvince) === 'แจ้งย้าย' && !vehicle.transferReceiptId) {
-      throw new BadRequestException({ error: 'งานแจ้งย้ายต้องแนบใบเสร็จแจ้งย้ายก่อนบันทึกว่าดำเนินการแล้ว' });
+      if (!waiveReason) {
+        throw new BadRequestException({ error: 'งานแจ้งย้ายต้องแนบใบเสร็จแจ้งย้ายก่อนบันทึกว่าดำเนินการแล้ว (หรือติ๊กข้ามใบเสร็จพร้อมระบุเหตุผล)' });
+      }
+      waived = waiveReason;
     }
 
     const completedDate = completedDateRaw ? toDate(completedDateRaw) : null;
     const cost = costRaw || null;
-    const { count } = await this.prisma.vehicle.updateMany({
-      where: { id, deletedAt: null, transferDone: false, ...NOT_SUBMITTED_WHERE },
-      data: { transferDone: done, transferCompletedDate: completedDate, transferCost: cost },
-    });
-    if (count === 0) throw new ConflictException({ error: STALE_ERROR });
+    const data = { transferDone: done, transferCompletedDate: completedDate, transferCost: cost, transferReceiptWaivedReason: waived };
+    const where = { id, deletedAt: null, transferDone: false, ...NOT_SUBMITTED_WHERE };
+    if (waived) {
+      await this.prisma.$transaction(async (tx) => {
+        const { count } = await tx.vehicle.updateMany({ where, data });
+        if (count === 0) throw new ConflictException({ error: STALE_ERROR });
+        await tx.vehicleEditLog.create({
+          data: {
+            vehicleId: id,
+            remark: `ข้ามใบเสร็จแจ้งย้าย: ${waived}`,
+            changes: JSON.stringify({ transferReceiptWaivedReason: { from: null, to: waived } }),
+            editedById: editorId(),
+          },
+        });
+      });
+    } else {
+      const { count } = await this.prisma.vehicle.updateMany({ where, data });
+      if (count === 0) throw new ConflictException({ error: STALE_ERROR });
+    }
 
     return { id, transferDone: done, transferCompletedDate: completedDateRaw || null, transferCost: cost };
   }
@@ -1221,7 +1243,7 @@ export class VehiclesService {
 
     const data = done
       ? { transferDone: true, transferCompletedDate: toDate(completedDateRaw), transferCost: costRaw || null }
-      : { transferDone: false, transferCompletedDate: null, transferCost: null };
+      : { transferDone: false, transferCompletedDate: null, transferCost: null, transferReceiptWaivedReason: null };
     const changes: Record<string, { from: string | null; to: string | null }> = {};
     if (!done) changes.transferDone = { from: 'true', to: 'false' };
     if (diffField(vehicle.transferCompletedDate) !== diffField(data.transferCompletedDate)) {

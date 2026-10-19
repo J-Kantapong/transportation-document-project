@@ -357,6 +357,7 @@ export class MyWorkService {
           deletedAt: null,
           transferDone: true,
           transferReceiptId: null,
+          transferReceiptWaivedReason: null,
           billingClosedAt: null,
           invoiceLines: { none: NOT_VOID },
           registrationProvince: { not: 'กรุงเทพมหานคร' },

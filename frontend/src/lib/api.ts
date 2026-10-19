@@ -581,6 +581,8 @@ export interface TransferNoticeVehicle {
   // ใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-08): งานแจ้งย้าย (จดต่างจังหวัด) ต้องแนบใบเสร็จก่อนติ๊กดำเนินการแล้ว - 1 ใบผูกได้หลายคัน
   // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (Bill) · คันที่มีใบเสร็จ transferCost = No bill อย่างเดียว
   receiptRequired?: boolean;
+  // ข้ามใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-19): เหตุผลที่บันทึกไว้ (null = ไม่ได้ข้าม)
+  transferReceiptWaivedReason?: string | null;
   transferBillCost?: string | null;
   transferReceipt?: { id: string; totalAmount: string; vehicleCount: number } | null;
   // ใช้กับปุ่ม "✎ แก้" ของคันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): ยกเลิกสถานะได้ถ้ายังไม่ส่งตรวจ แก้ได้จนกว่าจะยื่นเอกสาร
@@ -1029,7 +1031,7 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify(data) },
     ),
   // expectedTransferDone = สถานะที่หน้าจอโหลดมา - ไม่ตรงกับในระบบแล้ว (มีคนบันทึกไปก่อน) backend ตอบ 409
-  updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null; expectedTransferDone: boolean }) =>
+  updateTransferNotice: (id: string, data: { done: boolean; completedDate: string | null; cost: string | null; expectedTransferDone: boolean; waiveReceiptReason?: string }) =>
     request<{ vehicle: Pick<TransferNoticeVehicle, 'id' | 'transferDone' | 'transferCompletedDate' | 'transferCost'> }>(
       `/api/vehicles/${id}/transfer-notice`,
       { method: 'PATCH', body: JSON.stringify(data) },
