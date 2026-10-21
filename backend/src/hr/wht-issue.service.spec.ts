@@ -68,7 +68,7 @@ describe('WhtIssueService.issueEmployeeYear', () => {
 
   it('rejects a future issue date, a bad year and an empty selection', async () => {
     const { svc } = setup();
-    await expect(as(() => svc.issueEmployeeYear({ year: 2026, issueDate: '2999-01-01', employeeIds: ['e1'] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ไม่เกินวันนี้') } });
+    await expect(as(() => svc.issueEmployeeYear({ year: 2026, issueDate: '2999-01-01', employeeIds: ['e1'] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ล่วงหน้า') } });
     await expect(as(() => svc.issueEmployeeYear({ year: 1999, issueDate: '2026-01-15', employeeIds: ['e1'] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('ปีภาษี') } });
     await expect(as(() => svc.issueEmployeeYear({ year: 2025, issueDate: '2026-01-15', employeeIds: [] }))).rejects.toMatchObject({ response: { error: expect.stringContaining('อย่างน้อย 1 คน') } });
   });
