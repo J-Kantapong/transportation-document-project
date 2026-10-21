@@ -91,9 +91,13 @@ function parseYear(raw: unknown): number {
   return year;
 }
 
+const WHT_ADVANCE_DAYS = 31;
+
 function parseIssueDate(raw: unknown, taxYear: number): string {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || day(raw).toISOString().slice(0, 10) !== raw) throw bad('วันที่ออกต้องเป็น ค.ศ. YYYY-MM-DD ที่ถูกต้อง');
-  if (raw > bangkokToday()) throw bad('วันที่ออกต้องไม่เกินวันนี้');
+  // ออกล่วงหน้าได้ (user 2026-10-21) แต่ไม่เกิน 31 วัน กันพิมพ์ปีผิด
+  const latest = new Date(day(bangkokToday()).getTime() + WHT_ADVANCE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  if (raw > latest) throw bad(`วันที่ออกล่วงหน้าได้ไม่เกิน ${WHT_ADVANCE_DAYS} วัน`);
   if (Number(raw.slice(0, 4)) < taxYear) throw bad('วันที่ออกต้องไม่ก่อนปีภาษีที่จ่ายเงิน');
   return raw;
 }
