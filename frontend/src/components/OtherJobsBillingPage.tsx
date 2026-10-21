@@ -11,13 +11,14 @@ import {
   type AccountPeriod,
   type BillingAccount,
   type JobFeeRate,
+  type InvoiceItem,
   type JobType,
   type OtherJob,
   type OtherJobsQueue,
 } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { computeTotals, effectiveWhtRate, formatMoney, round2 } from "@/lib/invoice";
-import { printInvoice } from "@/lib/invoice-print";
+import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 import { ClosedJobsPanel, CloseJobDialog } from "@/components/OtherJobClosing";
 import { getCachedUser } from "@/lib/auth";
@@ -80,6 +81,7 @@ export function OtherJobsBillingPage() {
   const [whtValue, setWhtValue] = useState<number | null>(null);
   const [whtChecked, setWhtChecked] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   // ปิดงาน - วางบิลนอกระบบ (ผู้ใช้ 2026-10-13): งานที่กำลังปิด / นับรอบโหลดรายการที่ปิดแล้วใหม่ / เปิดกลับได้เฉพาะ ADMIN
   const [closing, setClosing] = useState<OtherJob | null>(null);
   const [closedReload, setClosedReload] = useState(0);
@@ -195,6 +197,38 @@ export function OtherJobsBillingPage() {
         whtOverrideOf(whtValue),
       )
     : null;
+
+  // ตัวอย่างใบวางบิลจากงานที่ติ๊ก - บรรทัดเหมือนที่ backend สร้างตอนออกบิลจริง (ดู jobItems) แต่ไม่บันทึกอะไร เลขที่บิลที่เห็นเป็นเลขที่เสนอ
+  const previewItems: InvoiceItem[] = selected.flatMap((j) => {
+    const snap = { chassis: j.chassis, plateText: j.plateText, brand: j.brand, ownerName: j.ownerName, receiptNo: j.receiptNo, doneDate: j.doneDate, vehicleClass: j.vehicleClass, variant: j.variant, serviceLabel: j.suggestedServiceLabel };
+    const target = j.plateText || j.chassis;
+    const price = servicePrice(j) ?? 0;
+    const out: InvoiceItem[] = [];
+    if (j.fee > 0) out.push({ kind: "FEE", description: `ค่าธรรมเนียม${j.typeLabel} ${target}`, quantity: 1, unitPrice: j.fee, amount: j.fee, cost: null, sourceType: j.type, sourceId: j.id, sourceSnapshot: snap });
+    if (price > 0) out.push({ kind: "SERVICE", description: `ค่าบริการ${j.typeLabel} ${target}`, quantity: 1, unitPrice: price, amount: price, cost: null, sourceType: j.type, sourceId: j.id, sourceSnapshot: snap });
+    return out;
+  });
+  const preview: PrintableInvoice | null =
+    queueCustomer && totals && selected.length > 0
+      ? {
+          invoiceNo,
+          account,
+          issueDate: issueForCalc,
+          customer: { name: queueCustomer.company || queueCustomer.name, branch: queueCustomer.branch, address: queueCustomer.address, taxId: queueCustomer.taxId },
+          jobLabel: "",
+          extras: [],
+          vatRate: totals.vatRate,
+          whtRate: totals.whtRate,
+          feeTotal: totals.feeTotal,
+          serviceTotal: totals.serviceTotal,
+          goodsTotal: totals.goodsTotal,
+          vatAmount: totals.vatAmount,
+          whtAmount: totals.whtAmount,
+          netTotal: totals.netTotal,
+          items: previewItems,
+          lines: [],
+        }
+      : null;
 
   function toggle(j: OtherJob) {
     setConfirming(false);
@@ -585,6 +619,13 @@ export function OtherJobsBillingPage() {
                     <span>{formatMoney(totals.netTotal)}</span>
                   </div>
                 </div>
+              )}
+
+              <button type="button" className="text-button" style={{ justifySelf: "start" }} onClick={() => setShowPreview((s) => !s)} disabled={!preview}>
+                {showPreview ? "ซ่อนตัวอย่างบิล" : "ดูตัวอย่างบิล"}
+              </button>
+              {showPreview && preview && (
+                <iframe title="ตัวอย่างใบวางบิล" srcDoc={buildInvoiceHtml(preview)} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />
               )}
 
               {confirming && totals ? (
