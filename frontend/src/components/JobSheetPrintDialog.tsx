@@ -18,7 +18,7 @@ import { customerDisplayNames } from "@/lib/job-sheet";
 // - ใบรถยนต์: ชื่อบริษัทของลูกค้าถ้ามี ไม่งั้น "บริษัท {ชื่อลูกค้า}" (ตามตัวอย่าง "บริษัท SP")
 // - ใบมอเตอร์ไซค์: ส่วนที่แก้ได้ = ชื่อลูกค้า (เจ้าของงาน) - ตอนพิมพ์ขึ้นต้นด้วย "มนต์ชัย จิตกุศลรุ่งเรือง - " เสมอ (MOTO_TITLE_PREFIX);
 //   กลุ่มด่วนต่อท้าย "(ด่วน)" เพราะใบมอเตอร์ไซค์ไม่มีช่องหมายเหตุ จะได้แยกใบด่วนออกจากใบธรรมดาของเจ้าของงานเดียวกันได้
-function defaultTitleFor(kind: JobSheetKind, urgent: boolean): (r: DocumentSubmission) => string {
+export function defaultTitleFor(kind: JobSheetKind, urgent: boolean): (r: DocumentSubmission) => string {
   return (r) => {
     const c = r.vehicle.customer;
     if (kind === "moto") return urgent ? `${c.name} (ด่วน)` : c.name;

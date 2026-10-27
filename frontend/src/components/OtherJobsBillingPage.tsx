@@ -621,9 +621,10 @@ export function OtherJobsBillingPage() {
                 </div>
               )}
 
-              <button type="button" className="text-button" style={{ justifySelf: "start" }} onClick={() => setShowPreview((s) => !s)} disabled={!preview}>
+              <button type="button" className="text-button" style={{ justifySelf: "start" }} onClick={() => setShowPreview((s) => !s)}>
                 {showPreview ? "ซ่อนตัวอย่างบิล" : "ดูตัวอย่างบิล"}
               </button>
+              {showPreview && !preview && <div className="muted">ติ๊กเลือกงานที่จะวางบิลก่อน ตัวอย่างจึงจะขึ้น</div>}
               {showPreview && preview && (
                 <iframe title="ตัวอย่างใบวางบิล" srcDoc={buildInvoiceHtml(preview)} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />
               )}
