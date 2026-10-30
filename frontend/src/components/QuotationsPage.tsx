@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { isoToDisplayDate } from "@/lib/date";
+import { getCachedUser } from "@/lib/auth";
+import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatMoney } from "@/lib/invoice";
 import {
   QUOTATION_KIND_LABEL,
@@ -13,6 +14,7 @@ import {
   quotationGrandTotal,
   type Quotation,
   type QuotationList,
+  type QuotationSeries,
   type QuotationStage,
 } from "@/lib/quotation-api";
 
@@ -44,6 +46,13 @@ export function QuotationsPage() {
   const [data, setData] = useState<QuotationList | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [series, setSeries] = useState<QuotationSeries | null>(null);
+
+  // ADMIN เห็นแผงตั้งเลขล่าสุด (ต่อเลขจากระบบเดิม)
+  useEffect(() => {
+    if (!(getCachedUser()?.roles ?? []).includes("ADMIN")) return;
+    quotationApi.series().then(setSeries).catch(() => undefined);
+  }, []);
 
   function setQuery(next: { stage?: string; q?: string }) {
     const merged = { stage, q, ...next };
@@ -169,6 +178,81 @@ export function QuotationsPage() {
           </div>
         )}
       </section>
+
+      {series && <SeriesPanel series={series} onSaved={setSeries} />}
+    </section>
+  );
+}
+
+// ตั้งเลขล่าสุดที่ใช้ไปแล้ว (ผู้ใช้ 2026-10-30: ระบบเดิมออกถึง QT2026-022 ใบในระบบต้องเริ่ม 023) - ADMIN เท่านั้น
+function SeriesPanel({ series, onSaved }: { series: QuotationSeries; onSaved: (s: QuotationSeries) => void }) {
+  const [year, setYear] = useState(todayIso().slice(0, 4));
+  const [lastNumber, setLastNumber] = useState("");
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const y = Number(year);
+  const n = Number(lastNumber);
+  const valid = Number.isInteger(y) && y >= 2020 && lastNumber.trim() !== "" && Number.isInteger(n) && n >= 0;
+  const highest = series.series.find((s) => s.year === y)?.highestInSystem ?? 0;
+
+  async function save() {
+    setError("");
+    if (!valid) return setError("ใส่ปี ค.ศ. และเลขล่าสุดเป็นตัวเลข");
+    if (n < highest) return setError(`ปี ${y} ออกเลข ${highest} ในระบบไปแล้ว - ตั้งต่ำกว่านี้ไม่ได้`);
+    if (!remark.trim()) return setError("ใส่ที่มาของเลข เช่น เลขล่าสุดในระบบเดิม");
+    setSaving(true);
+    try {
+      onSaved(await quotationApi.setSeries({ year: y, lastNumber: n, remark: remark.trim() }));
+      setLastNumber("");
+      setRemark("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-head">
+        <h2>เลขที่ใบเสนอราคา (ADMIN)</h2>
+      </div>
+      <div style={{ padding: "0 23px 16px" }}>
+        <ul style={{ margin: "0 0 12px", paddingLeft: 18 }}>
+          {series.series.map((s) => (
+            <li key={s.year}>
+              ปี {s.year}: เลขล่าสุด {s.lastNumber} · ใบถัดไป <b>{s.nextNo}</b>
+              {s.highestInSystem > 0 ? ` · เลขสูงสุดที่ออกในระบบ ${s.highestInSystem}` : ""}
+            </li>
+          ))}
+        </ul>
+        <p className="muted" style={{ fontSize: 13 }}>
+          ใส่เลขล่าสุดที่ออกไปแล้วนอกระบบ (เช่น QT{year}-022 → ใส่ 22) ใบถัดไปจะเป็น QT{year}-{String((valid ? n : 0) + 1).padStart(3, "0")} · ตั้งต่ำกว่าเลขที่ออกในระบบแล้วไม่ได้
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+          <label className="field">
+            ปี ค.ศ.
+            <input type="text" inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))} style={{ width: 80 }} />
+          </label>
+          <label className="field">
+            เลขล่าสุดที่ใช้ไปแล้ว
+            <input type="text" inputMode="numeric" value={lastNumber} onChange={(e) => setLastNumber(e.target.value.replace(/\D/g, "").slice(0, 5))} style={{ width: 110 }} />
+          </label>
+          <label className="field" style={{ flex: "1 1 220px" }}>
+            ที่มา / เหตุผล *
+            <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ระบบเดิมออกถึง QT2026-022" />
+          </label>
+          <button type="button" className="primary" onClick={save} disabled={saving}>
+            {saving ? "กำลังบันทึก..." : "บันทึก"}
+          </button>
+        </div>
+        {error && (
+          <p className="customer-message error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

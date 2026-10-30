@@ -51,6 +51,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/billing\/other-jobs\/reopen$/, access: ['ADMIN'] },
   // ตั้งเลขเริ่มใบกำกับภาษี (= เปิดใช้ใบกำกับในระบบ) ADMIN เท่านั้น (ผู้ใช้ 2026-09-28)
   { pattern: /^\/api\/billing\/tax-invoices\/series\/set$/, access: ['ADMIN'] },
+  // ตั้งเลขล่าสุดใบเสนอราคา (ต่อจากระบบเดิม) ADMIN เท่านั้น (ผู้ใช้ 2026-10-30)
+  { pattern: /^\/api\/billing\/quotations\/series\/set$/, access: ['ADMIN'] },
   { pattern: /^\/api\/billing(\/|$)/, access: ['ADMIN', 'ACCOUNTANT'] },
   // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN / STAFF_CAR / STAFF_MOTO เท่านั้น - DELIVERY อ่านใบได้แต่แก้ไม่ได้
   // ACCOUNTANT อ่านรายงานส่งงานได้ (ใบส่งงาน + ป้ายค้างส่ง) ไว้ตรวจก่อนวางบิล แต่ไม่เห็นคิว Delivery และบันทึก/แก้ไม่ได้ (ผู้ใช้ 2026-09-27)
