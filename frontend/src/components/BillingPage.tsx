@@ -918,14 +918,14 @@ export function BillingPage() {
                                         {v.otherProvince ? "ขอใช้" : "ไม่ขอใช้"}
                                       </b>
                                       <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                        <button
-                                          type="button"
-                                          className="primary"
-                                          disabled={applied}
-                                          onClick={() => patchRow(v.id, { addOnIds: says.addOnIds, receiptChecked: true })}
-                                        >
-                                          {applied ? "✓ ใช้ตามใบเสร็จแล้ว" : `ใช้ตามใบเสร็จ (${says.otherProvince ? "คิดค่าขอใช้" : "ไม่คิดค่าขอใช้"})`}
-                                        </button>
+                                        {/* ใช้แล้ว = ข้อความสีเขียว ไม่ใช่ปุ่มจาง (ผู้ใช้ 2026-10-30: ปุ่มจาง + เมาส์รูปรอ ดูเหมือนค้าง) */}
+                                        {applied ? (
+                                          <b style={{ color: "#1e6b3a" }}>✓ ใช้ตามใบเสร็จแล้ว · ค่าบริการคันนี้ {fee === null ? "—" : formatMoney(fee)}</b>
+                                        ) : (
+                                          <button type="button" className="primary" onClick={() => patchRow(v.id, { addOnIds: says.addOnIds, receiptChecked: true })}>
+                                            {`ใช้ตามใบเสร็จ (${says.otherProvince ? "คิดค่าขอใช้" : "ไม่คิดค่าขอใช้"})`}
+                                          </button>
+                                        )}
                                         <span style={{ fontSize: 12 }}>
                                           {hasAddOn ? "มีผลกับค่าบริการของบิลนี้เท่านั้น ไม่แก้จังหวัดในข้อมูลรถ" : "ลูกค้านี้ไม่มีค่าเพิ่มขอใช้ในตารางราคา ค่าบริการจึงไม่เปลี่ยน"}
                                         </span>
