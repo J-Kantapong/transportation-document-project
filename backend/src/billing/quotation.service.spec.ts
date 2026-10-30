@@ -68,13 +68,14 @@ function setup(rows: Array<ReturnType<typeof quotationRow>>, opts: { lastNumber?
     quotation: {
       findUnique: vi.fn(async (a: { where: { id?: string; contentHash?: string } }) => (a.where.id ? (byId.get(a.where.id) ?? null) : null)),
       findFirst: vi.fn(async () => opts.liveForMonth ?? null),
+      findMany: vi.fn(async () => [...byId.values()].filter((r) => r.baseNo).map((r) => ({ baseNo: r.baseNo }))),
       update: vi.fn(async (a: { where: { id: string }; data: Record<string, unknown> }) => {
         const next = { ...byId.get(a.where.id)!, ...a.data } as ReturnType<typeof quotationRow>;
         byId.set(a.where.id, next);
         return next;
       }),
     },
-    quotationSeries: { update: vi.fn(async (a: { data: { lastNumber: number } }) => seriesUpdates.push(a.data.lastNumber)) },
+    quotationSeries: { findMany: vi.fn(async () => [{ year: 2026, lastNumber: seriesUpdates.at(-1) ?? opts.lastNumber ?? 0 }]), update: vi.fn(async (a: { data: { lastNumber: number } }) => seriesUpdates.push(a.data.lastNumber)) },
     yamahaRelocationEntry: {
       groupBy: vi.fn(async () => [
         { size: 'SMALL', _sum: { count: opts.yamaha?.SMALL ?? 0 } },
@@ -94,6 +95,22 @@ function setup(rows: Array<ReturnType<typeof quotationRow>>, opts: { lastNumber?
   const svc = new QuotationService(db as unknown as PrismaService, billing as unknown as BillingService, storage as unknown as ReceiptStorage);
   return { svc, db, byId, audits, seriesUpdates, rates, billing, storage };
 }
+
+describe('QuotationService.setSeries', () => {
+  it('continues from the old system number and logs the change', async () => {
+    const { svc, seriesUpdates, audits } = setup([quotationRow({ id: 'a', status: 'ISSUED', quotationNo: 'QT2026-001', baseNo: 'QT2026-001' })], { lastNumber: 1 });
+    await svc.setSeries({ year: 2026, lastNumber: 22, remark: 'ระบบเดิมออกถึง QT2026-022' });
+    expect(seriesUpdates).toEqual([22]);
+    expect(audits[0]).toMatchObject({ entity: 'Quotation', entityId: 'series-2026', action: 'set-last-number' });
+  });
+
+  it('refuses a number below one already issued in the system, and a missing reason', async () => {
+    const { svc, seriesUpdates } = setup([quotationRow({ id: 'a', status: 'ISSUED', quotationNo: 'QT2026-005-R1', baseNo: 'QT2026-005' })], { lastNumber: 5 });
+    await expect(svc.setSeries({ year: 2026, lastNumber: 4, remark: 'x' })).rejects.toMatchObject({ response: { error: expect.stringContaining('QT2026-005') } });
+    await expect(svc.setSeries({ year: 2026, lastNumber: 22 })).rejects.toBeTruthy();
+    expect(seriesUpdates).toEqual([]);
+  });
+});
 
 describe('QuotationService.issue', () => {
   it('gives a draft the next number of the issue year', async () => {

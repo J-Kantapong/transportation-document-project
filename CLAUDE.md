@@ -370,7 +370,10 @@ This private repository is the shared development surface for the user, Claude C
   per-vehicle prices (lines carry the `ServiceFeeRate` fields). Status `DRAFT` (no number, freely edited or deleted) ->
   `ISSUED` -> `APPROVED` | `REJECTED`, plus `CANCELLED` and `SUPERSEDED`; the screen groups by `stage` (`stageOf`:
   WAITING / EXPIRED by `validUntil`, DONE once billed or applied as rates). Number `QT{year}-{3 digits}` from
-  `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; an issued
+  `QuotationSeries` (one series for both accounts, row-locked, created on first use), given at issue; ADMIN can set
+  the last number already used outside the system (user 2026-10-30: the old system reached QT2026-022) in the panel at the
+  bottom of `/accounting/quotations` (`GET /api/billing/quotations/series`, `POST .../series/set` `{ year, lastNumber, remark }`,
+  never below the highest number issued in the system, AuditLog entity `Quotation` id `series-<year>` action `set-last-number`); an issued
   quotation is never edited: "ทำฉบับแก้ไข" makes a draft (`replacesId`) that takes the same number + `-R1` when issued
   and supersedes the old one. Validity defaults to 30 days. A customer not in the system yet can be typed in
   (`customerId` null) and linked later (`link-customer`), required before billing / applying rates. Approval needs the

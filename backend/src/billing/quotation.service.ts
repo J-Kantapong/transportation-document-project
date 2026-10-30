@@ -54,6 +54,12 @@ const num = (d: unknown) => (d === null || d === undefined ? null : Number(d));
 const utc = (isoDate: string) => new Date(`${isoDate}T00:00:00.000Z`);
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
 const nameOf = (u: { name: string; displayName: string | null } | null) => (u ? u.displayName || u.name : null);
+// เลขสูงสุดของปีจาก baseNo เช่น QT2026-007 -> 7 (ไม่มี = 0)
+const highestBaseNumber = (rows: Array<{ baseNo: string | null }>, year: number) =>
+  rows.reduce((max, r) => {
+    const m = r.baseNo?.match(new RegExp(`^QT${year}-(\\d+)$`));
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
 
 const PAGE = 100;
 const VEHICLE_KINDS = ['CAR', 'MOTO', 'ANY'];
@@ -453,6 +459,49 @@ export class QuotationService {
 
   // ---------- ออกเลข ----------
   // ร่าง -> ISSUED: ให้เลข QT{ปี}-{3 หลัก} ตามปีของวันที่ออก (ล็อกแถวชุดเลขกันเลขซ้ำ) · ฉบับแก้ไขใช้เลขเดิม + -R{n} และแทนที่ฉบับเดิม
+  // ---------- เลขที่ใบเสนอราคา ----------
+
+  // เลขล่าสุดแต่ละปี + เลขสูงสุดที่ออกในระบบ (ผู้ใช้ 2026-10-30: ระบบเดิมออกถึง QT2026-022 แล้ว ใบในระบบต้องต่อเลขนั้น)
+  async series() {
+    const [rows, issued] = await Promise.all([
+      this.prisma.quotationSeries.findMany({ orderBy: { year: 'desc' } }),
+      this.prisma.quotation.findMany({ where: { baseNo: { not: null } }, select: { baseNo: true } }),
+    ]);
+    const year = Number(bangkokToday().slice(0, 4));
+    const years = [...new Set([year, ...rows.map((r) => r.year)])].sort((a, b) => b - a);
+    return {
+      series: years.map((y) => {
+        const lastNumber = rows.find((r) => r.year === y)?.lastNumber ?? 0;
+        return { year: y, lastNumber, nextNo: formatQuotationNo(y, lastNumber + 1), highestInSystem: highestBaseNumber(issued, y) };
+      }),
+    };
+  }
+
+  // ADMIN ตั้งเลขล่าสุดที่ใช้ไปแล้ว (เช่นจากระบบเดิม) · ห้ามต่ำกว่าเลขที่ออกในระบบแล้ว (เลขจะชน)
+  async setSeries(dto: { year?: unknown; lastNumber?: unknown; remark?: unknown }) {
+    const remark = requireRemark(dto?.remark, 'กรุณาระบุเหตุผล/ที่มาของเลข');
+    const year = dto.year;
+    if (typeof year !== 'number' || !Number.isInteger(year) || year < 2020 || year > 2100) throw bad('ปีต้องเป็น ค.ศ. เช่น 2026');
+    const lastNumber = dto.lastNumber;
+    if (typeof lastNumber !== 'number' || !Number.isInteger(lastNumber) || lastNumber < 0 || lastNumber > 99_999) throw bad('เลขล่าสุดต้องเป็นจำนวนเต็มตั้งแต่ 0');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`INSERT INTO "QuotationSeries" ("year", "lastNumber", "updatedAt") VALUES (${year}, 0, NOW()) ON CONFLICT ("year") DO NOTHING`;
+      const [row] = await tx.$queryRaw<Array<{ lastNumber: number }>>`SELECT "lastNumber" FROM "QuotationSeries" WHERE "year" = ${year} FOR UPDATE`;
+      const issued = await tx.quotation.findMany({ where: { baseNo: { startsWith: `QT${year}-` } }, select: { baseNo: true } });
+      const highest = highestBaseNumber(issued, year);
+      if (lastNumber < highest) throw bad(`ปี ${year} ออก ${formatQuotationNo(year, highest)} ในระบบไปแล้ว - ตั้งเลขล่าสุดต่ำกว่า ${highest} ไม่ได้`);
+      await tx.quotationSeries.update({ where: { year }, data: { lastNumber } });
+      await writeAudit(tx, {
+        entity: 'Quotation',
+        entityId: `series-${year}`,
+        action: 'set-last-number',
+        remark,
+        changes: { lastNumber: { from: row?.lastNumber ?? null, to: lastNumber } },
+      });
+    });
+    return this.series();
+  }
+
   async issue(id: string, dto: { expectedUpdatedAt?: unknown } = {}) {
     const q = await this.prisma.$transaction(async (tx) => {
       const draft = await this.lock(tx, id);

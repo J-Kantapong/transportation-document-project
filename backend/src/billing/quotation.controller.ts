@@ -20,6 +20,17 @@ export class QuotationController {
     return this.quotations.yamahaMonth(month, size);
   }
 
+  // เลขที่ใบเสนอราคา: เลขล่าสุดแต่ละปี · ตั้งเลขล่าสุด (series/set) = ADMIN เท่านั้น - ดู access-policy.ts
+  @Get('series')
+  series() {
+    return this.quotations.series();
+  }
+
+  @Post('series/set')
+  setSeries(@Body() body: { year?: unknown; lastNumber?: unknown; remark?: unknown }) {
+    return this.quotations.setSeries(body ?? {});
+  }
+
   // ใบที่อนุมัติแล้วและยังไม่ออกบิลของลูกค้า ?customerId=
   @Get('ready')
   async ready(@Query('customerId') customerId?: string) {

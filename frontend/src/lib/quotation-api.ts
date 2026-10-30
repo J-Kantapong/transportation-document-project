@@ -129,6 +129,11 @@ export interface QuotationList {
   counts: Record<QuotationStage, number>;
 }
 
+// เลขที่ใบเสนอราคาแต่ละปี (ADMIN ตั้งเลขล่าสุดต่อจากระบบเดิมได้)
+export interface QuotationSeries {
+  series: Array<{ year: number; lastNumber: number; nextNo: string; highestInSystem: number }>;
+}
+
 export interface QuotationHistoryEntry {
   id: string;
   action: string;
@@ -161,6 +166,8 @@ export const quotationApi = {
           .map(([k, v]) => [k, String(v)]),
       )}`,
     ),
+  series: () => request<QuotationSeries>(`${base}/series`),
+  setSeries: (data: { year: number; lastNumber: number; remark: string }) => request<QuotationSeries>(`${base}/series/set`, json("POST", data)),
   get: (id: string) => request<One>(at(id)),
   history: (id: string) => request<{ entries: QuotationHistoryEntry[] }>(at(id, "history")),
   ready: (customerId: string) => request<{ quotations: Quotation[] }>(`${base}/ready?customerId=${encodeURIComponent(customerId)}`),
