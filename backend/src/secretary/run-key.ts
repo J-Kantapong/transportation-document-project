@@ -3,9 +3,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export const MIN_KEY_LENGTH = 16;
-export type Slot = 'morning' | 'evening';
+// reminder = เตือนประจำสัปดาห์ (reminders.ts, ผู้ใช้ 2026-10-31)
+export type Slot = 'morning' | 'evening' | 'reminder';
 
-export const isSlot = (value: unknown): value is Slot => value === 'morning' || value === 'evening';
+export const isSlot = (value: unknown): value is Slot => value === 'morning' || value === 'evening' || value === 'reminder';
 
 export function verifyRunKey(given: string | undefined, expected: string | undefined): boolean {
   if (!given || !expected || expected.length < MIN_KEY_LENGTH) return false;

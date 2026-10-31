@@ -11,6 +11,7 @@ import type { LineEvent } from './line-webhook.js';
 import { NotesService } from './notes.service.js';
 import { parseNoteCommand } from './notes.js';
 import { buildMorningMessage } from './morning-message.js';
+import { dueReminders, reminderMessage, remindersText } from './reminders.js';
 import type { Slot } from './run-key.js';
 import { helpText, overdueText, spendText, stuckText, textMessage, withQuickReply } from './replies.js';
 
@@ -51,14 +52,27 @@ export class SecretaryService {
   // จำในหน่วยความจำ (เซิร์ฟเวอร์รีสตาร์ท = ลืม) พอสำหรับกัน retry ติดกัน
   private readonly sentSlots = new Set<string>();
 
-  async runScheduled(slot: Slot): Promise<{ sent: boolean; skipped?: 'already-sent' }> {
-    const id = `${bangkokToday()}:${slot}`;
+  async runScheduled(slot: Slot): Promise<{ sent: boolean; skipped?: 'already-sent'; reminders?: string[] }> {
+    const today = bangkokToday();
+    if (!this.sentSlots.has(`${today}:`)) this.sentSlots.clear(); // วันใหม่ = เริ่มจำใหม่ ไม่ให้โตไม่สิ้นสุด
+    this.sentSlots.add(`${today}:`);
+    if (slot === 'reminder') return this.runReminders(today);
+    const id = `${today}:${slot}`;
     if (this.sentSlots.has(id)) return { sent: false, skipped: 'already-sent' };
     if (slot === 'morning') await this.sendMorning();
     else await this.sendEvening();
-    this.sentSlots.clear(); // เก็บเฉพาะวันนี้ ไม่ให้โตไม่สิ้นสุด
     this.sentSlots.add(id);
     return { sent: true };
+  }
+
+  // เตือนประจำสัปดาห์ (ผู้ใช้ 2026-10-31): ส่งทุกรายการของวันนี้ที่ถึงเวลาแล้วและยังไม่ได้ส่ง (แต่ละรายการจำแยก
+  // จึงเรียกซ้ำกี่ครั้งในวันเดียวก็ส่งรายการละครั้ง) - ไม่มีรายการ = sent false
+  private async runReminders(today: string): Promise<{ sent: boolean; skipped?: 'already-sent'; reminders: string[] }> {
+    const due = dueReminders().filter((r) => !this.sentSlots.has(`${today}:reminder:${r.id}`));
+    if (due.length === 0) return { sent: false, skipped: 'already-sent', reminders: [] };
+    await pushLine(due.map((r) => reminderMessage(r, this.baseUrl())));
+    for (const r of due) this.sentSlots.add(`${today}:reminder:${r.id}`);
+    return { sent: true, reminders: due.map((r) => r.id) };
   }
 
   async sendMorning(): Promise<void> {
@@ -84,6 +98,8 @@ export class SecretaryService {
         return [textMessage(stuckText(await this.overviewService.overview()))];
       case 'spend':
         return [textMessage(spendText(await this.overviewService.overview()))];
+      case 'reminders':
+        return [textMessage(remindersText())];
       default:
         return [textMessage(helpText())];
     }

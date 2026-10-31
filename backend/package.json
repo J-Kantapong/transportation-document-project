@@ -25,7 +25,8 @@
     "seed:admin": "tsx scripts/seed-admin.ts",
     "secretary:test": "tsx scripts/secretary-test.ts",
     "secretary:morning": "tsx scripts/secretary-send.ts morning",
-    "secretary:evening": "tsx scripts/secretary-send.ts evening"
+    "secretary:evening": "tsx scripts/secretary-send.ts evening",
+    "secretary:reminder": "tsx scripts/secretary-send.ts reminder"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",

@@ -23,7 +23,7 @@ describe('parseCommand', () => {
     // ตู้เอกสารถูกจับก่อนโดย parseNoteCommand (ดู notes.spec.ts) จึงไม่นับที่นี่ · "คำสั่ง" = เมนูช่วยเหลือ
     const labels = QUICK_COMMANDS.map((c) => c.label);
     expect(labels).toContain('ตู้เอกสาร');
-    expect(QUICK_COMMANDS.filter((c) => c.text !== 'ตู้เอกสาร').map((c) => parseCommand(c.text))).toEqual(['morning', 'evening', 'finance', 'overdue', 'stuck', 'spend', 'help']);
+    expect(QUICK_COMMANDS.filter((c) => c.text !== 'ตู้เอกสาร').map((c) => parseCommand(c.text))).toEqual(['morning', 'evening', 'finance', 'overdue', 'stuck', 'spend', 'reminders', 'help']);
     for (const c of QUICK_COMMANDS) expect(c.label.length).toBeLessThanOrEqual(20);
     expect(QUICK_COMMANDS.length).toBeLessThanOrEqual(13); // ข้อจำกัดของ LINE
   });
