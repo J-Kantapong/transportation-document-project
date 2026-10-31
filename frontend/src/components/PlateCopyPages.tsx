@@ -841,12 +841,12 @@ export function PlateCopyReturnPage() {
   const replace = (updated: PlateCopy) => setItems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
 
-  async function confirmReturn(item: PlateCopy) {
+  async function confirmReturn(item: PlateCopy, auto = false) {
     if (!returnDate) return setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
+    const ok = auto || window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
       await plateCopyApi.markReturned(item.id, returnDate);
@@ -864,7 +864,7 @@ export function PlateCopyReturnPage() {
       </Link>
       <h1>รับใบเสร็จ (คัดแผ่นป้ายทะเบียน)</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
+        ถ่ายหรือแนบรูปใบเสร็จ (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) ระบบจะถือว่ารับเอกสารกลับทันทีตามวันที่ที่ระบุ
       </p>
 
       <div className="panel">
@@ -978,7 +978,7 @@ function ReturnRow({
   showActions: boolean; // ตารางมีคอลัมน์ปุ่มแก้ (ผู้ใช้บันทึกได้อย่างน้อยหนึ่งประเภทรถ)
   canWrite: boolean; // บันทึกงานนี้ได้ (ตามประเภทรถของงาน)
   onChange: (item: PlateCopy) => void;
-  onConfirm: (item: PlateCopy) => void;
+  onConfirm: (item: PlateCopy, auto?: boolean) => void | Promise<void>;
   onMessage: (text: string, error?: boolean) => void;
   onDialog: (kind: "edit" | "cancel" | "undo") => void;
 }) {
@@ -1000,6 +1000,8 @@ function ReturnRow({
         const image = await compressReceiptImage(file);
         onChange((await plateCopyApi.addReceipt(item.id, image, compressedFileName(file), returned ? receiptRemark.trim() : undefined)).plateCopy);
       }
+      // แนบรูปใบเสร็จ = รับเอกสารกลับแล้ว (ใช้วันที่รับกลับที่เลือกไว้ด้านบน)
+      if (!returned) await onConfirm(item, true);
     } catch (err) {
       onMessage(errorText(err, "แนบรูปไม่สำเร็จ"), true);
     } finally {
@@ -1158,7 +1160,7 @@ async function openPlatePhoto(plateCopyId: string) {
   }
 }
 
-function ReceivePlateCard({
+function ReceivePlateRow({
   item,
   canWrite,
   onMessage,
@@ -1171,10 +1173,10 @@ function ReceivePlateCard({
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const [editDateText, setEditDateText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<"date" | "detach" | null>(null);
   const received = Boolean(item.plateReceivedDate);
@@ -1182,7 +1184,7 @@ function ReceivePlateCard({
   const dueIso = plateCopyDueDate(item.submitDate);
   const overdueDays = !received ? daysBetweenIso(dueIso, todayIso()) : 0;
 
-  // ตัวอย่างรูปที่เลือก - คืนหน่วยความจำของ object URL เมื่อเปลี่ยนรูป/ออกจากการ์ด
+  // ตัวอย่างรูปที่เลือก - คืนหน่วยความจำของ object URL เมื่อเปลี่ยนรูป/ออกจากแถว
   useEffect(() => {
     if (!file) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- ล้างตัวอย่างเมื่อไม่มีรูปที่เลือก
@@ -1201,6 +1203,7 @@ function ReceivePlateCard({
     if (picked) setFile(picked);
   }
 
+  // เลือก/ถ่ายรูป -> ดูตัวอย่าง -> กด "ยืนยันรับป้าย" จึงบันทึก (รูปจำเป็นเสมอ)
   async function confirm() {
     const date = textToIso(dateText);
     if (!date) return onMessage("กรุณากรอกวันที่รับป้ายให้ถูกต้อง", true);
@@ -1223,77 +1226,74 @@ function ReceivePlateCard({
   }
 
   return (
-    <div style={{ padding: "16px 23px", borderTop: "1px solid #edf0f6" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-        <div>
-          <div className="job">
-            <strong>{item.ownerName}</strong> · ทะเบียน {plateText(item)}
-          </div>
-          <div className="sub">
-            {classText(item)} · {vehicleText(item)}
-          </div>
-          <div className="sub">
-            เจ้าของงาน: {item.customer ? (item.customer.company ?? item.customer.name) : "ยังไม่ระบุ"} · ยื่น {isoToDisplayDate(item.submitDate)}
-          </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          {received ? (
-            <span className="badge portal-badge-done">รับป้าย {isoToDisplayDate(item.plateReceivedDate!)}</span>
-          ) : (
-            <>
-              <div className="sub">
-                คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
-              </div>
-              {overdueDays > 0 && (
-                <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>
-                  ⚠ เกินกำหนด {overdueDays} วัน
-                </span>
-              )}
-            </>
-          )}
-          <div className="sub">{item.returnedDate ? `ได้ใบเสร็จแล้ว ${isoToDisplayDate(item.returnedDate)}` : "ยังไม่ได้ใบเสร็จ"}</div>
-        </div>
-      </div>
-
-      {received ? (
-        <div style={{ marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {item.platePhotoId && (
-            <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => openPlatePhoto(item.id)}>
-              📷 ดูรูปป้าย
-            </button>
-          )}
-          {canWrite && (
-            <>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => {
-                  setEditDateText(isoToDisplayDate(item.plateReceivedDate!));
-                  setDialog("date");
-                }}
-              >
-                ✎ แก้วันที่
-              </button>
-              <button type="button" className="text-button" style={dangerButton} onClick={() => setDialog("detach")}>
-                ถอดรูป
-              </button>
-            </>
-          )}
-        </div>
-      ) : canWrite ? (
-        <div style={{ marginTop: 12, padding: 14, border: "1px solid #dfe5f0", borderRadius: 10, background: "#f7f9ff" }}>
-          <strong>ยืนยันรับป้าย</strong>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start", marginTop: 10 }}>
-            <div>
-              {previewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- ตัวอย่างรูปจาก object URL ในเครื่อง ไม่ผ่าน next/image
-                <img src={previewUrl} alt="ตัวอย่างรูปป้ายที่เลือก" style={{ width: 160, height: 120, objectFit: "cover", borderRadius: 8, border: "1px solid #dfe5f0" }} />
-              ) : (
-                <div className="muted" style={{ width: 160, height: 120, display: "grid", placeItems: "center", border: "1px dashed #b9c3d6", borderRadius: 8 }}>
-                  ยังไม่มีรูปป้าย
-                </div>
-              )}
+    <tr>
+      <td>{isoToDisplayDate(item.submitDate)}</td>
+      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+        <CustomerCell item={item} />
+      </td>
+      <td>
+        <div className="job">{item.ownerName}</div>
+        <div className="sub">{vehicleText(item)}</div>
+      </td>
+      <td>
+        {CLASS_LABEL[item.vehicleClass]}
+        {item.urgent && <div className="sub">งานด่วน</div>}
+      </td>
+      <td>{plateText(item)}</td>
+      <td style={{ whiteSpace: "normal" }}>
+        {received ? (
+          <span className="badge portal-badge-done">รับป้าย {isoToDisplayDate(item.plateReceivedDate!)}</span>
+        ) : (
+          <>
+            <div className="sub">
+              คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
             </div>
+            {overdueDays > 0 && (
+              <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>
+                ⚠ เกินกำหนด {overdueDays} วัน
+              </span>
+            )}
+          </>
+        )}
+        <div className="sub">{item.returnedDate ? `ได้ใบเสร็จแล้ว ${isoToDisplayDate(item.returnedDate)}` : "ยังไม่ได้ใบเสร็จ"}</div>
+      </td>
+      <td>
+        {received ? (
+          <>
+            {item.platePhotoId && (
+              <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => openPlatePhoto(item.id)}>
+                📷 ดูรูปป้าย
+              </button>
+            )}
+            {canWrite && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="text-button"
+                  style={{ paddingLeft: 0 }}
+                  onClick={() => {
+                    setEditDateText(isoToDisplayDate(item.plateReceivedDate!));
+                    setDialog("date");
+                  }}
+                >
+                  ✎ แก้วันที่
+                </button>
+                <button type="button" className="text-button" style={dangerButton} onClick={() => setDialog("detach")}>
+                  ถอดรูป
+                </button>
+              </div>
+            )}
+          </>
+        ) : canWrite ? (
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            {previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- ตัวอย่างรูปจาก object URL ในเครื่อง ไม่ผ่าน next/image
+              <img src={previewUrl} alt="ตัวอย่างรูปป้ายที่เลือก" style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 8, border: "1px solid #dfe5f0" }} />
+            ) : (
+              <div className="muted" style={{ width: 120, height: 90, display: "grid", placeItems: "center", border: "1px dashed #b9c3d6", borderRadius: 8, fontSize: 13 }}>
+                ยังไม่มีรูปป้าย
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {/* capture = เปิดกล้องหลังบนมือถือทันที / ปุ่มเลือกรูปใช้เลือกจากแกลเลอรีหรือไฟล์ในเครื่อง */}
               <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => pick(e.target.files)} />
@@ -1315,49 +1315,47 @@ function ReceivePlateCard({
               </button>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="muted" style={{ marginTop: 8 }}>
-          รอรับป้าย
-        </div>
-      )}
+        ) : (
+          <span className="muted">รอรับป้าย</span>
+        )}
 
-      {dialog === "date" && (
-        <ReasonDialog
-          title="แก้วันที่รับป้าย"
-          confirmLabel="บันทึก"
-          placeholder="เช่น พิมพ์วันผิด"
-          onClose={() => setDialog(null)}
-          onConfirm={async (remark) => {
-            const date = textToIso(editDateText);
-            if (!date) throw new Error("กรุณากรอกวันที่ให้ถูกต้อง");
-            await plateCopyApi.updatePlateReceivedDate(item.id, date, remark);
-            onDone();
-          }}
-        >
-          <Summary item={item} />
-          <label className="field" style={{ marginTop: 12 }}>
-            วันที่รับป้ายใหม่ *
-            <DateTextInput value={editDateText} onChange={setEditDateText} label="วันที่รับป้าย" />
-          </label>
-        </ReasonDialog>
-      )}
-      {dialog === "detach" && (
-        <ReasonDialog
-          title="ถอดรูปป้ายที่แนบผิด"
-          confirmLabel="ยืนยันถอดรูป"
-          placeholder="เช่น แนบผิดคัน"
-          onClose={() => setDialog(null)}
-          onConfirm={async (remark) => {
-            await plateCopyApi.detachPlatePhoto(item.id, remark);
-            onDone();
-          }}
-        >
-          <Summary item={item} />
-          <p style={{ marginTop: 12 }}>งานนี้จะกลับไปรอรับป้ายอีกครั้ง</p>
-        </ReasonDialog>
-      )}
-    </div>
+        {dialog === "date" && (
+          <ReasonDialog
+            title="แก้วันที่รับป้าย"
+            confirmLabel="บันทึก"
+            placeholder="เช่น พิมพ์วันผิด"
+            onClose={() => setDialog(null)}
+            onConfirm={async (remark) => {
+              const date = textToIso(editDateText);
+              if (!date) throw new Error("กรุณากรอกวันที่ให้ถูกต้อง");
+              await plateCopyApi.updatePlateReceivedDate(item.id, date, remark);
+              onDone();
+            }}
+          >
+            <Summary item={item} />
+            <label className="field" style={{ marginTop: 12 }}>
+              วันที่รับป้ายใหม่ *
+              <DateTextInput value={editDateText} onChange={setEditDateText} label="วันที่รับป้าย" />
+            </label>
+          </ReasonDialog>
+        )}
+        {dialog === "detach" && (
+          <ReasonDialog
+            title="ถอดรูปป้ายที่แนบผิด"
+            confirmLabel="ยืนยันถอดรูป"
+            placeholder="เช่น แนบผิดคัน"
+            onClose={() => setDialog(null)}
+            onConfirm={async (remark) => {
+              await plateCopyApi.detachPlatePhoto(item.id, remark);
+              onDone();
+            }}
+          >
+            <Summary item={item} />
+            <p style={{ marginTop: 12 }}>งานนี้จะกลับไปรอรับป้ายอีกครั้ง</p>
+          </ReasonDialog>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -1395,7 +1393,7 @@ export function PlateCopyReceivePlatePage() {
       </Link>
       <h1>รับป้าย (คัดแผ่นป้ายทะเบียน)</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือเลือกรูปป้ายที่ได้รับ ใส่วันที่รับ แล้วกดยืนยันรับป้ายในการ์ดของงานนั้น (ไม่ต้องรอรับใบเสร็จก่อน) ปกติป้ายออกภายใน {PLATE_COPY_EXPECTED_DAYS} วัน
+        ถ่ายหรือเลือกรูปป้ายที่ได้รับ ใส่วันที่รับ แล้วกดยืนยันรับป้ายในแถวของงานนั้น (ไม่ต้องรอรับใบเสร็จก่อน) ปกติป้ายออกภายใน {PLATE_COPY_EXPECTED_DAYS} วัน
       </p>
 
       <div className="panel">
@@ -1423,9 +1421,26 @@ export function PlateCopyReceivePlatePage() {
         ) : items.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับป้าย" : "ยังไม่มีงานที่รับป้ายแล้ว"}</div>
         ) : (
-          items.map((item) => (
-            <ReceivePlateCard key={item.id} item={item} canWrite={canWriteItem(writable, item)} onMessage={(text, error) => setMessage({ text, error })} onDone={() => load(status)} />
-          ))
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>วันที่ยื่น</th>
+                  <th>เจ้าของงาน</th>
+                  <th>รถ</th>
+                  <th>ประเภทรถ</th>
+                  <th>ทะเบียน</th>
+                  <th>กำหนดรับป้าย</th>
+                  <th>ป้าย</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <ReceivePlateRow key={item.id} item={item} canWrite={canWriteItem(writable, item)} onMessage={(text, error) => setMessage({ text, error })} onDone={() => load(status)} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </section>

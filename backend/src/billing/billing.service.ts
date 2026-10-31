@@ -14,6 +14,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
+import { expectedPaymentDate, isPayWeekday, PAY_WEEKS_AFTER_MAX, type PaySchedule } from './payment-schedule.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
 import {
   computeInvoiceTotals,
@@ -253,9 +254,10 @@ const INVOICE_INCLUDE = {
   items: true,
   taxInvoices: { where: { status: 'ISSUED' }, select: { id: true, taxInvoiceNo: true, issueDate: true, beforePayment: true } } } as const;
 
-// วันครบกำหนดชำระ = วันออกบิล + เครดิตเทอมของลูกค้า (ผู้ใช้ 2026-09-28) - ไม่ได้ตั้งเครดิตเทอม = ไม่มีวันครบกำหนด
+// วันครบกำหนดชำระ (= วันที่คาดว่าจะได้รับเงิน) ณ วันออกบิล: รอบวันในสัปดาห์ของลูกค้า (ผู้ใช้ 2026-10-31, SPI = พฤหัสสัปดาห์ถัดไป)
+// ไม่ได้ตั้งรอบวัน = วันออกบิล + เครดิตเทอม (ผู้ใช้ 2026-09-28) · ไม่ได้ตั้งทั้งคู่ = ไม่มีวันครบกำหนด - กฎอยู่ใน payment-schedule.ts
 const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
-const dueDateOf = (issueDate: Date, creditDays: number | null | undefined) => (creditDays == null ? null : addDays(issueDate, creditDays));
+const dueDateOf = (issueDate: Date, customer: PaySchedule) => expectedPaymentDate(issueDate, customer);
 
 // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29: 1% / 3% / ตามงาน ต้องปรับได้ทุกบิล) - ไม่ส่ง = ตามเงื่อนไขลูกค้า ณ วันออกบิล
 export function parseWhtOverride(raw: unknown): number | null {
@@ -295,10 +297,20 @@ export function toTerms(c: CustomerTermsRow): BillingTerms {
 }
 // เงื่อนไขที่ส่งให้หน้าจอ = เงื่อนไขคิดยอด + เครดิตเทอม (ไม่ใช้คิดยอดบิล จึงไม่อยู่ใน BillingTerms)
 const termsWithCredit = (
-  c: CustomerTermsRow & { billingCreditDays: number | null; billingRequiresQuotation?: boolean; billingWhtMethod?: string; billingTaxInvoiceBeforePayment?: boolean },
+  c: CustomerTermsRow & {
+    billingCreditDays: number | null;
+    billingPayWeekday?: number | null;
+    billingPayWeeksAfter?: number | null;
+    billingRequiresQuotation?: boolean;
+    billingWhtMethod?: string;
+    billingTaxInvoiceBeforePayment?: boolean;
+  },
 ) => ({
   ...toTerms(c),
   creditDays: c.billingCreditDays,
+  // รอบจ่ายตามวันในสัปดาห์ (ผู้ใช้ 2026-10-31) - null = ใช้เครดิตวัน
+  payWeekday: isPayWeekday(c.billingPayWeekday) ? c.billingPayWeekday : null,
+  payWeeksAfter: c.billingPayWeeksAfter ?? 1,
   requiresQuotation: c.billingRequiresQuotation ?? false,
   whtMethod: c.billingWhtMethod === 'EWHT' ? 'EWHT' : 'PAPER',
   taxInvoiceBeforePayment: c.billingTaxInvoiceBeforePayment ?? false,
@@ -658,6 +670,8 @@ export class BillingService {
       whtSpecialRate?: unknown;
       whtSpecialUntil?: unknown;
       creditDays?: unknown;
+      payWeekday?: unknown;
+      payWeeksAfter?: unknown;
       requiresQuotation?: unknown;
       whtMethod?: unknown;
       taxInvoiceBeforePayment?: unknown;
@@ -678,6 +692,16 @@ export class BillingService {
       const c = dto.creditDays;
       if (c !== null && (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c > 365)) throw bad('เครดิตเทอมต้องเป็นจำนวนวันเต็ม 0 ถึง 365');
       data.billingCreditDays = c;
+    }
+    // รอบจ่ายตามวันในสัปดาห์ (ผู้ใช้ 2026-10-31, SPI: พฤหัสสัปดาห์ถัดไป): ไม่ส่ง = คงเดิม, null = ใช้เครดิตวัน, 1-5 = จันทร์-ศุกร์
+    if (dto.payWeekday !== undefined) {
+      if (dto.payWeekday !== null && !isPayWeekday(dto.payWeekday)) throw bad('วันรับเงินต้องเป็นจันทร์ถึงศุกร์ (1-5)');
+      data.billingPayWeekday = dto.payWeekday;
+    }
+    if (dto.payWeeksAfter !== undefined) {
+      const w = dto.payWeeksAfter;
+      if (typeof w !== 'number' || !Number.isInteger(w) || w < 0 || w > PAY_WEEKS_AFTER_MAX) throw bad(`สัปดาห์ที่ได้เงินต้องเป็น 0 ถึง ${PAY_WEEKS_AFTER_MAX}`);
+      data.billingPayWeeksAfter = w;
     }
     // ประเภท 50 ทวิ ตั้งต้นของลูกค้า (ผู้ใช้ 2026-10-06): ไม่ส่ง = คงเดิม
     if (dto.whtMethod !== undefined) {
@@ -703,6 +727,20 @@ export class BillingService {
       const changes = diffChanges(current, data);
       if (!Object.keys(changes).length) throw bad('เงื่อนไขวางบิลเหมือนเดิม - ไม่มีอะไรต้องแก้');
       const updated = await tx.customer.update({ where: { id: customerId }, data });
+      // รอบจ่ายเปลี่ยน -> คำนวณวันครบกำหนดของบิลที่ยังรอรับเงินใหม่ (ผู้ใช้ 2026-10-31: บิล SPI ที่ค้างอยู่ต้องถูกเตือนทันที ไม่ใช่แค่บิลใหม่)
+      // บิลที่รับเงินแล้ว/ยกเลิกไม่แตะ · จำนวนที่แก้ลงประวัติไว้ด้วย
+      const scheduleChanged = ['billingCreditDays', 'billingPayWeekday', 'billingPayWeeksAfter'].some((k) => k in changes);
+      if (scheduleChanged) {
+        const open = await tx.invoice.findMany({ where: { customerId, status: 'ISSUED' }, select: { id: true, issueDate: true, dueDate: true } });
+        let recomputed = 0;
+        for (const inv of open) {
+          const next = dueDateOf(inv.issueDate, updated);
+          if ((next?.getTime() ?? null) === (inv.dueDate?.getTime() ?? null)) continue;
+          await tx.invoice.update({ where: { id: inv.id }, data: { dueDate: next } });
+          recomputed += 1;
+        }
+        if (recomputed) changes.dueDatesRecomputed = { from: null, to: recomputed };
+      }
       await writeAudit(tx, { entity: 'Customer', entityId: customerId, action: 'update-terms', remark, changes });
       return termsWithCredit(updated);
     });
@@ -934,9 +972,10 @@ export class BillingService {
 
           return tx.invoice.create({
             data: {
+              createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
               invoiceNo,
               issueDate,
-              dueDate: dueDateOf(issueDate, customer.billingCreditDays),
+              dueDate: dueDateOf(issueDate, customer),
               account,
               customerId: customer.id,
               customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
@@ -988,9 +1027,10 @@ export class BillingService {
     const create = (db: Pick<Prisma.TransactionClient, 'invoice'>) =>
       db.invoice.create({
         data: {
+          createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
           invoiceNo,
           issueDate,
-          dueDate: dueDateOf(issueDate, customer.billingCreditDays),
+          dueDate: dueDateOf(issueDate, customer),
           account,
           customerId: customer.id,
           customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
@@ -1313,9 +1353,10 @@ export class BillingService {
           const totals = computeInvoiceTotals({ lines: [], extras: [], items, terms: withWht(termsFor(account, toTerms(customer)), whtOverride), issueDate: issueIso });
           return tx.invoice.create({
             data: {
+              createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
               invoiceNo,
               issueDate,
-              dueDate: dueDateOf(issueDate, customer.billingCreditDays),
+              dueDate: dueDateOf(issueDate, customer),
               account,
               customerId: customer.id,
               customerSnapshot: { name: customer.company || customer.name, branch: customer.branch, address: customer.address, taxId: customer.taxId, ...payeeSnapshot(account, customer) },
@@ -1432,7 +1473,7 @@ export class BillingService {
     if (paidIso > bangkokToday()) throw bad('วันที่รับเงินต้องไม่เกินวันนี้');
     const { count } = await this.prisma.invoice.updateMany({
       where: { id, status: 'ISSUED' },
-      data: { status: 'PAID', paidDate, taxInvoiceNo: advanceTv ? advanceTv.taxInvoiceNo : taxInvoiceNo },
+      data: { status: 'PAID', paidDate, paidById: currentUser()?.id ?? null, taxInvoiceNo: advanceTv ? advanceTv.taxInvoiceNo : taxInvoiceNo },
     });
     if (count === 0) throw conflict('บันทึกรับเงินได้เฉพาะบิลที่รอรับเงิน');
     return this.mapInvoice(await this.invoiceWithLines(id));
@@ -1472,7 +1513,7 @@ export class BillingService {
       // เงื่อนไขรวมวันที่/เลข TV ที่อ่านมา: ประวัติต้องตรงกับค่าที่ถูกล้างจริง
       const { count } = await tx.invoice.updateMany({
         where: { id, status: 'PAID', paidDate: invoice.paidDate, taxInvoiceNo: invoice.taxInvoiceNo },
-        data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: keepTvNo },
+        data: { status: 'ISSUED', paidDate: null, paidById: null, taxInvoiceNo: keepTvNo },
       });
       if (count === 0) throw conflict('บิลนี้เปลี่ยนสถานะไปแล้ว กรุณาโหลดรายการใหม่');
       await writeAudit(tx, {
@@ -1600,11 +1641,18 @@ export class BillingService {
         const nextIssue = issueDate ?? invoice.issueDate;
         const nextIssueIso = nextIssue.toISOString().slice(0, 10);
         let terms: BillingTerms = { vat: Number(invoice.vatRate) > 0, whtRate: Number(invoice.whtRate), whtSpecialRate: null, whtSpecialUntil: null };
+        const customerNow = applyCurrentTerms || issueDate ? await tx.customer.findUnique({ where: { id: invoice.customerId } }) : null;
         if (applyCurrentTerms) {
-          const customer = await tx.customer.findUnique({ where: { id: invoice.customerId } });
-          if (!customer) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
-          terms = termsFor(invoice.account, toTerms(customer));
+          if (!customerNow) throw new NotFoundException({ error: 'ไม่พบข้อมูลลูกค้า' });
+          terms = termsFor(invoice.account, toTerms(customerNow));
         }
+        // เลื่อนวันออกบิล = เลื่อนวันครบกำหนด: ลูกค้าที่ตั้งรอบวันในสัปดาห์คำนวณใหม่จากวันออกบิลใหม่ (ผู้ใช้ 2026-10-31) ที่เหลือเลื่อนตามจำนวนวันเดิม
+        const nextDueDate =
+          issueDate && customerNow && isPayWeekday(customerNow.billingPayWeekday)
+            ? dueDateOf(nextIssue, customerNow)
+            : invoice.dueDate
+              ? addDays(invoice.dueDate, (nextIssue.getTime() - invoice.issueDate.getTime()) / 86_400_000)
+              : null;
         terms = withWht(terms, whtOverride);
         const nextExtras = extras ?? extrasOf(invoice.extras);
         const totals = computeInvoiceTotals({ lines: nextLines, extras: nextExtras, items: nextItems, terms, issueDate: nextIssueIso });
@@ -1627,8 +1675,7 @@ export class BillingService {
           where: { id },
           data: {
             issueDate: nextIssue,
-            // เลื่อนวันออกบิล = เลื่อนวันครบกำหนดตามจำนวนวันเดิม
-            dueDate: invoice.dueDate ? addDays(invoice.dueDate, (nextIssue.getTime() - invoice.issueDate.getTime()) / 86_400_000) : null,
+            dueDate: nextDueDate,
             jobLabel: jobLabel ?? invoice.jobLabel,
             extras: nextExtras,
             vatRate: totals.vatRate,

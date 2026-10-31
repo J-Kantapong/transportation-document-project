@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api";
 import { ACCOUNT_LABEL, billingApi, type AccountPeriod, type BillingAccount, type BillingTerms, type RateKind, type RateVehicleKind, type ServiceFeeRate, type ServiceFeeRateInput } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { describePaySchedule, expectedPaymentIso, isPayWeekday, PAY_WEEKDAY_LABELS, PAY_WEEKS_AFTER_MAX } from "@/lib/payment-schedule";
 import { PROVINCES } from "@/lib/vehicle-reference-data";
 
 // ประเภทรถที่แถวราคาจำกัดได้ (เทียบ Vehicle.body ขึ้นต้น) - ผู้ใช้ 2026-10-09: ป้ายเหลือง รย.17 ราคาต่างจาก รย.12
@@ -34,6 +35,12 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
   const [untilText, setUntilText] = useState(terms.whtSpecialUntil ? isoToDisplayDate(terms.whtSpecialUntil) : "");
   // เครดิตเทอม (ผู้ใช้ 2026-09-28) ว่าง = ไม่ตั้ง - ใช้หาวันครบกำหนดของบิลที่ออกหลังจากนี้
   const [creditText, setCreditText] = useState(terms.creditDays == null ? "" : String(terms.creditDays));
+  // รอบจ่ายตามวันในสัปดาห์ (ผู้ใช้ 2026-10-31, SPI: วางบิลสัปดาห์นี้ ได้เงินพฤหัสสัปดาห์หน้า) - "" = ใช้เครดิตวัน
+  const [payWeekdayText, setPayWeekdayText] = useState(isPayWeekday(terms.payWeekday) ? String(terms.payWeekday) : "");
+  const [payWeeksAfter, setPayWeeksAfter] = useState(terms.payWeeksAfter ?? 1);
+  const payWeekday = payWeekdayText === "" ? null : Number(payWeekdayText);
+  const exampleIssue = todayIso();
+  const exampleDue = expectedPaymentIso(exampleIssue, { creditDays: creditText.trim() === "" ? null : Number(creditText), payWeekday, payWeeksAfter });
   // ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM)
   const [requiresQuotation, setRequiresQuotation] = useState(terms.requiresQuotation ?? false);
   // ประเภท 50 ทวิ ที่ลูกค้าส่งมาตามปกติ (ผู้ใช้ 2026-10-06)
@@ -63,7 +70,19 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
     setSaving(true);
     setError("");
     try {
-      const result = await billingApi.updateTerms(customerId, { vat, whtRate, whtSpecialRate, whtSpecialUntil, creditDays, requiresQuotation, whtMethod, taxInvoiceBeforePayment, remark: remark.trim() });
+      const result = await billingApi.updateTerms(customerId, {
+        vat,
+        whtRate,
+        whtSpecialRate,
+        whtSpecialUntil,
+        creditDays,
+        payWeekday,
+        payWeeksAfter,
+        requiresQuotation,
+        whtMethod,
+        taxInvoiceBeforePayment,
+        remark: remark.trim(),
+      });
       onSaved(result.terms);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -107,10 +126,47 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
           <p style={{ fontSize: 12 }}>ระบบเทียบวันสิ้นสุดกับวันที่ออกบิล พ้นวันนั้นแล้วกลับไปใช้อัตราปกติเอง บิลที่ออกไปแล้วไม่เปลี่ยน</p>
         </>
       )}
-      <label className="field" style={{ maxWidth: 260 }}>
-        เครดิตเทอม (วัน นับจากวันออกบิล)
-        <input type="text" inputMode="numeric" value={creditText} onChange={(e) => setCreditText(e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="เช่น 30 (ว่าง = ไม่ตั้ง)" />
-      </label>
+      <div style={{ display: "grid", gap: 8 }}>
+        <strong style={{ fontSize: 14 }}>รอบที่ลูกค้าจ่ายเงิน (ใช้คำนวณ &quot;วันคาดรับเงิน&quot; ของบิล เลยวันแล้วยังไม่ลงรับเงิน = ระบบเตือน)</strong>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 14 }}>
+          <label className="field">
+            จ่ายตามวันในสัปดาห์
+            <select value={payWeekdayText} onChange={(e) => setPayWeekdayText(e.target.value)}>
+              <option value="">ไม่ใช้ (นับตามเครดิตวันแทน)</option>
+              {Object.entries(PAY_WEEKDAY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  วัน{label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {payWeekday !== null && (
+            <label className="field">
+              ของสัปดาห์ไหน
+              <select value={payWeeksAfter} onChange={(e) => setPayWeeksAfter(Number(e.target.value))}>
+                <option value={0}>สัปดาห์เดียวกับที่วางบิล</option>
+                <option value={1}>สัปดาห์ถัดไป (วางสัปดาห์นี้ ได้เงินสัปดาห์หน้า)</option>
+                {Array.from({ length: PAY_WEEKS_AFTER_MAX - 1 }, (_, i) => i + 2).map((w) => (
+                  <option key={w} value={w}>
+                    {w} สัปดาห์หลังวางบิล
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {payWeekday === null && (
+            <label className="field">
+              เครดิตเทอม (วัน นับจากวันออกบิล)
+              <input type="text" inputMode="numeric" value={creditText} onChange={(e) => setCreditText(e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="เช่น 30 (ว่าง = ไม่ตั้ง)" />
+            </label>
+          )}
+        </div>
+        <p style={{ fontSize: 12, margin: 0 }}>
+          {describePaySchedule({ creditDays: creditText.trim() === "" ? null : Number(creditText), payWeekday, payWeeksAfter })}
+          {exampleDue ? ` · ตัวอย่าง: วางบิลวันนี้ ${isoToDisplayDate(exampleIssue)} คาดรับเงิน ${isoToDisplayDate(exampleDue)}` : ""}
+          {" · "}บันทึกแล้วบิลที่ยังรอรับเงินของลูกค้ารายนี้จะได้วันคาดรับเงินใหม่ทันที (ระบบไม่รู้วันหยุดราชการ ถ้าตรงวันหยุดการเตือนจะมาเร็วไป 1 วัน)
+        </p>
+      </div>
       {withholds && (
         <div className="inspect-filter" style={{ padding: 0 }} role="group" aria-label="ประเภท 50 ทวิ ที่ลูกค้าส่ง">
           <button type="button" className={`filter-chip${whtMethod === "PAPER" ? " selected" : ""}`} onClick={() => setWhtMethod("PAPER")}>

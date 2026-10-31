@@ -231,6 +231,7 @@ export class TaxRenewalService {
 
     return this.prisma.taxRenewal.create({
       data: {
+        createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
         ...columns,
         submitDate,
         inspectionRequired: tax.inspectionRequired,

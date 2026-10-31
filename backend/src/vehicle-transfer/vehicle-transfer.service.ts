@@ -354,7 +354,7 @@ export class VehicleTransferService {
     });
 
     const row = await this.prisma.vehicleTransfer.create({
-      data: { transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, ...fees },
+      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, ...fees },
       include: transferInclude,
     });
     return { transfer: serializeTransfer(row) };

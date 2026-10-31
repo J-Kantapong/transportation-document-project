@@ -12,6 +12,7 @@ import { buildAccountingPackage, buildSalesTaxExcel } from "@/lib/accounting-bun
 import { downloadBlob } from "@/lib/pdf-export";
 import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
+import { InvoiceDueBadge, invoiceDueDays } from "@/components/InvoiceDueBadge";
 
 // หน้า "ใบกำกับภาษี" (ผู้ใช้ 2026-09-28): รายการใบกำกับรายเดือน (รวมใบที่ยกเลิก) + Excel รายงานภาษีขาย + พิมพ์/ใบแทน/ยกเลิก
 // ADMIN ตั้งเลขล่าสุดจาก Google Sheet = เปิดใช้ใบกำกับในระบบ (ตั้งได้ก่อนออกใบแรกของปีนั้น)
@@ -139,12 +140,16 @@ export function TaxInvoicesPage() {
             </span>
           </div>
           <div style={{ display: "grid" }}>
-            {waiting.map((i) => (
+            {/* บิลที่เลยวันคาดรับเงินขึ้นก่อน (ผู้ใช้ 2026-11-01: ป้ายเดียวกับหน้าวางบิล) แล้วค่อยเรียงตามเดิม */}
+            {[...waiting]
+              .map((i, idx) => ({ i, idx, days: invoiceDueDays(i.dueDate, todayIso()) }))
+              .sort((a, b) => Number(b.days !== null && b.days < 0) - Number(a.days !== null && a.days < 0) || a.idx - b.idx)
+              .map(({ i }) => (
               <div key={i.id} style={{ padding: "10px 23px", borderTop: "1px solid #f0f2f6", display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <span>
-                  <b>{i.invoiceNo}</b> · {isoToDisplayDate(i.issueDate)} · {i.customer.name}
+                  <b>{i.invoiceNo}</b> · {isoToDisplayDate(i.issueDate)} · {i.customer.name} <InvoiceDueBadge status={i.status} dueDate={i.dueDate} today={todayIso()} />
                   <span className="muted" style={{ display: "block", fontSize: 13 }}>
-                    {i.lines.length ? `${i.lines.length} คัน` : "บิลกำหนดเอง"} · ยอดสุทธิ {formatMoney(i.netTotal)} บาท{i.dueDate ? ` · ครบกำหนด ${isoToDisplayDate(i.dueDate)}` : ""}
+                    {i.lines.length ? `${i.lines.length} คัน` : "บิลกำหนดเอง"} · ยอดสุทธิ {formatMoney(i.netTotal)} บาท{i.dueDate ? ` · คาดรับเงิน ${isoToDisplayDate(i.dueDate)}` : ""}
                   </span>
                 </span>
                 <button type="button" className="primary" onClick={() => { setNotice(""); setIssuing(i); }}>

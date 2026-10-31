@@ -218,6 +218,7 @@ export class YamahaRelocationService {
       }
       const entry = await this.prisma.yamahaRelocationEntry.create({
         data: {
+          createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
           date: new Date(`${dateRaw}T00:00:00.000Z`),
           size: dto.size,
           count,

@@ -220,7 +220,7 @@ describe('TaxInvoiceService.cancel', () => {
     const { svc, invoiceUpdates, audits } = fakeDb({ lastNumber: 5, invoice: { status: 'PAID', paidDate: new Date('2026-10-20T00:00:00.000Z') } });
     await expect(svc.cancel('tv1', { remark: ' ' })).rejects.toMatchObject({ status: 400 });
     await asUser(() => svc.cancel('tv1', { remark: 'ชื่อลูกค้าผิด' }));
-    expect(invoiceUpdates[0]).toEqual({ status: 'ISSUED', paidDate: null, taxInvoiceNo: null });
+    expect(invoiceUpdates[0]).toEqual({ status: 'ISSUED', paidDate: null, paidById: null, taxInvoiceNo: null });
     expect(audits[0]).toMatchObject({ entity: 'Invoice', entityId: 'i1', action: 'cancel-tax-invoice', remark: 'ชื่อลูกค้าผิด', editedById: 'u1' });
   });
 });

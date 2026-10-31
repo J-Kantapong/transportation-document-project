@@ -54,6 +54,36 @@ const SEVERITY: Record<OverviewAlert["severity"], { label: string; icon: string 
   info: { label: "แจ้งให้ทราบ", icon: "i" },
 };
 
+// ส่วนบนของหน้า (ผู้ใช้ 2026-11-01 "ไม่ชอบมองอะไรเยอะๆ แต่ถ้ามีสีเตือนสะดุดตาจะมองง่าย"): การ์ด 4 ใบตอบ 4 คำถาม
+// ลูกค้าค้างเท่าไหร่ / ต้องใช้เงินเท่าไหร่ / งานที่ยังไม่ได้เงิน / ต้องทำกี่เรื่อง - สีตามสถานะ แดง = ต้องทำวันนี้ ส้ม = ควรดู เขียว = ปกติ
+// รายละเอียดเดิมทั้งหมด (ตัวเลขรายวัน ขั้นตอน กราฟ ประมาณการ) พับไว้ใต้ปุ่มเดียว จำสถานะไว้ในเครื่อง
+type Tone = "red" | "orange" | "green" | "neutral";
+const DETAILS_KEY = "overview-details-v1";
+
+function FocusTile({ tone, label, value, unit, lines, href }: { tone: Tone; label: string; value: string; unit?: string; lines: Array<string | null | false | undefined>; href?: string }) {
+  const body = (
+    <>
+      <div className="exec-tile-label">{label}</div>
+      <div className="exec-tile-value">
+        {value}
+        {unit && <small>{unit}</small>}
+      </div>
+      <div className="exec-tile-lines">
+        {lines.filter(Boolean).map((l, i) => (
+          <div key={i}>{l}</div>
+        ))}
+      </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className={`exec-tile exec-tile--${tone}`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={`exec-tile exec-tile--${tone}`}>{body}</div>
+  );
+}
+
 // เรื่องที่เป็นรายคัน (ผู้ใช้ 2026-10-09): คันเดียว = "ไปจัดการ" พาไปที่คันนั้นเลย · หลายคัน = กดกางรายชื่อ แต่ละคันมีลิงก์ของตัวเอง
 // เรื่องที่เป็นรายใบ (บิล 50 ทวิ ใบเสนอราคา ใบเสร็จไม่ตรง) ทำแบบเดียวกันด้วย docs · เรื่องที่ไม่มีรายการ (ผู้ใช้รออนุมัติ) ไปหน้าของเรื่องนั้น
 function AlertRow({ alert: a }: { alert: OverviewAlert }) {
@@ -124,8 +154,27 @@ export function ExecutiveOverview() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState("");
   const [doneKey, setDoneKey] = useState(""); // คำขอล่าสุดที่โหลดเสร็จ (สำเร็จหรือไม่ก็ตาม)
+  const [showDetails, setShowDetails] = useState(false); // รายละเอียดเดิมพับไว้ (ผู้ใช้ 2026-11-01) - จำในเครื่อง
   const key = `${date ?? "today"}|${nonce}`;
   const loading = doneKey !== key;
+
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
+      setShowDetails(localStorage.getItem(DETAILS_KEY) === "1");
+    } catch {
+      /* private mode ฯลฯ - ใช้ค่าเริ่มต้น */
+    }
+  }, []);
+  const toggleDetails = () => {
+    const next = !showDetails;
+    setShowDetails(next);
+    try {
+      localStorage.setItem(DETAILS_KEY, next ? "1" : "0");
+    } catch {
+      /* ไม่จำก็ได้ */
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -175,6 +224,18 @@ export function ExecutiveOverview() {
   const maxCategory = Math.max(1, ...spend.categories.map((c) => c.last30));
   const net30 = cash.net30;
 
+  // ---------- การ์ดสรุป 4 ใบ (ผู้ใช้ 2026-11-01) ----------
+  const overdue = wc.overdue ?? { count: 0, amount: 0, customers: [] };
+  const week = forecast.weeks[0];
+  const weeklyOut = week?.outflow ?? forecast.avgDailySpend * 7;
+  const weekNet = week ? week.inflow - week.outflow : null;
+  const highAlerts = alerts.filter((a) => a.severity === "high");
+  const mediumAlerts = alerts.filter((a) => a.severity === "medium");
+  const infoAlerts = alerts.filter((a) => a.severity === "info");
+  const todo = [...highAlerts, ...mediumAlerts];
+  const deliveryPending = alerts.find((a) => a.key === "delivery-pending");
+  const topOverdue = overdue.customers[0];
+
   return (
     <div className="content exec">
       <div className="heading">
@@ -219,6 +280,90 @@ export function ExecutiveOverview() {
         </p>
       )}
 
+      {/* ---------- ต้องรู้วันนี้: การ์ด 4 ใบ ---------- */}
+      <section className="exec-focus" aria-label="สรุปที่ต้องรู้">
+        <FocusTile
+          tone={overdue.count > 0 ? "red" : wc.receivable.count > 0 ? "neutral" : "green"}
+          label="ลูกค้าค้างจ่าย"
+          value={baht(wc.receivable.amount)}
+          unit="บาท"
+          href="/accounting/billing"
+          lines={[
+            `${wc.receivable.count} ใบ · ลูกค้าจ่ายเฉลี่ย ${wc.avgDaysToPay ?? "-"} วันหลังวางบิล`,
+            overdue.count > 0
+              ? `⚠ เลยวันคาดรับเงิน ${overdue.count} ใบ ${baht(overdue.amount)} บาท - เช็กว่าได้รับแล้วแต่ยังไม่ลง`
+              : "ยังไม่มีใบไหนเลยวันคาดรับเงิน",
+            topOverdue && `${topOverdue.customerName} ${topOverdue.count} ใบ (เลยมา ${topOverdue.maxDaysOver} วัน)`,
+          ]}
+        />
+        <FocusTile
+          tone={weekNet === null ? "neutral" : weekNet < 0 ? "orange" : "green"}
+          label="ต้องมีเงินหมุน / สัปดาห์"
+          value={baht(weeklyOut)}
+          unit="บาท"
+          lines={[
+            `30 วันล่าสุดใช้ไป ${baht(spend.last30.total)} บาท (เงินเดือน/ค่าจ้าง ${baht(spend.last30.overhead)})`,
+            week && `สัปดาห์นี้คาดเงินเข้า ${baht(week.inflow)} → ${weekNet! >= 0 ? "ถ้าเข้าครบ พอ" : `ขาด ${baht(-weekNet!)}`}`,
+            week && week.overdueInflow > 0 && `⚠ ในนั้น ${baht(week.overdueInflow)} บาท ลูกค้าช้ากว่ารอบปกติแล้ว ต้องตาม`,
+          ]}
+        />
+        <FocusTile
+          tone={deliveryPending ? "orange" : wc.unbilled.count > 0 ? "neutral" : "green"}
+          label="ทำเสร็จแล้ว ยังไม่ได้เงิน"
+          value={baht(wc.unbilled.amount + wc.inProcess.amount)}
+          unit="บาท"
+          href="/accounting/billing"
+          lines={[
+            `ส่งงานแล้ว รอวางบิล ${wc.unbilled.count} คัน ${baht(wc.unbilled.amount)} บาท`,
+            `ยื่นแล้ว ยังไม่ส่งงาน ${wc.inProcess.count} คัน ${baht(wc.inProcess.amount)} บาท`,
+            deliveryPending && `⚠ ${deliveryPending.detail}`,
+          ]}
+        />
+        <FocusTile
+          tone={highAlerts.length ? "red" : mediumAlerts.length ? "orange" : "green"}
+          label="ต้องทำ"
+          value={String(todo.length)}
+          unit="เรื่อง"
+          lines={[
+            highAlerts.length ? `ด่วน ${highAlerts.length} · ควรดู ${mediumAlerts.length}` : mediumAlerts.length ? `ควรดู ${mediumAlerts.length}` : "ไม่มีเรื่องเร่งด่วน",
+            highAlerts[0] && `1. ${highAlerts[0].title}`,
+            highAlerts[1] && `2. ${highAlerts[1].title}`,
+          ]}
+        />
+      </section>
+
+      {/* ---------- ต้องทำวันนี้ ---------- */}
+      <section className="panel exec-panel">
+        <div className="panel-head">
+          <h2>ต้องทำวันนี้</h2>
+          <span className="muted">{todo.length ? `${todo.length} เรื่อง` : "ไม่มีเรื่องค้าง"}</span>
+        </div>
+        {todo.length === 0 ? (
+          <div className="exec-empty">ไม่มีเรื่องเร่งด่วนตอนนี้ ✓</div>
+        ) : (
+          <ul className="exec-alerts">
+            {todo.map((a) => (
+              <AlertRow key={a.key} alert={a} />
+            ))}
+          </ul>
+        )}
+        {infoAlerts.length > 0 && (
+          <details className="exec-table-toggle">
+            <summary>เรื่องอื่นที่ไม่เร่งด่วน ({infoAlerts.length})</summary>
+            <ul className="exec-alerts">
+              {infoAlerts.map((a) => (
+                <AlertRow key={a.key} alert={a} />
+              ))}
+            </ul>
+          </details>
+        )}
+      </section>
+
+      <button type="button" className="exec-details-toggle" aria-expanded={showDetails} onClick={toggleDetails}>
+        {showDetails ? "ซ่อนรายละเอียด ▴" : "ดูรายละเอียด (ตัวเลขรายวัน ขั้นตอน กราฟ ประมาณการ) ▾"}
+      </button>
+      {showDetails && (
+      <>
       {/* ---------- ตัวเลขหลัก ---------- */}
       <section className="stats exec-kpis" aria-label="ตัวเลขหลัก">
         <div className="stat">
@@ -277,23 +422,6 @@ export function ExecutiveOverview() {
             {wc.avgDaysToPay === null ? "ยังไม่มีประวัติรับเงิน" : `ลูกค้าจ่ายเฉลี่ย ${wc.avgDaysToPay} วันหลังวางบิล`}
           </div>
         </div>
-      </section>
-
-      {/* ---------- เรื่องที่ต้องจัดการ ---------- */}
-      <section className="panel exec-panel">
-        <div className="panel-head">
-          <h2>สิ่งที่ควรจัดการ</h2>
-          <span className="muted">{alerts.length ? `${alerts.length} เรื่อง` : "ไม่มีเรื่องค้าง"}</span>
-        </div>
-        {alerts.length === 0 ? (
-          <div className="exec-empty">ไม่มีเรื่องเร่งด่วนตอนนี้</div>
-        ) : (
-          <ul className="exec-alerts">
-            {alerts.map((a) => (
-              <AlertRow key={a.key} alert={a} />
-            ))}
-          </ul>
-        )}
       </section>
 
       {/* ---------- งานแต่ละขั้นตอน + รถที่ติดขัด (แยกรถยนต์/จักรยานยนต์) ---------- */}
@@ -569,6 +697,8 @@ export function ExecutiveOverview() {
           </p>
         </div>
       </section>
+      </>
+      )}
     </div>
   );
 }

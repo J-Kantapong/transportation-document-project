@@ -53,7 +53,7 @@ export class PlatePhotosService {
   private async linkVehicle(tx: Prisma.TransactionClient, vehicleId: string, date: Date, photoId: string) {
     const { count } = await tx.vehicle.updateMany({
       where: { id: vehicleId, plateReceivedDate: null },
-      data: { plateReceivedDate: date, platePhotoId: photoId },
+      data: { plateReceivedDate: date, platePhotoId: photoId, plateReceivedById: currentUser()?.id ?? null }, // ผู้ทำ (ผู้ใช้ 2026-10-15)
     });
     if (count === 0) throw new BadRequestException({ error: 'รถคันนี้รับป้ายไปแล้ว' });
   }
@@ -210,7 +210,7 @@ export class PlatePhotosService {
     const { removed, photo } = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.vehicle.updateMany({
         where: { id: vehicle.id, platePhotoId: photoId, plateReceivedDate: { not: null }, plateDeliveredDate: null },
-        data: { plateReceivedDate: null, platePhotoId: null },
+        data: { plateReceivedDate: null, platePhotoId: null, plateReceivedById: null },
       });
       if (count === 0) throw staleReceivedRow();
       await tx.vehicleEditLog.create({

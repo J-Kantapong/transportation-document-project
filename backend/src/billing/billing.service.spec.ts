@@ -137,6 +137,15 @@ describe('BillingService.createCustomInvoice', () => {
     const noCredit = await none.svc.createCustomInvoice(customDto());
     expect(none.create.mock.calls[0][0].data.dueDate).toBeNull();
     expect(noCredit.dueDate).toBeNull();
+
+    // รอบวันในสัปดาห์ชนะเครดิตวัน (ผู้ใช้ 2026-10-31, SPI): ออกบิลพุธ 2027-02-03 -> พฤหัสสัปดาห์ถัดไป 2027-02-11
+    const weekday = customService();
+    weekday.svc = new BillingService({
+      customer: { findUnique: vi.fn().mockResolvedValue({ ...customer, billingCreditDays: 30, billingPayWeekday: 4, billingPayWeeksAfter: 1, accountPeriods: [] }) },
+      invoice: { create: weekday.create },
+    } as unknown as PrismaService);
+    const spi = await weekday.svc.createCustomInvoice(customDto());
+    expect(spi.dueDate).toBe('2027-02-11');
   });
 
   it('takes the WHT rate chosen for the bill', async () => {
@@ -406,7 +415,7 @@ describe('BillingService.markPaid / voidInvoice', () => {
     expect(invoice.status).toBe('PAID');
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'i1', status: 'ISSUED' },
-      data: { status: 'PAID', paidDate: new Date('2026-09-27T00:00:00.000Z'), taxInvoiceNo: 'TV2026-001' },
+      data: { status: 'PAID', paidDate: new Date('2026-09-27T00:00:00.000Z'), paidById: null, taxInvoiceNo: 'TV2026-001' },
     });
     await expect(svc.markPaid('i1', { paidDate: '2026-09-21' })).resolves.toBeTruthy();
   });
@@ -472,7 +481,7 @@ describe('BillingService.markPaid / voidInvoice', () => {
       await svc.markPaid('i1', { paidDate: '2026-09-27', taxInvoiceNo: 'พิมพ์มาผิด' });
       expect(updateMany).toHaveBeenCalledWith({
         where: { id: 'i1', status: 'ISSUED' },
-        data: { status: 'PAID', paidDate: new Date('2026-09-27T00:00:00.000Z'), taxInvoiceNo: 'TV2026-030' },
+        data: { status: 'PAID', paidDate: new Date('2026-09-27T00:00:00.000Z'), paidById: null, taxInvoiceNo: 'TV2026-030' },
       });
     });
 
@@ -507,7 +516,7 @@ describe('BillingService.unpayInvoice', () => {
     // เปลี่ยนแบบมีเงื่อนไขรวมค่าที่อ่านมา กันกด 2 หน้าจอพร้อมกัน
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'i1', status: 'PAID', paidDate: new Date('2026-09-25T00:00:00.000Z'), taxInvoiceNo: 'TV2026-010' },
-      data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null },
+      data: { status: 'ISSUED', paidDate: null, paidById: null, taxInvoiceNo: null },
     });
     expect(auditCreate).toHaveBeenCalledWith({
       data: {
@@ -558,7 +567,7 @@ describe('BillingService.unpayInvoice', () => {
   it('ใบกำกับที่ออกก่อนรับเงิน (ผู้ใช้ 2026-10-15) ย้อนรับเงินได้ บิลกลับเป็นรอรับเงินโดยเลข TV ยังอยู่', async () => {
     const { svc, updateMany, auditCreate } = unpayService('PAID', 1, { taxInvoiceNo: 'TV2026-010', beforePayment: true } as { taxInvoiceNo: string });
     await asUser(() => svc.unpayInvoice('i1', { remark: 'วันที่รับเงินผิด' }));
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: 'TV2026-010' } }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ISSUED', paidDate: null, paidById: null, taxInvoiceNo: 'TV2026-010' } }));
     expect(auditCreate.mock.calls[0][0].data.changes).not.toHaveProperty('taxInvoiceNo');
   });
 });
@@ -940,7 +949,18 @@ describe('BillingService.updateTerms', () => {
   it('บันทึกเงื่อนไขใหม่ ล็อกแถวลูกค้าก่อนอ่าน และเก็บเฉพาะช่องที่เปลี่ยนลงประวัติลูกค้า', async () => {
     const { svc, queryRaw, findUnique, update, auditCreate } = termsService();
     const terms = await asUser(() => svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: ' หมดโปรอัตราพิเศษ ' }));
-    expect(terms).toEqual({ vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, requiresQuotation: false, whtMethod: 'PAPER', taxInvoiceBeforePayment: false });
+    expect(terms).toEqual({
+      vat: true,
+      whtRate: 3,
+      whtSpecialRate: null,
+      whtSpecialUntil: null,
+      creditDays: undefined,
+      payWeekday: null,
+      payWeeksAfter: 1,
+      requiresQuotation: false,
+      whtMethod: 'PAPER',
+      taxInvoiceBeforePayment: false,
+    });
     expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findUnique.mock.invocationCallOrder[0]);
     expect(update).toHaveBeenCalledWith({
@@ -970,6 +990,28 @@ describe('BillingService.updateTerms', () => {
     const keep = termsService();
     await asUser(() => keep.svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: null, whtSpecialUntil: null, remark: 'ไม่แตะ 50 ทวิ' }));
     expect(keep.update.mock.calls[0][0].data).not.toHaveProperty('billingWhtMethod');
+  });
+
+  // รอบจ่ายตามวันในสัปดาห์ (ผู้ใช้ 2026-10-31, SPI: พฤหัสสัปดาห์ถัดไป) - บิลที่ยังรอรับเงินได้วันครบกำหนดใหม่ทันที
+  it('ตั้งรอบจ่ายวันพฤหัสสัปดาห์ถัดไป แล้วคำนวณวันครบกำหนดของบิลค้างใหม่ (บิลที่ตรงอยู่แล้วไม่แตะ)', async () => {
+    const { svc, update, auditCreate } = termsService();
+    const invoiceFindMany = vi.fn().mockResolvedValue([
+      { id: 'i1', issueDate: new Date('2026-10-28T00:00:00.000Z'), dueDate: null }, // พุธ -> พฤหัส 5/11
+      { id: 'i2', issueDate: new Date('2026-10-21T00:00:00.000Z'), dueDate: new Date('2026-10-29T00:00:00.000Z') }, // ตรงอยู่แล้ว
+    ]);
+    const invoiceUpdate = vi.fn().mockResolvedValue({});
+    (svc as unknown as { prisma: Record<string, unknown> }).prisma.invoice = { findMany: invoiceFindMany, update: invoiceUpdate };
+    const terms = await asUser(() =>
+      svc.updateTerms('c1', { vat: true, whtRate: 3, whtSpecialRate: 1, whtSpecialUntil: '2026-12-31', payWeekday: 4, payWeeksAfter: 1, remark: 'SPI จ่ายพฤหัสสัปดาห์หน้า' }),
+    );
+    expect(terms).toMatchObject({ payWeekday: 4, payWeeksAfter: 1 });
+    expect(update.mock.calls[0][0].data).toMatchObject({ billingPayWeekday: 4 });
+    expect(invoiceFindMany.mock.calls[0][0]).toMatchObject({ where: { customerId: 'c1', status: 'ISSUED' } });
+    expect(invoiceUpdate).toHaveBeenCalledTimes(1);
+    expect(invoiceUpdate).toHaveBeenCalledWith({ where: { id: 'i1' }, data: { dueDate: new Date('2026-11-05T00:00:00.000Z') } });
+    expect(auditCreate.mock.calls[0][0].data.changes).toMatchObject({ billingPayWeekday: { from: null, to: 4 }, dueDatesRecomputed: { from: null, to: 1 } });
+    await expect(svc.updateTerms('c1', { vat: true, whtRate: 3, payWeekday: 6, remark: 'x' })).rejects.toMatchObject({ response: { error: 'วันรับเงินต้องเป็นจันทร์ถึงศุกร์ (1-5)' } });
+    await expect(svc.updateTerms('c1', { vat: true, whtRate: 3, payWeeksAfter: 9, remark: 'x' })).rejects.toMatchObject({ response: { error: expect.stringContaining('สัปดาห์ที่ได้เงิน') } });
   });
 
   it('ต้องมีเหตุผล - ไม่มีแล้วไม่แตะฐานข้อมูล', async () => {

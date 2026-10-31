@@ -248,7 +248,7 @@ export class VehicleMoveOutService {
     const urgent = urgentFor(vehicleClass, dto?.urgent);
     const fees = calculateMoveOutFees(vehicleClass, urgent);
     const row = await this.prisma.vehicleMoveOut.create({
-      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, urgent, ...fees },
+      data: { createdById: currentUser()?.id ?? null, vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, urgent, ...fees },
       include: moveOutInclude,
     });
     return { moveOut: serializeMoveOut(row) };

@@ -74,7 +74,7 @@ describe('BookPhotosService.attach - แนบรูปเล่มทีละ�
     expect(create.mock.calls[0][0].data).toMatchObject({ closedAt: expect.any(Date) });
     expect(updateMany.mock.calls[0][0]).toEqual({
       where: { id: 'v1', bookReceivedDate: null },
-      data: { bookReceivedDate: day('2026-09-26'), bookPhotoId: 'p1' },
+      data: { bookReceivedDate: day('2026-09-26'), bookPhotoId: 'p1', bookReceivedById: null },
     });
   });
 
@@ -107,7 +107,7 @@ describe('BookPhotosService.attach - แนบรูปเล่มทีละ�
     expect(storage.put).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(photoUpdate.mock.calls[0][0]).toEqual({ where: { id: 'old' }, data: { closedAt: expect.any(Date), readPending: false } });
-    expect(updateMany.mock.calls[0][0].data).toEqual({ bookReceivedDate: day('2026-09-26'), bookPhotoId: 'old' });
+    expect(updateMany.mock.calls[0][0].data).toEqual({ bookReceivedDate: day('2026-09-26'), bookPhotoId: 'old', bookReceivedById: null });
   });
 
   it('มีคนรับเล่มคันนี้ไปพร้อมกัน = ลบไฟล์ที่เพิ่งเก็บทิ้ง', async () => {
@@ -144,7 +144,7 @@ describe('BookPhotosService.detach - ถอดรูปเล่มที่แ�
     await expect(asUser(['ADMIN'], () => svc.detach('v1', { remark: 'แนบผิดคัน' }))).resolves.toEqual({ vehicleId: 'v1', chassis: 'CH1', photo: 'deleted' });
     expect(updateMany.mock.calls[0][0]).toEqual({
       where: { id: 'v1', bookPhotoId: 'b1', bookReceivedDate: { not: null }, deliveredDate: null },
-      data: { bookReceivedDate: null, bookPhotoId: null },
+      data: { bookReceivedDate: null, bookPhotoId: null, bookReceivedById: null },
     });
     expect(logCreate.mock.calls[0][0].data).toMatchObject({ remark: 'แนบผิดคัน', editedById: 'u1' });
     expect(photoDelete).toHaveBeenCalledWith({ where: { id: 'b1' }, select: { storageKey: true } });

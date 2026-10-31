@@ -285,7 +285,7 @@ export class PlateCopyService {
     // ค่าใช้จ่ายตายตัวตามประเภทรถ / ชนิดการคัดป้าย / งานด่วน (plate-copy-fee.ts) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ
     const fees = calculatePlateCopyFees(vehicleClass, copyType, urgent);
     const row = await this.prisma.plateCopy.create({
-      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, copyType, urgent, ...fees },
+      data: { createdById: currentUser()?.id ?? null, vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, copyType, urgent, ...fees },
       include: plateCopyInclude,
     });
     return { plateCopy: serializePlateCopy(row) };

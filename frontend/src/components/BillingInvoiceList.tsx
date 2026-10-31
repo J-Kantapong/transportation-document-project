@@ -17,6 +17,7 @@ import {
 } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { InvoiceDueBadge } from "@/components/InvoiceDueBadge";
 import { computeTotals, effectiveWhtRate, formatMoney, jobsOfItems, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
 import { downloadInvoicePdf, printInvoice } from "@/lib/invoice-print";
 import Link from "next/link";
@@ -28,14 +29,8 @@ import { canPrintOriginal, printTaxInvoice } from "@/lib/tax-invoice-print";
 // ใบกำกับภาษีในระบบ (ผู้ใช้ 2026-09-28): บิลบัญชีบริษัทที่มี VAT รับเงินพร้อมออกใบกำกับ เมื่อ ADMIN เปิดใช้แล้ว (ตั้งเลขเริ่ม)
 const needsTaxInvoice = (i: Invoice) => i.account !== "PERSONAL" && i.vatRate > 0;
 
-// เครดิตเทอม: บิลรอรับเงินที่เลยวันครบกำหนด = แดง, ครบใน 7 วัน = เหลือง
-function dueBadge(i: Invoice, today: string) {
-  if (i.status !== "ISSUED" || !i.dueDate) return null;
-  const days = Math.round((Date.parse(`${i.dueDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
-  if (days < 0) return <span className="badge" style={{ background: "#fde8e8", color: "#b43434" }}>เกินกำหนด {-days} วัน</span>;
-  if (days <= 7) return <span className="badge warn">ครบกำหนดใน {days} วัน</span>;
-  return null;
-}
+// วันคาดรับเงิน (เครดิตเทอม / รอบจ่ายของลูกค้า, ผู้ใช้ 2026-10-31): ป้ายอยู่ใน components/InvoiceDueBadge.tsx ใช้ร่วมกับหน้าใบกำกับภาษี
+const dueBadge = (i: Invoice, today: string) => <InvoiceDueBadge status={i.status} dueDate={i.dueDate} today={today} />;
 
 // บิลที่ออกแล้วของทุกลูกค้า: พิมพ์ซ้ำ, บันทึกรับเงิน (พร้อมเลขที่ใบกำกับภาษี TV ที่ออกจาก Google Sheet), หรือยกเลิกบิล (รถกลับเข้าคิวรอวางบิล)
 // บิลรอรับเงินโหลดครบทุกใบเสมอ ประวัติ (รับเงินแล้ว / ยกเลิก) โหลดทีละ 200 ใบ ใหม่สุดก่อน และยอดรอรับเงินนับฝั่ง server
@@ -264,7 +259,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                   <td>{i.invoiceNo}</td>
                   <td>
                     {isoToDisplayDate(i.issueDate)}
-                    {i.dueDate && i.status === "ISSUED" && <div className="muted">ครบกำหนด {isoToDisplayDate(i.dueDate)}</div>}
+                    {i.dueDate && i.status === "ISSUED" && <div className="muted">คาดรับเงิน {isoToDisplayDate(i.dueDate)}</div>}
                     {dueBadge(i, todayIso())}
                   </td>
                   <td>{i.customer.name}</td>
