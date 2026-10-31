@@ -4,6 +4,8 @@ import { OverviewService } from '../overview/overview.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { parseCommand, type Command } from './commands.js';
 import { buildEveningMessage, type EveningInput } from './evening-message.js';
+import { buildFinanceMessage } from './finance-message.js';
+import { loadFinancePending } from './finance-pending.js';
 import { lineConfigFromEnv, pushLine, replyLine, type LineMessage } from './line-client.js';
 import type { LineEvent } from './line-webhook.js';
 import { NotesService } from './notes.service.js';
@@ -34,6 +36,11 @@ export class SecretaryService {
     return buildMorningMessage(await this.overviewService.overview(), this.baseUrl());
   }
 
+  // การ์ดการเงินค้าง (ผู้ใช้ 2026-10-31) - ส่งต่อจากสรุปเช้าทุกวัน และคำสั่ง "การเงิน"
+  private async financeMessage(): Promise<LineMessage> {
+    return buildFinanceMessage(await loadFinancePending(this.prisma, bangkokToday()), this.baseUrl());
+  }
+
   private async eveningMessage(): Promise<LineMessage> {
     const overview = await this.overviewService.overview();
     const staff = await this.staffActivity(overview.today);
@@ -55,7 +62,7 @@ export class SecretaryService {
   }
 
   async sendMorning(): Promise<void> {
-    await pushLine([await this.morningMessage()]);
+    await pushLine([await this.morningMessage(), await this.financeMessage()]);
   }
 
   async sendEvening(): Promise<void> {
@@ -66,7 +73,9 @@ export class SecretaryService {
   async answer(command: Command): Promise<LineMessage[]> {
     switch (command) {
       case 'morning':
-        return [await this.morningMessage()];
+        return [await this.morningMessage(), await this.financeMessage()];
+      case 'finance':
+        return [await this.financeMessage()];
       case 'evening':
         return [await this.eveningMessage()];
       case 'overdue':

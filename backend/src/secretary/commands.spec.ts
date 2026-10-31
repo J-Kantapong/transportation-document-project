@@ -5,6 +5,8 @@ describe('parseCommand', () => {
   it('จับคำสั่งหลักจากคำสำคัญ ไม่ต้องพิมพ์ตรงเป๊ะ', () => {
     expect(parseCommand('สรุปเช้า')).toBe('morning');
     expect(parseCommand('  สรุป เย็น ')).toBe('evening');
+    expect(parseCommand('การเงินค้าง')).toBe('finance');
+    expect(parseCommand('การเงิน')).toBe('finance');
     expect(parseCommand('ค้างจ่าย')).toBe('overdue');
     expect(parseCommand('ใครค้างเงินบ้าง')).toBe('overdue');
     expect(parseCommand('รถติดขัด')).toBe('stuck');
@@ -21,7 +23,7 @@ describe('parseCommand', () => {
     // ตู้เอกสารถูกจับก่อนโดย parseNoteCommand (ดู notes.spec.ts) จึงไม่นับที่นี่ · "คำสั่ง" = เมนูช่วยเหลือ
     const labels = QUICK_COMMANDS.map((c) => c.label);
     expect(labels).toContain('ตู้เอกสาร');
-    expect(QUICK_COMMANDS.filter((c) => c.text !== 'ตู้เอกสาร').map((c) => parseCommand(c.text))).toEqual(['morning', 'evening', 'overdue', 'stuck', 'spend', 'help']);
+    expect(QUICK_COMMANDS.filter((c) => c.text !== 'ตู้เอกสาร').map((c) => parseCommand(c.text))).toEqual(['morning', 'evening', 'finance', 'overdue', 'stuck', 'spend', 'help']);
     for (const c of QUICK_COMMANDS) expect(c.label.length).toBeLessThanOrEqual(20);
     expect(QUICK_COMMANDS.length).toBeLessThanOrEqual(13); // ข้อจำกัดของ LINE
   });
