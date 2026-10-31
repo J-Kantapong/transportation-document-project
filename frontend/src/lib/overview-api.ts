@@ -144,6 +144,8 @@ export interface Overview {
     advance: { amount: number; count: number }; // คีย์ล่วงหน้า (วันที่ยื่นหลังวันนี้) ยังไม่ได้จ่าย ไม่นับรวมใน total
     unbilled: { amount: number; count: number };
     receivable: { amount: number; count: number };
+    // เลยวันคาดรับเงิน (Invoice.dueDate จากรอบจ่าย / เครดิตของลูกค้า) ต่อลูกค้า เรียงเลยนานสุดก่อน
+    overdue: { count: number; amount: number; customers: Array<{ customerId: string; customerName: string; count: number; amount: number; maxDaysOver: number }> };
     total: number;
     aging: AgingBucket[];
     unbilledAging: AgingBucket[];

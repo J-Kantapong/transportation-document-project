@@ -294,7 +294,19 @@ export class OverviewService {
       this.prisma.invoice.findMany({ where: { status: 'PAID', paidDate: range }, select: { paidDate: true, netTotal: true } }),
       this.prisma.invoice.findMany({
         where: { status: 'ISSUED' },
-        select: { id: true, invoiceNo: true, issueDate: true, dueDate: true, customerId: true, netTotal: true, customerSnapshot: true },
+        select: {
+          id: true,
+          invoiceNo: true,
+          issueDate: true,
+          dueDate: true,
+          customerId: true,
+          netTotal: true,
+          customerSnapshot: true,
+          account: true,
+          // ลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย (ยามาฮ่า) + ใบกำกับที่ออกแล้ว - เตือนบิลที่ยังไม่ได้ออก (ผู้ใช้ 2026-11-01)
+          customer: { select: { billingTaxInvoiceBeforePayment: true } },
+          taxInvoices: { where: { status: 'ISSUED' }, select: { id: true } },
+        },
       }),
       this.prisma.invoice.findMany({
         where: { status: 'PAID', paidDate: { gte: toDate(addDays(today, -180)) } },
@@ -715,6 +727,8 @@ export class OverviewService {
       issueDate: isoOf(i.issueDate),
       dueDate: i.dueDate ? isoOf(i.dueDate) : null,
       amount: num(i.netTotal),
+      // บิลบัญชีบริษัทของลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย แต่ยังไม่ได้ออกใบกำกับ = ลูกค้ายังไม่เริ่มนับวันจ่าย (ผู้ใช้ 2026-11-01)
+      taxInvoiceMissing: i.account !== 'PERSONAL' && (i.customer?.billingTaxInvoiceBeforePayment ?? false) && !(i.taxInvoices?.length ?? 0),
     }));
     const unbilledItems = unbilledVehicles.map((v) => {
       const sub = v.documentSubmissions[0];
@@ -1023,6 +1037,7 @@ export class OverviewService {
     // เลยกำหนดเครดิตของลูกค้า (Invoice.dueDate = วันที่ออกบิล + เครดิตวัน ณ วันออกบิล) แต่ยังไม่ถึง 60 วัน - 60 วันขึ้นไปอยู่ในการเตือนข้างบนแล้ว
     const pastDue = receivableItems.filter((r) => r.dueDate !== null && r.dueDate < today && daysBetween(r.issueDate, today) <= 60);
     const dueSoon = receivableItems.filter((r) => r.dueDate !== null && r.dueDate >= today && daysBetween(today, r.dueDate) <= 7);
+    const taxInvoiceMissing = receivableItems.filter((r) => r.taxInvoiceMissing);
     const whtOverdue = whtPendingRows.filter((r) => daysBetween(isoOf(r.issueDate), today) > WHT_OVERDUE_DAYS).sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
     // ใบเสนอราคา: รอลูกค้าตอบ (หมดอายุแล้วนับแยก) · อนุมัติแล้วแต่ยังไม่ได้ออกบิล/ตั้งเป็นราคาลูกค้า (stageOf ใน quotation-calc.ts)
     const byValidUntil = (a: { validUntil: Date }, b: { validUntil: Date }) => a.validUntil.getTime() - b.validUntil.getTime();
@@ -1094,13 +1109,26 @@ export class OverviewService {
         href: '/accounting/billing',
         ...withDocs([...overdueAr].sort(oldestIssue), invoiceDoc((r) => `ค้าง ${daysBetween(r.issueDate, today)} วัน`, false)),
       },
+      // เลยวันคาดรับเงิน (รอบจ่าย / เครดิตของลูกค้า, ผู้ใช้ 2026-10-31): ส่วนใหญ่คือได้รับแล้วแต่ลืมลง - สูงสุดเพราะทำให้ตัวเลขเงินสดผิดทั้งระบบ
       pastDue.length && {
         key: 'ar-past-due',
-        severity: 'medium',
-        title: 'บิลเลยกำหนดชำระตามเครดิตลูกค้า',
-        detail: `${pastDue.length} ใบ รวม ${fmt(pastDue.reduce((a, r) => a + r.amount, 0))} บาท`,
+        severity: 'high',
+        title: 'บิลเลยวันคาดรับเงินแล้ว - เช็ก statement ว่าได้รับแล้วแต่ยังไม่ลง',
+        detail: `${pastDue.length} ใบ รวม ${fmt(pastDue.reduce((a, r) => a + r.amount, 0))} บาท - ได้แล้วกด "รับเงิน" / ยังไม่ได้ตามลูกค้า`,
         href: '/accounting/billing',
         ...withDocs([...pastDue].sort(earliestDue), invoiceDoc((r) => `เลยกำหนด ${daysBetween(r.dueDate!, today)} วัน`, true)),
+      },
+      // ลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย (ยามาฮ่า) แต่บิลยังไม่ได้ออกใบกำกับ = เงินก้อนนั้นยังไม่เริ่มนับวันจ่าย (ผู้ใช้ 2026-11-01)
+      taxInvoiceMissing.length && {
+        key: 'tax-invoice-before-payment',
+        severity: 'high',
+        title: 'ลูกค้าต้องได้ใบกำกับภาษีก่อนจ่าย - บิลเหล่านี้ยังไม่ได้ออกใบกำกับ',
+        detail: `${taxInvoiceMissing.length} ใบ รวม ${fmt(taxInvoiceMissing.reduce((a, r) => a + r.amount, 0))} บาท - ออกใบกำกับ "ออกก่อนรับเงิน" แล้วส่งให้ลูกค้า`,
+        href: '/accounting/tax-invoices',
+        ...withDocs([...taxInvoiceMissing].sort(oldestIssue), (r): AlertDoc => ({
+          ...invoiceDoc((x) => `ออกบิลมา ${daysBetween(x.issueDate, today)} วัน ยังไม่มีใบกำกับ`, false)(r),
+          href: `/accounting/tax-invoices?issue=${encodeURIComponent(r.id)}`,
+        })),
       },
       whtOverdue.length && {
         key: 'wht-overdue',

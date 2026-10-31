@@ -329,6 +329,7 @@ describe('OverviewService.overview', () => {
     const alert = (key: string) => alerts.find((a) => a.key === key)!;
 
     expect(alert('ar-overdue').docs).toMatchObject([{ title: 'IV2026-012', amount: 1000, note: 'ค้าง 88 วัน', href: '/accounting/billing?focus=IV2026-012' }]);
+    expect(alert('tax-invoice-before-payment')).toBeUndefined(); // ไม่มีลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย
     // เลยกำหนด: ใบที่ครบกำหนดก่อนขึ้นก่อน
     expect(alert('ar-past-due').detail).toMatch(/^2 ใบ/);
     expect(alert('ar-past-due').itemTotal).toBe(2);
@@ -336,11 +337,44 @@ describe('OverviewService.overview', () => {
       ['IV2026-090', 'เลยกำหนด 17 วัน'],
       ['IV2026-121', 'เลยกำหนด 7 วัน'],
     ]);
+    expect(alert('ar-past-due').severity).toBe('high');
     expect(alert('ar-due-soon').docs).toMatchObject([{ title: 'IV2026-130', date: '2026-09-30', note: 'อีก 3 วัน' }]);
     expect(alert('wht-overdue').docs).toMatchObject([{ title: 'TV2026-005', customerName: 'ลูกค้า ข', amount: 30, href: '/accounting/tax-invoices/wht?focus=TV2026-005' }]);
     expect(alert('quotation-approved-open').docs).toMatchObject([{ title: 'QT-q1', note: 'รอออกใบวางบิล', date: '2026-09-25', href: '/accounting/quotations/view?id=q1' }]);
     expect(alert('quotation-expired').docs).toMatchObject([{ title: 'QT-q2', note: 'หมดอายุมา 7 วัน' }]);
     expect(alerts.some((a) => a.key === 'quotation-waiting')).toBe(false); // มีใบหมดอายุแล้ว เรื่องรอตอบรวมอยู่ในข้อความของเรื่องนั้น
+  });
+
+  // ลูกค้าที่ต้องได้ใบกำกับก่อนจ่าย (ยามาฮ่า, ผู้ใช้ 2026-11-01): บิลบัญชีบริษัทที่ยังไม่มีใบกำกับขึ้นเตือนสูงสุด พร้อมลิงก์ไปออกใบ
+  it('สิ่งที่ควรจัดการ: บิลของลูกค้าที่ต้องได้ใบกำกับก่อนจ่ายแต่ยังไม่ได้ออกใบกำกับ', async () => {
+    const { svc, prisma } = service();
+    const inv = (invoiceNo: string, o: Record<string, unknown>) => ({
+      id: `id-${invoiceNo}`,
+      invoiceNo,
+      issueDate: d('2026-09-20'),
+      dueDate: null,
+      customerId: 'ym',
+      netTotal: 400000,
+      customerSnapshot: { name: 'YM' },
+      account: 'COMPANY',
+      customer: { billingTaxInvoiceBeforePayment: true },
+      taxInvoices: [],
+      ...o,
+    });
+    prisma.invoice.findMany.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status === 'ISSUED'
+        ? [
+            inv('IV2026-131', {}), // ยังไม่ออก -> เตือน
+            inv('IV2026-140', { taxInvoices: [{ id: 'tv1' }] }), // ออกก่อนรับเงินแล้ว
+            inv('PB2026-003', { account: 'PERSONAL' }), // บัญชีบุคคล ไม่มีใบกำกับ
+            inv('IV2026-150', { customer: { billingTaxInvoiceBeforePayment: false } }), // ลูกค้าธรรมดา
+          ]
+        : [],
+    );
+    const alert = (await svc.overview()).alerts.find((a) => a.key === 'tax-invoice-before-payment')!;
+    expect(alert.severity).toBe('high');
+    expect(alert.detail).toMatch(/^1 ใบ รวม 400,000/);
+    expect(alert.docs).toMatchObject([{ title: 'IV2026-131', customerName: 'YM', note: 'ออกบิลมา 7 วัน ยังไม่มีใบกำกับ', href: '/accounting/tax-invoices?issue=id-IV2026-131' }]);
   });
 
   // ผู้ใช้ 2026-10-13: รายงานรถที่ข้อมูลน่าจะคีย์ผิดและยังไม่วางบิล กดแล้วเปิดฟอร์มแก้ไขของคันนั้น
