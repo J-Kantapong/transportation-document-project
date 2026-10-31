@@ -1,6 +1,7 @@
 // ส่งการ์ดสรุปของเลขาเข้าไลน์ส่วนตัวทันที (ผู้ใช้ 2026-10-07) - ใช้ทดสอบ/ส่งมือ
 //   npm run secretary:morning   สรุปเช้า
 //   npm run secretary:evening   สรุปเย็น
+//   npm run secretary:reminder  เตือนประจำสัปดาห์ที่ถึงเวลาแล้วของวันนี้ (ไม่มี = ไม่ส่ง)
 // ใช้ฐานข้อมูลตาม DATABASE_URL ใน backend/.env (ตอนนี้ = dev)
 // ไม่ใช้ Nest DI เพราะ tsx ไม่ส่ง decorator metadata - ประกอบ service เองเหมือนที่ Nest ทำ
 import 'dotenv/config';
@@ -12,8 +13,8 @@ import { NotesService } from '../src/secretary/notes.service.js';
 import { SecretaryService } from '../src/secretary/secretary.service.js';
 
 const kind = process.argv[2];
-if (kind !== 'morning' && kind !== 'evening') {
-  console.error('ใช้: npm run secretary:morning หรือ npm run secretary:evening');
+if (kind !== 'morning' && kind !== 'evening' && kind !== 'reminder') {
+  console.error('ใช้: npm run secretary:morning, secretary:evening หรือ secretary:reminder');
   process.exit(1);
 }
 
@@ -22,9 +23,14 @@ let failed = false;
 try {
   await prisma.$connect();
   const secretary = new SecretaryService(new OverviewService(prisma), prisma, new NotesService(prisma));
-  if (kind === 'morning') await secretary.sendMorning();
-  else await secretary.sendEvening();
-  console.log(`ส่งสรุป${kind === 'morning' ? 'เช้า' : 'เย็น'}แล้ว - เปิดไลน์ดูได้เลย`);
+  if (kind === 'reminder') {
+    const result = await secretary.runScheduled('reminder');
+    console.log(result.sent ? `ส่งเตือนแล้ว: ${result.reminders?.join(', ')}` : 'วันนี้ยังไม่มีเตือนที่ถึงเวลา');
+  } else {
+    if (kind === 'morning') await secretary.sendMorning();
+    else await secretary.sendEvening();
+    console.log(`ส่งสรุป${kind === 'morning' ? 'เช้า' : 'เย็น'}แล้ว - เปิดไลน์ดูได้เลย`);
+  }
 } catch (error) {
   failed = true;
   if (error instanceof LineConfigError) {

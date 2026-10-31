@@ -22,9 +22,10 @@ describe('verifyRunKey', () => {
 });
 
 describe('isSlot', () => {
-  it('รับเฉพาะ morning / evening', () => {
+  it('รับเฉพาะ morning / evening / reminder', () => {
     expect(isSlot('morning')).toBe(true);
     expect(isSlot('evening')).toBe(true);
+    expect(isSlot('reminder')).toBe(true);
     expect(isSlot('noon')).toBe(false);
     expect(isSlot(undefined)).toBe(false);
   });

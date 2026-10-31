@@ -43,3 +43,27 @@ describe('SecretaryService.runScheduled', () => {
     expect(morning).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('SecretaryService.runScheduled("reminder")', () => {
+  it('ส่งเตือนที่ถึงเวลาของวันนั้น รายการละครั้ง และไม่ส่งเมื่อยังไม่ถึงเวลา', async () => {
+    vi.useFakeTimers();
+    const pushed: unknown[][] = [];
+    const line = await import('./line-client.js');
+    vi.spyOn(line, 'pushLine').mockImplementation(async (messages) => {
+      pushed.push(messages as unknown[]);
+    });
+    const { s } = service();
+    vi.setSystemTime(new Date('2026-11-02T08:30:00.000Z')); // จันทร์ 15:30 ไทย - ยังไม่ถึง 16:00
+    expect(await s.runScheduled('reminder')).toEqual({ sent: false, skipped: 'already-sent', reminders: [] });
+    vi.setSystemTime(new Date('2026-11-02T09:05:00.000Z')); // จันทร์ 16:05 ไทย
+    expect(await s.runScheduled('reminder')).toEqual({ sent: true, reminders: ['mon-lexus'] });
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toEqual([{ type: 'text', text: '🔔 เตือน: วางบิล Lexus' }]);
+    expect(await s.runScheduled('reminder')).toEqual({ sent: false, skipped: 'already-sent', reminders: [] });
+    // รอบเย็นวันเดียวกันยังส่งได้ ไม่ถูกเตือนบัง
+    expect(await s.runScheduled('evening')).toEqual({ sent: true });
+    vi.setSystemTime(new Date('2026-11-03T09:05:00.000Z')); // อังคาร 16:05 ไทย
+    expect(await s.runScheduled('reminder')).toEqual({ sent: true, reminders: ['tue-spi'] });
+    expect(pushed).toHaveLength(2);
+  });
+});
