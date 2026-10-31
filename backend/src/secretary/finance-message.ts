@@ -1,7 +1,7 @@
 // การ์ดไลน์ "การเงินค้าง" (ผู้ใช้ 2026-10-31: ส่งผ่านเลขาส่วนตัว สั้นๆ) - ส่งต่อจากสรุปเช้าทุกวัน และพิมพ์ "การเงิน" ขอดูเมื่อไหร่ก็ได้
 // รายการเดียวกับที่ตรวจด้วยมือวันนั้น: เงินเดือน / รอวางบิล / รอรับเงิน / 50 ทวิ / ใบเสนอราคา / ชุดส่งบัญชีต้นเดือน
 // ฟังก์ชันล้วน (ไม่แตะฐานข้อมูล) ข้อมูลมาจาก finance-pending.ts
-import { baht, bubble, section, tapTo, text, TONES, urlFor, type Tone } from './card-parts.js';
+import { baht, bubble, capList, moreLine, overflowTexts, section, tapTo, text, TONES, urlFor, type Tone } from './card-parts.js';
 import type { LineMessage } from './line-client.js';
 
 export type PayrollStatus = 'NONE' | 'DRAFT' | 'APPROVED' | 'PAID';
@@ -67,18 +67,18 @@ export function accountingReminder(today: string): string | null {
   return `ชุดส่งบัญชี + ภ.พ.30 เดือน ${monthLabel(previousMonth(today.slice(0, 7)))} (ภายในวันที่ 15)`;
 }
 
-const MAX_CUSTOMERS = 3;
-
 function line(value: string, tone: Tone, uri: string | undefined, size = 'sm') {
   return text(value, { size, ...(tone === 'neutral' ? {} : { color: TONES[tone].fg }), ...tapTo(uri) });
 }
 
 const sub = (value: string, uri?: string) => text(value, { size: 'xs', color: '#888888', ...tapTo(uri) });
 
-export function buildFinanceMessage(input: FinancePending, baseUrl?: string): LineMessage {
+// ลูกค้ารอวางบิลแสดงครบทุกราย (ผู้ใช้ 2026-10-08 "ข้อมูลควรครบก่อน") เกินเพดานการ์ดไปต่อในข้อความถัดไปเหมือนสรุปเช้า
+export function buildFinanceMessage(input: FinancePending, baseUrl?: string): LineMessage[] {
   const billing = urlFor(baseUrl, '/accounting/billing');
   const lines: Array<Record<string, unknown>> = [];
   const summary: string[] = [];
+  let restCustomers: string[] = [];
 
   for (const todo of payrollTodos(input)) {
     lines.push(line(`• ${todo.text}`, todo.tone, urlFor(baseUrl, '/hr/payroll')));
@@ -90,12 +90,14 @@ export function buildFinanceMessage(input: FinancePending, baseUrl?: string): Li
     const parts = [unbilled.vehicles ? `${unbilled.vehicles} คัน` : '', unbilled.jobs ? `${unbilled.jobs} งาน` : ''].filter(Boolean).join(' + ');
     const oldest = unbilled.oldestDays && unbilled.oldestDays > 0 ? ` (นานสุด ${unbilled.oldestDays} วัน)` : '';
     lines.push(line(`• รอวางบิล ${parts}${oldest}`, unbilled.oldestDays && unbilled.oldestDays > 7 ? 'danger' : 'warning', billing));
-    const shown = unbilled.customers.slice(0, MAX_CUSTOMERS);
-    for (const c of shown) {
+    const customerLines = unbilled.customers.map((c) => {
       const what = [c.vehicles ? `${c.vehicles} คัน` : '', c.jobs ? `${c.jobs} งาน` : ''].filter(Boolean).join(' + ');
-      lines.push(sub(`   ${c.customerName} ${what}`, billing));
-    }
-    if (unbilled.customers.length > shown.length) lines.push(sub(`   และอีก ${unbilled.customers.length - shown.length} ราย`));
+      return `   ${c.customerName} ${what}`;
+    });
+    const listed = capList(customerLines);
+    restCustomers = listed.rest;
+    for (const l of listed.shown) lines.push(sub(l, billing));
+    lines.push(...moreLine(listed.rest.length));
     summary.push(`รอวางบิล ${parts}`);
   }
 
@@ -135,9 +137,13 @@ export function buildFinanceMessage(input: FinancePending, baseUrl?: string): Li
   if (accounting) lines.push(line(`• ${accounting}`, 'neutral', urlFor(baseUrl, '/accounting/tax-invoices')));
 
   const body = lines.length > 0 ? lines : [text('ไม่มีงานการเงินค้าง', { size: 'sm', color: TONES.success.fg })];
-  return {
-    type: 'flex',
-    altText: summary.length ? `การเงินค้าง: ${summary.slice(0, 3).join(' · ')}` : 'การเงินค้าง: ไม่มี',
-    contents: bubble('การเงินค้าง', input.today, [section('ต้องทำ / ต้องตาม', body)], baseUrl),
-  };
+  const overflow = overflowTexts('การเงินค้าง', [{ title: 'รอวางบิล', lines: restCustomers.map((l) => l.trim()) }]);
+  return [
+    {
+      type: 'flex',
+      altText: summary.length ? `การเงินค้าง: ${summary.slice(0, 3).join(' · ')}` : 'การเงินค้าง: ไม่มี',
+      contents: bubble('การเงินค้าง', input.today, [section('ต้องทำ / ต้องตาม', body)], baseUrl),
+    },
+    ...overflow.map((t): LineMessage => ({ type: 'text', text: t })),
+  ];
 }

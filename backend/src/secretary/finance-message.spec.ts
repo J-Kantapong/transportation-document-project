@@ -37,7 +37,7 @@ const allText = (value: unknown): string[] => {
 };
 
 function flexOf(input: FinancePending, url?: string) {
-  const message = buildFinanceMessage(input, url);
+  const [message] = buildFinanceMessage(input, url);
   if (message.type !== 'flex') throw new Error('ต้องเป็น flex');
   return message;
 }
@@ -78,19 +78,33 @@ describe('buildFinanceMessage', () => {
     expect(flexOf(base).altText).toBe('การเงินค้าง: เงินเดือน ต.ค. 2026 ยังไม่สร้างรอบ · รอวางบิล 28 คัน + 8 งาน · รอรับเงิน 19 ใบ');
   });
 
-  it('แสดงทุกเรื่องที่ค้าง ยอดเงินเต็ม ลูกค้ารอวางบิล 3 รายแรก', () => {
+  it('แสดงทุกเรื่องที่ค้าง ยอดเงินเต็ม ลูกค้ารอวางบิลครบทุกราย', () => {
+    expect(buildFinanceMessage(base)).toHaveLength(1);
     const texts = allText(flexOf(base).contents);
     expect(texts).toContain('• เงินเดือน ต.ค. 2026 ยังไม่สร้างรอบ');
     expect(texts).toContain('• รอวางบิล 28 คัน + 8 งาน (นานสุด 19 วัน)');
     expect(texts).toContain('   YM 8 งาน');
-    expect(texts.some((t) => t.includes(' D 1 คัน'))).toBe(false);
-    expect(texts).toContain('   และอีก 1 ราย');
+    expect(texts).toContain('   D 1 คัน');
     expect(texts).toContain('• รอรับเงิน 19 ใบ ฿1,385,773.3');
     expect(texts).toContain('   บริษัท 12 ใบ ฿1,151,413.25 · บุคคล 7 ใบ ฿234,360.05');
     expect(texts).toContain('   นานสุด IV2026-114 YM ฿418,757.8 (57 วัน)');
     expect(texts).toContain('• 50 ทวิ ยังไม่ได้รับ 16 ใบ ฿10,752.25 (ใกล้ครบ 1 ใบ)');
     expect(texts).toContain('• ใบเสนอราคา: รออนุมัติ 2 · ฉบับร่าง 1');
     expect(texts.some((t) => t.includes('ชุดส่งบัญชี'))).toBe(false);
+  });
+
+  it('ลูกค้ารอวางบิลเกินเพดานการ์ด: การ์ดบอกว่ามีต่อ ที่เหลือครบในข้อความถัดไป', () => {
+    const many = Array.from({ length: 18 }, (_, i) => ({ customerName: `C${i + 1}`, vehicles: 1, jobs: 0 }));
+    const messages = buildFinanceMessage({ ...base, unbilled: { ...base.unbilled, customers: many } });
+    expect(messages).toHaveLength(2);
+    const texts = allText(messages[0]);
+    expect(texts).toContain('   C15 1 คัน');
+    expect(texts).not.toContain('   C16 1 คัน');
+    expect(texts).toContain('และอีก 3 รายการ (ต่อในข้อความถัดไป)');
+    const rest = messages[1];
+    if (rest.type !== 'text') throw new Error('ต้องเป็น text');
+    expect(rest.text).toContain('รอวางบิล (ต่อ)');
+    expect(rest.text).toContain('C18 1 คัน');
   });
 
   it('ไม่มีอะไรค้าง = บอกว่าไม่มี', () => {

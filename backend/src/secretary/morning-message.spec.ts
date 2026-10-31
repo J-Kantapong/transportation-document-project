@@ -35,7 +35,7 @@ const allText = (value: unknown): string[] => {
 };
 
 function flexOf(input: MorningInput, url?: string) {
-  const message = buildMorningMessage(input, url);
+  const [message] = buildMorningMessage(input, url);
   if (message.type !== 'flex') throw new Error('ต้องเป็น flex');
   return message;
 }
@@ -57,20 +57,35 @@ describe('buildMorningMessage', () => {
     expect(flexOf(base).altText).toBe('สรุปเช้า: บิลเกินกำหนด 4 ใบ · รถติดขัด 12 คัน · ใช้เมื่อวาน ฿45,230');
   });
 
-  it('แสดงยอดเงินเต็มและ "ต้องทำก่อน" ไม่เกิน 3 ข้อ', () => {
+  it('แสดงยอดเงินเต็มและ "ต้องทำก่อน" ครบทุกข้อ (ผู้ใช้ 2026-10-08: ข้อมูลควรครบก่อน)', () => {
     const texts = allText(flexOf(base).contents);
     expect(texts).toContain('฿128,400');
     expect(texts).toContain('฿45,230');
     expect(texts.some((t) => t.startsWith('1. บิลค้างชำระเกิน 60 วัน - 2 ใบ'))).toBe(true);
     expect(texts.some((t) => t.startsWith('3. ใบเสนอราคารอ PO'))).toBe(true);
-    expect(texts.some((t) => t.includes('ข้อที่ 4'))).toBe(false);
+    expect(texts.filter((t) => /^\d+\. /.test(t))).toHaveLength(base.alerts.length);
   });
 
-  it('ลูกค้าค้างจ่ายแสดง 3 รายแรก (เกินนานสุดก่อน) แล้วบอกว่ามีอีกกี่ราย', () => {
+  it('ลูกค้าค้างจ่ายแสดงครบทุกราย (เกินนานสุดก่อน) ไม่ตัด', () => {
     const texts = allText(flexOf(base).contents);
     expect(texts).toContain('TWE ฿86,400 (2 ใบ เกินกำหนด 12 วัน)');
-    expect(texts.some((t) => t.startsWith('B '))).toBe(false);
-    expect(texts).toContain('และอีก 1 ราย');
+    for (const c of base.workingCapital.overdue.customers) expect(texts.some((t) => t.startsWith(`${c.customerName} `))).toBe(true);
+    expect(texts.some((t) => t.startsWith('และอีก'))).toBe(false);
+    expect(buildMorningMessage(base)).toHaveLength(1);
+  });
+
+  it('ยาวเกินเพดานของการ์ด: ส่วนที่เกินไปต่อในข้อความถัดไป ไม่มีรายไหนหาย และการ์ดไม่เกินขนาดที่ LINE รับ', () => {
+    const customers = Array.from({ length: 45 }, (_, i) => ({ customerName: `ลูกค้าชื่อยาวพอสมควร ${i + 1}`, count: 2, amount: 1000 + i, maxDaysOver: 90 - i }));
+    const alerts = Array.from({ length: 30 }, (_, i) => ({ severity: 'high', title: `เรื่องที่ต้องทำลำดับที่ ${i + 1}`, detail: 'รายละเอียดยาวๆ ของเรื่องนี้ 12 คัน', href: '/registration/new-vehicle/inspection' }));
+    const messages = buildMorningMessage({ ...base, alerts, workingCapital: { overdue: { count: 90, amount: 5, customers } } }, 'https://app.example.com');
+    const [card, ...rest] = messages;
+    if (card.type !== 'flex') throw new Error('ต้องเป็น flex');
+    expect(Buffer.byteLength(JSON.stringify(card.contents))).toBeLessThan(30_000);
+    expect(messages.length).toBeLessThanOrEqual(5);
+    const everything = [...allText(card.contents), ...rest.flatMap((m) => (m.type === 'text' ? m.text.split('\n') : []))];
+    for (const c of customers) expect(everything.some((t) => t.startsWith(`${c.customerName} `))).toBe(true);
+    for (let i = 1; i <= 30; i += 1) expect(everything.some((t) => t.startsWith(`${i}. เรื่องที่ต้องทำลำดับที่ ${i} `))).toBe(true);
+    expect(allText(card.contents)).toContain('และอีก 30 รายการ (ต่อในข้อความถัดไป)');
   });
 
   it('ไม่มีอะไรค้าง: ช่องเป็นสีเขียวและบอกว่าไม่มีเรื่องด่วน ไม่มีหัวข้อลูกค้าค้างจ่าย', () => {

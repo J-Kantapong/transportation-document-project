@@ -33,16 +33,16 @@ export class SecretaryService {
     return origin && /^https?:\/\//i.test(origin) ? origin.replace(/\/+$/, '') : undefined;
   }
 
-  private async morningMessage(): Promise<LineMessage> {
+  private async morningMessage(): Promise<LineMessage[]> {
     return buildMorningMessage(await this.overviewService.overview(), this.baseUrl());
   }
 
   // การ์ดการเงินค้าง (ผู้ใช้ 2026-10-31) - ส่งต่อจากสรุปเช้าทุกวัน และคำสั่ง "การเงิน"
-  private async financeMessage(): Promise<LineMessage> {
+  private async financeMessage(): Promise<LineMessage[]> {
     return buildFinanceMessage(await loadFinancePending(this.prisma, bangkokToday()), this.baseUrl());
   }
 
-  private async eveningMessage(): Promise<LineMessage> {
+  private async eveningMessage(): Promise<LineMessage[]> {
     const overview = await this.overviewService.overview();
     const staff = await this.staffActivity(overview.today);
     return buildEveningMessage({ ...overview, staff }, this.baseUrl());
@@ -76,22 +76,24 @@ export class SecretaryService {
   }
 
   async sendMorning(): Promise<void> {
-    await pushLine([await this.morningMessage(), await this.financeMessage()]);
+    await pushLine(await this.morningMessage());
+    // แยกส่ง: LINE รับไม่เกิน 5 ข้อความต่อครั้ง สรุปเช้าที่ยาวมีข้อความต่อท้ายได้
+    await pushLine(await this.financeMessage());
   }
 
   async sendEvening(): Promise<void> {
-    await pushLine([await this.eveningMessage()]);
+    await pushLine(await this.eveningMessage());
   }
 
   // คำตอบของคำสั่งในไลน์ (แบบ A: ไม่ใช้ AI)
   async answer(command: Command): Promise<LineMessage[]> {
     switch (command) {
       case 'morning':
-        return [await this.morningMessage(), await this.financeMessage()];
+        return this.morningMessage();
       case 'finance':
-        return [await this.financeMessage()];
+        return this.financeMessage();
       case 'evening':
-        return [await this.eveningMessage()];
+        return this.eveningMessage();
       case 'overdue':
         return [textMessage(overdueText(await this.overviewService.overview()))];
       case 'stuck':
