@@ -329,8 +329,9 @@ This private repository is the shared development surface for the user, Claude C
   (a Saturday/Sunday issue date still counts as its own week; pushed one week when it would fall before the issue date); it wins
   over credit days. Terms API takes `payWeekday` / `payWeeksAfter`; saving a changed schedule (or credit days) recomputes `dueDate`
   of that customer's ISSUED invoices at once (AuditLog `update-terms` carries `dueDatesRecomputed`), and editing a bill's issue
-  date recomputes from the schedule instead of shifting. `dueDate` is shown as "คาดรับเงิน": the invoice list badge reads
-  "เลยวันคาดรับเงิน N วัน - เช็กว่าได้รับแล้ว?" (the usual cause is a payment not keyed in), the overview / my-work alerts are
+  date recomputes from the schedule instead of shifting. `dueDate` is shown as "คาดรับเงิน": the badge
+  "เลยวันคาดรับเงิน N วัน - เช็กว่าได้รับแล้ว?" (`components/InvoiceDueBadge.tsx`, the usual cause is a payment not keyed in) sits on
+  the billing invoice list and on the tax invoice page's "บิลรอรับเงิน - ออกใบกำกับได้" panel (past-due first), the overview / my-work alerts are
   unchanged, and the LINE finance card gets a red "เลยวันคาดรับเงิน" line per customer (`FinancePending.receivables.pastDue`,
   built with `overdueByCustomer`). Public holidays are not known: the reminder then comes one day early (user's choice).
   Dev DB migrated and browser-tested on dev 2026-11-01 (SPI set to Thursday next week: PB2026-003 issued Thu 08/10 got 15/10 and the
