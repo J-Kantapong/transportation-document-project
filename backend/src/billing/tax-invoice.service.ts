@@ -244,7 +244,7 @@ export class TaxInvoiceService {
           },
         });
         if (carriedCert) await tx.taxInvoice.update({ where: { id: replaces!.id }, data: { whtCertificateId: null } });
-        await tx.invoice.update({ where: { id: invoiceId }, data: beforePayment ? { taxInvoiceNo } : { status: 'PAID', paidDate, taxInvoiceNo } });
+        await tx.invoice.update({ where: { id: invoiceId }, data: beforePayment ? { taxInvoiceNo } : { status: 'PAID', paidDate, paidById: currentUser()?.id ?? null, taxInvoiceNo } });
         return created.id;
       },
       { timeout: 20_000 },
@@ -373,7 +373,7 @@ export class TaxInvoiceService {
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: remark, cancelledById: currentUser()?.id ?? null },
       });
       if (tv.invoiceId && invoice?.status === 'PAID') {
-        await tx.invoice.update({ where: { id: tv.invoiceId }, data: { status: 'ISSUED', paidDate: null, taxInvoiceNo: null } });
+        await tx.invoice.update({ where: { id: tv.invoiceId }, data: { status: 'ISSUED', paidDate: null, paidById: null, taxInvoiceNo: null } });
       } else if (tv.invoiceId && invoice?.status === 'ISSUED') {
         // ใบที่ออกก่อนรับเงินและยังไม่ได้รับเงิน (ผู้ใช้ 2026-10-15): บิลยังรอรับเงิน ล้างแค่เลข TV ที่บิล แล้วแก้บิล/ออกใบใหม่ได้
         await tx.invoice.update({ where: { id: tv.invoiceId }, data: { taxInvoiceNo: null } });

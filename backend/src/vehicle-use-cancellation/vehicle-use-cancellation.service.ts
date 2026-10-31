@@ -226,7 +226,7 @@ export class VehicleUseCancellationService {
 
     // ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02: Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ และแก้ภายหลังไม่ได้
     const row = await this.prisma.vehicleUseCancellation.create({
-      data: { vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, billTotal: VEHICLE_USE_CANCEL_BILL_FEE, noBillTotal: VEHICLE_USE_CANCEL_NO_BILL_FEE, dutyAmount: VEHICLE_USE_CANCEL_DUTY_FEE },
+      data: { createdById: currentUser()?.id ?? null, vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, billTotal: VEHICLE_USE_CANCEL_BILL_FEE, noBillTotal: VEHICLE_USE_CANCEL_NO_BILL_FEE, dutyAmount: VEHICLE_USE_CANCEL_DUTY_FEE },
       include: cancellationInclude,
     });
     return { cancellation: serializeCancellation(row) };

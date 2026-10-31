@@ -128,6 +128,9 @@ model Customer {
   personalPayeeBank        String?
   personalPayeeAccountNo   String?
   billingCreditDays        Int? // เครดิตเทอม (วัน นับจากวันออกบิล, ผู้ใช้ 2026-09-28: มีรอบรับวางบิลแต่ใช้ค่าคร่าวๆ) - null = ไม่ได้ตั้ง
+  // รอบจ่ายตามวันในสัปดาห์ (ผู้ใช้ 2026-10-31, SPI: วางบิลสัปดาห์นี้ ได้เงินวันพฤหัสสัปดาห์หน้า) - ใช้แทนเครดิตวันเมื่อตั้ง
+  billingPayWeekday        Int? // 1 = จันทร์ .. 5 = ศุกร์ · null = ใช้เครดิตวัน
+  billingPayWeeksAfter     Int       @default(1) // 0 = สัปดาห์เดียวกับวันออกบิล, 1 = สัปดาห์ถัดไป, ...
   // ต้องมีใบเสนอราคาที่ลูกค้าอนุมัติแล้วก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลได้จากหน้าใบเสนอราคาเท่านั้น
   billingRequiresQuotation Boolean   @default(false)
 
@@ -162,6 +165,9 @@ model Brand {
 
 model Vehicle {
   id                   String   @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  plateReceivedById String? // คนที่แนบรูปรับป้าย
+  bookReceivedById  String? // คนที่แนบรูปรับเล่ม
   date                 DateTime // วันที่
   customerId           String // ชื่อลูกค้า
   // เลขตัวถัง - ไม่ซ้ำเฉพาะในกลุ่มรถที่ยังไม่ถูกลบ (partial unique index "Vehicle_chassis_active_key" ใน
@@ -188,12 +194,12 @@ model Vehicle {
   // transferBillCost = ส่วนของคันนี้ในยอดใบเสร็จ (หารเท่ากัน หรือแก้รายคันได้ รวมแล้วเท่ายอดใบ) - ขึ้นใบวางบิลรวมในค่าธรรมเนียมราชการ
   transferReceiptId     String?
   transferBillCost      Decimal?  @db.Decimal(10, 2)
-
-  // Step 3: ตรวจรถ - รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน (ส่งตรวจ -> ผลตรวจ) โดย inspectionRound บอกว่า
-  // ข้อมูลส่งตรวจ/ผลตรวจชุดปัจจุบันเป็นของรอบไหน ผลตรวจผ่านมีอายุ 90 วัน: ครบ 90 วันจาก inspectionResultDate
   // ข้ามใบเสร็จแจ้งย้าย (ผู้ใช้ 2026-10-19): งานที่แจ้งย้ายไปแล้วนอกระบบ/ไม่มีใบเสร็จ ติ๊กดำเนินการแล้วได้โดยระบุเหตุผล (บังคับ)
   // null = ไม่ได้ข้าม · ล้างเมื่อยกเลิกสถานะดำเนินการแล้ว · คันนี้ไม่มียอดแจ้งย้ายขึ้นบิล
   transferReceiptWaivedReason String?
+
+  // Step 3: ตรวจรถ - รอบ 1 และรอบ 2 ใช้ช่องชุดเดียวกัน (ส่งตรวจ -> ผลตรวจ) โดย inspectionRound บอกว่า
+  // ข้อมูลส่งตรวจ/ผลตรวจชุดปัจจุบันเป็นของรอบไหน ผลตรวจผ่านมีอายุ 90 วัน: ครบ 90 วันจาก inspectionResultDate
   // แล้วยังไม่ได้ยื่นเอกสาร รถเข้าคิวส่งตรวจเองเป็นรอบ 2 (ดู submission-eligibility.ts) ข้อมูลรอบก่อน (หรือครั้งที่ตรวจไม่ผ่าน) ถูกเก็บไว้ใน VehicleEditLog ตอนส่งตรวจใหม่
   inspectionRound Int @default(1) // 1 | 2
 
@@ -760,6 +766,8 @@ enum PlateSwapNumberSource {
 
 model PlateSwap {
   id           String        @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   kind         PlateSwapKind @default(OLD_NEW)
   vehicleClass String        @default("CAR") // CAR | MOTO - ตอนนี้รับเฉพาะ CAR (อัตราจักรยานยนต์ยังไม่มี)
 
@@ -869,6 +877,8 @@ model PlateSwap {
 // หมายเหตุชื่อ: cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap) ไม่ใช่การยกเลิกการใช้รถ
 model VehicleUseCancellation {
   id           String @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   vehicleClass String @default("CAR") // CAR | MOTO
 
   // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับ ownerName ซึ่งเป็นเจ้าของรถตามทะเบียน) - บังคับกรอกที่ชั้น service
@@ -925,6 +935,8 @@ model VehicleUseCancellation {
 // cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap)
 model PlateCopy {
   id           String @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   vehicleClass String @default("CAR") // CAR | MOTO (ผู้ใช้ 2026-10-09 เปิดมอเตอร์ไซค์) - เปลี่ยนหลังสร้างไม่ได้
 
   // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับ ownerName) - บังคับกรอกที่ชั้น service
@@ -992,6 +1004,8 @@ model PlateCopy {
 // cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel เหมือน PlateSwap)
 model VehicleTransfer {
   id           String @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   transferType String // OWNER | INSPECTION
   vehicleClass String @default("CAR") // CAR | MOTO
 
@@ -1070,6 +1084,8 @@ enum YamahaRelocationSize {
 
 model YamahaRelocationEntry {
   id        String               @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   date      DateTime // วันที่แจ้งย้าย
   size      YamahaRelocationSize
   count     Int // จำนวนคันในวันนั้น
@@ -1284,6 +1300,9 @@ model DeliverySlipItem {
 // และบันทึกประวัติลง AuditLog (entity 'Invoice') - customerSnapshot ไม่เปลี่ยนตามการแก้ข้อมูลลูกค้าทีหลัง
 model Invoice {
   id               String    @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนออกบิล
+  paidById    String? // คนบันทึกรับเงิน (รวมรับเงินพร้อมออกใบกำกับ)
   invoiceNo        String    @unique
   issueDate        DateTime
   customerId       String
@@ -1635,6 +1654,8 @@ model InvoiceLine {
 // Bill = ภาษีรถประจำปี + เงินเพิ่มกรณีล่าช้า / No Bill = ลงขัน (รถยนต์ 20, จักรยานยนต์ 10 - ติ๊กงดได้)
 model TaxRenewal {
   id String @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
 
   vehicleId  String? // รถในฐานข้อมูลรถจดใหม่ (ถ้ามี)
   customerId String?
@@ -1978,6 +1999,8 @@ model Supplier {
 // cancelledAt = "งานนี้ถูกยกเลิกในระบบ" (soft cancel) ไม่ใช่การยกเลิกการย้ายออก
 model VehicleMoveOut {
   id           String @id @default(cuid())
+  // ผู้ทำ (ผู้ใช้ 2026-10-15, หน้าภาพรวมการทำงาน) - id ของ User ไม่มี FK แถวก่อนหน้านี้เป็น null
+  createdById String? // คนบันทึกงาน
   vehicleClass String @default("CAR") // CAR | MOTO
 
   // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับ ownerName ซึ่งเป็นเจ้าของรถตามทะเบียน) - บังคับกรอกที่ชั้น service

@@ -2,7 +2,7 @@
 // รอวางบิล = คิวของ BillingService.queue (รถ) + loadJobs (งานอื่นๆ: ส่งงานแล้ว ยังไม่อยู่ในบิลที่ไม่ VOID ไม่ได้ปิดงาน)
 // 50 ทวิ = WHT_PENDING_WHERE ของหน้าใบกำกับภาษี · ใบเสนอราคา = stageOf ของหน้าใบเสนอราคา
 import { WHT_OVERDUE_DAYS, WHT_PENDING_WHERE } from '../billing/tax-invoice.service.js';
-import { daysBetween } from '../overview/overview-calculator.js';
+import { daysBetween, overdueByCustomer } from '../overview/overview-calculator.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { previousMonth, type FinancePending, type PayrollStatus } from './finance-message.js';
 
@@ -33,7 +33,7 @@ export async function loadFinancePending(prisma: PrismaService, today: string): 
     prisma.taxRenewal.findMany({ where: { customerId: { not: null }, cancelledAt: null, deliveredDate: { not: null }, paymentDate: { not: null } }, select: jobSelect }),
     prisma.invoice.findMany({
       where: { status: 'ISSUED' },
-      select: { invoiceNo: true, issueDate: true, netTotal: true, account: true, customer: { select: { name: true, company: true } } },
+      select: { invoiceNo: true, issueDate: true, dueDate: true, netTotal: true, account: true, customerId: true, customer: { select: { name: true, company: true } } },
       orderBy: { issueDate: 'asc' },
     }),
     prisma.taxInvoice.findMany({ where: WHT_PENDING_WHERE, select: { issueDate: true, whtAmount: true } }),
@@ -118,6 +118,13 @@ export async function loadFinancePending(prisma: PrismaService, today: string): 
       oldest: first
         ? { invoiceNo: first.invoiceNo, customerName: nameOf(first.customer), amount: num(first.netTotal), days: daysBetween(iso(first.issueDate), today) }
         : null,
+      // เลยวันคาดรับเงิน (dueDate จากรอบจ่าย / เครดิตของลูกค้า, ผู้ใช้ 2026-10-31) - กฎเดียวกับ workingCapital.overdue ของภาพรวม
+      pastDue: (({ count, amount, customers }) => ({ count, amount, customers: customers.map(({ customerName, count: c, amount: a, maxDaysOver }) => ({ customerName, count: c, amount: a, maxDaysOver })) }))(
+        overdueByCustomer(
+          invoices.map((i) => ({ customerId: i.customerId, customerName: nameOf(i.customer), dueDate: i.dueDate ? iso(i.dueDate) : null, amount: num(i.netTotal) })),
+          today,
+        ),
+      ),
     },
     wht: {
       count: whts.length,

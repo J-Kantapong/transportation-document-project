@@ -34,10 +34,14 @@ export interface ActivityEvent {
   href: string;
 }
 
+// ชื่อไทยของประวัติแก้ไข (AuditLog) - ครบทุก entity / action ที่ระบบเขียน (ผู้ใช้ 2026-10-15: เดิมบางรายการขึ้นเป็นภาษาอังกฤษ เช่น "ลูกค้า: update-terms")
+// เพิ่ม entity / action ใหม่ใน writeAudit แล้วให้เพิ่มที่นี่ด้วย (ไม่มีชื่อ = แสดงคำอังกฤษเดิม)
 const AUDIT_ENTITY_LABELS: Record<string, string> = {
   Customer: 'ลูกค้า',
   Invoice: 'ใบวางบิล',
   TaxInvoice: 'ใบกำกับภาษี',
+  TaxInvoiceSeries: 'เลขใบกำกับภาษี',
+  WhtCertificate: '50 ทวิ ของลูกค้า',
   TaxRenewal: 'ต่อภาษี',
   YamahaRelocation: 'แจ้งย้ายยามาฮ่า',
   PlateSwap: 'สลับเลข',
@@ -49,19 +53,97 @@ const AUDIT_ENTITY_LABELS: Record<string, string> = {
   User: 'ผู้ใช้',
   PayrollRun: 'เงินเดือน',
   Employee: 'พนักงาน',
+  PayslipSignature: 'ลายเซ็นผู้จ่ายเงิน',
+  IssuedWhtCertificate: '50 ทวิ ที่บริษัทออก',
+  IssuedWhtSeries: 'เลข 50 ทวิ ที่บริษัทออก',
+  Supplier: 'ทะเบียน Supplier',
+  SupplierProvinceRate: 'ราคาซับต่างจังหวัด',
 };
 const AUDIT_ACTION_LABELS: Record<string, string> = {
+  create: 'สร้าง',
+  add: 'เพิ่ม',
   update: 'แก้ไข',
+  set: 'ตั้งค่า',
+  replace: 'เปลี่ยน',
+  remove: 'ลบ',
+  import: 'นำเข้า',
   cancel: 'ยกเลิก',
   void: 'ยกเลิกบิล',
+  pay: 'บันทึกจ่ายแล้ว',
   unpay: 'ยกเลิกการรับเงิน',
+  approve: 'อนุมัติ',
+  unapprove: 'ยกเลิกการอนุมัติ',
+  reject: 'ไม่อนุมัติ',
+  recalculate: 'คำนวณใหม่',
+  issue: 'ออกเอกสาร',
+  invoice: 'ออกใบวางบิล',
   'undo-return': 'ยกเลิกการรับคืนเอกสาร',
+  'undo-inspection-sent': 'ยกเลิกการส่งตรวจ',
+  'undo-inspection-result': 'ยกเลิกผลตรวจ',
   'set-password': 'ตั้งรหัสผ่านใหม่',
-  'job-rates': 'ตั้งราคางาน',
+  'job-rates': 'ตั้งราคางานอื่นๆ',
+  rates: 'ตั้งตารางค่าบริการ',
+  'apply-rates': 'ตั้งราคาจากใบเสนอราคา',
+  'apply-quotation-rates': 'ตั้งราคาจากใบเสนอราคา',
+  'update-terms': 'แก้เงื่อนไขวางบิล',
   'set-account': 'เปลี่ยนบัญชีรับเงิน',
+  'set-personal-payee': 'เปลี่ยนผู้รับเงินบัญชีบุคคล',
+  'set-last-number': 'ตั้งเลขล่าสุด',
+  'set-pay-date': 'แก้วันจ่ายเงินเดือน',
   'billing-close': 'ปิดงาน - วางบิลนอกระบบ',
   'billing-reopen': 'เปิดงานกลับ (วางบิล)',
-  issue: 'ออกเอกสาร',
+  'cancel-tax-invoice': 'ยกเลิกใบกำกับภาษี',
+  'tax-invoice-replacement': 'ออกใบแทนใบกำกับภาษี',
+  'link-customer': 'ผูกลูกค้า',
+  relink: 'เปลี่ยนรถที่ผูก',
+  'add-receipt': 'แนบใบเสร็จ',
+  'remove-receipt': 'ลบใบเสร็จ',
+  'update-receipt-fields': 'แก้ข้อมูลใบเสร็จ',
+  extraction: 'อ่านใบเสร็จ',
+  'update-plate-date': 'แก้วันรับป้าย',
+  'update-book-date': 'แก้วันรับเล่ม',
+  'detach-plate-photo': 'ถอดรูปป้าย',
+  'detach-book-photo': 'ถอดรูปเล่ม',
+  'delivery-update': 'แก้ใบส่งงาน',
+  'delivery-cancel': 'ยกเลิกใบส่งงาน',
+  'delivery-add-plate': 'เพิ่มป้ายในใบส่งงาน',
+  resign: 'ลาออก',
+  reinstate: 'กลับมาทำงาน',
+  deactivate: 'ปิดใช้งาน',
+  reactivate: 'เปิดใช้งาน',
+};
+// หน้าที่ใช้ตรวจของแต่ละประวัติแก้ไข (เดิมทุกแถวลิงก์ไปหน้าแรก)
+const AUDIT_ENTITY_HREFS: Record<string, string> = {
+  Customer: '/customers',
+  Invoice: '/accounting/billing',
+  TaxInvoice: '/accounting/tax-invoices',
+  TaxInvoiceSeries: '/accounting/tax-invoices',
+  WhtCertificate: '/accounting/tax-invoices/wht',
+  TaxRenewal: '/registration/tax-renewal',
+  YamahaRelocation: '/registration/yamaha-relocation',
+  PlateSwap: '/registration/plate-swap',
+  PlateCopy: '/registration/other/plate-copy',
+  VehicleTransfer: '/registration/transfer',
+  VehicleUseCancellation: '/registration/other/cancel-use',
+  VehicleMoveOut: '/registration/other/move-out',
+  Quotation: '/accounting/quotations',
+  User: '/admin/users',
+  PayrollRun: '/hr/payroll',
+  Employee: '/hr/employees',
+  PayslipSignature: '/hr/payroll',
+  IssuedWhtCertificate: '/hr/wht',
+  IssuedWhtSeries: '/hr/wht',
+  Supplier: '/hr/suppliers',
+  SupplierProvinceRate: '/admin/supplier-rates',
+};
+// หน้าสลับเลขแยกตามประเภทรถและแบบ (เดิมลิงก์ /registration/plate-swap/old-new ซึ่งไม่มีหน้านี้)
+const plateSwapHref = (vehicleClass: string, kind: string) => `/registration/plate-swap/${vehicleClass === 'MOTO' ? 'moto' : 'car'}/${kind === 'OLD_OLD' ? 'old-old' : 'old-new'}`;
+const DELIVERY_ACTIONS = new Set(['delivery-update', 'delivery-cancel', 'delivery-add-plate']);
+export const auditHref = (entity: string, action: string) => {
+  if (action === 'billing-close' || action === 'billing-reopen') return '/accounting/billing/jobs';
+  if (DELIVERY_ACTIONS.has(action)) return '/delivery/report';
+  if (entity === 'Quotation' && action === 'invoice') return '/accounting/billing';
+  return AUDIT_ENTITY_HREFS[entity] ?? '/';
 };
 const classKind = (vehicleClass: string): VehicleKind => (vehicleClass === 'MOTO' ? 'moto' : 'car');
 // ใบส่งงานหนึ่งใบมีรถชนิดเดียว (ใบเก่าที่ผสมกัน ใช้ชนิดของรายการแรก)
@@ -70,7 +152,10 @@ const slipKind = (items: Array<{ vehicleKind: string | null; body: string | null
   if (!first) return null;
   return first.vehicleKind === 'moto' || first.vehicleKind === 'car' ? first.vehicleKind : vehicleKindOf(first.body);
 };
-const auditTitle = (entity: string, action: string) => `${AUDIT_ENTITY_LABELS[entity] ?? entity}: ${AUDIT_ACTION_LABELS[action] ?? action}`;
+// คำเดียวกันที่ความหมายต่างตามเรื่อง (เงินเดือน: pay / unpay = จ่ายออก ไม่ใช่รับเงิน)
+const AUDIT_ENTITY_ACTION_LABELS: Record<string, string> = { 'PayrollRun/unpay': 'ยกเลิกการจ่าย' };
+export const auditTitle = (entity: string, action: string) =>
+  `${AUDIT_ENTITY_LABELS[entity] ?? entity}: ${AUDIT_ENTITY_ACTION_LABELS[`${entity}/${action}`] ?? AUDIT_ACTION_LABELS[action] ?? action}`;
 
 interface EventInput {
   id: string;
@@ -94,6 +179,7 @@ interface EventInput {
 interface JobRow {
   id: string;
   createdAt: Date;
+  createdById: string | null;
   customerId: string | null;
   chassis: string;
   plateCategory: string;
@@ -127,19 +213,19 @@ export class ActivityService {
       p.vehicle.findMany({ where: { createdAt: range, deletedAt: null }, select: { ...vehicleSel, createdAt: true, createdBy: userSel } }),
       p.documentSubmission.findMany({ where: { createdAt: range }, select: { id: true, vehicleId: true, createdAt: true, urgent: true, status: true, noBillItems: true, noBillTotal: true, billFeeTotal: true, taxAmount: true, receiptAmount: true, createdBy: userSel } }),
       p.documentSubmission.findMany({ where: { receiptReceivedDate: exact, status: 'RECEIPT_RECEIVED' }, select: { id: true, vehicleId: true, status: true, receiptNo: true, receiptAmount: true, billFeeTotal: true, taxAmount: true, receivedBy: userSel, receipts: { select: { createdAt: true }, orderBy: { createdAt: 'asc' } } } }),
-      p.vehicle.findMany({ where: { plateReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, platePhoto: { select: { createdAt: true } } } }),
-      p.vehicle.findMany({ where: { bookReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, bookPhoto: { select: { createdAt: true } } } }),
+      p.vehicle.findMany({ where: { plateReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, plateReceivedById: true, platePhoto: { select: { createdAt: true } } } }),
+      p.vehicle.findMany({ where: { bookReceivedDate: exact, deletedAt: null }, select: { ...vehicleSel, bookReceivedById: true, bookPhoto: { select: { createdAt: true } } } }),
       p.deliverySlip.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, slipNo: true, customerId: true, recipient: true, createdAt: true, items: { where: { cancelledAt: null }, select: { id: true, vehicleKind: true, body: true } }, createdBy: userSel } }),
-      p.invoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, invoiceNo: true, customerId: true, netTotal: true } }),
-      p.invoice.findMany({ where: { paidDate: exact, status: 'PAID' }, select: { id: true, invoiceNo: true, customerId: true, netTotal: true } }),
-      p.taxInvoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, taxInvoiceNo: true, customerId: true, grandTotal: true } }),
-      p.plateSwap.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, vehicleClass: true, oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
-      p.taxRenewal.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
-      p.yamahaRelocationEntry.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, size: true, count: true, billFee: true, noBillFee: true } }),
-      p.vehicleTransfer.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
-      p.vehicleUseCancellation.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
-      p.plateCopy.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
-      p.vehicleMoveOut.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.invoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, invoiceNo: true, customerId: true, netTotal: true, createdById: true } }),
+      p.invoice.findMany({ where: { paidDate: exact, status: 'PAID' }, select: { id: true, invoiceNo: true, customerId: true, netTotal: true, paidById: true } }),
+      p.taxInvoice.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, status: true, taxInvoiceNo: true, customerId: true, grandTotal: true, beforePayment: true, createdById: true } }),
+      p.plateSwap.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, kind: true, customerId: true, vehicleClass: true, oldChassis: true, oldPlateCategory: true, oldPlateNumber: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
+      p.taxRenewal.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, billTotal: true, noBillTotal: true, noBillItems: true } }),
+      p.yamahaRelocationEntry.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, size: true, count: true, billFee: true, noBillFee: true } }),
+      p.vehicleTransfer.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.vehicleUseCancellation.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.plateCopy.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
+      p.vehicleMoveOut.findMany({ where: { createdAt: range, cancelledAt: null }, select: { id: true, createdAt: true, createdById: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleClass: true, billTotal: true, noBillTotal: true, dutyAmount: true } }),
       p.vehicleEditLog.findMany({ where: { editedAt: range }, select: { id: true, vehicleId: true, editedAt: true, remark: true, editedBy: userSel } }),
       p.auditLog.findMany({ where: { createdAt: range }, select: { id: true, createdAt: true, entity: true, action: true, remark: true, editedBy: userSel } }),
     ]);
@@ -157,6 +243,16 @@ export class ActivityService {
     const customers = new Map(customerRows.map((c) => [c.id, c.name]));
     const cname = (id: string | null | undefined) => (id ? (customers.get(id) ?? null) : null);
     const person = (u: { name: string; displayName: string | null } | null | undefined) => (u ? u.displayName || u.name : null);
+    // คอลัมน์ผู้ทำที่ไม่มี relation (เพิ่ม 2026-10-15 + ใบกำกับภาษี) - ดึงชื่อครั้งเดียว
+    const authorIds = new Set<string>();
+    for (const v of plates) if (v.plateReceivedById) authorIds.add(v.plateReceivedById);
+    for (const v of books) if (v.bookReceivedById) authorIds.add(v.bookReceivedById);
+    for (const i of invoices) if (i.createdById) authorIds.add(i.createdById);
+    for (const i of paidInvoices) if (i.paidById) authorIds.add(i.paidById);
+    for (const x of [...taxInvoices, ...plateSwaps, ...taxRenewals, ...yamaha, ...transfers, ...useCancels, ...plateCopies, ...moveOuts]) if (x.createdById) authorIds.add(x.createdById);
+    const authorRows = authorIds.size ? await p.user.findMany({ where: { id: { in: [...authorIds] } }, select: { id: true, name: true, displayName: true } }) : [];
+    const authors = new Map(authorRows.map((u) => [u.id, person(u)]));
+    const author = (id: string | null | undefined) => (id ? (authors.get(id) ?? null) : null);
 
     // รับใบเสร็จ / ป้าย / เล่ม: ระบบเก็บวันที่รับ (ไม่มีเวลา) แต่รูปที่แนบมีเวลาอัปโหลดจริง - ถ้ารูปถูกอัปโหลดในวันนี้ ใช้เวลานั้น ไม่งั้นแสดงเป็นวันที่ล้วน
     const inDay = (d: Date | null | undefined) => (d && d >= dayStart && d < dayEnd ? d : undefined);
@@ -195,8 +291,8 @@ export class ActivityService {
         actor: person(s.receivedBy), href: '/registration/new-vehicle/receive-receipt',
       });
     }
-    for (const v of plates) add({ id: `plate-${v.id}`, at: inDay(v.platePhoto?.createdAt), type: 'plate', group: 'new', kind: vehicleKindOf(v.body), title: 'รับป้ายทะเบียน', ref: v.chassis, customer: cname(v.customerId), detail: plate(v.plateCategory, v.plateNumber), href: '/registration/new-vehicle/receive-plate' });
-    for (const v of books) add({ id: `book-${v.id}`, at: inDay(v.bookPhoto?.createdAt), type: 'book', group: 'new', kind: vehicleKindOf(v.body), title: 'รับเล่มทะเบียน', ref: v.chassis, customer: cname(v.customerId), href: '/registration/new-vehicle/receive-book' });
+    for (const v of plates) add({ id: `plate-${v.id}`, at: inDay(v.platePhoto?.createdAt), type: 'plate', group: 'new', kind: vehicleKindOf(v.body), title: 'รับป้ายทะเบียน', ref: v.chassis, customer: cname(v.customerId), detail: plate(v.plateCategory, v.plateNumber), actor: author(v.plateReceivedById), href: '/registration/new-vehicle/receive-plate' });
+    for (const v of books) add({ id: `book-${v.id}`, at: inDay(v.bookPhoto?.createdAt), type: 'book', group: 'new', kind: vehicleKindOf(v.body), title: 'รับเล่มทะเบียน', ref: v.chassis, customer: cname(v.customerId), actor: author(v.bookReceivedById), href: '/registration/new-vehicle/receive-book' });
     for (const s of slips) {
       add({
         id: `slip-${s.id}`, at: s.createdAt, type: 'delivery', group: 'new', kind: slipKind(s.items), title: 'ส่งงานให้ลูกค้า', ref: `DL-${String(s.slipNo).padStart(5, '0')}`, customer: cname(s.customerId),
@@ -207,7 +303,7 @@ export class ActivityService {
     // --- งานอื่นๆ: ยอดที่เก็บไว้ตอนยื่น (อากรแยก) ---
     const jobs = (rows: JobRow[], type: string, title: string, href: string) => {
       for (const r of rows) {
-        add({ id: `${type}-${r.id}`, at: r.createdAt, type, group: 'other', kind: classKind(r.vehicleClass), title, ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, r.noBillTotal, r.dutyAmount), href });
+        add({ id: `${type}-${r.id}`, at: r.createdAt, type, group: 'other', kind: classKind(r.vehicleClass), title, ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, r.noBillTotal, r.dutyAmount), actor: author(r.createdById), href });
       }
     };
     jobs(transfers, 'transfer', 'งานโอน', '/registration/transfer');
@@ -216,21 +312,21 @@ export class ActivityService {
     jobs(moveOuts, 'move-out', 'ย้ายออก', '/registration/other/move-out');
     for (const r of plateSwaps) {
       const duty = dutyOfItems(r.noBillItems);
-      add({ id: `swap-${r.id}`, at: r.createdAt, type: 'plate-swap', group: 'other', kind: classKind(r.vehicleClass), title: 'สลับเลข', ref: r.oldChassis, customer: cname(r.customerId), detail: plate(r.oldPlateCategory, r.oldPlateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), href: '/registration/plate-swap/old-new' });
+      add({ id: `swap-${r.id}`, at: r.createdAt, type: 'plate-swap', group: 'other', kind: classKind(r.vehicleClass), title: 'สลับเลข', ref: r.oldChassis, customer: cname(r.customerId), detail: plate(r.oldPlateCategory, r.oldPlateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), actor: author(r.createdById), href: plateSwapHref(r.vehicleClass, r.kind) });
     }
     for (const r of taxRenewals) {
       const duty = dutyOfItems(r.noBillItems);
-      add({ id: `tax-${r.id}`, at: r.createdAt, type: 'tax-renewal', group: 'other', kind: isMotorcycleType(r.vehicleType) ? 'moto' : 'car', title: 'ต่อภาษี', ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), href: '/registration/tax-renewal' });
+      add({ id: `tax-${r.id}`, at: r.createdAt, type: 'tax-renewal', group: 'other', kind: isMotorcycleType(r.vehicleType) ? 'moto' : 'car', title: 'ต่อภาษี', ref: r.chassis, customer: cname(r.customerId), detail: plate(r.plateCategory, r.plateNumber), ...money(r.billTotal, num(r.noBillTotal) - duty, duty), actor: author(r.createdById), href: '/registration/tax-renewal' });
     }
     for (const y of yamaha) {
-      add({ id: `ymh-${y.id}`, at: y.createdAt, type: 'yamaha', group: 'other', title: `แจ้งย้ายยามาฮ่า (${y.size === 'SMALL' ? 'เล็ก' : 'ใหญ่'})`, customer: 'ยามาฮ่า', detail: `${y.count} คัน`, ...money(y.billFee, y.noBillFee, 0), href: '/registration/yamaha-relocation' });
+      add({ id: `ymh-${y.id}`, at: y.createdAt, type: 'yamaha', group: 'other', title: `แจ้งย้ายยามาฮ่า (${y.size === 'SMALL' ? 'เล็ก' : 'ใหญ่'})`, customer: 'ยามาฮ่า', detail: `${y.count} คัน`, ...money(y.billFee, y.noBillFee, 0), actor: author(y.createdById), href: '/registration/yamaha-relocation' });
     }
 
     // --- การเงิน ---
     // บิล / ใบกำกับที่ยกเลิกแล้วยังแสดงเป็นแถว (ให้เห็นว่าเคยออก) แต่ไม่นับในยอดรวม: cancelled = true
-    for (const i of invoices) add({ id: `inv-${i.id}`, at: i.createdAt, type: 'invoice', group: 'billing', title: i.status === 'VOID' ? 'ออกใบวางบิล (ยกเลิกแล้ว)' : 'ออกใบวางบิล', ref: i.invoiceNo, customer: cname(i.customerId), amount: round2(num(i.netTotal)), cancelled: i.status === 'VOID', href: '/accounting/billing' });
-    for (const i of paidInvoices) add({ id: `paid-${i.id}`, type: 'paid', group: 'billing', title: 'รับเงินตามบิล', ref: i.invoiceNo, customer: cname(i.customerId), amount: round2(num(i.netTotal)), href: '/accounting/billing' });
-    for (const t of taxInvoices) add({ id: `tv-${t.id}`, at: t.createdAt, type: 'tax-invoice', group: 'billing', title: t.status === 'CANCELLED' ? 'ใบกำกับภาษี (ยกเลิกแล้ว)' : 'ออกใบกำกับภาษี/ใบเสร็จ', ref: t.taxInvoiceNo, customer: cname(t.customerId), amount: round2(num(t.grandTotal)), cancelled: t.status === 'CANCELLED', href: '/accounting/tax-invoices' });
+    for (const i of invoices) add({ id: `inv-${i.id}`, at: i.createdAt, type: 'invoice', group: 'billing', title: i.status === 'VOID' ? 'ออกใบวางบิล (ยกเลิกแล้ว)' : 'ออกใบวางบิล', ref: i.invoiceNo, customer: cname(i.customerId), amount: round2(num(i.netTotal)), cancelled: i.status === 'VOID', actor: author(i.createdById), href: '/accounting/billing' });
+    for (const i of paidInvoices) add({ id: `paid-${i.id}`, type: 'paid', group: 'billing', title: 'รับเงินตามบิล', ref: i.invoiceNo, customer: cname(i.customerId), amount: round2(num(i.netTotal)), actor: author(i.paidById), href: '/accounting/billing' });
+    for (const t of taxInvoices) add({ id: `tv-${t.id}`, at: t.createdAt, type: 'tax-invoice', group: 'billing', title: t.status === 'CANCELLED' ? 'ใบกำกับภาษี (ยกเลิกแล้ว)' : 'ออกใบกำกับภาษี/ใบเสร็จ', ref: t.taxInvoiceNo, customer: cname(t.customerId), detail: t.beforePayment ? 'ออกก่อนรับเงิน' : null, amount: round2(num(t.grandTotal)), cancelled: t.status === 'CANCELLED', actor: author(t.createdById), href: '/accounting/tax-invoices' });
 
     // --- การแก้ไข / ยกเลิก (มีผู้ทำและเหตุผล) ---
     for (const l of vehicleLogs) {
@@ -238,7 +334,7 @@ export class ActivityService {
       add({ id: `vlog-${l.id}`, at: l.editedAt, type: 'vehicle-edit', group: 'edit', kind: v ? vehicleKindOf(v.body) : null, title: 'แก้ไข/ยกเลิกข้อมูลรถ', ref: v?.chassis ?? null, customer: cname(v?.customerId), detail: l.remark, actor: person(l.editedBy), href: v ? vehicleHref(v.chassis) : '/vehicles' });
     }
     for (const l of auditLogs) {
-      add({ id: `alog-${l.id}`, at: l.createdAt, type: 'audit', group: 'edit', title: auditTitle(l.entity, l.action), detail: l.remark, actor: person(l.editedBy), href: l.action === 'billing-close' || l.action === 'billing-reopen' ? '/accounting/billing/jobs' : '/' });
+      add({ id: `alog-${l.id}`, at: l.createdAt, type: 'audit', group: 'edit', title: auditTitle(l.entity, l.action), detail: l.remark, actor: person(l.editedBy), href: auditHref(l.entity, l.action) });
     }
 
     events.sort((a, b) => (a.timed === b.timed ? a.at.localeCompare(b.at) : a.timed ? -1 : 1));

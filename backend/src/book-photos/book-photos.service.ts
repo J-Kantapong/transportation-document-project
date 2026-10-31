@@ -48,7 +48,7 @@ export class BookPhotosService {
   private async linkVehicle(tx: Prisma.TransactionClient, vehicleId: string, date: Date, photoId: string) {
     const { count } = await tx.vehicle.updateMany({
       where: { id: vehicleId, bookReceivedDate: null },
-      data: { bookReceivedDate: date, bookPhotoId: photoId },
+      data: { bookReceivedDate: date, bookPhotoId: photoId, bookReceivedById: currentUser()?.id ?? null }, // ผู้ทำ (ผู้ใช้ 2026-10-15)
     });
     if (count === 0) throw new BadRequestException({ error: 'รถคันนี้รับเล่มไปแล้ว' });
   }
@@ -173,7 +173,7 @@ export class BookPhotosService {
     const { removed, photo } = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.vehicle.updateMany({
         where: { id: vehicle.id, bookPhotoId: photoId, bookReceivedDate: { not: null }, deliveredDate: null },
-        data: { bookReceivedDate: null, bookPhotoId: null },
+        data: { bookReceivedDate: null, bookPhotoId: null, bookReceivedById: null },
       });
       if (count === 0) throw staleReceivedRow();
       await tx.vehicleEditLog.create({

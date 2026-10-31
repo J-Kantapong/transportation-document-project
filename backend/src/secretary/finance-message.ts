@@ -22,6 +22,9 @@ export interface FinancePending {
     company: { count: number; amount: number };
     personal: { count: number; amount: number };
     oldest: { invoiceNo: string; customerName: string; amount: number; days: number } | null;
+    // เลยวันที่คาดว่าจะได้รับเงิน (Invoice.dueDate จากรอบจ่าย/เครดิตของลูกค้า, ผู้ใช้ 2026-10-31) แต่ยังไม่ได้ลงรับเงิน
+    // = น่าจะได้รับแล้วแต่ลืมลง หรือลูกค้าจ่ายช้า - ต่อลูกค้า เรียงเลยนานสุดก่อน
+    pastDue?: { count: number; amount: number; customers: Array<{ customerName: string; count: number; amount: number; maxDaysOver: number }> };
   };
   wht: { count: number; amount: number; overdue: number; soon: number }; // overdue = เกิน 30 วัน, soon = อีก 5 วันจะเกิน
   quotations: { waiting: number; expired: number; approvedUnused: number; drafts: number };
@@ -111,7 +114,18 @@ export function buildFinanceMessage(input: FinancePending, baseUrl?: string): Li
     if (split.length) lines.push(sub(`   ${split.join(' · ')}`, billing));
     const o = receivables.oldest;
     if (o && o.days > 0) lines.push(sub(`   นานสุด ${o.invoiceNo} ${o.customerName} ${baht(o.amount)} (${o.days} วัน)`, urlFor(baseUrl, `/accounting/billing?focus=${o.invoiceNo}`)));
-    summary.push(`รอรับเงิน ${receivables.count} ใบ`);
+    // เลยวันคาดรับเงินแล้ว (ผู้ใช้ 2026-10-31: SPI จ่ายพฤหัสสัปดาห์ถัดไป แต่ลืมลงรับเงิน) - แดง ให้เช็ก statement แล้วกดรับเงิน
+    // ใน altText เรื่องนี้แทนที่ "รอรับเงิน" เพราะสำคัญกว่า (altText มีที่แค่ 3 เรื่อง)
+    const past = receivables.pastDue;
+    if (past && past.count > 0) {
+      lines.push(line(`• เลยวันคาดรับเงิน ${past.count} ใบ ${baht(past.amount)} - เช็ก statement ว่าได้รับแล้วแต่ยังไม่ลง`, 'danger', billing));
+      const listed = capList(past.customers, 3);
+      for (const c of listed.shown) lines.push(sub(`   ${c.customerName} ${c.count} ใบ ${baht(c.amount)} (เลยมา ${c.maxDaysOver} วัน)`, billing));
+      lines.push(...moreLine(listed.rest.length));
+      summary.push(`เลยวันคาดรับเงิน ${past.count} ใบ`);
+    } else {
+      summary.push(`รอรับเงิน ${receivables.count} ใบ`);
+    }
   }
 
   const { wht } = input;

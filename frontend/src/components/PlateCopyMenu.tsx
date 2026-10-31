@@ -26,7 +26,7 @@ export function PlateCopyMenu() {
           </Link>
           <Link href={`${BASE}/receive-plate`}>
             <strong>รับป้าย</strong>
-            <div className="muted">ถ่ายรูปป้ายที่ได้รับในการ์ดยืนยันรับป้าย (ปกติป้ายออกภายใน 15 วัน)</div>
+            <div className="muted">ถ่ายรูปป้ายที่ได้รับในแถวของงาน (ปกติป้ายออกภายใน 15 วัน)</div>
           </Link>
         </div>
       </section>

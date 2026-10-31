@@ -91,6 +91,32 @@ describe('buildFinanceMessage', () => {
     expect(texts).toContain('• 50 ทวิ ยังไม่ได้รับ 16 ใบ ฿10,752.25 (ใกล้ครบ 1 ใบ)');
     expect(texts).toContain('• ใบเสนอราคา: รออนุมัติ 2 · ฉบับร่าง 1');
     expect(texts.some((t) => t.includes('ชุดส่งบัญชี'))).toBe(false);
+    expect(texts.some((t) => t.includes('เลยวันคาดรับเงิน'))).toBe(false);
+  });
+
+  // รอบจ่ายของลูกค้า (ผู้ใช้ 2026-10-31: SPI จ่ายพฤหัสสัปดาห์ถัดไป แต่ลืมลงรับเงิน) - บิลที่เลยวันคาดรับเงินขึ้นแดงพร้อมลูกค้า
+  it('บิลเลยวันคาดรับเงิน: บรรทัดแดง + ลูกค้า 3 รายแรก และอยู่ใน altText', () => {
+    const input: FinancePending = {
+      ...base,
+      receivables: {
+        ...base.receivables,
+        pastDue: {
+          count: 3,
+          amount: 141413,
+          customers: [
+            { customerName: 'SPI', count: 3, amount: 141413, maxDaysOver: 23 },
+            { customerName: 'A', count: 1, amount: 1, maxDaysOver: 2 },
+            { customerName: 'B', count: 1, amount: 1, maxDaysOver: 2 },
+            { customerName: 'C', count: 1, amount: 1, maxDaysOver: 1 },
+          ],
+        },
+      },
+    };
+    const texts = allText(flexOf(input).contents);
+    expect(texts).toContain('• เลยวันคาดรับเงิน 3 ใบ ฿141,413 - เช็ก statement ว่าได้รับแล้วแต่ยังไม่ลง');
+    expect(texts).toContain('   SPI 3 ใบ ฿141,413 (เลยมา 23 วัน)');
+    expect(texts).toContain('และอีก 1 รายการ (ต่อในข้อความถัดไป)');
+    expect(flexOf(input).altText).toContain('เลยวันคาดรับเงิน 3 ใบ');
   });
 
   it('ลูกค้ารอวางบิลเกินเพดานการ์ด: การ์ดบอกว่ามีต่อ ที่เหลือครบในข้อความถัดไป', () => {

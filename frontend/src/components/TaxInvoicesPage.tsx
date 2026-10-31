@@ -144,7 +144,7 @@ export function TaxInvoicesPage() {
                 <span>
                   <b>{i.invoiceNo}</b> · {isoToDisplayDate(i.issueDate)} · {i.customer.name}
                   <span className="muted" style={{ display: "block", fontSize: 13 }}>
-                    {i.lines.length ? `${i.lines.length} คัน` : "บิลกำหนดเอง"} · ยอดสุทธิ {formatMoney(i.netTotal)} บาท{i.dueDate ? ` · ครบกำหนด ${isoToDisplayDate(i.dueDate)}` : ""}
+                    {i.lines.length ? `${i.lines.length} คัน` : "บิลกำหนดเอง"} · ยอดสุทธิ {formatMoney(i.netTotal)} บาท{i.dueDate ? ` · คาดรับเงิน ${isoToDisplayDate(i.dueDate)}` : ""}
                   </span>
                 </span>
                 <button type="button" className="primary" onClick={() => { setNotice(""); setIssuing(i); }}>

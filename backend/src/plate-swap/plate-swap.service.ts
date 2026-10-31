@@ -589,6 +589,7 @@ export class PlateSwapService {
       const vehicle = await this.lockNewVehicle(tx, vehicleId, undefined, 'link', vehicleClass);
       return tx.plateSwap.create({
         data: {
+          createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-15)
           kind: PlateSwapKind.OLD_NEW,
           vehicleClass,
           customerId,
@@ -665,11 +666,11 @@ export class PlateSwapService {
 
     const swaps = await this.prisma.$transaction(async (tx) => [
       await tx.plateSwap.create({
-        data: { ...shared, ...carA, newPlateCategory: carB.oldPlateCategory, newPlateNumber: carB.oldPlateNumber },
+        data: { ...shared, createdById: currentUser()?.id ?? null, ...carA, newPlateCategory: carB.oldPlateCategory, newPlateNumber: carB.oldPlateNumber },
         include: swapInclude,
       }),
       await tx.plateSwap.create({
-        data: { ...shared, ...carB, newPlateCategory: carA.oldPlateCategory, newPlateNumber: carA.oldPlateNumber },
+        data: { ...shared, createdById: currentUser()?.id ?? null, ...carB, newPlateCategory: carA.oldPlateCategory, newPlateNumber: carA.oldPlateNumber },
         include: swapInclude,
       }),
     ]);

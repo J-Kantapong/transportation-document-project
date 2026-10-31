@@ -110,7 +110,7 @@ describe('PlatePhotosService.attach - แนบรูปป้ายทีละ
     expect(create.mock.calls[0][0].data).toMatchObject({ kind: 'moto', closedAt: expect.any(Date) });
     expect(updateMany.mock.calls[0][0]).toEqual({
       where: { id: 'v1', plateReceivedDate: null },
-      data: { plateReceivedDate: day('2026-09-26'), platePhotoId: 'p1' },
+      data: { plateReceivedDate: day('2026-09-26'), platePhotoId: 'p1', plateReceivedById: null },
     });
   });
 
@@ -184,7 +184,7 @@ describe('PlatePhotosService.attach - แนบรูปป้ายทีละ
     expect(storage.put).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(photoUpdate.mock.calls[0][0]).toEqual({ where: { id: 'old' }, data: { closedAt: expect.any(Date), kind: 'moto', readPending: false } });
-    expect(updateMany.mock.calls[0][0].data).toEqual({ plateReceivedDate: day('2026-09-26'), platePhotoId: 'old' });
+    expect(updateMany.mock.calls[0][0].data).toEqual({ plateReceivedDate: day('2026-09-26'), platePhotoId: 'old', plateReceivedById: null });
   });
 
   it('รูปค้างถูกคำขออื่นเอาไปใช้พร้อมกัน = 409', async () => {
@@ -269,7 +269,7 @@ describe('PlatePhotosService.detach - ถอดรูปป้ายที่แ
     });
     expect(updateMany.mock.calls[0][0]).toEqual({
       where: { id: 'v1', platePhotoId: 'p1', plateReceivedDate: { not: null }, plateDeliveredDate: null },
-      data: { plateReceivedDate: null, platePhotoId: null },
+      data: { plateReceivedDate: null, platePhotoId: null, plateReceivedById: null },
     });
     const log = logCreate.mock.calls[0][0].data;
     expect(log).toMatchObject({ vehicleId: 'v1', remark: 'แนบผิดคัน', editedById: 'u1' });
