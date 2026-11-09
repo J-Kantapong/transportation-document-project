@@ -168,6 +168,18 @@ async function seedGovernmentTaxWeightBrackets() {
   const truck = [300, 450, 600, 750, 900, 1050, 1350, 1650, 1950, 2250, 2550, 2850, 3150, 3450, 3750, 4050];
   const legalReference = "ก.พ. ตาราง 2-3 (อ้าง DLT 2565): https://www.ocsc.go.th/wp-content/uploads/2024/09/ISFE881.pdf";
 
+  // รถตาม พ.ร.บ.การขนส่งทางบก (งานต่อภาษีรถใหญ่, ผู้ใช้ 2026-11-09) - ตารางอัตราภาษีรถบรรทุกตาม "น้ำหนักรถ" แยกคอลัมน์ตาม
+  // ประเภทการขนส่ง (ช่วงน้ำหนักเดียวกับข้างบน; คอลัมน์ส่วนบุคคลตัวเลขเดียวกับ passenger) - เฉพาะ TRANSPORT_PRIVATE ที่ผู้ใช้ยืนยัน
+  // ด้วยใบเสร็จจริง (7,800 กก. = 3,600 บาท) เป็น VERIFIED อีก 3 คอลัมน์ DRAFT/inactive รอยืนยัน รถขนาดเล็กมีถึง 3,000 กก.
+  // migration 20261109110000_tax_renewal_transport ใส่แถวชุดเดียวกันนี้ให้ฐานข้อมูลที่รันแค่ migrate deploy
+  const truckNonFixed = [450, 600, 750, 900, 1050, 1350, 1650, 1950, 2250, 2550, 2850, 3150, 3450, 3750, 4050, 4350];
+  const truckFixed = [300, 400, 500, 600, 700, 900, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700, 2900];
+  const truckSmall: Array<number | null> = [300, 400, 500, 600, 700, 900, 1100, 1300, 1500, null, null, null, null, null, null, null];
+  const transportReference = (verified: boolean) =>
+    verified
+      ? 'บัญชีอัตราภาษีรถตามมาตรา 85 ท้าย พ.ร.บ.การขนส่งทางบก พ.ศ. 2522 (แก้ไขโดยฉบับที่ 11 พ.ศ. 2550) คอลัมน์ขนส่งส่วนบุคคล - ผู้ใช้ยืนยันด้วยใบเสร็จจริง 3,600 บาท (น้ำหนักรถ 7,800 กก.) 2026-11-09'
+      : 'บัญชีอัตราภาษีรถตามมาตรา 85 ท้าย พ.ร.บ.การขนส่งทางบก พ.ศ. 2522 (แก้ไขโดยฉบับที่ 11 พ.ศ. 2550) - ยังไม่มีใบเสร็จจริงยืนยัน (2026-11-09)';
+
   const rows: Array<{
     vehicleFamily: GovTaxVehicleFamily;
     fuelGroup: GovTaxFuelGroup | null;
@@ -175,12 +187,24 @@ async function seedGovernmentTaxWeightBrackets() {
     weightTo: number | null;
     amount: number;
     sortOrder: number;
+    verified?: boolean;
+    legalReference?: string;
   }> = [];
   bounds.forEach((weightTo, i) => {
     const weightFrom = i === 0 ? 0 : (bounds[i - 1] as number);
     rows.push({ vehicleFamily: GovTaxVehicleFamily.RY1, fuelGroup: GovTaxFuelGroup.BEV, weightFrom, weightTo, amount: passenger[i], sortOrder: i });
     rows.push({ vehicleFamily: GovTaxVehicleFamily.RY2, fuelGroup: null, weightFrom, weightTo, amount: passenger[i], sortOrder: i });
     rows.push({ vehicleFamily: GovTaxVehicleFamily.RY3, fuelGroup: null, weightFrom, weightTo, amount: truck[i], sortOrder: i });
+    const transport: Array<[GovTaxVehicleFamily, number | null, boolean]> = [
+      [GovTaxVehicleFamily.TRANSPORT_PRIVATE, passenger[i], true],
+      [GovTaxVehicleFamily.TRANSPORT_NON_FIXED, truckNonFixed[i], false],
+      [GovTaxVehicleFamily.TRANSPORT_FIXED, truckFixed[i], false],
+      [GovTaxVehicleFamily.TRANSPORT_SMALL, truckSmall[i], false],
+    ];
+    for (const [vehicleFamily, amount, verified] of transport) {
+      if (amount === null) continue;
+      rows.push({ vehicleFamily, fuelGroup: null, weightFrom, weightTo, amount, sortOrder: i, verified, legalReference: transportReference(verified) });
+    }
   });
 
   for (const row of rows) {
@@ -190,11 +214,22 @@ async function seedGovernmentTaxWeightBrackets() {
     const existing = await prisma.governmentTaxWeightBracket.findFirst({
       where: { vehicleFamily: row.vehicleFamily, fuelGroup: row.fuelGroup, weightFrom: row.weightFrom },
     });
-    const data = { weightTo: row.weightTo, amount: row.amount, sortOrder: row.sortOrder, status: GovTaxRuleStatus.VERIFIED, active: true, legalReference };
+    const verified = row.verified ?? true;
+    const data = {
+      weightTo: row.weightTo,
+      amount: row.amount,
+      sortOrder: row.sortOrder,
+      status: verified ? GovTaxRuleStatus.VERIFIED : GovTaxRuleStatus.DRAFT,
+      active: verified,
+      legalReference: row.legalReference ?? legalReference,
+    };
+    const { verified: _v, legalReference: _ref, ...rowData } = row;
+    void _v;
+    void _ref;
     if (existing) {
       await prisma.governmentTaxWeightBracket.update({ where: { id: existing.id }, data });
     } else {
-      await prisma.governmentTaxWeightBracket.create({ data: { ...row, ...data } });
+      await prisma.governmentTaxWeightBracket.create({ data: { ...rowData, ...data } });
     }
   }
 }

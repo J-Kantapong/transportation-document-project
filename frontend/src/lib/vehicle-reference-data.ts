@@ -21,6 +21,17 @@ export const VEHICLE_TYPES = [
   'รย.3-ตู้บรรทุก',
 ] as const;
 
+// รถตาม พ.ร.บ.การขนส่งทางบก (ผู้ใช้ 2026-11-09) - เฉพาะงานต่อภาษี ไม่ใช่ตัวเลือกของงานจดใหม่ (ตรงกับ backend)
+// ขึ้นต้น ขส.- ไม่ใช่มอเตอร์ไซค์ -> นับเป็นรถยนต์ (lib/vehicle-kind.ts)
+export const TRANSPORT_PREFIX = 'ขส.-';
+export const TRANSPORT_VEHICLE_TYPES = [
+  'ขส.-ส่วนบุคคล',
+  'ขส.-ไม่ประจำทาง',
+  'ขส.-ประจำทาง',
+  'ขส.-รถขนาดเล็ก',
+] as const;
+export const isTransportType = (body: string | null | undefined) => !!body && body.startsWith(TRANSPORT_PREFIX);
+
 // Province names: Ministry of Commerce, referencing DOPA, https://std.moc.go.th/std/group/28
 export const PROVINCES = [
   'กรุงเทพมหานคร', 'สมุทรปราการ', 'นนทบุรี', 'ปทุมธานี', 'พระนครศรีอยุธยา', 'อ่างทอง', 'ลพบุรี', 'สิงห์บุรี',
