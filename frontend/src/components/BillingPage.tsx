@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, receiptImageUrl } from "@/lib/api";
+import { ApiError, api, receiptImageUrl } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import {
@@ -152,6 +152,22 @@ export function BillingPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [canEditVehicle, setCanEditVehicle] = useState(false); // ADMIN / STAFF_ENTRY - ปุ่มแก้ข้อมูลรถ
   const [expanded, setExpanded] = useState<string | null>(null); // คันที่เปิด "แก้" อยู่
+  // ใช้ CC ตามใบเสร็จ (ผู้ใช้ 2026-11-09): แก้ข้อมูลรถฝั่ง backend แล้วโหลดคิวใหม่ให้ราคาที่เสนอคิดจาก CC ใหม่ (คันที่ติ๊กไว้ยังอยู่)
+  const [ccApplying, setCcApplying] = useState<string | null>(null);
+  const [ccApplyError, setCcApplyError] = useState<Record<string, string>>({});
+  async function applyReceiptCc(v: BillingVehicle, customerId: string) {
+    if (!v.submissionId) return;
+    setCcApplying(v.id);
+    setCcApplyError((prev) => ({ ...prev, [v.id]: "" }));
+    try {
+      await api.applyReceiptCc(v.submissionId);
+      await loadQueue(false, customerId);
+    } catch (err) {
+      setCcApplyError((prev) => ({ ...prev, [v.id]: err instanceof ApiError ? err.message : "แก้ไม่สำเร็จ" }));
+    } finally {
+      setCcApplying(null);
+    }
+  }
   const [fixedIds, setFixedIds] = useState<Set<string>>(new Set()); // คันที่เพิ่งแก้ข้อมูลรถเสร็จ (ป้าย "แก้ไขเรียบร้อย")
   const [confirmOpen, setConfirmOpen] = useState(false); // หน้ายืนยันออกบิล
   // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29) null = ตามลูกค้า · checked = ยืนยันอัตราที่ไม่ตรงกับลูกค้าแล้ว
@@ -334,6 +350,8 @@ export function BillingPage() {
     if (money(row.receiptText) === null) return "ไม่มียอดใบเสร็จ - กด แก้ แล้วใส่ค่าใบเสร็จ";
     const swapProblem = swapProblemOf(v);
     if (swapProblem) return swapProblem;
+    // CC ไม่ตรงใบเสร็จ / ไม่อยู่ในช่วงประเภทรถ (ผู้ใช้ 2026-11-09): ราคาที่เสนอเลือกจาก CC นี้ - ต้องแก้ (ใช้ CC ตามใบเสร็จ / แก้ข้อมูลรถ) หรือยืนยันก่อน
+    if (v.ccWarning && !row.receiptChecked) return `${v.ccWarning} - กด แก้ แล้ว${v.receiptCc !== null && v.receiptCc !== undefined ? 'กด "ใช้ CC ตามใบเสร็จ"' : "แก้ข้อมูลรถ"}`;
     const mismatch = receiptMismatchOf(v);
     if (mismatch) return `${mismatch} - กด แก้ ${receiptSaysOf(v) ? 'แล้วกด "ใช้ตามใบเสร็จ"' : "ตรวจกับใบเสร็จจริง"}`;
     if (serviceFeeOf(v) !== null) return null;
@@ -936,6 +954,37 @@ export function BillingPage() {
                                 <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
                                   <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
                                   ตรวจกับใบเสร็จจริงแล้ว ยอดถูกต้อง (และติ๊ก/เอาติ๊ก &quot;ขอใช้&quot; ให้ตรงใบเสร็จแล้ว)
+                                </label>
+                              </div>
+                            )}
+                            {v.ccWarning && (
+                              <div
+                                style={{
+                                  gridColumn: "1 / -1",
+                                  padding: "8px 12px",
+                                  borderRadius: 8,
+                                  background: row.receiptChecked ? "#eaf7ee" : "#fff4e5",
+                                  color: row.receiptChecked ? "#1e6b3a" : "#8a4b00",
+                                }}
+                              >
+                                <b>CC</b> · {v.ccWarning}
+                                <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                  {v.receiptCc !== null && v.receiptCc !== undefined && v.submissionId && (
+                                    <button
+                                      type="button"
+                                      className="primary"
+                                      disabled={ccApplying === v.id}
+                                      onClick={() => applyReceiptCc(v, customer.id)}
+                                    >
+                                      {ccApplying === v.id ? "กำลังแก้…" : `ใช้ CC ตามใบเสร็จ (${v.receiptCc})`}
+                                    </button>
+                                  )}
+                                  <span style={{ fontSize: 12 }}>แก้ CC (และช่วงประเภทรถ) ในข้อมูลรถ แล้วระบบเลือกราคาใหม่ให้ · เก็บประวัติการแก้</span>
+                                </div>
+                                {ccApplyError[v.id] && <div style={{ marginTop: 4, color: "#b43434" }}>{ccApplyError[v.id]}</div>}
+                                <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                                  <input type="checkbox" checked={row.receiptChecked} onChange={(e) => patchRow(v.id, { receiptChecked: e.target.checked })} />
+                                  ตรวจกับใบเสร็จจริงแล้ว CC ที่คีย์ถูกต้อง (AI อ่านผิด)
                                 </label>
                               </div>
                             )}
