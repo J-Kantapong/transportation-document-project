@@ -9,6 +9,8 @@ import { bangkokToday, isoOf, toDate } from '../overview/overview-calculator.js'
 import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
 import { computeDocumentFees, isMotorcycle, type DocumentFeeRuleSet, type FeeParamRow, type NewPlateOption, type PlateNumberOption } from './document-fee-calculator.js';
 import { suggestSizeFixes, type SizeHint } from './receipt-size-hint.js';
+import { receiptCcOf } from '../receipts/receipt-cc.js';
+import { motorcycleBodyForCc } from '../vehicles/vehicle-validation.js';
 import type { CreateDocumentSubmissionDto } from './dto/create-document-submission.dto.js';
 import type { BulkCreateDocumentSubmissionDto, BulkDocumentSubmissionEntryDto } from './dto/bulk-create-document-submission.dto.js';
 import type { PreviewBulkDocumentSubmissionDto, PreviewBulkDocumentSubmissionEntryDto } from './dto/preview-bulk-document-submission.dto.js';
@@ -549,6 +551,7 @@ export class DocumentSubmissionService {
           select: {
             chassis: true,
             body: true,
+            cc: true, // เทียบกับ CC ที่ AI อ่านจากใบเสร็จ (2026-11-09)
             plateCategory: true,
             plateNumber: true,
             // id = กุญแจใบยื่น/ใบส่งงาน (ผู้ใช้ 2026-09-27: รหัสลูกค้าทุกหน้า ชื่อซ้ำกันได้) - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
@@ -909,6 +912,43 @@ export class DocumentSubmissionService {
       liveSlips: [...new Set(slipItems.map((i) => `DL-${String(i.slip.slipNo).padStart(5, '0')}`))],
       liveInvoices: [...new Set(invoiceLines.map((l) => l.invoice.invoiceNo))],
     };
+  }
+
+  // ใช้ CC ตามใบเสร็จ (ผู้ใช้ 2026-11-09 "ในใบเสร็จมี CC อยู่"): CC ที่ AI อ่านจากใบเสร็จของรายการนี้ต่างจากที่คีย์ไว้ -> แก้ Vehicle.cc
+  // ให้ตรงใบเสร็จ และย้ายประเภทรถ รย.12 ไปช่วง CC ที่ถูก (ประเภทอื่นคงเดิม) · ใบเสร็จถูกเสมอแต่ต้องมีคนกด เพราะ AI อ่านผิดได้
+  // ไม่คิด Bill ใหม่ (ค่าธรรมเนียม/ภาษีมอเตอร์ไซค์ไม่ขึ้นกับช่วง CC) - ผลคือราคาวางบิลที่ระบบเสนอเปลี่ยนตาม CC ใหม่
+  // ทำได้ทั้ง PENDING และ RECEIPT_RECEIVED (ต้องมีใบเสร็จที่อ่าน CC ได้ก่อน) · remark ไม่บังคับ บันทึก VehicleEditLog เสมอ
+  async applyReceiptCc(submissionId: string, remarkRaw?: unknown) {
+    const submission = await this.prisma.documentSubmission.findUnique({
+      where: { id: submissionId },
+      select: {
+        status: true,
+        vehicleId: true,
+        vehicle: { select: { body: true, cc: true, deletedAt: true } },
+        receipts: { select: { extraction: true, createdAt: true } },
+      },
+    });
+    if (!submission || submission.vehicle.deletedAt) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
+    assertVehicleInScope(submission.vehicle.body);
+    const receiptCc = receiptCcOf(submission.receipts);
+    if (receiptCc === null) throw new BadRequestException({ error: 'ใบเสร็จของรายการนี้ยังไม่มี CC ที่อ่านได้' });
+    const before = submission.vehicle.cc === null ? null : Number(submission.vehicle.cc);
+    const body = submission.vehicle.body;
+    const newBody = body ? motorcycleBodyForCc(body, receiptCc) : body;
+    if (before === receiptCc && newBody === body) throw new BadRequestException({ error: 'CC ในระบบตรงกับใบเสร็จอยู่แล้ว' });
+    const typed = typeof remarkRaw === 'string' ? remarkRaw.trim() : '';
+    const remark = `ใช้ CC ตามใบเสร็จ (AI อ่าน ${receiptCc})${typed ? `: ${typed}` : ''}`;
+    const changes: Record<string, { from: string | null; to: string | null }> = {
+      cc: { from: before === null ? null : String(before), to: String(receiptCc) },
+    };
+    if (newBody !== body) changes.body = { from: body, to: newBody };
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vehicle.update({ where: { id: submission.vehicleId }, data: { cc: receiptCc, ...(newBody !== body ? { body: newBody } : {}) } });
+      await tx.vehicleEditLog.create({
+        data: { vehicleId: submission.vehicleId, remark, changes: JSON.stringify(changes), editedById: currentUser()?.id ?? null },
+      });
+    });
+    return { vehicleId: submission.vehicleId, cc: receiptCc, body: newBody, changes };
   }
 
   // ยกเลิกรายการที่ยื่นแล้ว (ผู้ใช้ 2026-09-25) เพื่อให้รถกลับไปอยู่ในคิวรอยื่นเอกสารแล้วยื่นใหม่ (ราคาคำนวณใหม่ทั้งหมด)

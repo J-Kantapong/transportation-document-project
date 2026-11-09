@@ -14,6 +14,8 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
+import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
+import { receiptCcMismatch, receiptCcOf } from '../receipts/receipt-cc.js';
 import { expectedPaymentDate, isPayWeekday, PAY_WEEKS_AFTER_MAX, type PaySchedule } from './payment-schedule.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
 import {
@@ -478,6 +480,7 @@ const QUEUE_VEHICLE_INCLUDE = {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
     select: {
+      id: true, // หน้าวางบิลเรียก apply-receipt-cc ของรายการนี้ (2026-11-09)
       status: true,
       receiptNo: true,
       receiptAmount: true,
@@ -490,8 +493,8 @@ const QUEUE_VEHICLE_INCLUDE = {
       newPlateOption: true,
       relocateAddon: true,
       stopUseRelocateOut: true,
-      // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28)
-      receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true } },
+      // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28) · extraction = CC ที่ AI อ่าน (2026-11-09)
+      receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true, extraction: true, createdAt: true } },
     },
   },
 } as const;
@@ -587,6 +590,7 @@ export class BillingService {
             const sub = v.documentSubmissions[0];
             const isMoto = isMotorcycle(v.body);
             const cc = num(v.cc);
+            const receiptCc = receiptCcOf(sub?.receipts ?? []);
             const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis, registrationProvince: v.registrationProvince, body: v.body });
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
@@ -628,6 +632,11 @@ export class BillingService {
               // = ใบเสร็จบอกว่าขอใช้/ไม่ขอใช้ต่างจากข้อมูลรถ หน้าวางบิลเสนอปุ่ม "ใช้ตามใบเสร็จ" · คำนวณไม่ได้ = null (ไม่เสนอ)
               receiptEstimateFlipped: currentBillEstimate(flipOtherProvince(v, otherProvince), sub, feeRules),
               receiptImageIds: sub?.receipts?.map((r) => r.id) ?? [],
+              // CC ตรวจกับใบเสร็จ (ผู้ใช้ 2026-11-09 "ในใบเสร็จมี CC อยู่"): ราคาที่เสนอเลือกจาก CC ที่คีย์ ถ้าไม่ตรงใบเสร็จ = ราคาผิดแถวได้
+              // ccWarning = ไม่ตรงใบเสร็จ หรือ (ไม่มี CC ในใบเสร็จ) CC ไม่อยู่ในช่วงของประเภทรถ - หน้าวางบิลไม่ให้ติ๊กจนกว่าจะแก้/ยืนยัน
+              submissionId: sub?.id ?? null,
+              receiptCc,
+              ccWarning: receiptCcMismatch(cc, receiptCc) ?? (v.body && cc !== null ? motorcycleCcMismatch(v.body, String(cc)) : null),
               // ขอใช้เลขทะเบียน - เผื่อเคสลูกค้าชำระค่าขอใช้เลขเอง; SWAP_* (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข (ผู้ใช้ 2026-09-27)
               requestedPlateNumber,
               urgent,

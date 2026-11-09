@@ -63,6 +63,13 @@ export function motorcycleCcMismatch(body: string, cc: string): string | null {
   return `ขนาด CC ${cc} ไม่อยู่ในช่วงของ ${body}${expected ? ` (ช่วงนี้คือ ${expected})` : ''} - ตรวจ CC หรือประเภทรถอีกครั้ง`;
 }
 
+// ประเภทรถ รย.12 ที่ช่วง CC ครอบคลุมค่านี้ - ใช้ตอน "ใช้ CC ตามใบเสร็จ" (2026-11-09): เปลี่ยน CC แล้วประเภทรถต้องย้ายช่วงตาม
+// ไม่งั้น motorcycleCcMismatch จะฟ้องทันที · body ที่ไม่ใช่ช่วง รย.12 (รย.17 / รถยนต์) คงเดิม · cc ไม่ถูกต้อง = คงเดิม
+export function motorcycleBodyForCc(body: string, cc: number): string {
+  if (!(body in MOTORCYCLE_CC_RANGES) || !Number.isFinite(cc) || cc <= 0) return body;
+  return Object.entries(MOTORCYCLE_CC_RANGES).find(([, [from, to]]) => cc >= from && cc < to)?.[0] ?? body;
+}
+
 export function getVehicleRowErrors(row: NormalizedVehicleRow): string[] {
   const errors: string[] = [];
 
