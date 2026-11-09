@@ -4,6 +4,8 @@
 // rate. On top of the base amount: RY1 owned by a juristic person pays double, unless the
 // vehicle is under a hire-purchase contract run as a business and the hirer is an individual
 // (Master Rule from the integration spec) - RY2/RY3/RY12 never double regardless of owner.
+// TRANSPORT_* (รถตาม พ.ร.บ.ขนส่ง, งานต่อภาษีรถใหญ่, user 2026-11-09) also use the weight-bracket
+// lookup with fuelGroup null and never double; one family per ประเภทการขนส่ง column.
 // Pure function over plain data - the caller (TaxService) is responsible for loading only
 // active+VERIFIED GovernmentTax* rows from Prisma and passing them in as `rules`; this
 // function never checks status/active itself.

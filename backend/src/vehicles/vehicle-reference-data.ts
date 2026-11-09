@@ -22,6 +22,21 @@ export const VEHICLE_TYPES = [
   'รย.3-ตู้บรรทุก',
 ] as const;
 
+// รถตาม พ.ร.บ.การขนส่งทางบก (รถใหญ่/รถประกอบการ, ผู้ใช้ 2026-11-09) - ใช้เฉพาะงานต่อภาษี ไม่อยู่ใน VEHICLE_TYPES
+// ของงานจดใหม่ (14 ประเภทเดิมไม่เปลี่ยน) ชื่อตรงคอลัมน์ของตารางอัตราภาษีรถบรรทุกตามประเภทการขนส่ง
+// ขึ้นต้น ขส.- จึงไม่ใช่มอเตอร์ไซค์ -> นับเป็นรถยนต์ทุกที่ (ขอบเขต STAFF_CAR, ใบส่งงาน, บิล) โดยไม่ต้องแก้ scope
+export const TRANSPORT_PREFIX = 'ขส.-';
+export const TRANSPORT_VEHICLE_TYPES = [
+  'ขส.-ส่วนบุคคล',
+  'ขส.-ไม่ประจำทาง',
+  'ขส.-ประจำทาง',
+  'ขส.-รถขนาดเล็ก',
+] as const;
+
+export function isTransportType(body: string | null | undefined): boolean {
+  return !!body && body.startsWith(TRANSPORT_PREFIX);
+}
+
 // มอเตอร์ไซค์ = รย.12 (ทุกช่วง cc) และ รย.17 (จักรยานยนต์สาธารณะ, ผู้ใช้ 2026-10-08) - ใช้ที่เดียวกันทั้งระบบ: ขอบเขตงาน STAFF_MOTO,
 // ค่าธรรมเนียมขั้นยื่น, ภาษี (อัตรามอเตอร์ไซค์), ใบส่งงาน ฯลฯ · frontend/src/lib/vehicle-kind.ts ต้องตรงกัน
 export const MOTORCYCLE_PREFIXES = ['รย.12-', 'รย.17-'] as const;

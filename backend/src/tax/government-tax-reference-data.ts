@@ -32,8 +32,19 @@ export function classifyVehicleFamily(
   if (body.startsWith('รย.1-')) return GovTaxVehicleFamily.RY1;
   if (body.startsWith('รย.2-')) return GovTaxVehicleFamily.RY2;
   if (body.startsWith('รย.3-')) return GovTaxVehicleFamily.RY3;
-  return null;
+  return TRANSPORT_FAMILY_BY_TYPE[body] ?? null;
 }
+
+// รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09) - ชื่อประเภทรถของงานต่อภาษี (TRANSPORT_VEHICLE_TYPES) -> คอลัมน์ตารางอัตรา
+// เทียบทั้งชื่อ ไม่ใช่ prefix เพราะแต่ละชื่อคือคนละคอลัมน์ ชื่อที่ไม่รู้จัก = คำนวณไม่ได้ (null) เหมือนประเภทอื่นที่ไม่รู้จัก
+export const TRANSPORT_FAMILY_BY_TYPE: Record<string, GovTaxVehicleFamily> = {
+  'ขส.-ส่วนบุคคล': GovTaxVehicleFamily.TRANSPORT_PRIVATE,
+  'ขส.-ไม่ประจำทาง': GovTaxVehicleFamily.TRANSPORT_NON_FIXED,
+  'ขส.-ประจำทาง': GovTaxVehicleFamily.TRANSPORT_FIXED,
+  'ขส.-รถขนาดเล็ก': GovTaxVehicleFamily.TRANSPORT_SMALL,
+};
+
+export const TRANSPORT_FAMILIES: ReadonlySet<GovTaxVehicleFamily> = new Set(Object.values(TRANSPORT_FAMILY_BY_TYPE));
 
 export function vehicleAgeYears(
   firstRegistrationDate: Date,

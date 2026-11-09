@@ -111,7 +111,9 @@ export function printTaxInvoice(t: TaxInvoice, mode: TaxInvoicePrintMode): void 
 // สำเนาใบกำกับทุกใบของเดือนในเอกสารเดียว สำหรับ PDF ชุดส่งบัญชี (ผู้ใช้ 2026-10-06): ใบละหน้า ป้าย "สำเนา" เรียงตามเลขที่
 // ใบที่ยกเลิกมีลายน้ำ "ยกเลิก" อยู่แล้ว · override ขอบ/เส้นประของหน้าจอ (@media screen ใน PRINT_CSS) เพราะวาดเป็นรูปลง PDF
 const BUNDLE_CSS = `
-  @media screen { body { padding: 0; } .page { margin: 0; padding: 0; border: 0; } }
+  @media screen { body { padding: 0; } .page { margin: 0; padding: 0; border: 0; overflow: hidden; } html, body { overflow-x: hidden; } }
+  /* ลายน้ำหมุนแล้วกว้างเกินหน้า - หุบให้อยู่ในกรอบหน้า ไม่ดันความกว้างเอกสาร */
+  .void-mark { left: 5%; right: 5%; }
 `;
 
 export function buildTaxInvoiceBundleHtml(list: TaxInvoice[]): string {

@@ -71,7 +71,9 @@ export async function htmlToPdfBlob(html: string, setup: PdfPageSetup): Promise<
     await Promise.race([doc.fonts.ready, new Promise((resolve) => setTimeout(resolve, 3000))]);
     iframe.style.height = `${doc.documentElement.scrollHeight}px`;
     const totalH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
-    const docW = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth);
+    // ความกว้างหน้ากระดาษคือความกว้างที่จัดหน้าไว้ ไม่ใช้ scrollWidth: ลายน้ำ "ยกเลิก" ที่หมุนล้นขอบทำให้ scrollWidth โตกว่าหน้า
+    // แล้วรูปที่วาดไม่ตรงกับที่จัดไว้ ได้ PDF ที่ขอบขวาขาด (พบ 2026-11-09 ในชุดส่งบัญชี)
+    const docW = Math.round(contentWmm * PX_PER_MM);
     const { soft, forced, tables } = layoutOf(doc);
 
     // 1) วางหน้าก่อน (px ของเอกสาร): ตัดตรงขอบล่างของแถว/หัวข้อ, หน้าที่เริ่มกลางตาราง (หลังหัวตาราง) วาดหัวตารางซ้ำไว้บนสุด
@@ -98,6 +100,7 @@ export async function htmlToPdfBlob(html: string, setup: PdfPageSetup): Promise<
         x: 0,
         y,
         width: docW,
+        windowWidth: docW,
         height: Math.max(1, Math.ceil(height)),
       });
       if (!canvas.width || !canvas.height) throw new Error("วาดหน้าเอกสารไม่สำเร็จ");

@@ -1,7 +1,10 @@
 // Hand-rolled validation ตามแบบ tax/tax-validation.ts (ฟังก์ชันธรรมดา + ข้อความไทย ไม่ใช้ class-validator)
 import { BadRequestException } from '@nestjs/common';
 import { OwnerType } from '../generated/prisma/enums.js';
-import { FUEL_TYPES, VEHICLE_TYPES } from '../vehicles/vehicle-reference-data.js';
+import { FUEL_TYPES, TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES } from '../vehicles/vehicle-reference-data.js';
+
+// งานต่อภาษีรับทั้ง 14 ประเภทของงานจดใหม่ และรถตาม พ.ร.บ.ขนส่ง (ขส.-..., ผู้ใช้ 2026-11-09) ที่กรอกเองเท่านั้น
+const RENEWAL_VEHICLE_TYPES: readonly string[] = [...VEHICLE_TYPES, ...TRANSPORT_VEHICLE_TYPES];
 
 export function parseDate(raw: unknown, field: string, required: true): Date;
 export function parseDate(raw: unknown, field: string, required?: false): Date | null;
@@ -39,7 +42,7 @@ export function parseDecimal(raw: unknown, field: string): number | null {
 
 export function parseVehicleType(raw: unknown): string {
   const value = parseText(raw, 'ประเภทรถ', true);
-  if (!(VEHICLE_TYPES as readonly string[]).includes(value!)) {
+  if (!RENEWAL_VEHICLE_TYPES.includes(value!)) {
     throw new BadRequestException({ error: 'ประเภทรถไม่อยู่ในรายการที่กำหนด' });
   }
   return value!;
