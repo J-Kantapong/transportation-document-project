@@ -13,7 +13,7 @@ import {
 import { canEditSubmitSteps, getCachedUser, writeScopeFor, type UserRole, type VehicleScope } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
-import { FUEL_TYPES, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
+import { FUEL_TYPES, TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES, isTransportType } from "@/lib/vehicle-reference-data";
 import { DateInput } from "@/components/DateInput";
 
 type Source = "VEHICLE" | "MANUAL";
@@ -40,6 +40,8 @@ interface FormState {
   ownerName: string;
   taxExpiryDate: string;
   paymentDate: string;
+  // รถตาม พ.ร.บ.ขนส่ง (ขส.-..., ผู้ใช้ 2026-11-09): วันที่ตรวจสภาพรถ - ต้องมีก่อนบันทึกวันที่ชำระ (กรอกทีหลังในตารางได้)
+  inspectionDate: string;
   inspectionConfirmed: boolean;
   insuranceConfirmed: boolean;
   skipContribution: boolean;
@@ -64,6 +66,7 @@ const EMPTY: FormState = {
   ownerName: "",
   taxExpiryDate: "",
   paymentDate: "",
+  inspectionDate: "",
   inspectionConfirmed: false,
   insuranceConfirmed: false,
   skipContribution: false,
@@ -79,11 +82,17 @@ const baht =(n: number | string | null | undefined) =>
 // ช่องวันที่เก็บเป็นข้อความ วว/ดด/ปปปป ตามทั้งระบบ (ดู lib/date.ts) - แปลงเป็น ISO ตอนส่ง backend
 const toIso = (text: string) => displayDateToIso(text.replace(/\D/g, ""));
 
+// เชื้อเพลิงไม่มีผลกับภาษีรถตาม พ.ร.บ.ขนส่ง (คิดจากน้ำหนักรถอย่างเดียว) - ซ่อนช่องเพื่อลดงานพิมพ์ เก็บดีเซลเป็นค่าตั้งต้น (ผู้ใช้ 2026-11-09)
+const TRANSPORT_DEFAULT_FUEL = "ดีเซล";
+
 function toInput(form: FormState): TaxRenewalInput {
+  const transport = isTransportType(form.vehicleType);
   const shared = {
     submitDate: toIso(form.submitDate),
     taxExpiryDate: toIso(form.taxExpiryDate),
     paymentDate: toIso(form.paymentDate) || null,
+    // วันที่ตรวจสภาพรถส่งเฉพาะรถ ขส. (รถเล็กใช้ติ๊ก ตรอ.)
+    inspectionDate: transport ? toIso(form.inspectionDate) || null : null,
     inspectionConfirmed: form.inspectionConfirmed,
     insuranceConfirmed: form.insuranceConfirmed,
     skipContribution: form.skipContribution,
@@ -113,12 +122,13 @@ function toInput(form: FormState): TaxRenewalInput {
     plateCategory: form.plateCategory,
     plateNumber: form.plateNumber,
     vehicleType: form.vehicleType,
-    fuel: form.fuel,
-    cc: form.cc || null,
+    fuel: transport ? form.fuel || TRANSPORT_DEFAULT_FUEL : form.fuel,
+    cc: transport ? null : form.cc || null,
     weight: form.weight || null,
     firstRegistrationDate: toIso(form.firstRegistrationDate),
     ownerType: form.ownerType || undefined,
-    financed: form.financed,
+    // ขส. ไม่มีเรื่องไฟแนนซ์ (ไม่คูณ 2 อยู่แล้ว) - ซ่อนติ๊กและไม่ส่ง
+    financed: transport ? false : form.financed,
     ownerName: form.ownerName || null,
   };
 }
@@ -153,6 +163,7 @@ function invalidDateMessage(form: FormState, missing: Array<keyof FormState>): s
     ["submitDate", "วันที่ยื่นงาน"],
     ["taxExpiryDate", "วันครบกำหนดภาษี"],
     ["paymentDate", "วันที่ชำระภาษี"],
+    ["inspectionDate", "วันที่ตรวจสภาพรถ"],
   ];
   // วันจดทะเบียนครั้งแรกมีช่องเฉพาะรถที่กรอกเอง หรือรถในระบบที่ยังไม่มีวันนี้
   if (form.source === "MANUAL" || missing.includes("firstRegistrationDate")) {
@@ -182,12 +193,16 @@ function readyForPreview(form: FormState, selected: TaxRenewalVehicleHit | null)
       f === "firstRegistrationDate" ? Boolean(toIso(form.firstRegistrationDate)) : Boolean(form[f]),
     );
   }
+  // รถ ขส.: เชื้อเพลิงซ่อน (ดีเซลให้เอง) แต่ต้องมีน้ำหนักรถ เพราะภาษีคิดจากน้ำหนักอย่างเดียว
+  const transport = isTransportType(form.vehicleType);
+  if (form.paymentDate.replace(/\D/g, "") === "" && form.inspectionDate.replace(/\D/g, "") && !toIso(form.inspectionDate)) return false;
   return Boolean(
     form.chassis &&
       form.plateCategory &&
       form.plateNumber &&
       form.vehicleType &&
-      form.fuel &&
+      (form.fuel || transport) &&
+      (!transport || form.weight) &&
       form.ownerType &&
       toIso(form.firstRegistrationDate),
   );
@@ -232,6 +247,21 @@ export function TaxRenewalPage() {
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+  // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09 "พิมพ์น้อยที่สุด"): เลือกแล้วซ่อนเชื้อเพลิง/CC/ติ๊ก ตรอ./ไฟแนนซ์ และตั้งเจ้าของเป็นนิติบุคคล
+  // ให้ก่อน (รถประกอบการส่วนใหญ่เป็นบริษัท เปลี่ยนได้คลิกเดียว) - เปลี่ยนกลับเป็นรถเล็กล้างวันที่ตรวจทิ้ง
+  const transportForm = form.source === "MANUAL" && isTransportType(form.vehicleType);
+  const setVehicleType = (vehicleType: string) =>
+    setForm((prev) => {
+      const transport = isTransportType(vehicleType);
+      return {
+        ...prev,
+        vehicleType,
+        ownerType: transport && !prev.ownerType ? "JURISTIC" : prev.ownerType,
+        financed: transport ? false : prev.financed,
+        inspectionDate: transport ? prev.inspectionDate : "",
+        inspectionConfirmed: transport ? false : prev.inspectionConfirmed,
+      };
+    });
 
   const missing = missingVehicleFields(form.source === "VEHICLE" ? selectedVehicle : null);
   const ready = readyForPreview(form, selectedVehicle);
@@ -419,33 +449,38 @@ export function TaxRenewalPage() {
                   </label>
                   <label className="field">
                     <span>ประเภทรถ</span>
-                    <select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} required>
+                    <select value={form.vehicleType} onChange={(e) => setVehicleType(e.target.value)} required>
                       <option value="">เลือกประเภทรถ</option>
-                      {VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t)).map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
+                      <VehicleTypeOptions writeScope={writeScope} />
                     </select>
                   </label>
+                  {!transportForm && (
+                    <>
+                      <label className="field">
+                        <span>ประเภทเชื้อเพลิง</span>
+                        <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)} required>
+                          <option value="">เลือกเชื้อเพลิง</option>
+                          {FUEL_TYPES.map((f) => (
+                            <option key={f} value={f}>
+                              {f}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>ขนาด CC</span>
+                        <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
+                      </label>
+                    </>
+                  )}
                   <label className="field">
-                    <span>ประเภทเชื้อเพลิง</span>
-                    <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)} required>
-                      <option value="">เลือกเชื้อเพลิง</option>
-                      {FUEL_TYPES.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>ขนาด CC</span>
-                    <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
-                  </label>
-                  <label className="field">
-                    <span>น้ำหนักรถ (กก.)</span>
-                    <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
+                    <span>{transportForm ? "น้ำหนักรถ (กก.) * - ตามเล่มทะเบียน ไม่ใช่น้ำหนักรวม" : "น้ำหนักรถ (กก.)"}</span>
+                    <input
+                      value={form.weight}
+                      onChange={(e) => set("weight", e.target.value)}
+                      inputMode="decimal"
+                      required={transportForm}
+                    />
                   </label>
                   <label className="field">
                     <span>วันจดทะเบียนครั้งแรก</span>
@@ -455,9 +490,16 @@ export function TaxRenewalPage() {
                       required
                     />
                   </label>
+                  {transportForm && (
+                    <label className="field">
+                      <span>วันที่ตรวจสภาพรถ (เว้นว่างได้ กรอกทีหลังในตาราง)</span>
+                      <DateTextInput value={form.inspectionDate} onChange={(v) => set("inspectionDate", v)} />
+                    </label>
+                  )}
                   <OwnerTypeFields
                     ownerType={form.ownerType}
                     financed={form.financed}
+                    hideFinanced={transportForm}
                     onOwnerTypeChange={(v) => set("ownerType", v)}
                     onFinancedChange={(v) => set("financed", v)}
                   />
@@ -546,14 +588,17 @@ export function TaxRenewalPage() {
             </div>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginTop: 22 }}>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
-                <input
-                  type="checkbox"
-                  checked={form.inspectionConfirmed}
-                  onChange={(e) => set("inspectionConfirmed", e.target.checked)}
-                />
-                มีใบตรวจ ตรอ. แล้ว
-              </label>
+              {/* รถ ขส. ออฟฟิศพาไปตรวจเอง - ใช้ช่องวันที่ตรวจสภาพรถด้านบนแทนติ๊กใบ ตรอ. */}
+              {!transportForm && (
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.inspectionConfirmed}
+                    onChange={(e) => set("inspectionConfirmed", e.target.checked)}
+                  />
+                  มีใบตรวจ ตรอ. แล้ว
+                </label>
+              )}
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
                 <input
                   type="checkbox"
@@ -635,7 +680,18 @@ export function TaxRenewalPage() {
                       <td>{row.vehicleType}</td>
                       <td>{isoToDisplayDate(row.taxExpiryDate.slice(0, 10))}</td>
                       <td>
-                        {row.inspectionRequired ? (
+                        {row.vehicleClass === "TRANSPORT" ? (
+                          // รถ ขส. (ผู้ใช้ 2026-11-09): ตรวจสภาพทุกปี - บันทึกเป็นวันที่ตรวจ (แก้/ล้างผ่าน ✎ แก้) ไม่ใช่ติ๊กใบ ตรอ.
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {!row.inspectionDate && <span className="badge warn">ต้องตรวจ</span>}
+                            <DateCell
+                              key={`inspection:${row.inspectionDate ?? ""}`}
+                              value={row.inspectionDate}
+                              readOnly={!editable}
+                              onSave={(v) => patch(row.id, { inspectionDate: v })}
+                            />
+                          </div>
+                        ) : row.inspectionRequired ? (
                           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
                             <input
                               type="checkbox"
@@ -663,12 +719,19 @@ export function TaxRenewalPage() {
                       <td>{baht(row.noBillTotal)}</td>
                       {/* key มีวันที่ที่บันทึกไว้ด้วย: ล้างวันที่ผ่าน ✎ แก้แล้วช่องต้องเริ่มใหม่ ไม่ค้างวันที่เดิมที่พิมพ์ไว้ในช่อง (พบ 2026-09-27) */}
                       <td>
-                        <DateCell
-                          key={`payment:${row.paymentDate ?? ""}`}
-                          value={row.paymentDate}
-                          readOnly={!editable}
-                          onSave={(v) => patch(row.id, { paymentDate: v })}
-                        />
+                        {row.vehicleClass === "TRANSPORT" && !row.inspectionDate && !row.paymentDate ? (
+                          // backend ปฏิเสธวันที่ชำระของรถ ขส. ที่ยังไม่มีวันที่ตรวจ - บอกตั้งแต่ในตารางแทนให้พิมพ์แล้วเด้ง
+                          <span className="muted" title="รถตาม พ.ร.บ.ขนส่งต้องบันทึกวันที่ตรวจสภาพรถก่อน">
+                            รอตรวจรถ
+                          </span>
+                        ) : (
+                          <DateCell
+                            key={`payment:${row.paymentDate ?? ""}`}
+                            value={row.paymentDate}
+                            readOnly={!editable}
+                            onSave={(v) => patch(row.id, { paymentDate: v })}
+                          />
+                        )}
                       </td>
                       <td>
                         <DateCell
@@ -772,6 +835,7 @@ function EditRenewalDialog({
     paymentDate: dateText(row.paymentDate),
     receivedDate: dateText(row.receivedDate),
     deliveredDate: dateText(row.deliveredDate),
+    inspectionDate: dateText(row.inspectionDate),
     chassis: row.chassis,
     engine: row.engine ?? "",
     plateCategory: row.plateCategory,
@@ -790,6 +854,8 @@ function EditRenewalDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const manual = !row.vehicleId;
+  // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09): ไม่มีเชื้อเพลิง/CC/ไฟแนนซ์ให้แก้ มีวันที่ตรวจสภาพรถแทนติ๊ก ตรอ.
+  const transport = isTransportType(form.vehicleType);
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((prev) => ({ ...prev, [key]: value }));
 
   useEffect(() => {
@@ -810,6 +876,7 @@ function EditRenewalDialog({
       ["paymentDate", "วันที่ชำระภาษี"],
       ["receivedDate", "วันที่รับป้ายภาษี"],
       ["deliveredDate", "วันที่คืนลูกค้า"],
+      ["inspectionDate", "วันที่ตรวจสภาพรถ"],
     ];
     for (const [key, label] of optional) {
       const text = String(form[key]);
@@ -827,19 +894,21 @@ function EditRenewalDialog({
         paymentDate: isoOrNull(form.paymentDate),
         receivedDate: isoOrNull(form.receivedDate),
         deliveredDate: isoOrNull(form.deliveredDate),
+        // รถ ขส. ส่งวันที่ตรวจ (ล้างได้ = ต้องมีเหตุผลอยู่แล้ว) / เปลี่ยนจาก ขส. เป็นรถเล็กต้องล้างวันที่นี้ backend จึงรับ
+        inspectionDate: transport ? isoOrNull(form.inspectionDate) : null,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
         // ส่งเฉพาะเมื่อเปลี่ยน - ค่าเดิมจากข้อมูลรถบางคันอาจไม่อยู่ในรายการตัวเลือก (backend ตรวจรายการเฉพาะค่าที่ส่งมา)
         ...(form.vehicleType !== row.vehicleType ? { vehicleType: form.vehicleType } : {}),
         ...(form.fuel !== row.fuel ? { fuel: form.fuel } : {}),
-        cc: form.cc || null,
+        cc: transport ? null : form.cc || null,
         weight: form.weight || null,
         firstRegistrationDate: toIso(form.firstRegistrationDate),
         ownerName: form.ownerName || null,
         skipContribution: form.skipContribution,
         // รถจากระบบ: เลขตัวถัง/เลขเครื่องมาจากข้อมูลรถ / เจ้าของที่มาจากข้อมูลรถแก้ที่นี่ไม่ได้ - ไม่ส่งไป
         ...(manual ? { chassis: form.chassis, engine: form.engine || null } : {}),
-        ...(!row.ownerFromVehicle && form.ownerType ? { ownerType: form.ownerType, financed: form.financed } : {}),
+        ...(!row.ownerFromVehicle && form.ownerType ? { ownerType: form.ownerType, financed: transport ? false : form.financed } : {}),
         remark: remark.trim(),
         // ฟอร์มส่งทุกช่องจากตอนเปิด - มีคนแก้/ติ๊กไปก่อนระหว่างที่เปิดค้างไว้ backend ตอบ 409 ไม่ทับของเขา (พบ 2026-09-27)
         expectedUpdatedAt: row.updatedAt,
@@ -896,6 +965,12 @@ function EditRenewalDialog({
           <span>วันที่คืนลูกค้า</span>
           <DateTextInput value={form.deliveredDate} onChange={(v) => set("deliveredDate", v)} />
         </label>
+        {transport && (
+          <label className="field">
+            <span>วันที่ตรวจสภาพรถ (ลบให้ว่าง = ยังไม่ตรวจ ต้องล้างวันที่ชำระด้วย)</span>
+            <DateTextInput value={form.inspectionDate} onChange={(v) => set("inspectionDate", v)} />
+          </label>
+        )}
         {manual && (
           <>
             <label className="field">
@@ -919,29 +994,34 @@ function EditRenewalDialog({
         <label className="field">
           <span>ประเภทรถ</span>
           <select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
-            {Array.from(new Set([row.vehicleType, ...VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t))])).map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
+            {/* ค่าเดิมจากข้อมูลรถบางคันอาจไม่อยู่ในรายการ (manual เท่านั้นที่เป็น ขส. ได้) */}
+            {!(VEHICLE_TYPES as readonly string[]).includes(row.vehicleType) &&
+              !(TRANSPORT_VEHICLE_TYPES as readonly string[]).includes(row.vehicleType) && (
+                <option value={row.vehicleType}>{row.vehicleType}</option>
+              )}
+            <VehicleTypeOptions writeScope={writeScope} transport={manual} />
           </select>
         </label>
+        {!transport && (
+          <>
+            <label className="field">
+              <span>ประเภทเชื้อเพลิง</span>
+              <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)}>
+                {Array.from(new Set([row.fuel, ...FUEL_TYPES])).map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>ขนาด CC</span>
+              <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
+            </label>
+          </>
+        )}
         <label className="field">
-          <span>ประเภทเชื้อเพลิง</span>
-          <select value={form.fuel} onChange={(e) => set("fuel", e.target.value)}>
-            {Array.from(new Set([row.fuel, ...FUEL_TYPES])).map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>ขนาด CC</span>
-          <input value={form.cc} onChange={(e) => set("cc", e.target.value)} inputMode="decimal" />
-        </label>
-        <label className="field">
-          <span>น้ำหนักรถ (กก.)</span>
+          <span>{transport ? "น้ำหนักรถ (กก.) * - ตามเล่มทะเบียน" : "น้ำหนักรถ (กก.)"}</span>
           <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
         </label>
         <label className="field">
@@ -957,6 +1037,7 @@ function EditRenewalDialog({
           <OwnerTypeFields
             ownerType={form.ownerType}
             financed={form.financed}
+            hideFinanced={transport}
             onOwnerTypeChange={(v) => set("ownerType", v)}
             onFinancedChange={(v) => set("financed", v)}
           />
@@ -1260,14 +1341,43 @@ function DateCell({
 
 // ประเภทเจ้าของรถ + ติ๊กไฟแนนซ์ แบบเดียวกับหน้าเพิ่มข้อมูลรถ (ติ๊กแล้วประเภทที่เลือกคือผู้ครอบครอง/ผู้เช่าซื้อ)
 // รถติดไฟแนนซ์ที่ผู้เช่าซื้อเป็นบุคคลธรรมดาไม่คูณสองแบบนิติบุคคล (รย.1) - เดิมไม่มีช่องนี้จึงคิดภาษีสองเท่า (พบ 2026-09-27)
+// ตัวเลือกประเภทรถของงานต่อภาษี: 14 ประเภทของงานจดใหม่ + รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09) แยกกลุ่ม
+// ขส. นับเป็นรถยนต์ (inWriteScope) จึงเห็นเฉพาะ ADMIN / STAFF_CAR - transport=false เมื่อรถมาจากระบบ (เป็น ขส. ไม่ได้)
+function VehicleTypeOptions({ writeScope, transport = true }: { writeScope: VehicleScope; transport?: boolean }) {
+  const cars = VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t));
+  const trucks = transport ? TRANSPORT_VEHICLE_TYPES.filter((t) => inWriteScope(writeScope, t)) : [];
+  return (
+    <>
+      <optgroup label="รถตาม พ.ร.บ.รถยนต์">
+        {cars.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </optgroup>
+      {trucks.length > 0 && (
+        <optgroup label="รถตาม พ.ร.บ.ขนส่ง (รถใหญ่ / รถประกอบการ)">
+          {trucks.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
+
 function OwnerTypeFields({
   ownerType,
   financed,
+  hideFinanced = false,
   onOwnerTypeChange,
   onFinancedChange,
 }: {
   ownerType: FormState["ownerType"];
   financed: boolean;
+  hideFinanced?: boolean; // รถ ขส.: ไม่มีเรื่องเช่าซื้อ (ไม่คูณ 2 อยู่แล้ว) - ซ่อนติ๊กไฟแนนซ์
   onOwnerTypeChange: (v: FormState["ownerType"]) => void;
   onFinancedChange: (v: boolean) => void;
 }) {
@@ -1281,6 +1391,7 @@ function OwnerTypeFields({
           <option value="JURISTIC">นิติบุคคล</option>
         </select>
       </label>
+      {hideFinanced ? null : (
       <div className="field">
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <input
@@ -1292,6 +1403,7 @@ function OwnerTypeFields({
           ติดไฟแนนซ์ (เช่าซื้อ)
         </label>
       </div>
+      )}
     </>
   );
 }
@@ -1324,10 +1436,12 @@ function PreviewSummary({ preview }: { preview: TaxRenewalPreview }) {
         {tax.taxCycleCount > 1 && ` · ค้าง ${tax.taxCycleCount} รอบปี`}
         {tax.lateMonths > 0 && ` · ล่าช้า ${tax.lateMonths} เดือน`}
       </div>
-      {/* ถ้ายังไม่ได้ติ๊กว่ามีใบตรวจ จะมี warning เรื่อง ตรอ. อยู่แล้ว ไม่ต้องขึ้นซ้ำสองบรรทัด */}
-      {tax.inspectionRequired && !tax.warnings.some((w) => w.includes("ตรอ.")) && (
+      {/* ถ้ายังไม่ได้ติ๊กว่ามีใบตรวจ / ยังไม่มีวันที่ตรวจ (ขส.) จะมี warning อยู่แล้ว ไม่ต้องขึ้นซ้ำสองบรรทัด */}
+      {tax.inspectionRequired && !tax.warnings.some((w) => w.includes("ตรวจสภาพ")) && (
         <p className="customer-message" style={{ marginTop: 8 }}>
-          รถคันนี้ต้องมีใบตรวจสภาพ (ตรอ.) ก่อนต่อภาษี - ติ๊กยืนยันแล้ว
+          {tax.registrationCode === "ขส."
+            ? "รถตาม พ.ร.บ.ขนส่งต้องตรวจสภาพรถก่อนต่อภาษี - บันทึกวันที่ตรวจแล้ว"
+            : "รถคันนี้ต้องมีใบตรวจสภาพ (ตรอ.) ก่อนต่อภาษี - ติ๊กยืนยันแล้ว"}
         </p>
       )}
       {tax.warnings.map((w) => (

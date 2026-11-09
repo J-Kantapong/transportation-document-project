@@ -16,6 +16,7 @@ import {
   GovernmentTaxOwnerInput,
   GovernmentTaxRuleSet,
 } from '../tax/government-tax-calculator.js';
+import { TRANSPORT_FAMILIES, TRANSPORT_FAMILY_BY_TYPE } from '../tax/government-tax-reference-data.js';
 
 export type VehicleFuel =
   | 'เบนซิน'
@@ -31,7 +32,8 @@ export type TaxMethod =
   | 'ENGINE_CC_RY1'
   | 'WEIGHT_RY2'
   | 'WEIGHT_RY3'
-  | 'WEIGHT_EV_RY1';
+  | 'WEIGHT_EV_RY1'
+  | 'WEIGHT_TRANSPORT'; // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09) - น้ำหนักรถ x คอลัมน์ประเภทการขนส่ง
 
 // แปลง Vehicle.fuel -> กลุ่มเชื้อเพลิงที่ใช้เลือกสูตรภาษี ห้ามรับ govTaxFuelGroup จากผู้ใช้โดยตรง
 export const GOV_TAX_FUEL_GROUP_MAP: Record<VehicleFuel, GovTaxFuelGroup> = {
@@ -44,11 +46,18 @@ export const GOV_TAX_FUEL_GROUP_MAP: Record<VehicleFuel, GovTaxFuelGroup> = {
   'ไฟฟ้า (BEV)': GovTaxFuelGroup.BEV,
 };
 
+export const TRANSPORT_REGISTRATION_CODE = 'ขส.';
+
 const REGISTRATION_CODE_BY_FAMILY: Record<GovTaxVehicleFamily, string> = {
   [GovTaxVehicleFamily.RY1]: 'รย.1',
   [GovTaxVehicleFamily.RY2]: 'รย.2',
   [GovTaxVehicleFamily.RY3]: 'รย.3',
   [GovTaxVehicleFamily.RY12]: 'รย.12',
+  // รถตาม พ.ร.บ.ขนส่งทุกคอลัมน์ใช้รหัสเดียว - requiresInspection ดูรหัสนี้ (ตรวจทุกปี)
+  [GovTaxVehicleFamily.TRANSPORT_PRIVATE]: TRANSPORT_REGISTRATION_CODE,
+  [GovTaxVehicleFamily.TRANSPORT_NON_FIXED]: TRANSPORT_REGISTRATION_CODE,
+  [GovTaxVehicleFamily.TRANSPORT_FIXED]: TRANSPORT_REGISTRATION_CODE,
+  [GovTaxVehicleFamily.TRANSPORT_SMALL]: TRANSPORT_REGISTRATION_CODE,
 };
 
 // Policy ตัวคูณเชื้อเพลิง (เช่น NGV) - ยังไม่มีตารางในฐานข้อมูล ส่งเป็น [] ได้ แล้วจะใช้ตัวคูณ 1
@@ -173,6 +182,7 @@ export function resolveTaxMethod(
   fuelGroup: GovTaxFuelGroup,
 ): TaxMethod {
   if (family === GovTaxVehicleFamily.RY12) return 'FIXED_MOTORCYCLE';
+  if (TRANSPORT_FAMILIES.has(family)) return 'WEIGHT_TRANSPORT';
   if (family === GovTaxVehicleFamily.RY2) return 'WEIGHT_RY2';
   if (family === GovTaxVehicleFamily.RY3) return 'WEIGHT_RY3';
   return fuelGroup === GovTaxFuelGroup.BEV ? 'WEIGHT_EV_RY1' : 'ENGINE_CC_RY1';
@@ -206,11 +216,13 @@ export function calculateLateMonths(taxExpiryDate: Date, paymentDate: Date): num
 
 // อายุรถนับแบบ date-to-date จากวันจดทะเบียนครั้งแรก (ไม่ใช่ปีปฏิทินหรือ year-index):
 // รย.1/รย.2/รย.3 ครบ 7 ปี และ รย.12 ครบ 5 ปี ต้องตรวจสภาพ - ผู้ใช้ยืนยัน 2026-09-23
+// รถตาม พ.ร.บ.ขนส่ง (ขส.) ต้องตรวจสภาพทุกครั้งก่อนต่อภาษี ไม่ขึ้นกับอายุ - ผู้ใช้ 2026-11-09
 export function requiresInspection(
   registrationCode: string,
   vehicleAgeYears: number,
   taxOverdueYears: number,
 ): boolean {
+  if (registrationCode === TRANSPORT_REGISTRATION_CODE) return true;
   if (taxOverdueYears > 1) return true;
   if (['รย.1', 'รย.2', 'รย.3'].includes(registrationCode) && vehicleAgeYears >= 7) return true;
   if (registrationCode === 'รย.12' && vehicleAgeYears >= 5) return true;
@@ -343,7 +355,9 @@ export function calculateVehicleTax(
   const dueDates = buildTaxDueDates(input.taxExpiryDate, input.paymentDate, MAX_TAX_CYCLES);
   const cycles: VehicleTaxCycle[] = dueDates.map((dueDate) => {
     const vehicleYear = calculateVehicleYear(input.firstRegistrationDate, dueDate);
-    // ส่วนลดอายุรถใช้กับ รย.1 ที่คิดตาม cc เท่านั้น - รย.2/รย.3/รย.12 และ BEV ไม่ลด
+    // ส่วนลดอายุรถใช้กับ รย.1 ที่คิดตาม cc เท่านั้น - รย.2/รย.3/รย.12, BEV และรถตาม พ.ร.บ.ขนส่ง ไม่ลด
+    // (ขส.: ใบเสร็จจริงของรถอายุ 18 ปี = อัตราเต็ม 3,600 ไม่มีส่วนลด - ผู้ใช้ 2026-11-09; เงินเพิ่ม 1%/เดือน ใช้กติกาเดียวกับรถเล็ก
+    // เป็นข้อสมมติ ยังไม่ได้ยืนยัน)
     const ageDiscountRate = taxMethod === 'ENGINE_CC_RY1' ? getAgeDiscountRate(vehicleYear) : 0;
     const ageDiscountAmount = baseTax * ageDiscountRate;
     const taxAfterAgeDiscount = baseTax - ageDiscountAmount;
@@ -384,7 +398,10 @@ export function calculateVehicleTax(
   const vehicleAgeYears = ageYearsAt(input.firstRegistrationDate, input.paymentDate);
   const taxOverdueYears = lateMonths / 12;
   const inspectionRequired = requiresInspection(registrationCode, vehicleAgeYears, taxOverdueYears);
-  if (inspectionRequired && !input.inspectionCertificateConfirmed) {
+  if (inspectionRequired && !input.inspectionCertificateConfirmed && registrationCode === TRANSPORT_REGISTRATION_CODE) {
+    // ขส.: ออฟฟิศพารถไปตรวจเอง (ค่าตรวจ 1,000 ใน No Bill) - "ยืนยันแล้ว" = มีวันที่ตรวจสภาพรถแล้ว ไม่ใช่ใบ ตรอ.
+    warnings.push('รถตาม พ.ร.บ.ขนส่งต้องตรวจสภาพรถก่อนต่อภาษี - ยังไม่ได้บันทึกวันที่ตรวจสภาพรถ');
+  } else if (inspectionRequired && !input.inspectionCertificateConfirmed) {
     warnings.push('รถคันนี้ต้องมีใบตรวจสภาพ (ตรอ.) ก่อนต่อภาษี - ยังไม่ได้ติ๊กยืนยันว่ามีใบตรวจแล้ว');
   }
 
@@ -444,7 +461,8 @@ function classifyFamily(body: string | null | undefined): GovTaxVehicleFamily | 
   if (body.startsWith('รย.1-') || body === 'รย.1') return GovTaxVehicleFamily.RY1;
   if (body.startsWith('รย.2-') || body === 'รย.2') return GovTaxVehicleFamily.RY2;
   if (body.startsWith('รย.3-') || body === 'รย.3') return GovTaxVehicleFamily.RY3;
-  return null;
+  // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09) - ตารางเดียวกับที่ขั้นตอนที่ 4 ใช้ (government-tax-reference-data.ts)
+  return TRANSPORT_FAMILY_BY_TYPE[body] ?? null;
 }
 
 const TAX_METHOD_LABELS: Record<TaxMethod, string> = {
@@ -453,6 +471,7 @@ const TAX_METHOD_LABELS: Record<TaxMethod, string> = {
   WEIGHT_RY2: 'ตามน้ำหนักรถ (รย.2)',
   WEIGHT_RY3: 'ตามน้ำหนักรถ (รย.3)',
   WEIGHT_EV_RY1: 'ตามน้ำหนักรถ - รถไฟฟ้า (รย.1)',
+  WEIGHT_TRANSPORT: 'ตามน้ำหนักรถ (พ.ร.บ.ขนส่ง)',
 };
 
 const formatThaiDate = (d: Date) =>
