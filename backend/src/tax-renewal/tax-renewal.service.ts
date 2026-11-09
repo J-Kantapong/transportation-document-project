@@ -12,7 +12,7 @@ import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storag
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { TaxService } from '../tax/tax.service.js';
-import { calculateTaxRenewalFees } from './tax-renewal-fee.js';
+import { calculateTaxRenewalFees, vehicleClassOf } from './tax-renewal-fee.js';
 import {
   parseDate,
   parseDecimal,
@@ -30,7 +30,7 @@ import {
   VehicleTaxResult,
 } from './vehicle-tax-calculator.js';
 
-import { motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
+import { isTransportType, motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
 
 // snapshot ลงคอลัมน์ Json - ผ่าน JSON ก่อนเพื่อให้ Date/Decimal กลายเป็นค่าธรรมดาที่ Prisma รับได้
 const toJson = (value: unknown) => JSON.parse(JSON.stringify(value)) as object;
@@ -92,7 +92,31 @@ function parseExpectedUpdatedAt(raw: unknown): Date | null {
 const TAX_INPUT_FIELDS = ['taxExpiryDate', 'vehicleType', 'fuel', 'cc', 'weight', 'firstRegistrationDate'] as const;
 const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับใบเสร็จ (หน้ารับใบเสร็จ)';
 const LAST_RECEIPT_ERROR = 'งานที่รับใบเสร็จแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';
-const WORKFLOW_DATE_FIELDS = ['paymentDate', 'receivedDate', 'deliveredDate'] as const;
+// inspectionDate ใช้กับรถตาม พ.ร.บ.ขนส่งเท่านั้น (ผู้ใช้ 2026-11-09) - เติมจากว่าง = งานปกติ แก้/ล้าง = ต้องมีเหตุผล เหมือนวันที่อื่น
+const WORKFLOW_DATE_FIELDS = ['inspectionDate', 'paymentDate', 'receivedDate', 'deliveredDate'] as const;
+const TRANSPORT_INSPECTION_REQUIRED_ERROR = 'รถตาม พ.ร.บ.ขนส่งต้องบันทึกวันที่ตรวจสภาพรถก่อนบันทึกวันที่ชำระภาษี';
+const TRANSPORT_ONLY_INSPECTION_ERROR = 'วันที่ตรวจสภาพรถใช้กับรถตาม พ.ร.บ.ขนส่ง (ขส.) เท่านั้น - รถเล็กติ๊ก "มีใบตรวจ ตรอ. แล้ว" แทน';
+
+// ขั้นตรวจสภาพรถของรถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09, บันทึกครั้งเดียวเป็นวันที่ ไม่แยกส่งตรวจ/ผลตรวจ): ต้องตรวจทุกครั้งก่อนต่อภาษี
+// จึงบันทึกวันที่ชำระไม่ได้จนกว่าจะมีวันที่ตรวจ และตรวจต้องไม่หลังวันชำระ/ไม่เกินวันนี้ - รถเล็กห้ามมีวันที่นี้ (ใช้ติ๊ก ตรอ. แทน)
+function assertInspectionDate(vehicleType: string, inspectionDate: Date | null, paymentDate: Date | null) {
+  if (!isTransportType(vehicleType)) {
+    if (inspectionDate) throw new BadRequestException({ error: TRANSPORT_ONLY_INSPECTION_ERROR });
+    return;
+  }
+  if (paymentDate && !inspectionDate) throw new BadRequestException({ error: TRANSPORT_INSPECTION_REQUIRED_ERROR });
+  if (inspectionDate && inspectionDate > todayInBangkok()) {
+    throw new BadRequestException({ error: 'วันที่ตรวจสภาพรถต้องไม่เกินวันนี้' });
+  }
+  if (inspectionDate && paymentDate && inspectionDate > paymentDate) {
+    throw new BadRequestException({ error: 'วันที่ตรวจสภาพรถต้องไม่หลังวันที่ชำระภาษี' });
+  }
+}
+
+// "ยืนยันตรวจแล้ว" ของรถ ขส. = มีวันที่ตรวจ (ไม่รับติ๊กจากฟอร์ม) / รถเล็ก = ติ๊ก "มีใบตรวจ ตรอ. แล้ว" ตามเดิม
+function inspectionConfirmedOf(vehicleType: string, inspectionDate: Date | null, ticked: boolean): boolean {
+  return isTransportType(vehicleType) ? inspectionDate !== null : ticked;
+}
 const DELIVERED_BY_SLIP_ERROR = 'งานนี้ส่งคืนลูกค้าผ่านใบส่งงาน (DL) แล้ว - แก้วันที่หรือยกเลิกการส่งที่หน้ารายงานส่งงานก่อน';
 
 @Injectable()
@@ -206,8 +230,10 @@ export class TaxRenewalService {
   async preview(body: Record<string, unknown>) {
     const info = await this.resolveVehicleInfo(body);
     const paymentDate = parseDate(body.paymentDate, 'วันที่ชำระ') ?? todayInBangkok();
+    // preview ไม่บังคับลำดับวันที่ตรวจ (ฟอร์มยังกรอกไม่ครบ) แค่ให้ warning ของเครื่องคำนวณบอกว่ายังไม่ได้ตรวจ
+    const inspectionDate = isTransportType(info.vehicleType) ? parseDate(body.inspectionDate, 'วันที่ตรวจสภาพรถ') : null;
     const tax = await this.computeTax(info, paymentDate, {
-      inspectionConfirmed: Boolean(body.inspectionConfirmed),
+      inspectionConfirmed: inspectionConfirmedOf(info.vehicleType, inspectionDate, Boolean(body.inspectionConfirmed)),
     });
     const fees = calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution) });
     return { tax, fees };
@@ -215,11 +241,14 @@ export class TaxRenewalService {
 
   async create(body: Record<string, unknown>) {
     const info = await this.resolveVehicleInfo(body);
-    const inspectionConfirmed = Boolean(body.inspectionConfirmed);
     // วันที่ยื่นงาน - เป็นข้อมูลของงาน ไม่ใช่ของรถ จึงไม่อยู่ใน resolveVehicleInfo และไม่มีผลกับยอดภาษี
     const submitDate = parseDate(body.submitDate, 'วันที่ยื่นงาน', true);
     // คิด ณ วันที่ชำระถ้ามี ไม่งั้นใช้วันนี้เพื่อดูว่าต้องตรวจสภาพไหม (ยอดเงินยัง snapshot ไม่ได้จนกว่าจะชำระ)
     const paymentDate = parseDate(body.paymentDate, 'วันที่ชำระ');
+    // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09): วันที่ตรวจสภาพรถ - ต้องมีก่อนชำระ / รถเล็กใช้ติ๊ก ตรอ. ตามเดิม
+    const inspectionDate = parseDate(body.inspectionDate, 'วันที่ตรวจสภาพรถ');
+    assertInspectionDate(info.vehicleType, inspectionDate, paymentDate);
+    const inspectionConfirmed = inspectionConfirmedOf(info.vehicleType, inspectionDate, Boolean(body.inspectionConfirmed));
     const tax = await this.computeTax(info, paymentDate ?? todayInBangkok(), { inspectionConfirmed });
     const fees = paymentDate
       ? calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution) })
@@ -236,6 +265,7 @@ export class TaxRenewalService {
         submitDate,
         inspectionRequired: tax.inspectionRequired,
         inspectionConfirmed,
+        inspectionDate,
         insuranceConfirmed: Boolean(body.insuranceConfirmed),
         paymentDate,
         skipContribution: Boolean(body.skipContribution),
@@ -329,6 +359,8 @@ export class TaxRenewalService {
       const stored = storedRenewalOwner(row.taxBreakdown);
       return {
         ...row,
+        // CAR | MOTO | TRANSPORT (รถตาม พ.ร.บ.ขนส่ง, ผู้ใช้ 2026-11-09) - หน้าเว็บใช้เลือกคอลัมน์ตรวจรถ ไม่ต้องเช็ก prefix เอง
+        vehicleClass: vehicleClassOf(row.vehicleType),
         ownerFromVehicle: Boolean(vehicle?.owner),
         financed: stored?.isHirePurchaseBusiness ?? false,
         hirerType: stored?.hirerType ?? null,
@@ -397,6 +429,7 @@ export class TaxRenewalService {
           vehicleType: existing.vehicleType,
           submitDate: existing.submitDate,
           taxExpiryDate: existing.taxExpiryDate,
+          inspectionDate: existing.inspectionDate,
           paymentDate: existing.paymentDate,
           receivedDate: existing.receivedDate,
           deliveredDate: existing.deliveredDate,
@@ -462,14 +495,21 @@ export class TaxRenewalService {
     }
     const ownerChanged = !sameOwner(owner, currentOwner);
 
-    const inspectionConfirmed =
-      body.inspectionConfirmed === undefined ? existing.inspectionConfirmed : Boolean(body.inspectionConfirmed);
     const insuranceConfirmed =
       body.insuranceConfirmed === undefined ? existing.insuranceConfirmed : Boolean(body.insuranceConfirmed);
     const skipContribution =
       body.skipContribution === undefined ? existing.skipContribution : Boolean(body.skipContribution);
     const paymentDate =
       body.paymentDate === undefined ? existing.paymentDate : parseDate(body.paymentDate, 'วันที่ชำระ');
+    // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09): วันที่ตรวจสภาพรถ - เปลี่ยนประเภทรถจาก ขส. เป็นรถเล็กต้องล้างวันที่นี้ด้วย (400 ถ้ายังค้าง)
+    const inspectionDate =
+      body.inspectionDate === undefined ? existing.inspectionDate : parseDate(body.inspectionDate, 'วันที่ตรวจสภาพรถ');
+    assertInspectionDate(vehicleType, inspectionDate, paymentDate);
+    const inspectionConfirmed = inspectionConfirmedOf(
+      vehicleType,
+      inspectionDate,
+      body.inspectionConfirmed === undefined ? existing.inspectionConfirmed : Boolean(body.inspectionConfirmed),
+    );
     const receivedDate =
       body.receivedDate === undefined ? existing.receivedDate : parseDate(body.receivedDate, 'วันที่รับป้ายภาษี');
     const deliveredDate =
@@ -498,7 +538,7 @@ export class TaxRenewalService {
 
     // แยกการแก้ข้อมูล (ต้องมีเหตุผล) ออกจากงานปกติ: กรอกวันที่ที่ยังว่าง = งานปกติ / แก้หรือล้างวันที่ที่มีแล้ว = แก้ข้อมูล
     const detailChanges = diffChanges(existing, { ...details, skipContribution });
-    const dateChanges = diffChanges(existing, { paymentDate, receivedDate, deliveredDate });
+    const dateChanges = diffChanges(existing, { inspectionDate, paymentDate, receivedDate, deliveredDate });
     const correctedDates = WORKFLOW_DATE_FIELDS.filter((field) => field in dateChanges && existing[field] !== null);
     const isCorrection = Object.keys(detailChanges).length > 0 || ownerChanged || correctedDates.length > 0 || customerCorrected;
     const remark = isCorrection ? requireRemark(body.remark, 'กรุณาระบุเหตุผลที่แก้งานต่อภาษี') : null;
@@ -548,10 +588,11 @@ export class TaxRenewalService {
       // งานปกติ (ติ๊ก / กรอกวันที่ครั้งแรก): เขียนเฉพาะช่องที่ส่งมา (+ ยอดเงินที่เพิ่งคิดตอนใส่วันที่ชำระ) - ไม่เขียนข้อมูลรถ/เจ้าของ/
       // วันที่อื่นที่อ่านไว้ต้นคำขอ ติ๊กที่แทรกกับการ ✎ แก้ของอีกคนจึงไม่เอาค่าเก่าไปทับโดยไม่มีประวัติ (พบ 2026-09-27)
       // ownerType เขียนเฉพาะตอนคิดยอดใหม่ ให้ตรงกับ taxBreakdown.owner ที่ใช้คิด (เดิมทุกติ๊กคัดลอกเจ้าของปัจจุบันของรถมาทับ)
-      const dates = { paymentDate, receivedDate, deliveredDate };
+      const dates = { inspectionDate, paymentDate, receivedDate, deliveredDate };
       const sentDates = WORKFLOW_DATE_FIELDS.filter((field) => has(field));
       const routine: Prisma.TaxRenewalUpdateInput = {
-        ...(has('inspectionConfirmed') ? { inspectionConfirmed } : {}),
+        // ขส.: ติ๊กตรวจแล้วตามวันที่ตรวจ (กรอกวันที่ = ติ๊กให้) / รถเล็ก: ตามที่ติ๊กมา
+        ...(has('inspectionConfirmed') || has('inspectionDate') ? { inspectionConfirmed } : {}),
         ...(has('insuranceConfirmed') ? { insuranceConfirmed } : {}),
         ...Object.fromEntries(sentDates.map((field) => [field, dates[field]])),
         ...customerData,
@@ -565,7 +606,12 @@ export class TaxRenewalService {
       // และลำดับ ชำระ -> รับป้าย -> คืนลูกค้า ที่ตรวจข้างบนยังถูกตอนเขียน)
       const datesAsChecked =
         sentDates.length > 0
-          ? { paymentDate: existing.paymentDate, receivedDate: existing.receivedDate, deliveredDate: existing.deliveredDate }
+          ? {
+              inspectionDate: existing.inspectionDate,
+              paymentDate: existing.paymentDate,
+              receivedDate: existing.receivedDate,
+              deliveredDate: existing.deliveredDate,
+            }
           : {};
       return this.prisma.taxRenewal
         .update({ where: { id, cancelledAt: null, ...datesAsChecked, ...(guard ? { updatedAt: guard } : {}) }, data: routine })
@@ -575,6 +621,7 @@ export class TaxRenewalService {
       ...details,
       ownerType: owner.ownerType,
       inspectionConfirmed,
+      inspectionDate,
       insuranceConfirmed,
       skipContribution,
       paymentDate,

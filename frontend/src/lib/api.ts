@@ -795,6 +795,8 @@ export interface TaxRenewalInput {
   ownerName?: string | null;
   taxExpiryDate: string;
   inspectionConfirmed?: boolean;
+  // รถตาม พ.ร.บ.ขนส่ง (ขส.-..., ผู้ใช้ 2026-11-09): วันที่ตรวจสภาพรถ - ต้องมีก่อน paymentDate; รถเล็กส่ง null
+  inspectionDate?: string | null;
   insuranceConfirmed?: boolean;
   skipContribution?: boolean;
   paymentDate?: string | null;
@@ -804,6 +806,7 @@ export interface TaxRenewalInput {
 // = แก้ข้อมูล ต้องส่ง remark (ผู้ใช้ 2026-09-27) - chassis/engine แก้ได้เฉพาะรถที่กรอกเอง, ownerType/financed เฉพาะเจ้าของที่ไม่ได้มาจากข้อมูลรถ
 export interface TaxRenewalUpdateInput {
   inspectionConfirmed?: boolean;
+  inspectionDate?: string | null; // รถ ขส. เท่านั้น - เติมจากว่างเป็นงานปกติ แก้/ล้างต้องมี remark
   insuranceConfirmed?: boolean;
   skipContribution?: boolean;
   paymentDate?: string | null;
@@ -839,12 +842,15 @@ export interface TaxRenewal {
   plateCategory: string;
   plateNumber: string;
   vehicleType: string;
+  // CAR | MOTO | TRANSPORT (รถตาม พ.ร.บ.ขนส่ง, ผู้ใช้ 2026-11-09) - TRANSPORT ใช้วันที่ตรวจสภาพรถแทนติ๊ก ตรอ.
+  vehicleClass: "CAR" | "MOTO" | "TRANSPORT";
   fuel: string;
   firstRegistrationDate: string;
   taxExpiryDate: string;
   ownerName: string | null;
   inspectionRequired: boolean;
   inspectionConfirmed: boolean;
+  inspectionDate: string | null;
   insuranceConfirmed: boolean;
   paymentDate: string | null;
   receivedDate: string | null;
