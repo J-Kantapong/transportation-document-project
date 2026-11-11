@@ -911,9 +911,9 @@ export class BillingService {
     const jobLabel = optionalText(dto.jobLabel, 'ชื่องาน');
     if (!jobLabel) throw bad('ต้องใส่ชื่องานที่จะแสดงบนบิล');
     if (typeof dto.customerId !== 'string') throw bad('ต้องระบุลูกค้า');
-    if (!Array.isArray(dto.lines) || dto.lines.length === 0) throw bad('ต้องเลือกรถอย่างน้อย 1 คัน');
+    if (dto.lines !== undefined && !Array.isArray(dto.lines)) throw bad('รายการรถไม่ถูกต้อง');
 
-    const lineInputs = (dto.lines as Array<Record<string, unknown>>).map((l) => {
+    const lineInputs = ((dto.lines ?? []) as Array<Record<string, unknown>>).map((l) => {
       if (typeof l?.vehicleId !== 'string') throw bad('รายการรถไม่ถูกต้อง');
       return { vehicleId: l.vehicleId, ...parseLineAmounts(l) };
     });
@@ -922,6 +922,8 @@ export class BillingService {
     const extras = parseExtras(dto.extras);
     const customItems = dto.items === undefined ? [] : parseItems(dto.items);
     const picks = parseJobPicks(dto.jobs);
+    // หน้าวางบิลรวม (ผู้ใช้ 2026-11-11): บิลเดียวมีรถ งานอื่นๆ หรือทั้งสองอย่างก็ได้ - ต้องมีอย่างใดอย่างหนึ่ง
+    if (lineInputs.length === 0 && picks.length === 0) throw bad('ต้องเลือกรถหรืองานอย่างน้อย 1 รายการ');
     const whtOverride = parseWhtOverride(dto.whtRate);
 
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
@@ -969,8 +971,9 @@ export class BillingService {
           // บัญชีของบิล = บัญชีของลูกค้า ณ วันส่งงานของรถ - บิลเดียวต้องอยู่บัญชีเดียว (ช่วงย้ายบัญชีต้องแยกบิล)
           const accounts = new Set(lines.map((l) => accountOn(periods, iso(l.deliveredDate)!)));
           if (accounts.size > 1) throw bad('รถในบิลนี้ส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี');
-          const account = [...accounts][0];
           const issueIso = issueDate.toISOString().slice(0, 10);
+          // ไม่มีรถในบิล (มีแต่งานอื่นๆ) = บัญชีของลูกค้า ณ วันออกบิล เหมือน createJobInvoice
+          const account = accounts.size ? [...accounts][0] : accountOn(periods, issueIso);
           // งานอื่นๆ ที่พ่วงมา (ผู้ใช้ 2026-10-07): บัญชีของงานยึดวันออกบิล (ไม่มีวันส่งงาน) ต้องตรงกับบัญชีของรถ · ล็อกหลังรถเสมอ
           if (picks.length && accountOn(periods, issueIso) !== account) {
             throw bad('งานอื่นๆ ที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) กับรถในบิลนี้ ณ วันออกบิล - แยกออกเป็นบิลละบัญชี');
@@ -999,7 +1002,7 @@ export class BillingService {
               whtAmount: totals.whtAmount,
               netTotal: totals.netTotal,
               // createMany = คำสั่งเดียว บิลหลายสิบคันไม่ชน timeout ของ transaction
-              lines: { createMany: { data: lines } },
+              ...(lines.length ? { lines: { createMany: { data: lines } } } : {}),
               ...(items.length ? { items: { createMany: { data: items } } } : {}),
             },
             include: INVOICE_INCLUDE,

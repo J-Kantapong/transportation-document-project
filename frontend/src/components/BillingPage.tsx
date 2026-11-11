@@ -70,6 +70,14 @@ const ROW_GRID: React.CSSProperties = {
   alignItems: "center",
 };
 
+// คอลัมน์ของรายการงานอื่นๆ รอวางบิล (ติ๊ก · งาน · ทะเบียน · วันส่งงาน · ค่าธรรมเนียม · ค่าบริการ)
+const JOB_GRID: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "20px minmax(90px,1fr) minmax(110px,1.4fr) minmax(76px,0.8fr) minmax(70px,0.8fr) 100px",
+  gap: 10,
+  alignItems: "center",
+};
+
 const sameIds =(a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
 // งานอื่นๆ ระบุด้วย "ประเภท:id" (id ของแต่ละตารางงานซ้ำกันข้ามประเภทได้ในทางทฤษฎี)
 const jobKey = (j: Pick<OtherJob, "type" | "id">) => `${j.type}:${j.id}`;
@@ -240,7 +248,7 @@ export function BillingPage() {
       } else {
         // คันที่ออกจากคิวแล้วหายไป คันใหม่ (เช่น รถจากบิลที่เพิ่งยกเลิก) ได้แถวใหม่ที่ยังไม่ติ๊ก
         setRows((prev) => Object.fromEntries(q.customers.flatMap((c) => c.vehicles.map((v) => [v.id, mergeRow(prev[v.id], v)]))));
-        if (q.customers.some((c) => c.id === shownId)) {
+        if (q.customers.some((c) => c.id === shownId) || jobsQueue?.customers.some((c) => c.id === shownId && c.jobs.length > 0)) {
           setCustomerId(shownId); // ลูกค้าอื่นเพิ่งเข้าคิวก็ยังอยู่ที่ลูกค้าเดิม
         } else {
           // ลูกค้าที่เปิดอยู่ไม่มีรถรอวางบิลแล้ว - ค่าใช้จ่ายอื่นๆ/ชื่องาน/งานอื่นของลูกค้านั้นใช้กับลูกค้าอื่นไม่ได้
@@ -264,19 +272,58 @@ export function BillingPage() {
     loadQueue(true);
   }, []);
 
-  const customer = customers.find((c) => c.id === customerId) ?? customers[0] ?? null;
+  // หน้าวางบิลรวม (ผู้ใช้ 2026-11-11 "อยากวางบิลร่วมกัน"): ลูกค้าที่มีแต่งานอื่นๆ (ต่อภาษี / โอน ...) ไม่มีรถรอวางบิล ก็อยู่ในรายการด้วย
+  // ลูกค้ากลุ่มนี้ไม่ได้โหลดตารางราคารถมา (rates ว่าง, vehiclesLoaded = false) จึงซ่อนปุ่มแก้ตารางค่าดำเนินการ กันบันทึกทับตารางเดิม
+  const billingCustomers = useMemo<Array<BillingCustomer & { vehiclesLoaded: boolean }>>(() => {
+    const withVehicles = customers.map((c) => ({ ...c, vehiclesLoaded: true }));
+    const jobOnly = otherJobs
+      .filter((c) => c.jobs.length > 0 && !customers.some((x) => x.id === c.id))
+      .map((c) => ({ id: c.id, name: c.name, company: c.company, branch: c.branch, address: c.address, taxId: c.taxId, account: c.account, terms: c.terms, rates: [], vehicles: [], vehiclesLoaded: false }));
+    return [...withVehicles, ...jobOnly];
+  }, [customers, otherJobs]);
+  const jobCountOf = (id: string) => otherJobs.find((c) => c.id === id)?.jobs.length ?? 0;
+  const customer = billingCustomers.find((c) => c.id === customerId) ?? billingCustomers[0] ?? null;
   const vehicles = useMemo(
     () => (customer ? [...customer.vehicles].sort((a, b) => a.deliveredDate.localeCompare(b.deliveredDate) || comparePlate(a, b)) : []),
     [customer],
   );
   const selected = vehicles.filter((v) => rows[v.id]?.checked);
+  // งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล + ที่ติ๊กพ่วงในบิลนี้ (ผู้ใช้ 2026-10-07; อยู่ในรายการหน้าหลักตั้งแต่ 2026-11-11) - ค่าบริการตามตารางของลูกค้า แก้ได้รายงาน
+  const customerJobs = useMemo(
+    () => [...(otherJobs.find((c) => c.id === customer?.id)?.jobs ?? [])].sort((a, b) => a.deliveredDate.localeCompare(b.deliveredDate) || a.typeLabel.localeCompare(b.typeLabel)),
+    [otherJobs, customer?.id],
+  );
+  const jobPriceText = (j: OtherJob) => jobPrices[jobKey(j)] ?? (j.suggestedServiceFee === null ? "" : formatMoney(j.suggestedServiceFee));
+  const jobPrice = (j: OtherJob) => money(jobPriceText(j));
+  const selectedJobs = customerJobs.filter((j) => jobPicked.has(jobKey(j)));
+  const hasPick = selected.length > 0 || selectedJobs.length > 0;
+  // ปัญหาของงานที่ติ๊กแล้ว (แสดงที่แถว) - null = พร้อม
+  const jobProblemOf = (j: OtherJob): string | null => {
+    if (jobPriceText(j).trim() === "") return "ใส่ค่าบริการ (ใส่ 0 ถ้าไม่คิด)";
+    if (jobPrice(j) === null) return "ค่าบริการต้องเป็นตัวเลข";
+    if (j.fee <= 0 && (jobPrice(j) ?? 0) <= 0) return "ไม่มียอดให้วางบิล";
+    return null;
+  };
+  function setJobsPicked(keys: string[], picked: boolean) {
+    setJobPicked((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (picked) next.add(k);
+        else next.delete(k);
+      }
+      return next;
+    });
+  }
   // บัญชีของบิล = บัญชีของรถที่เลือก (ตามวันส่งงาน) - เลือกปนกัน 2 บัญชี = ออกบิลไม่ได้ ต้องแยกบิล
   const selectedAccounts = [...new Set(selected.map((v) => v.account))];
   const mixedAccounts = selectedAccounts.length > 1;
   const account: BillingAccount = selectedAccounts.length === 1 ? selectedAccounts[0] : (customer?.account ?? "COMPANY");
   const invoiceNo = invoiceNos[account];
   const issueDateIso = displayDateToIso(issueDateText.replace(/\D/g, ""));
-  const jobLabel = jobLabelEdit ?? defaultJobLabel(selected.length ? selected : vehicles);
+  // ไม่มีรถในบิล (มีแต่งานอื่นๆ) = ชื่องานตามประเภทงาน เหมือนหน้าวางบิลงานอื่นเดิม
+  const jobLabel =
+    jobLabelEdit ??
+    (selected.length === 0 && selectedJobs.length > 0 ? [...new Set(selectedJobs.map((j) => j.typeLabel))].join(" / ") : defaultJobLabel(selected.length ? selected : vehicles));
 
   const rates = customer?.rates ?? [];
   const rateById = new Map(rates.map((r) => [r.id, r]));
@@ -411,11 +458,6 @@ export function BillingPage() {
       })),
     ]);
   const draftItems = itemRowsToItems(itemRows);
-  // งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล + ที่ติ๊กพ่วงในบิลนี้ (ผู้ใช้ 2026-10-07) - ค่าบริการตามตารางของลูกค้า แก้ได้รายงาน
-  const customerJobs = useMemo(() => otherJobs.find((c) => c.id === customer?.id)?.jobs ?? [], [otherJobs, customer?.id]);
-  const jobPriceText = (j: OtherJob) => jobPrices[jobKey(j)] ?? (j.suggestedServiceFee === null ? "" : formatMoney(j.suggestedServiceFee));
-  const jobPrice = (j: OtherJob) => money(jobPriceText(j));
-  const selectedJobs = customerJobs.filter((j) => jobPicked.has(jobKey(j)));
   // บรรทัดที่งานจะกลายเป็นบนบิล (เหมือน backend jobItems) ไว้คิดยอดและตัวอย่างเอกสาร - server สร้างของจริงเองตอนบันทึก
   const jobDraftItems: InvoiceItem[] = selectedJobs.flatMap((j) => {
     const snap = { chassis: j.chassis, plateText: j.plateText, brand: j.brand, ownerName: j.ownerName, receiptNo: j.receiptNo, doneDate: j.doneDate, vehicleClass: j.vehicleClass, variant: j.variant, serviceLabel: j.suggestedServiceLabel };
@@ -448,7 +490,7 @@ export function BillingPage() {
     : null;
 
   const preview: PrintableInvoice | null =
-    customer && totals && selected.length > 0
+    customer && totals && hasPick
       ? {
           invoiceNo,
           account,
@@ -524,7 +566,8 @@ export function BillingPage() {
   async function handleIssue() {
     if (!customer) return;
     const fail = (text: string) => setMessage({ text, error: true });
-    if (selected.length === 0) return fail("เลือกรถอย่างน้อย 1 คัน");
+    if (!hasPick) return fail("เลือกรถหรืองานอย่างน้อย 1 รายการ");
+    if (customer.terms.requiresQuotation) return fail("ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกใบวางบิลจากหน้าใบเสนอราคา");
     if (mixedAccounts) return fail("รถที่เลือกส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี");
     if (!invoiceNo.trim()) return fail("ใส่เลขที่บิล");
     if (!issueDateIso) return fail("วันที่ออกบิลไม่ถูกต้อง");
@@ -542,10 +585,8 @@ export function BillingPage() {
     if (itemError) return fail(itemError);
     if (jobAccountMismatch) return fail("งานอื่นๆ ที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) กับรถในบิลนี้ - ออกบิลงานอื่นแยกใบ");
     for (const j of selectedJobs) {
-      const name = `${j.typeLabel} ${j.plateText || j.chassis}`;
-      if (jobPriceText(j).trim() === "") return fail(`ใส่ค่าบริการของ ${name} (ใส่ 0 ถ้าไม่คิดค่าบริการ)`);
-      if (jobPrice(j) === null) return fail(`ค่าบริการของ ${name} ต้องเป็นตัวเลข`);
-      if (j.fee <= 0 && (jobPrice(j) ?? 0) <= 0) return fail(`${name} ไม่มียอดให้วางบิล`);
+      const problem = jobProblemOf(j);
+      if (problem) return fail(`${j.typeLabel} ${j.plateText || j.chassis}: ${problem}`);
     }
     const whtError = whtProblem(customerWht, whtValue, whtChecked);
     if (whtError) return fail(whtError);
@@ -582,7 +623,8 @@ export function BillingPage() {
       setExpanded(null);
       setInvoiceReload((n) => n + 1);
       const jobCount = selectedJobs.length;
-      setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${invoice.lines.length} คัน${jobCount ? ` + งานอื่น ${jobCount} งาน` : ""} ยอด ${formatMoney(invoice.netTotal)} บาท` });
+      const parts = [invoice.lines.length ? `${invoice.lines.length} คัน` : "", jobCount ? `งานอื่น ${jobCount} งาน` : ""].filter(Boolean).join(" + ");
+      setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${parts} ยอด ${formatMoney(invoice.netTotal)} บาท` });
       printInvoice(invoice);
     } catch (err) {
       fail(err instanceof ApiError ? err.message : "ออกบิลไม่สำเร็จ");
@@ -596,24 +638,9 @@ export function BillingPage() {
   return (
     <section className="content">
       <h1 tabIndex={-1}>วางบิล</h1>
-      {/* สรุปงานอื่นๆ ที่รอวางบิลของทุกลูกค้า กันลืม (ผู้ใช้ 2026-10-08) */}
-      {otherJobs.some((c) => c.jobs.length > 0) && (
-        <Link
-          href="/accounting/billing/jobs"
-          style={{ display: "block", marginTop: 8, padding: "10px 14px", borderRadius: 8, background: "#fff7e6", border: "1px solid #f5d28a", color: "#7a4b00", textDecoration: "none", fontSize: 14 }}
-        >
-          <b>มีงานอื่นรอวางบิล {otherJobs.reduce((n, c) => n + c.jobs.length, 0)} งาน</b>
-          {" ("}
-          {otherJobs
-            .filter((c) => c.jobs.length > 0)
-            .map((c) => `${c.company || c.name} ${c.jobs.length}`)
-            .join(", ")}
-          {") - กดเพื่อดูและวางบิล →"}
-        </Link>
-      )}
       <p>
-        รถที่พนักงานบันทึกส่งงานแล้วจะมารอที่นี่ เลือกคันที่จะรวมในบิล ตรวจค่าดำเนินการ แล้วออกใบวางบิลพร้อมเอกสารแนบรายคัน - คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด
-        &quot;ปิดงาน&quot; พร้อมหมายเหตุ
+        รถจดใหม่และงานอื่นๆ (ต่อภาษี / โอน / ยกเลิกใช้รถ / คัดป้าย / ย้ายออก) ที่ส่งงานลูกค้าแล้วจะมารอที่นี่ เลือกลูกค้า ติ๊กรถและงานที่จะรวมในบิลเดียวกัน แล้วออกใบวางบิล -
+        คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด &quot;ปิดงาน&quot; พร้อมหมายเหตุ
       </p>
       {/* ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่ลงส่งงาน - วางบิลไม่ได้จนกว่าจะลง บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08) */}
       <AwaitingDeliveryPanel only="all" onRecorded={() => loadQueue(false)} />
@@ -627,7 +654,7 @@ export function BillingPage() {
       </Link>
       {/* งานโอน / ยกเลิกการใช้รถ / คัดป้าย / ย้ายออก / ต่อภาษี ที่รับใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-07) */}
       <Link href="/accounting/billing/jobs" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
-        วางบิลงานอื่นๆ (โอน / ต่อภาษี / ยกเลิกใช้รถ ...) →
+        ตั้งราคา / ปิดงาน งานอื่นๆ (โอน / ต่อภาษี ...) →
       </Link>
       {/* บิลที่ไม่มีรถในระบบ: งานเก่าจากระบบเดิม / ขายสินค้า (ผู้ใช้ 2026-09-29) */}
       <Link href="/accounting/billing/custom" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
@@ -640,7 +667,7 @@ export function BillingPage() {
         </div>
       ) : !customer ? (
         <section className="panel" style={{ marginTop: 20 }}>
-          <div className="empty-customers">ไม่มีรถรอวางบิล (รถจะเข้าคิวเมื่อพนักงานบันทึกส่งงานในหน้า Delivery)</div>
+          <div className="empty-customers">ไม่มีรถหรืองานรอวางบิล (เข้าคิวเมื่อพนักงานบันทึกส่งงานในหน้า Delivery)</div>
           {message.text && (
             <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 20px" }}>
               {message.text}
@@ -650,9 +677,9 @@ export function BillingPage() {
       ) : (
         <>
           <div className="inspect-filter" style={{ padding: "20px 0 0" }}>
-            {customers.map((c) => (
+            {billingCustomers.map((c) => (
               <button key={c.id} className={`filter-chip${c.id === customer.id ? " selected" : ""}`} onClick={() => chooseCustomer(c.id)}>
-                {c.company || c.name} · รอวางบิล {c.vehicles.length}
+                {c.company || c.name} · รอวางบิล {[c.vehicles.length ? `${c.vehicles.length} คัน` : "", jobCountOf(c.id) ? `งานอื่น ${jobCountOf(c.id)}` : ""].filter(Boolean).join(" + ")}
                 {c.account === "PERSONAL" && ` · ${ACCOUNT_LABEL.PERSONAL}`}
               </button>
             ))}
@@ -664,9 +691,11 @@ export function BillingPage() {
                 <b style={{ fontWeight: 600 }}>{ACCOUNT_LABEL[customer.account]}</b>
                 <span className="muted" style={{ margin: "0 10px" }}>·</span>
                 <b style={{ fontWeight: 600 }}>เงื่อนไขวางบิล:</b> {termsSummary(customer.account === "PERSONAL" ? { ...customer.terms, vat: false } : customer.terms, todayIso())}
-                <span className="muted" style={{ marginLeft: 12 }}>
-                  ตารางค่าดำเนินการ {customer.rates.length} แถว
-                </span>
+                {customer.vehiclesLoaded && (
+                  <span className="muted" style={{ marginLeft: 12 }}>
+                    ตารางค่าดำเนินการ {customer.rates.length} แถว
+                  </span>
+                )}
               </div>
               <div>
                 <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "account" ? "" : "account")}>
@@ -675,9 +704,16 @@ export function BillingPage() {
                 <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "terms" ? "" : "terms")}>
                   แก้เงื่อนไข
                 </button>
-                <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "rates" ? "" : "rates")}>
-                  แก้ตารางค่าดำเนินการ
-                </button>
+                {/* ลูกค้าที่มีแต่งานอื่นไม่ได้โหลดตารางราคารถมา - แก้ที่หน้าตั้งราคาล่วงหน้าแทน กันบันทึกตารางว่างทับของเดิม */}
+                {customer.vehiclesLoaded ? (
+                  <button className="text-button" onClick={() => setSettingsOpen(settingsOpen === "rates" ? "" : "rates")}>
+                    แก้ตารางค่าดำเนินการ
+                  </button>
+                ) : (
+                  <Link href="/accounting/billing/customers" className="text-button">
+                    ตารางราคารถ →
+                  </Link>
+                )}
               </div>
             </div>
             {settingsOpen === "account" && (
@@ -698,7 +734,12 @@ export function BillingPage() {
                 }}
               />
             )}
-            {settingsOpen === "rates" && (
+            {customer.terms.requiresQuotation && (
+              <div className="customer-message error" role="alert" style={{ marginTop: 8 }}>
+                ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกใบวางบิลจากหน้าใบเสนอราคา
+              </div>
+            )}
+            {settingsOpen === "rates" && customer.vehiclesLoaded && (
               <BillingRatesEditor
                 key={customer.id}
                 customerId={customer.id}
@@ -714,9 +755,10 @@ export function BillingPage() {
           {/* วางบิลแบบติ๊กอย่างเดียว (ผู้ใช้ 2026-09-28): แต่ละคันเห็นแค่ทะเบียน/เลขตัวถัง/ราคาที่ระบบคิด ไม่ต้องเลื่อนซ้ายขวา
               รายละเอียด (ค่าใบเสร็จ, แถวราคา, ค่าเพิ่ม, ข้อความบนบิล, ปิดงาน) อยู่หลังปุ่ม "แก้" ใช้เฉพาะคันที่ต้องแก้
               คันที่มีปัญหา (ไม่มีราคา/ไม่มียอดใบเสร็จ) ติ๊กไม่ได้จนกว่าจะแก้ · ออกบิลผ่านหน้ายืนยันที่สรุปราคาและยอดรวม */}
+          {vehicles.length > 0 && (
           <section className="panel" style={{ marginTop: 16, overflow: "visible" }}>
             <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
-              <h2>ส่งงานแล้ว รอวางบิล ({vehicles.length})</h2>
+              <h2>รถจดใหม่ ส่งงานแล้ว รอวางบิล ({vehicles.length})</h2>
               <span className="muted" style={{ fontSize: 12 }}>
                 <span style={{ display: "inline-block", width: 12, height: 12, background: "#fff6dd", border: "1px solid #f5d27a", borderRadius: 3, verticalAlign: "middle", marginRight: 4 }} />
                 แถวสีเหลือง = ไม่ใช่จดปกติ (ขอใช้ / ด่วน / กำหนดเอง)
@@ -1131,12 +1173,104 @@ export function BillingPage() {
               <span />
               <span />
               <span />
-              <span style={{ textAlign: "right" }}>{formatMoney(totals?.feeTotal ?? 0)}</span>
+              <span style={{ textAlign: "right" }}>
+                {formatMoney(round2(draftLines.reduce((s, l) => s + (l.receiptAmount ?? 0) + (l.swapReceiptAmount ?? 0) + (l.transferReceiptAmount ?? 0), 0)))}
+              </span>
               <span style={{ textAlign: "right" }}>{formatMoney(round2(draftLines.reduce((s, l) => s + (l.serviceFee ?? 0), 0)))}</span>
               <span />
             </div>
-            {/* ยอดสรุปเรียงลงมาทีละบรรทัด (ผู้ใช้ 2026-09-28) */}
-            {totals && selected.length > 0 && (
+          </section>
+          )}
+
+          {/* งานอื่นๆ ของลูกค้ารายนี้ อยู่ในหน้าเดียวกับรถ ติ๊กรวมในบิลเดียวกันได้เลย (ผู้ใช้ 2026-11-11 "อยากจะวางบิลร่วมกัน")
+              ค่าธรรมเนียม = ใบเสร็จของงาน, ค่าบริการ = ตารางราคางานของลูกค้า (แก้ได้รายงาน, ว่าง = ต้องใส่เอง) */}
+          {customerJobs.length > 0 && (
+            <section className="panel" style={{ marginTop: 16, overflow: "visible" }}>
+              <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
+                <h2>งานอื่นๆ ส่งงานแล้ว รอวางบิล ({customerJobs.length})</h2>
+                <Link href="/accounting/billing/jobs" className="text-button" style={{ fontSize: 12 }}>
+                  ตั้งราคางาน / ปิดงาน →
+                </Link>
+              </div>
+              {jobAccountMismatch && (
+                <div className="customer-message error" style={{ margin: "0 23px 8px" }}>
+                  งานอื่นอยู่{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถที่เลือกอยู่{ACCOUNT_LABEL[account]} - ออกบิลแยกใบ
+                </div>
+              )}
+              <div style={{ ...JOB_GRID, padding: "6px 23px", fontSize: 12, color: "#576781", borderTop: "1px solid #f0f2f6" }}>
+                <SelectAllBox
+                  checkedCount={selectedJobs.length}
+                  readyCount={customerJobs.length}
+                  onChange={(checked) => setJobsPicked(customerJobs.map(jobKey), checked)}
+                />
+                <span>งาน</span>
+                <span>ทะเบียน / เลขตัวถัง</span>
+                <span>ส่งงานเมื่อ</span>
+                <span style={{ textAlign: "right" }}>ค่าธรรมเนียม</span>
+                <span style={{ textAlign: "right" }}>ค่าบริการ</span>
+              </div>
+              {customerJobs.map((j) => {
+                const key = jobKey(j);
+                const picked = jobPicked.has(key);
+                const problem = picked ? jobProblemOf(j) : null;
+                const target = j.plateText || j.chassis;
+                return (
+                  <div key={key} data-focus-row style={{ borderTop: "1px solid #f0f2f6" }}>
+                    <div style={{ ...JOB_GRID, padding: "8px 23px", fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={picked}
+                        onChange={(e) => setJobsPicked([key], e.target.checked)}
+                        aria-label={`ลงบิล ${j.typeLabel} ${target}`}
+                        style={{ width: 18, height: 18 }}
+                      />
+                      <span>
+                        {j.typeLabel}
+                        {j.vehicleClass === "MOTO" && <span className="muted"> · จยย.</span>}
+                      </span>
+                      <span style={{ wordBreak: "break-all" }}>
+                        {target}
+                        {j.ownerName && <span className="muted" style={{ display: "block", fontSize: 11 }}>{j.ownerName}</span>}
+                      </span>
+                      <span>{isoToDisplayDate(j.deliveredDate)}</span>
+                      <span style={{ textAlign: "right" }}>
+                        {formatMoney(j.fee)}
+                        {j.feeSource === "ESTIMATE" && <span style={{ display: "block", fontSize: 11, color: "#bb8527" }}>ยังไม่มียอดใบเสร็จ</span>}
+                      </span>
+                      <span style={{ textAlign: "right" }}>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={jobPriceText(j)}
+                          placeholder="ใส่ราคา"
+                          onChange={(e) => {
+                            setJobPrices((prev) => ({ ...prev, [key]: e.target.value }));
+                            if (!picked) setJobsPicked([key], true); // พิมพ์ราคา = จะลงบิลงานนี้
+                          }}
+                          style={{ width: 90, textAlign: "right", height: 30, padding: "0 8px" }}
+                          aria-label={`ค่าบริการ ${j.typeLabel} ${target}`}
+                        />
+                      </span>
+                    </div>
+                    {(problem || j.warnings.length > 0) && (
+                      <div style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
+                        {problem && <div className="customer-message error">⚠ {problem}</div>}
+                        {j.warnings.map((w) => (
+                          <div key={w} style={{ color: "#bb8527" }}>
+                            ⚠ {w}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          )}
+
+          {/* ยอดสรุปของบิล (รถ + งานอื่นที่ติ๊ก) เรียงลงมาทีละบรรทัด (ผู้ใช้ 2026-09-28) */}
+          {totals && hasPick && (
+            <section className="panel" style={{ marginTop: 16 }}>
               <div style={{ display: "grid", justifyContent: "end", padding: "12px 23px 18px", background: "#f8f9fc" }}>
                 <div style={{ display: "grid", gap: 6, fontSize: 14, minWidth: 280 }}>
                   <SumLine label="ราคาใบเสร็จ" value={totals.feeTotal} />
@@ -1150,8 +1284,8 @@ export function BillingPage() {
                   </div>
                 </div>
               </div>
-            )}
-          </section>
+            </section>
+          )}
 
           {/* แถบล่างติดจอ: จำนวนที่ติ๊ก + ยอดรวม + ปุ่มออกบิล (เปิดหน้ายืนยัน) */}
           <div
@@ -1174,7 +1308,13 @@ export function BillingPage() {
           >
             <div style={{ fontSize: 14 }}>
               เลือก <b>{selected.length}</b> คัน
-              {totals && selected.length > 0 && (
+              {customerJobs.length > 0 && (
+                <>
+                  {" "}
+                  + งานอื่น <b>{selectedJobs.length}</b> งาน
+                </>
+              )}
+              {totals && hasPick && (
                 <>
                   {" "}
                   · ยอดบิล <b>{formatMoney(totals.netTotal)}</b> บาท
@@ -1182,8 +1322,8 @@ export function BillingPage() {
               )}
               {mixedAccounts && <div className="customer-message error">รถที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) - แยกเป็นบิลละบัญชี</div>}
             </div>
-            <button className="primary" disabled={selected.length === 0 || saving || refreshing} onClick={() => setConfirmOpen(true)}>
-              ออกบิล {selected.length > 0 ? `${selected.length} คัน` : ""}
+            <button className="primary" disabled={!hasPick || saving || refreshing} onClick={() => setConfirmOpen(true)}>
+              ออกบิล {[selected.length ? `${selected.length} คัน` : "", selectedJobs.length ? `${selectedJobs.length} งาน` : ""].filter(Boolean).join(" + ")}
             </button>
           </div>
           {message.text && (
@@ -1195,7 +1335,7 @@ export function BillingPage() {
           {confirmOpen && (
             <IssueDialog onClose={() => setConfirmOpen(false)}>
               <h2>
-                ยืนยันออกบิล {selected.length} คัน{selectedJobs.length ? ` + งานอื่น ${selectedJobs.length} งาน` : ""}
+                ยืนยันออกบิล {[selected.length ? `${selected.length} คัน` : "", selectedJobs.length ? `งานอื่น ${selectedJobs.length} งาน` : ""].filter(Boolean).join(" + ")}
               </h2>
               <p className="muted" style={{ marginBottom: 12 }}>
                 {customer.company || customer.name} · {ACCOUNT_LABEL[account]}
@@ -1236,59 +1376,21 @@ export function BillingPage() {
                     ))}
                   </div>
                 )}
-                {/* งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล พ่วงในบิลเดียวกัน (ผู้ใช้ 2026-10-07) - ค่าธรรมเนียมจากใบเสร็จของงาน ค่าบริการจากตารางของลูกค้า */}
-                {customerJobs.length > 0 && (
-                  <div style={{ display: "grid", gap: 6, fontSize: 13, background: "#f5f7fb", borderRadius: 8, padding: "8px 12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                      <b style={{ fontWeight: 600 }}>งานอื่นๆ ของลูกค้ารายนี้ที่รอวางบิล ({customerJobs.length} งาน) - ติ๊กเพื่อรวมในบิลนี้</b>
-                      <Link href="/accounting/billing/jobs" className="text-button" style={{ fontSize: 12 }}>
-                        ออกบิลงานอื่นแยกใบ / ตั้งราคา →
-                      </Link>
-                    </div>
-                    {jobAccountMismatch && <div className="customer-message error">งานอื่นอยู่บัญชี{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถในบิลอยู่{ACCOUNT_LABEL[account]} - ออกบิลงานอื่นแยกใบ</div>}
-                    {customerJobs.map((j) => {
-                      const key = jobKey(j);
-                      const picked = jobPicked.has(key);
-                      return (
-                        <label key={key} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 8, alignItems: "center" }}>
-                          <input
-                            type="checkbox"
-                            checked={picked}
-                            onChange={(e) =>
-                              setJobPicked((prev) => {
-                                const next = new Set(prev);
-                                if (e.target.checked) next.add(key);
-                                else next.delete(key);
-                                return next;
-                              })
-                            }
-                          />
-                          <span>
-                            {j.typeLabel} · {j.plateText || j.chassis}
-                            <span className="muted"> · {isoToDisplayDate(j.doneDate)}{j.ownerName ? ` · ${j.ownerName}` : ""}</span>
-                            {j.warnings.map((w) => (
-                              <div key={w} style={{ fontSize: 12, color: "#bb8527" }}>
-                                ⚠ {w}
-                              </div>
-                            ))}
-                          </span>
-                          <span style={{ whiteSpace: "nowrap" }}>ค่าธรรมเนียม {formatMoney(j.fee)}</span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-                            ค่าบริการ
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={jobPriceText(j)}
-                              placeholder="ใส่ราคา"
-                              disabled={!picked}
-                              onChange={(e) => setJobPrices((prev) => ({ ...prev, [key]: e.target.value }))}
-                              style={{ width: 90, textAlign: "right", height: 32, padding: "0 8px" }}
-                              aria-label={`ค่าบริการ ${j.typeLabel} ${j.plateText || j.chassis}`}
-                            />
-                          </span>
-                        </label>
-                      );
-                    })}
+                {/* งานอื่นที่ติ๊กไว้ในหน้าหลัก (ผู้ใช้ 2026-11-11: เลือกและแก้ราคาที่รายการหน้าหลัก หน้านี้แสดงสรุปอย่างเดียว) */}
+                {selectedJobs.length > 0 && (
+                  <div style={{ display: "grid", gap: 4, fontSize: 13, background: "#f5f7fb", borderRadius: 8, padding: "8px 12px" }}>
+                    <b style={{ fontWeight: 600 }}>งานอื่นๆ ในบิลนี้ ({selectedJobs.length} งาน)</b>
+                    {jobAccountMismatch && <div className="customer-message error">งานอื่นอยู่{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถในบิลอยู่{ACCOUNT_LABEL[account]} - ออกบิลแยกใบ</div>}
+                    {selectedJobs.map((j) => (
+                      <div key={jobKey(j)} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span>
+                          {j.typeLabel} · {j.plateText || j.chassis}
+                        </span>
+                        <span style={{ whiteSpace: "nowrap" }}>
+                          ค่าธรรมเนียม {formatMoney(j.fee)} · ค่าบริการ {jobPrice(j) === null ? "—" : formatMoney(jobPrice(j)!)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {inspectionSeparateRows.length > 0 && (
