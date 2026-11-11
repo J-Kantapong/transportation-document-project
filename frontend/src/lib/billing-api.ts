@@ -310,6 +310,11 @@ export interface BillingVehicle {
   receiptAmount: number | null;
   receiptAmountSource: "RECEIPT" | "BILL_ESTIMATE" | "NONE"; // BILL_ESTIMATE = พนักงานไม่ได้กรอกยอดใบเสร็จ ใช้ยอด Bill ที่ระบบคำนวณแทน
   receiptImageIds: string[]; // รูปใบเสร็จของการยื่นล่าสุด (ใหม่สุดก่อน) - แสดงในช่อง "แก้" ให้เทียบยอด
+  // CC ตรวจกับใบเสร็จ (ผู้ใช้ 2026-11-09): receiptCc = CC ที่ AI อ่านจากใบเสร็จ (null = ใบเก่า/อ่านไม่ได้) · ccWarning = CC ที่คีย์ไม่ตรง
+  // ใบเสร็จ หรือไม่อยู่ในช่วงของประเภทรถ -> ติ๊กวางบิลไม่ได้จนกว่าจะกด "ใช้ CC ตามใบเสร็จ" (submissionId) แก้ข้อมูลรถ หรือยืนยันว่าตรวจแล้ว
+  submissionId?: string | null;
+  receiptCc?: number | null;
+  ccWarning?: string | null;
   receiptEstimate: number | null; // ยอด Bill ที่ระบบคำนวณตอนยื่นจากข้อมูลรถ - ไม่ตรงกับใบเสร็จจริง = หน้าวางบิลเตือน (ผู้ใช้ 2026-09-28)
   // ยอด Bill ถ้าเรื่องขอใช้เป็นตรงข้ามกับข้อมูลรถ - ใบเสร็จตรงกับยอดนี้ = เสนอปุ่ม "ใช้ตามใบเสร็จ" (ผู้ใช้ 2026-10-09)
   receiptEstimateFlipped?: number | null;

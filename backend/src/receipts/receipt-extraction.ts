@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // ข้อมูลที่ AI อ่านจากใบเสร็จรับเงินกรมการขนส่งทางบก - รูปแบบจากใบเสร็จจริงของผู้ใช้ (2026-09-20)
 // เก็บใน ReceiptImage.extraction พร้อม checks (ตรวจอัตโนมัติแบบตายตัว ไม่ใช้ AI) ให้หน้าเว็บเน้นช่องที่ต้องให้คนเช็ก
-export const RECEIPT_FIELDS = ['receiptNo', 'date', 'plate', 'chassis', 'weightKg', 'items', 'total'] as const;
+export const RECEIPT_FIELDS = ['receiptNo', 'date', 'plate', 'chassis', 'cc', 'weightKg', 'items', 'total'] as const;
 export type ReceiptField = (typeof RECEIPT_FIELDS)[number];
 
 export const ReceiptReadingSchema = z.object({
@@ -13,6 +13,8 @@ export const ReceiptReadingSchema = z.object({
   plateCategory: z.string().nullable(), // หมวด เช่น "8ขก"
   plateNumber: z.string().nullable(), // เลข เช่น "3484"
   chassis: z.string().nullable(),
+  // ขนาด CC ที่พิมพ์บนใบเสร็จ (ผู้ใช้ 2026-11-09: ใช้เทียบกับ CC ที่พนักงานคีย์ เพราะราคาวางบิลมอเตอร์ไซค์อิง CC) ใบที่อ่านก่อนหน้านี้ไม่มีช่องนี้
+  cc: z.number().nullable(),
   weightKg: z.number().nullable(),
   items: z.array(z.object({ label: z.string(), amount: z.number() })),
   total: z.number().nullable(),
@@ -34,6 +36,9 @@ const UNCERTAIN_ALIASES: Record<string, ReceiptField> = {
   vin: 'chassis',
   weight: 'weightKg',
   item: 'items',
+  engine: 'cc',
+  enginecc: 'cc',
+  displacement: 'cc',
 };
 
 // เหลือเฉพาะชื่อช่องที่ needsCheck() ในหน้าเว็บรู้จัก (plate / total / items / chassis / ...) ไม่ซ้ำ
@@ -175,7 +180,8 @@ export const RECEIPT_READING_PROMPT = `รูปนี้คือใบเส�
   - อ่านใหม่แล้วยังไม่ครบ 17 ให้ตอบตามที่เห็นจริงแล้วใส่ chassis ใน uncertainFields ห้ามเติมหรือตัดตัวอักษรเองเพื่อให้ครบ 17
   - เลขตัวถังไม่มีตัว I O Q ระวังตัวที่คล้ายกัน เช่น 0 D, 1 I, 8 B, 5 S, 2 Z, T F, L E
   - ถ้าไม่มั่นใจแม้แต่ตัวเดียว ให้ใส่ chassis ใน uncertainFields
+- cc: ขนาดเครื่องยนต์เป็นซีซี ตัวเลขหลังคำว่า "ซีซี" / "CC" / "ความจุกระบอกสูบ" (พิมพ์อยู่ในส่วนข้อมูลรถ ใกล้น้ำหนักรถ) ใส่เฉพาะตัวเลข เช่น 149.5 หรือ 1498 ถ้าใบเสร็จไม่พิมพ์ซีซีให้ใส่ null ห้ามเอาน้ำหนักหรือยอดเงินมาใส่
 - weightKg: ตัวเลขหลัง "น้ำหนักรถ"
 - items: ทุกรายการค่าใช้จ่ายระหว่างข้อมูลรถกับยอดรวม ตามลำดับที่พิมพ์
 - total: ยอดหลัง "รวมเป็นเงินทั้งสิ้น"
-ช่องไหนอ่านไม่ออกให้ใส่ null ห้ามเดา ช่องไหนอ่านได้แต่ไม่มั่นใจ (ตัวอักษรเลือน/ถูกตราประทับหรือลายเซ็นทับ) ให้ใส่ชื่อช่องใน uncertainFields โดยใช้ชื่อจากลิสต์นี้เท่านั้น: receiptNo, date, plate, chassis, weightKg, items, total (ทะเบียนไม่ว่าหมวดหรือตัวเลขใช้ plate)`;
+ช่องไหนอ่านไม่ออกให้ใส่ null ห้ามเดา ช่องไหนอ่านได้แต่ไม่มั่นใจ (ตัวอักษรเลือน/ถูกตราประทับหรือลายเซ็นทับ) ให้ใส่ชื่อช่องใน uncertainFields โดยใช้ชื่อจากลิสต์นี้เท่านั้น: receiptNo, date, plate, chassis, cc, weightKg, items, total (ทะเบียนไม่ว่าหมวดหรือตัวเลขใช้ plate)`;
