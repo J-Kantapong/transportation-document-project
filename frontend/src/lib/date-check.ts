@@ -1,3 +1,4 @@
+import { confirmDialog } from "./confirm-dialog";
 // กันคีย์วันที่ผิด (ผู้ใช้ 2026-10-13): วันที่ผิดเกือบทั้งหมดมาจากไม่กี่เหตุการณ์ที่ผิดทั้งชุด แล้วต้องตามแก้ทีละคัน
 // (ใบส่งงาน 61 คันลงวันเสาร์ ทั้งที่ส่งจริงวันจันทร์ / ส่งตรวจ 54 คันลงวันหยุดราชการ) จึงเตือนที่ต้นทางสองแบบ:
 // 1. บอกวันในสัปดาห์ของวันที่ที่คีย์ เสาร์-อาทิตย์เป็นสีส้ม (ขนส่งปิด)
@@ -66,15 +67,15 @@ export function dateConfirmMessage(action: string, dates: string[], options: { n
     ...(weekend ? ["", `⚠ ${WEEKEND_WARNING}`] : []),
     ...(options.note ? ["", options.note] : []),
     "",
-    "วันที่ถูกต้องใช่ไหม? กด OK เพื่อบันทึก",
+    'วันที่ถูกต้องใช่ไหม? กด "ยืนยัน" เพื่อบันทึก',
   ].join("\n");
 }
 
 // ถามยืนยันวันที่ก่อนบันทึก - always: บันทึกหลายคัน ถามทุกครั้ง (วันที่ผิดทั้งชุดแก้ทีละคันทีหลังเสียเวลามาก)
 // ไม่ใส่ always: บันทึกคันเดียว ถามเฉพาะเมื่อวันที่ตรงกับเสาร์-อาทิตย์ ไม่รบกวนงานปกติ · คืน true = บันทึกต่อได้
-export function confirmDates(action: string, dates: string[], options: { always?: boolean; note?: string } = {}): boolean {
+export async function confirmDates(action: string, dates: string[], options: { always?: boolean; note?: string } = {}): Promise<boolean> {
   const valid = dates.filter((date) => weekdayOf(date) !== null);
   if (!valid.length) return true;
   if (!options.always && !valid.some(isWeekend)) return true;
-  return window.confirm(dateConfirmMessage(action, valid, { note: options.note }));
+  return confirmDialog(dateConfirmMessage(action, valid, { note: options.note }));
 }

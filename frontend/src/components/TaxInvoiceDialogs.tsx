@@ -8,6 +8,7 @@ import { checkBackdate } from "@/lib/tax-invoice-date";
 import { DateInput } from "@/components/DateInput";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { buildTaxInvoiceHtml, draftTaxInvoice, printTaxInvoice } from "@/lib/tax-invoice-print";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // หน้าต่างของใบกำกับภาษี (ผู้ใช้ 2026-09-28): รับเงิน + ออกใบกำกับ, ยกเลิก / ใบแทน (เหตุผลบังคับ), แนบ 50 ทวิ
 
@@ -111,10 +112,10 @@ export function TaxInvoiceIssueDialog({
       if (paidDate > latestAdvanceDate) return setError(`${dateLabel}ล่วงหน้าได้ไม่เกิน ${ADVANCE_DAYS} วัน (ถึง ${isoToDisplayDate(latestAdvanceDate)})`);
     } else if (paidDate > todayIso()) return setError(`${dateLabel}ต้องไม่เกินวันนี้`);
     if (wht === null) return setError("ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
-    if (paidDate > todayIso() && !window.confirm(futureDateWarning(paidDate))) return;
+    if (paidDate > todayIso() && !await confirmDialog(futureDateWarning(paidDate))) return;
     const backdate = checkBackdate(preview?.lastIssued, paidDate);
     if (backdate.kind === "refuse") return setError(backdate.message);
-    if (backdate.kind === "confirm" && !window.confirm(backdate.message)) return;
+    if (backdate.kind === "confirm" && !await confirmDialog(backdate.message)) return;
     setSaving(true);
     try {
       const { taxInvoice } = await billingApi.issueTaxInvoice(invoice.id, {

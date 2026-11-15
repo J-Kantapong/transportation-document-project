@@ -100,13 +100,13 @@ export default function SubmitSettingsPage() {
           <table className="review-table">
             <thead>
               <tr>
-                <th>รถ</th>
-                <th>เจ้าของรถ</th>
-                <th>ขอเลขทะเบียน</th>
-                <th>ทำป้ายใหม่</th>
-                <th>ตัวเลือก</th>
-                <th style={{ textAlign: "right" }}>รวม (บาท)</th>
-                <th></th>
+                <th scope="col">รถ</th>
+                <th scope="col">เจ้าของรถ</th>
+                <th scope="col">ขอเลขทะเบียน</th>
+                <th scope="col">ทำป้ายใหม่</th>
+                <th scope="col">ตัวเลือก</th>
+                <th scope="col" style={{ textAlign: "right" }}>รวม (บาท)</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             {selected.map((v) => {

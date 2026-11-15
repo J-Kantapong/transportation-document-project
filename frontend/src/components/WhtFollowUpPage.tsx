@@ -178,7 +178,7 @@ export function WhtFollowUpPage() {
                         <table>
                           <thead>
                             <tr>
-                              <th>
+                              <th scope="col">
                                 <input
                                   type="checkbox"
                                   aria-label="เลือกทั้งหมด"
@@ -195,12 +195,12 @@ export function WhtFollowUpPage() {
                                   }
                                 />
                               </th>
-                              <th>ใบกำกับ</th>
-                              <th>วันที่รับเงิน</th>
-                              <th style={{ textAlign: "right" }}>ภาษีที่หัก</th>
-                              <th>แบบ</th>
-                              <th>ค้าง</th>
-                              <th>ทวงล่าสุด</th>
+                              <th scope="col">ใบกำกับ</th>
+                              <th scope="col">วันที่รับเงิน</th>
+                              <th scope="col" style={{ textAlign: "right" }}>ภาษีที่หัก</th>
+                              <th scope="col">แบบ</th>
+                              <th scope="col">ค้าง</th>
+                              <th scope="col">ทวงล่าสุด</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -253,17 +253,17 @@ export function WhtFollowUpPage() {
             <table>
               <thead>
                 <tr>
-                  <th>ลูกค้า</th>
-                  <th>แบบ / เลขที่</th>
-                  <th style={{ textAlign: "right" }}>ยอด</th>
-                  <th>ใบกำกับ</th>
-                  <th>แนบเมื่อ</th>
-                  <th></th>
+                  <th scope="col">ลูกค้า</th>
+                  <th scope="col">แบบ / เลขที่</th>
+                  <th scope="col" style={{ textAlign: "right" }}>ยอด</th>
+                  <th scope="col">ใบกำกับ</th>
+                  <th scope="col">แนบเมื่อ</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
                 {certificates.map((c) => (
-                  <tr key={c.id} style={c.cancelledAt ? { color: "#8a94a6" } : undefined}>
+                  <tr key={c.id} style={c.cancelledAt ? { color: "#5f6b80" } : undefined}>
                     <td>{c.customerName}</td>
                     <td>
                       {WHT_METHOD_LABEL[c.method]}

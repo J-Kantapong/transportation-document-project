@@ -31,7 +31,7 @@ export function TransferReceiptCell({
   if (!v.transferReceipt) {
     return (
       <div>
-        <span className="badge warn">ยังไม่แนบ</span>
+        <span className="badge alert">ยังไม่แนบ</span>
         {canEdit && (
           <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 12 }}>
             <input type="checkbox" checked={picked} onChange={(e) => onPick(e.target.checked)} aria-label={`เลือก ${v.chassis} เพื่อแนบใบเสร็จแจ้งย้าย`} />
@@ -149,10 +149,10 @@ export function TransferReceiptAttachButton({ picked, onDone }: { picked: Transf
             <table>
               <thead>
                 <tr>
-                  <th>เลขตัวถัง</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>จังหวัดที่จด</th>
-                  <th style={{ textAlign: "right" }}>ยอดต่อคัน</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">จังหวัดที่จด</th>
+                  <th scope="col" style={{ textAlign: "right" }}>ยอดต่อคัน</th>
                 </tr>
               </thead>
               <tbody>
@@ -253,9 +253,9 @@ function TransferReceiptManageButton({ receiptId, vehicle, onChanged }: { receip
               <table>
                 <thead>
                   <tr>
-                    <th>เลขตัวถัง</th>
-                    <th>ชื่อลูกค้า</th>
-                    <th style={{ textAlign: "right" }}>ยอดต่อคัน</th>
+                    <th scope="col">เลขตัวถัง</th>
+                    <th scope="col">ชื่อลูกค้า</th>
+                    <th scope="col" style={{ textAlign: "right" }}>ยอดต่อคัน</th>
                   </tr>
                 </thead>
                 <tbody>

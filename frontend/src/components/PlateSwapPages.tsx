@@ -28,6 +28,7 @@ import {
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
@@ -90,7 +91,7 @@ export async function openReceiptImage(id: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -271,7 +272,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
 
   async function save() {
     if (needsRemark && !remark.trim()) {
-      window.alert("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ทะเบียนใหม่");
+      void alertDialog("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ทะเบียนใหม่");
       return;
     }
     setBusy(true);
@@ -280,7 +281,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
       setEditing(false);
       setRemark("");
     } catch (err) {
-      window.alert(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
+      void alertDialog(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
     } finally {
       setBusy(false);
     }
@@ -344,7 +345,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
   const text = newPlateText(swap);
   return (
     <div className="sub">
-      {text ? `ใหม่: ${text}` : <span style={{ color: "#bb8527" }}>ยังไม่ได้เลขใหม่</span>}
+      {text ? `ใหม่: ${text}` : <span style={{ color: "#946712" }}>ยังไม่ได้เลขใหม่</span>}
       {canWrite && (
         <button type="button" className="text-button" style={{ paddingLeft: 6 }} onClick={() => setEditing(true)}>
           {text ? "แก้ไข" : "กรอกเลข"}
@@ -1225,16 +1226,16 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถเก่า</th>
-                    <th>ทะเบียนเก่า / ใหม่</th>
-                    <th>รถใหม่ที่ลิงก์</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถเก่า</th>
+                    <th scope="col">ทะเบียนเก่า / ใหม่</th>
+                    <th scope="col">รถใหม่ที่ลิงก์</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -1313,7 +1314,7 @@ function SubmittedRow({
     try {
       await onRelink(swap, vehicle);
     } catch (err) {
-      window.alert(errorText(err, "บันทึกไม่สำเร็จ"));
+      void alertDialog(errorText(err, "บันทึกไม่สำเร็จ"));
     }
   }
 
@@ -1446,7 +1447,7 @@ export function PlateSwapReturnPage({
       return;
     }
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล (ผู้ใช้ 2026-09-27)
-    const ok = window.confirm(
+    const ok = await confirmDialog(
       `ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถเก่า: ${swap.oldOwnerName} (ทะเบียนเก่า ${oldPlateText(swap)})\nทะเบียนใหม่ที่รถเก่าได้: ${newPlateCategory} ${newPlateNumber}${
         swap.newVehicle ? `\nรถใหม่ที่รับเลข ${oldPlateText(swap)}: ${swap.newVehicle.chassis}` : ""
       }`,
@@ -1508,14 +1509,14 @@ export function PlateSwapReturnPage({
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถเก่า</th>
-                    <th>ทะเบียนเก่า / ใหม่</th>
-                    <th>รถใหม่ที่ลิงก์</th>
-                    <th>รูปใบเสร็จ</th>
-                    <th>ข้อมูลใบเสร็จ</th>
-                    <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถเก่า</th>
+                    <th scope="col">ทะเบียนเก่า / ใหม่</th>
+                    <th scope="col">รถใหม่ที่ลิงก์</th>
+                    <th scope="col">รูปใบเสร็จ</th>
+                    <th scope="col">ข้อมูลใบเสร็จ</th>
+                    <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -1617,7 +1618,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await plateSwapApi.removeReceipt(swap.id, receiptId, returned ? receiptRemark.trim() : undefined)).swap);
     } catch (err) {
@@ -1797,7 +1798,7 @@ async function openPlateSwapPhoto(kind: PlateOrBook, swapId: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -2016,12 +2017,12 @@ function PlateSwapReceivePlateOrBookPage({
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถเก่า</th>
-                  <th>ทะเบียนเก่า</th>
-                  <th>รถใหม่ที่ลิงก์</th>
-                  <th>{label}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถเก่า</th>
+                  <th scope="col">ทะเบียนเก่า</th>
+                  <th scope="col">รถใหม่ที่ลิงก์</th>
+                  <th scope="col">{label}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2484,15 +2485,15 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถ</th>
-                    <th>ทะเบียนเดิม / ที่ได้</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถ</th>
+                    <th scope="col">ทะเบียนเดิม / ที่ได้</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>

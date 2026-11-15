@@ -40,8 +40,8 @@ function toShot(receipt: ReceiptImage): Shot {
 
 const STATUS_STYLE: Record<ShotStatus, { icon: string; color: string; background: string }> = {
   reading: { icon: "⏳", color: "#4a5a78", background: "#f4f6fa" },
-  matched: { icon: "✅", color: "#23825f", background: "#edf8f3" },
-  unmatched: { icon: "⚠️", color: "#bb8527", background: "#fff8e6" },
+  matched: { icon: "✅", color: "#1d7556", background: "#edf8f3" },
+  unmatched: { icon: "⚠️", color: "#946712", background: "#fff8e6" },
   unreadable: { icon: "❌", color: "#b43434", background: "#fdeeee" },
   duplicate: { icon: "⚠️", color: "#b45309", background: "#fff1e0" },
 };

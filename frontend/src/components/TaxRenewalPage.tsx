@@ -652,16 +652,16 @@ export function TaxRenewalPage() {
             <table>
               <thead>
                 <tr>
-                  <th>ทะเบียน</th>
-                  <th>ประเภทรถ</th>
-                  <th>ครบกำหนด</th>
-                  <th>ตรอ.</th>
-                  <th>พ.ร.บ.</th>
-                  <th>ยอด Bill</th>
-                  <th>ลงขัน</th>
-                  <th>วันที่ชำระ</th>
-                  <th>รับป้ายภาษี</th>
-                  <th>คืนลูกค้า</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ครบกำหนด</th>
+                  <th scope="col">ตรอ.</th>
+                  <th scope="col">พ.ร.บ.</th>
+                  <th scope="col">ยอด Bill</th>
+                  <th scope="col">ลงขัน</th>
+                  <th scope="col">วันที่ชำระ</th>
+                  <th scope="col">รับป้ายภาษี</th>
+                  <th scope="col">คืนลูกค้า</th>
                   {canWrite && <th />}
                 </tr>
               </thead>
@@ -683,7 +683,7 @@ export function TaxRenewalPage() {
                         {row.vehicleClass === "TRANSPORT" ? (
                           // รถ ขส. (ผู้ใช้ 2026-11-09): ตรวจสภาพทุกปี - บันทึกเป็นวันที่ตรวจ (แก้/ล้างผ่าน ✎ แก้) ไม่ใช่ติ๊กใบ ตรอ.
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            {!row.inspectionDate && <span className="badge warn">ต้องตรวจ</span>}
+                            {!row.inspectionDate && <span className="badge alert">ต้องตรวจ</span>}
                             <DateCell
                               key={`inspection:${row.inspectionDate ?? ""}`}
                               value={row.inspectionDate}
@@ -710,6 +710,7 @@ export function TaxRenewalPage() {
                       <td>
                         <input
                           type="checkbox"
+                          aria-label="มี พ.ร.บ. แล้ว"
                           checked={row.insuranceConfirmed}
                           disabled={!editable}
                           onChange={(e) => void patch(row.id, { insuranceConfirmed: e.target.checked })}

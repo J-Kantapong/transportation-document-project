@@ -765,10 +765,12 @@ export function BillingPage() {
               </span>
             </div>
             {problemCount > 0 && (
-              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fff4e5", color: "#8a4b00", fontSize: 13 }}>
+              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fde0e0", color: "#8f1d1d", border: "1px solid #e59a9a", fontWeight: 600, fontSize: 13 }}>
                 ⚠ ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
               </div>
             )}
+            {/* จอแคบ: คอลัมน์รวมกว้าง ~620px ให้เลื่อนด้านข้างในกล่องนี้แทนที่ทั้งหน้าจะล้น */}
+            <div className="billing-queue-scroll"><div className="billing-queue-inner">
             {dates.map((date) => {
               const group = vehicles.filter((v) => v.deliveredDate === date);
               return (
@@ -819,7 +821,7 @@ export function BillingPage() {
                           <span style={{ wordBreak: "break-all" }}>
                             {v.chassis}
                             {fixedIds.has(v.id) && (
-                              <span style={{ marginLeft: 6, fontSize: 11, background: "#e3f5e9", color: "#1e6b3a", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                              <span style={{ marginLeft: 6, fontSize: 12, background: "#e3f5e9", color: "#1e6b3a", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
                                 ✓ แก้ไขเรียบร้อย
                               </span>
                             )}
@@ -832,25 +834,25 @@ export function BillingPage() {
                             {/* ใบเสร็จของรถเก่าในงานสลับเลข - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-14) */}
                             {v.plateSwap &&
                               (v.plateSwap.receiptAmount !== null ? (
-                                <span style={{ display: "block", fontSize: 11, color: "#576781" }} title={`ใบเสร็จรถเก่า ${v.plateSwap.oldChassis}${v.plateSwap.receiptNo ? ` เลขที่ ${v.plateSwap.receiptNo}` : ""} รวมอยู่ในค่าธรรมเนียมของบิล`}>
+                                <span style={{ display: "block", fontSize: 12, color: "#576781" }} title={`ใบเสร็จรถเก่า ${v.plateSwap.oldChassis}${v.plateSwap.receiptNo ? ` เลขที่ ${v.plateSwap.receiptNo}` : ""} รวมอยู่ในค่าธรรมเนียมของบิล`}>
                                   รวมรถเก่า {formatMoney(v.plateSwap.receiptAmount)} ({receipt === null ? "—" : formatMoney(receipt)} + {formatMoney(v.plateSwap.receiptAmount)})
                                 </span>
                               ) : (
-                                <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="งานสลับเลขยังไม่มียอดใบเสร็จของรถเก่า">
+                                <span style={{ display: "block", fontSize: 12, color: "#946712" }} title="งานสลับเลขยังไม่มียอดใบเสร็จของรถเก่า">
                                   ยังไม่มีใบเสร็จรถเก่า
                                 </span>
                               ))}
                             {/* ใบเสร็จแจ้งย้าย (ขั้น 2) ของคันนี้ - รวมเข้าค่าธรรมเนียมของบิลตอนออกบิล (ผู้ใช้ 2026-10-08) */}
                             {v.transferReceiptAmount != null ? (
-                              <span style={{ display: "block", fontSize: 11, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
+                              <span style={{ display: "block", fontSize: 12, color: "#576781" }} title="ใบเสร็จแจ้งย้าย รวมอยู่ในค่าธรรมเนียมของบิล">
                                 + แจ้งย้าย {formatMoney(v.transferReceiptAmount)}
                               </span>
                             ) : v.transferReceiptWaivedReason ? (
-                              <span style={{ display: "block", fontSize: 11, color: "#576781" }} title={`ข้ามใบเสร็จแจ้งย้าย: ${v.transferReceiptWaivedReason}`}>
+                              <span style={{ display: "block", fontSize: 12, color: "#576781" }} title={`ข้ามใบเสร็จแจ้งย้าย: ${v.transferReceiptWaivedReason}`}>
                                 ข้ามใบเสร็จแจ้งย้าย
                               </span>
                             ) : v.transferNotice ? (
-                              <span style={{ display: "block", fontSize: 11, color: "#bb8527" }} title="รถจดต่างจังหวัดคันนี้ไม่มีใบเสร็จแจ้งย้ายในระบบ - แนบได้ที่หน้าแจ้งย้าย/ตัดบัญชี ก่อนออกบิล">
+                              <span style={{ display: "block", fontSize: 12, color: "#946712" }} title="รถจดต่างจังหวัดคันนี้ไม่มีใบเสร็จแจ้งย้ายในระบบ - แนบได้ที่หน้าแจ้งย้าย/ตัดบัญชี ก่อนออกบิล">
                                 ไม่มีใบเสร็จแจ้งย้าย
                               </span>
                             ) : null}
@@ -858,15 +860,15 @@ export function BillingPage() {
                           <span style={{ textAlign: "right" }}>
                             {/* ป้ายขอใช้/ด่วนอยู่หน้าตัวเลข */}
                             {addOnsOf(row).map((a) => (
-                              <span key={a.id} style={{ fontSize: 11, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>
+                              <span key={a.id} style={{ fontSize: 12, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>
                                 {a.label}
                               </span>
                             ))}
                             {row.rateId === CUSTOM_RATE && !problem && (
-                              <span style={{ fontSize: 11, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>กำหนดเอง</span>
+                              <span style={{ fontSize: 12, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>กำหนดเอง</span>
                             )}
                             {problem ? (
-                              <span className="customer-message error" title={problem}>
+                              <span className="badge alert" title={problem}>
                                 ⚠ ต้องตรวจ
                               </span>
                             ) : (
@@ -1179,6 +1181,7 @@ export function BillingPage() {
               <span style={{ textAlign: "right" }}>{formatMoney(round2(draftLines.reduce((s, l) => s + (l.serviceFee ?? 0), 0)))}</span>
               <span />
             </div>
+            </div></div>
           </section>
           )}
 
@@ -1230,12 +1233,12 @@ export function BillingPage() {
                       </span>
                       <span style={{ wordBreak: "break-all" }}>
                         {target}
-                        {j.ownerName && <span className="muted" style={{ display: "block", fontSize: 11 }}>{j.ownerName}</span>}
+                        {j.ownerName && <span className="muted" style={{ display: "block", fontSize: 12 }}>{j.ownerName}</span>}
                       </span>
                       <span>{isoToDisplayDate(j.deliveredDate)}</span>
                       <span style={{ textAlign: "right" }}>
                         {formatMoney(j.fee)}
-                        {j.feeSource === "ESTIMATE" && <span style={{ display: "block", fontSize: 11, color: "#bb8527" }}>ยังไม่มียอดใบเสร็จ</span>}
+                        {j.feeSource === "ESTIMATE" && <span style={{ display: "block", fontSize: 12, color: "#946712" }}>ยังไม่มียอดใบเสร็จ</span>}
                       </span>
                       <span style={{ textAlign: "right" }}>
                         <input
@@ -1256,7 +1259,7 @@ export function BillingPage() {
                       <div style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
                         {problem && <div className="customer-message error">⚠ {problem}</div>}
                         {j.warnings.map((w) => (
-                          <div key={w} style={{ color: "#bb8527" }}>
+                          <div key={w} style={{ color: "#946712" }}>
                             ⚠ {w}
                           </div>
                         ))}
@@ -1692,14 +1695,14 @@ function ClosedBillingPanel({ reloadKey, canReopen, onReopened }: { reloadKey: n
           <table>
             <thead>
               <tr>
-                <th>ปิดเมื่อ</th>
-                <th>ลูกค้า</th>
-                <th>ทะเบียน</th>
-                <th>เลขตัวถัง</th>
-                <th>ส่งงานเมื่อ</th>
-                <th>หมายเหตุ</th>
-                <th>ผู้ปิด</th>
-                {canReopen && <th></th>}
+                <th scope="col">ปิดเมื่อ</th>
+                <th scope="col">ลูกค้า</th>
+                <th scope="col">ทะเบียน</th>
+                <th scope="col">เลขตัวถัง</th>
+                <th scope="col">ส่งงานเมื่อ</th>
+                <th scope="col">หมายเหตุ</th>
+                <th scope="col">ผู้ปิด</th>
+                {canReopen && <th scope="col"></th>}
               </tr>
             </thead>
             <tbody>

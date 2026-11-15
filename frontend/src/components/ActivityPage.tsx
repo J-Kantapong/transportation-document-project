@@ -210,16 +210,16 @@ export function ActivityPage() {
             <table className="act-table">
               <thead>
                 <tr>
-                  <th>เวลา</th>
-                  <th>รายการ</th>
-                  <th>เลขตัวถัง / เลขที่</th>
-                  <th>ประเภทรถ</th>
-                  <th>ลูกค้า</th>
-                  <th className="num-col">Bill</th>
-                  <th className="num-col">No bill</th>
-                  <th className="num-col">อากร</th>
-                  <th className="num-col">ยอดเอกสาร</th>
-                  <th>ผู้ทำ</th>
+                  <th scope="col">เวลา</th>
+                  <th scope="col">รายการ</th>
+                  <th scope="col">เลขตัวถัง / เลขที่</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ลูกค้า</th>
+                  <th scope="col" className="num-col">Bill</th>
+                  <th scope="col" className="num-col">No bill</th>
+                  <th scope="col" className="num-col">อากร</th>
+                  <th scope="col" className="num-col">ยอดเอกสาร</th>
+                  <th scope="col">ผู้ทำ</th>
                 </tr>
               </thead>
               <tbody>

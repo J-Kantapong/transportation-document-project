@@ -23,7 +23,7 @@ export function agingTone(days: number | null): AgingTone {
   return "ok";
 }
 
-export const AGING_COLOR: Record<AgingTone, string | undefined> = { ok: undefined, warn: "#bb6a00", late: "#c0392b" };
+export const AGING_COLOR: Record<AgingTone, string | undefined> = { ok: undefined, warn: "#8a4d00", late: "#b42318" };
 
 // ข้อความสั้นไว้ขึ้นป้าย: "พร้อมส่งมา 5 วัน" - วันแรกไม่ต้องเตือน
 export function agingText(days: number | null): string {

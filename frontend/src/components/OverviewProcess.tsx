@@ -93,8 +93,8 @@ export function ProcessBoard({ rows, dayWord }: { rows: ProcessRow[]; dayWord: s
             <tr>
               {[0, 1, 2].map((i) => (
                 <Fragment key={i}>
-                  <th className="num-col">รถยนต์</th>
-                  <th className="num-col proc-split-end">จยย.</th>
+                  <th scope="col" className="num-col">รถยนต์</th>
+                  <th scope="col" className="num-col proc-split-end">จยย.</th>
                 </Fragment>
               ))}
             </tr>
@@ -181,13 +181,13 @@ function StuckTable({ items, linkLabel, showSeverity }: { items: StuckItem[]; li
       <table className="exec-table stuck-table">
         <thead>
           <tr>
-            {showSeverity && <th>ความเร่งด่วน</th>}
-            <th>ประเภท</th>
-            <th>รถ</th>
-            <th>ลูกค้า</th>
-            <th>ติดที่ขั้น</th>
-            <th className="num-col">ค้างมา</th>
-            <th>สาเหตุ</th>
+            {showSeverity && <th scope="col">ความเร่งด่วน</th>}
+            <th scope="col">ประเภท</th>
+            <th scope="col">รถ</th>
+            <th scope="col">ลูกค้า</th>
+            <th scope="col">ติดที่ขั้น</th>
+            <th scope="col" className="num-col">ค้างมา</th>
+            <th scope="col">สาเหตุ</th>
             <th aria-label="ลิงก์" />
           </tr>
         </thead>
@@ -239,11 +239,11 @@ function DocTable({ docs }: { docs: AlertDoc[] }) {
       <table className="exec-table stuck-table">
         <thead>
           <tr>
-            <th>รายการ</th>
-            <th>ลูกค้า</th>
-            <th className="num-col">ยอด (บาท)</th>
-            <th>วันที่</th>
-            <th>หมายเหตุ</th>
+            <th scope="col">รายการ</th>
+            <th scope="col">ลูกค้า</th>
+            <th scope="col" className="num-col">ยอด (บาท)</th>
+            <th scope="col">วันที่</th>
+            <th scope="col">หมายเหตุ</th>
             <th aria-label="ลิงก์" />
           </tr>
         </thead>

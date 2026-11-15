@@ -372,10 +372,10 @@ export default function AdminUsersPage() {
             <table className="inspect-table">
               <thead>
                 <tr>
-                  <th>ผู้ใช้</th>
-                  <th>สถานะ</th>
-                  <th>บทบาท / บริษัทลูกค้า</th>
-                  <th>ดำเนินการ</th>
+                  <th scope="col">ผู้ใช้</th>
+                  <th scope="col">สถานะ</th>
+                  <th scope="col">บทบาท / บริษัทลูกค้า</th>
+                  <th scope="col">ดำเนินการ</th>
                 </tr>
               </thead>
               <tbody>

@@ -13,6 +13,7 @@ import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary
 import { SupplierFeeLine } from "./SupplierFeeLine";
 import { DateInput } from "@/components/DateInput";
 import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
@@ -90,7 +91,7 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
   const mismatched = AMOUNT_RE.test(text) && billNow !== null && Math.round((Number(text) - billNow) * 100) !== 0;
   const sizeHints = useSizeHints(s.id, mismatched ? text : "");
   if (!text) return null;
-  if (!AMOUNT_RE.test(text)) return <span className="badge warn">ตัวเลขไม่ถูกต้อง</span>;
+  if (!AMOUNT_RE.test(text)) return <span className="badge alert">ตัวเลขไม่ถูกต้อง</span>;
   const bill = billOf(s);
   if (bill === null) return <span className="badge">เทียบไม่ได้ (ยังคำนวณภาษีไม่ได้)</span>;
   const diff = Math.round((Number(text) - bill) * 100) / 100;
@@ -98,19 +99,19 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
   const hint = otherProvinceHint(s, diff);
   return (
     <>
-      <span className="badge warn">
+      <span className="badge alert">
         ไม่ตรง Bill ({diff > 0 ? "+" : ""}
         {money(diff)})
       </span>
       {/* ข้อมูลรถผิดที่ต้นทาง (ผู้ใช้ 2026-09-28) - บอกว่าน่าจะผิดตรงไหน + ปุ่มไปแก้ข้อมูลรถ (เฉพาะคนที่แก้ข้อมูลรถได้) */}
-      {hint && <div style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{hint}</div>}
-      {sizeHints.map((h) => (<div key={sizeHintText(h)} style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{sizeHintText(h)}</div>))}
+      {hint && <div style={{ fontSize: 12, color: "#9a4f12", marginTop: 2 }}>{hint}</div>}
+      {sizeHints.map((h) => (<div key={sizeHintText(h)} style={{ fontSize: 12, color: "#9a4f12", marginTop: 2 }}>{sizeHintText(h)}</div>))}
       {canEditVehicle ? (
-        <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 11 }}>
+        <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 12 }}>
           แก้ข้อมูลรถ ↗
         </a>
       ) : (
-        hint && <div style={{ fontSize: 11, color: "#576781" }}>แจ้งผู้ลงข้อมูลรถให้แก้จังหวัด</div>
+        hint && <div style={{ fontSize: 12, color: "#576781" }}>แจ้งผู้ลงข้อมูลรถให้แก้จังหวัด</div>
       )}
     </>
   );
@@ -290,7 +291,7 @@ function AiFindings({ s, ai, amountText, wrong, reviewed }: { s: DocumentSubmiss
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {lines.map((text) => (
-        <span key={text} style={{ fontSize: 12, color: "#b5651d" }}>
+        <span key={text} style={{ fontSize: 12, color: "#9a4f12" }}>
           ⚠ {text}
         </span>
       ))}
@@ -331,13 +332,13 @@ const initialInput = (s: DocumentSubmission): RowInput =>
 
 function StatusText({ s }: { s: DocumentSubmission }) {
   if (s.status === "RECEIPT_RECEIVED") return <span className="badge done">ได้ใบเสร็จแล้ว</span>;
-  if (s.status === "FAILED") return <span className="badge warn">ยื่นไม่สำเร็จ: {s.failRemark || "—"}</span>;
+  if (s.status === "FAILED") return <span className="badge alert">ยื่นไม่สำเร็จ: {s.failRemark || "—"}</span>;
   return <span className="badge">ย้ายไปค้างจากใบก่อนแล้ว</span>;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" }) {
   const bg = tone === "ok" ? "#eaf7f2" : tone === "warn" ? "#fff6e7" : "#f4f6fa";
-  const color = tone === "ok" ? "#23825f" : tone === "warn" ? "#bb8527" : "#576781";
+  const color = tone === "ok" ? "#1d7556" : tone === "warn" ? "#946712" : "#576781";
   return (
     <div style={{ background: bg, borderRadius: 8, padding: "10px 14px", minWidth: 120 }}>
       <div style={{ fontSize: 12, color }}>{label}</div>
@@ -635,7 +636,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
   }
 
   async function removeReceipt(submissionId: string, receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       await api.deleteReceipt(receiptId);
       localChange.current++;
@@ -879,7 +880,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                     textAlign: "left",
                     padding: "12px 14px",
                     borderRadius: 8,
-                    border: selected ? `2px solid ${short ? "#bb8527" : "#2854d9"}` : `1px solid ${short ? "#f0d9ae" : "#dfe5f0"}`,
+                    border: selected ? `2px solid ${short ? "#946712" : "#2854d9"}` : `1px solid ${short ? "#f0d9ae" : "#dfe5f0"}`,
                     background: short ? "#fffaf0" : "#fff",
                     cursor: "pointer",
                   }}
@@ -890,7 +891,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                     {open > 0 && ` · รอตรวจ ${open}`}
                     {withPhoto > 0 && ` · แนบรูปแล้ว ${withPhoto}`}
                     {short > 0 && (
-                      <span className="badge warn" style={{ fontWeight: 600 }}>
+                      <span className="badge alert" style={{ fontWeight: 600 }}>
                         ยังขาด {short} คัน
                       </span>
                     )}
@@ -937,11 +938,11 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
               <table className="receipt-check-table receipt-sheet-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 44 }}>ลำดับ</th>
-                    <th>รถ / รูปใบเสร็จ</th>
-                    <th>ข้อมูลตามใบเสร็จ</th>
-                    <th>ยอดเงิน</th>
-                    <th>ตรวจ / แก้ไข</th>
+                    <th scope="col" style={{ width: 44 }}>ลำดับ</th>
+                    <th scope="col">รถ / รูปใบเสร็จ</th>
+                    <th scope="col">ข้อมูลตามใบเสร็จ</th>
+                    <th scope="col">ยอดเงิน</th>
+                    <th scope="col">ตรวจ / แก้ไข</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -962,7 +963,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                         <td>{i + 1}</td>
                         <td>
                           <div style={{ fontFamily: "monospace" }}>{s.vehicle.chassis}</div>
-                          <div style={{ fontSize: 11, color: "#8a94a6", marginBottom: 6 }}>
+                          <div style={{ fontSize: 12, color: "#5f6b80", marginBottom: 6 }}>
                             {s.vehicle.brand.name}
                           </div>
                           {isCarried(s) && (
@@ -970,17 +971,17 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                               {photo ? (
                                 <span className="badge">ค้างจากรอบก่อน - แนบรูปแล้ว รอบันทึก</span>
                               ) : (
-                                <span className="badge warn">ยังขาด - ค้างจากรอบก่อน</span>
+                                <span className="badge alert">ยังขาด - ค้างจากรอบก่อน</span>
                               )}
                             </div>
                           )}
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={canEdit && active ? (rid) => removeReceipt(s.id, rid) : undefined} />
                           {active && (() => {
                             const dup = duplicateOf(receipts[s.id]);
-                            return dup && <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
+                            return dup && <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
                           })()}
                           {active && ai && (
-                            <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
+                            <div style={{ fontSize: 12, color: "#5f6b80", marginTop: 4 }}>
                               {ai.match === "chassis" && "จับคู่ด้วยเลขตัวถัง"}
                               {ai.match === "chassis-near" && "จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
                             </div>
@@ -1059,7 +1060,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                             <span>Bill</span>
                             <div>
                               <div>{bill === null ? "—" : money(bill)}</div>
-                              <div style={{ fontSize: 11, color: "#8a94a6" }}>
+                              <div style={{ fontSize: 12, color: "#5f6b80" }}>
                                 ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
                               </div>
                             </div>
@@ -1148,7 +1149,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                             </div>
                           )}
                           {rowError && (
-                            <div className="customer-message error" style={{ fontSize: 11 }} role="alert">
+                            <div className="customer-message error" style={{ fontSize: 12 }} role="alert">
                               {rowError}
                             </div>
                           )}
@@ -1214,17 +1215,17 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
             <table className="receipt-check-table">
               <thead>
                 <tr>
-                  <th>วันที่ยื่นเอกสาร</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ทะเบียน</th>
-                  <th>เลขที่ใบเสร็จ</th>
-                  <th>วันที่ในใบเสร็จ</th>
-                  <th>วันที่รับใบเสร็จ</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>Bill</th>
-                  <th>ยอดใบเสร็จ</th>
-                  {canEdit && <th>แก้ไข</th>}
+                  <th scope="col">วันที่ยื่นเอกสาร</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">เลขที่ใบเสร็จ</th>
+                  <th scope="col">วันที่ในใบเสร็จ</th>
+                  <th scope="col">วันที่รับใบเสร็จ</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">Bill</th>
+                  <th scope="col">ยอดใบเสร็จ</th>
+                  {canEdit && <th scope="col">แก้ไข</th>}
                 </tr>
               </thead>
               <tbody>

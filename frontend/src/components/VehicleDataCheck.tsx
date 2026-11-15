@@ -7,7 +7,7 @@ import { VIN_LENGTH, modelPrefix, normalizeChassis, oddChassisChars, type KnownM
 // ตัวช่วยกันคีย์ข้อมูลรถผิดในหน้าคีย์รถ (ผู้ใช้ 2026-10-13) - กฎอยู่ที่ backend/src/vehicles/vehicle-data-check.ts
 // ทุกอย่างในไฟล์นี้เป็นคำเตือน ไม่ห้ามบันทึก: backend ตอบ 409 needsConfirm แล้วพนักงานตรวจกับเอกสารและยืนยันเอง
 
-const WARN = "#b5651d";
+const WARN = "#9a4f12";
 const OK = "#2e7d4f";
 
 // นับหลักเลขตัวถังให้เห็นตอนพิมพ์ - ไม่ครบ 17 หรือมีตัว I O Q เป็นสีส้ม
@@ -140,7 +140,7 @@ export function DataWarningBox({
   const [checked, setChecked] = useState(false);
   return (
     <div role="alert" style={{ marginTop: 16, padding: "12px 16px", border: "1px solid #f0d9ae", background: "#fffaf0", borderRadius: 8, fontSize: 13 }}>
-      <strong style={{ color: "#bb8527" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
+      <strong style={{ color: "#946712" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
       <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 4 }}>
         {messages.map((message) => (
           <li key={message}>{message}</li>

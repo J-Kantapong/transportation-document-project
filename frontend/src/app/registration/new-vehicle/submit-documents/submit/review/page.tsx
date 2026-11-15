@@ -123,14 +123,14 @@ export default function SubmitReviewPage() {
           <table className="review-summary">
             <thead>
               <tr>
-                <th>#</th>
-                <th>เลขตัวถัง</th>
-                <th>เจ้าของงาน</th>
-                <th>ยี่ห้อ · ประเภทรถ</th>
-                <th className="amt">Bill</th>
-                <th className="amt">No bill</th>
-                <th className="amt">อากร</th>
-                <th className="amt">รวม (ไม่รวมอากร)</th>
+                <th scope="col">#</th>
+                <th scope="col">เลขตัวถัง</th>
+                <th scope="col">เจ้าของงาน</th>
+                <th scope="col">ยี่ห้อ · ประเภทรถ</th>
+                <th scope="col" className="amt">Bill</th>
+                <th scope="col" className="amt">No bill</th>
+                <th scope="col" className="amt">อากร</th>
+                <th scope="col" className="amt">รวม (ไม่รวมอากร)</th>
               </tr>
             </thead>
             <tbody>

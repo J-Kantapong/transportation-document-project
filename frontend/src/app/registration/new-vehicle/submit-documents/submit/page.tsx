@@ -394,7 +394,7 @@ function SubmitPickStep() {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: 36 }}>
+                  <th scope="col" style={{ width: 36 }}>
                     <input
                       type="checkbox"
                       aria-label={`เลือกทุกคันที่ตรงกับตัวกรอง (${filtered.length} คัน ทุกหน้า)`}
@@ -403,13 +403,13 @@ function SubmitPickStep() {
                       onChange={toggleAllFiltered}
                     />
                   </th>
-                  <th>วันที่ตรวจผ่าน</th>
-                  <th>เจ้าของงาน</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ยี่ห้อ</th>
-                  <th>ประเภทรถ</th>
-                  <th>ประเภทงาน</th>
-                  <th>หมายเหตุ</th>
+                  <th scope="col">วันที่ตรวจผ่าน</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ยี่ห้อ</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ประเภทงาน</th>
+                  <th scope="col">หมายเหตุ</th>
                 </tr>
               </thead>
               <tbody>
@@ -460,10 +460,10 @@ function SubmitPickStep() {
               <table>
                 <thead>
                   <tr>
-                    <th>เลขตัวถัง</th>
-                    <th>เจ้าของงาน</th>
-                    <th>วันที่ตรวจผ่าน</th>
-                    <th>สถานะ</th>
+                    <th scope="col">เลขตัวถัง</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">วันที่ตรวจผ่าน</th>
+                    <th scope="col">สถานะ</th>
                   </tr>
                 </thead>
                 <tbody>

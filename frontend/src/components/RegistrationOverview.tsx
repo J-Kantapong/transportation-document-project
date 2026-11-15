@@ -75,10 +75,10 @@ export function RegistrationOverview() {
             <table>
               <thead>
                 <tr>
-                  <th>เลขที่งาน / วันที่</th>
-                  <th>ประเภทงาน</th>
-                  <th>ผู้รับผิดชอบ</th>
-                  <th>สถานะ</th>
+                  <th scope="col">เลขที่งาน / วันที่</th>
+                  <th scope="col">ประเภทงาน</th>
+                  <th scope="col">ผู้รับผิดชอบ</th>
+                  <th scope="col">สถานะ</th>
                 </tr>
               </thead>
               <tbody />

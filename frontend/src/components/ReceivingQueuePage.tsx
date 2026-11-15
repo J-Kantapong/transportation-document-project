@@ -416,16 +416,16 @@ export function ReceivingQueuePage({
   const tableHead = (
     <thead>
       <tr>
-        {!groupBySheet && <th>{dateColumnLabel}</th>}
-        {!groupBySheet && <th>ชื่อลูกค้า</th>}
-        {groupBySheet && <th style={{ width: 40 }}>ลำดับ</th>}
-        <th>เลขตัวถัง</th>
-        {!groupBySheet && <th>ประเภทรถ</th>}
-        <th>ทะเบียน</th>
-        {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
-        {attachPhoto && <th>{doneDateLabel}</th>}
-        {attachPhoto && <th>{attachPhoto.label}</th>}
-        {groupBySheet && <th>ประเภทรถ</th>}
+        {!groupBySheet && <th scope="col">{dateColumnLabel}</th>}
+        {!groupBySheet && <th scope="col">ชื่อลูกค้า</th>}
+        {groupBySheet && <th scope="col" style={{ width: 40 }}>ลำดับ</th>}
+        <th scope="col">เลขตัวถัง</th>
+        {!groupBySheet && <th scope="col">ประเภทรถ</th>}
+        <th scope="col">ทะเบียน</th>
+        {showReceiptNo && <th scope="col">เลขที่ใบเสร็จ</th>}
+        {attachPhoto && <th scope="col">{doneDateLabel}</th>}
+        {attachPhoto && <th scope="col">{attachPhoto.label}</th>}
+        {groupBySheet && <th scope="col">ประเภทรถ</th>}
       </tr>
     </thead>
   );
@@ -434,7 +434,7 @@ export function ReceivingQueuePage({
     const row = rows[r.id];
     if (!row) return null;
     const message = row.message.text && (
-      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
+      <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 12 }} role="status">
         {row.message.text}
       </div>
     );
@@ -460,7 +460,7 @@ export function ReceivingQueuePage({
               />
               {/* ส่งเล่มไปก่อนแล้ว - ป้ายนี้ต้องบันทึกส่งตามที่หน้า Delivery หรือกด "ป้ายไปพร้อมเล่มแล้ว" ในรายงานส่งงาน (พบ 2026-09-27) */}
               {r.bookDeliveredDate && (
-                <div className="muted" style={{ fontSize: 11, maxWidth: 170 }}>
+                <div className="muted" style={{ fontSize: 12, maxWidth: 170 }}>
                   ส่งเล่มให้ลูกค้าไปแล้ว {isoToDisplayDate(r.bookDeliveredDate)}
                 </div>
               )}
@@ -504,7 +504,7 @@ export function ReceivingQueuePage({
                   }}
                 />
               </label>
-              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 หรือลากรูปจากคอมมาวางที่นี่
               </div>
               {message}
@@ -727,7 +727,7 @@ export function ReceivingQueuePage({
                       {st ? `${st.submitted} คัน` : `${sheet.rows.length} คัน`}
                       {done > 0 && ` · ${doneLabel} ${done}`} · {waitingLabel} {sheet.rows.length}
                       {incomplete && (
-                        <span className="badge warn queue-warn">
+                        <span className="badge alert queue-warn">
                           ⚠ ยื่นไม่ครบ:
                           {st.waitingReceipt > 0 && ` ยังไม่ได้ใบเสร็จ ${st.waitingReceipt}`}
                           {st.waitingReceipt > 0 && st.failed > 0 && " ·"}
@@ -791,15 +791,15 @@ export function ReceivingQueuePage({
             <table>
               <thead>
                 <tr>
-                  <th>{dateColumnLabel}</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ประเภทรถ</th>
-                  <th>ทะเบียน</th>
-                  {showReceiptNo && <th>เลขที่ใบเสร็จ</th>}
-                  {photoColumnLabel && <th>{photoColumnLabel}</th>}
-                  <th>{doneDateLabel}</th>
-                  {fixReceived && <th>แก้ไข</th>}
+                  <th scope="col">{dateColumnLabel}</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  {showReceiptNo && <th scope="col">เลขที่ใบเสร็จ</th>}
+                  {photoColumnLabel && <th scope="col">{photoColumnLabel}</th>}
+                  <th scope="col">{doneDateLabel}</th>
+                  {fixReceived && <th scope="col">แก้ไข</th>}
                 </tr>
               </thead>
               <tbody>

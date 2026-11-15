@@ -203,14 +203,14 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
           <table>
             <thead>
               <tr>
-                <th>ปิดเมื่อ</th>
-                <th>ลูกค้า</th>
-                <th>งาน</th>
-                <th>ทะเบียน / เลขตัวถัง</th>
-                <th>ส่งงานเมื่อ</th>
-                <th>หมายเหตุ</th>
-                <th>ผู้ปิด</th>
-                {canReopen && <th></th>}
+                <th scope="col">ปิดเมื่อ</th>
+                <th scope="col">ลูกค้า</th>
+                <th scope="col">งาน</th>
+                <th scope="col">ทะเบียน / เลขตัวถัง</th>
+                <th scope="col">ส่งงานเมื่อ</th>
+                <th scope="col">หมายเหตุ</th>
+                <th scope="col">ผู้ปิด</th>
+                {canReopen && <th scope="col"></th>}
               </tr>
             </thead>
             <tbody>

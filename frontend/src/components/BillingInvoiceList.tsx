@@ -244,18 +244,18 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
           <table>
             <thead>
               <tr>
-                <th>เลขที่</th>
-                <th>วันที่ออก</th>
-                <th>ลูกค้า</th>
-                <th>จำนวนรถ</th>
-                <th>ยอดสุทธิ</th>
-                <th>สถานะ</th>
-                <th></th>
+                <th scope="col">เลขที่</th>
+                <th scope="col">วันที่ออก</th>
+                <th scope="col">ลูกค้า</th>
+                <th scope="col">จำนวนรถ</th>
+                <th scope="col">ยอดสุทธิ</th>
+                <th scope="col">สถานะ</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
               {visible.map((i) => (
-                <tr key={i.id} style={i.status === "VOID" ? { color: "#8a94a6" } : undefined}>
+                <tr key={i.id} style={i.status === "VOID" ? { color: "#5f6b80" } : undefined}>
                   <td>{i.invoiceNo}</td>
                   <td>
                     {isoToDisplayDate(i.issueDate)}
@@ -333,7 +333,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                           ปิด
                         </button>
                         {error && (
-                          <div className="customer-message error" style={{ fontSize: 11 }} role="alert">
+                          <div className="customer-message error" style={{ fontSize: 12 }} role="alert">
                             {error}
                           </div>
                         )}
@@ -754,7 +754,7 @@ function InvoiceEditDialog({
       </div>
 
       {changedCount > 0 && (
-        <p className="customer-message" style={{ marginTop: 12, color: "#bb8527" }}>
+        <p className="customer-message" style={{ marginTop: 12, color: "#946712" }}>
           รถ {changedCount} คันมีข้อมูลเปลี่ยนหลังออกบิล (เช่น ทะเบียน / เลขที่ใบเสร็จ) - ติ๊ก &quot;ใช้ข้อมูลรถล่าสุด&quot; ในแถวนั้น
           บิลจะพิมพ์ตามข้อมูลปัจจุบันโดยใช้เลขที่บิลเดิม
         </p>
@@ -763,12 +763,12 @@ function InvoiceEditDialog({
         <table>
           <thead>
             <tr>
-              <th>ทะเบียน / เลขตัวถัง</th>
-              <th>ค่าใบเสร็จ</th>
-              <th>ค่าบริการ</th>
-              <th>ยอดหัก</th>
-              <th>ข้อความต่อท้ายบนบิล</th>
-              <th>เอาออกจากบิล</th>
+              <th scope="col">ทะเบียน / เลขตัวถัง</th>
+              <th scope="col">ค่าใบเสร็จ</th>
+              <th scope="col">ค่าบริการ</th>
+              <th scope="col">ยอดหัก</th>
+              <th scope="col">ข้อความต่อท้ายบนบิล</th>
+              <th scope="col">เอาออกจากบิล</th>
             </tr>
           </thead>
           <tbody>
@@ -780,14 +780,14 @@ function InvoiceEditDialog({
               // ยอดใบเสร็จที่พนักงานกรอกไว้ในระบบตอนนี้ ต่างจากที่บิลเก็บไว้ = แสดงเป็นคำแนะนำ (ยอดในบิลยังแก้เองเสมอ)
               const liveReceipt = live?.[l.id]?.receiptAmount ?? null;
               return (
-                <tr key={l.id} style={off ? { color: "#8a94a6", textDecoration: "line-through" } : undefined}>
+                <tr key={l.id} style={off ? { color: "#5f6b80", textDecoration: "line-through" } : undefined}>
                   <td>
                     {l.plateText || "—"}
                     <div className="muted">
                       {l.chassis} · {l.brandName}
                     </div>
                     {diffs.length > 0 && (
-                      <div style={{ fontSize: 12, marginTop: 4, maxWidth: 260, color: "#bb8527" }}>
+                      <div style={{ fontSize: 12, marginTop: 4, maxWidth: 260, color: "#946712" }}>
                         ข้อมูลรถตอนนี้: {diffs.map((d) => `${d.label} ${d.from} → ${d.to}`).join(" · ")}
                         <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2, color: "#34415a" }}>
                           <input

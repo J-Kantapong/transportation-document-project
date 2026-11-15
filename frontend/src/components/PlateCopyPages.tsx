@@ -26,6 +26,7 @@ import {
   type PlateCopy,
 } from "@/lib/plate-copy-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // (มอเตอร์ไซค์เปิดใช้ 2026-10-09: ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนหลังบันทึกไม่ได้ / มอเตอร์ไซค์มีป้ายใบเดียวจึงไม่มีชนิดการคัดป้าย)
@@ -616,16 +617,16 @@ export function PlateCopySubmitPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถ</th>
-                    <th>ประเภทรถ</th>
-                    <th>ทะเบียน</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถ</th>
+                    <th scope="col">ประเภทรถ</th>
+                    <th scope="col">ทะเบียน</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -846,7 +847,7 @@ export function PlateCopyReturnPage() {
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = auto || window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
+    const ok = auto || await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
       await plateCopyApi.markReturned(item.id, returnDate);
@@ -902,14 +903,14 @@ export function PlateCopyReturnPage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถ</th>
-                  <th>ประเภทรถ</th>
-                  <th>ทะเบียน</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>ข้อมูลใบเสร็จ</th>
-                  <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถ</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">ข้อมูลใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                   {canWrite && <th />}
                 </tr>
               </thead>
@@ -1011,7 +1012,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await plateCopyApi.removeReceipt(item.id, receiptId, returned ? receiptRemark.trim() : undefined)).plateCopy);
     } catch (err) {
@@ -1156,7 +1157,7 @@ async function openPlatePhoto(plateCopyId: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -1209,7 +1210,7 @@ function ReceivePlateRow({
     if (!date) return onMessage("กรุณากรอกวันที่รับป้ายให้ถูกต้อง", true);
     if (date > todayIso()) return onMessage("วันที่รับป้ายต้องไม่เกินวันนี้", true);
     if (!file) return onMessage("กรุณาถ่ายหรือเลือกรูปป้ายที่ได้รับก่อนยืนยัน", true);
-    if (!window.confirm(`ยืนยันรับป้าย?\n\n${item.ownerName} · ทะเบียน ${plateText(item)}\nวันที่รับป้าย: ${isoToDisplayDate(date)}`)) return;
+    if (!await confirmDialog(`ยืนยันรับป้าย?\n\n${item.ownerName} · ทะเบียน ${plateText(item)}\nวันที่รับป้าย: ${isoToDisplayDate(date)}`)) return;
     setBusy(true);
     onMessage("");
     try {
@@ -1249,7 +1250,7 @@ function ReceivePlateRow({
               คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
             </div>
             {overdueDays > 0 && (
-              <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>
+              <span className="badge alert">
                 ⚠ เกินกำหนด {overdueDays} วัน
               </span>
             )}
@@ -1425,13 +1426,13 @@ export function PlateCopyReceivePlatePage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถ</th>
-                  <th>ประเภทรถ</th>
-                  <th>ทะเบียน</th>
-                  <th>กำหนดรับป้าย</th>
-                  <th>ป้าย</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถ</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">กำหนดรับป้าย</th>
+                  <th scope="col">ป้าย</th>
                 </tr>
               </thead>
               <tbody>

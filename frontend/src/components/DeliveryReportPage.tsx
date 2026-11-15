@@ -324,12 +324,12 @@ export function DeliveryReportPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>ทะเบียน</th>
-                      <th>เลขตัวถัง</th>
-                      <th>ยี่ห้อ</th>
-                      <th>เลขที่ใบเสร็จ</th>
-                      <th>เล่ม</th>
-                      <th>ป้าย</th>
+                      <th scope="col">ทะเบียน</th>
+                      <th scope="col">เลขตัวถัง</th>
+                      <th scope="col">ยี่ห้อ</th>
+                      <th scope="col">เลขที่ใบเสร็จ</th>
+                      <th scope="col">เล่ม</th>
+                      <th scope="col">ป้าย</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -453,12 +453,12 @@ export function DeliveryReportPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>ลูกค้า</th>
-                      <th>ทะเบียน</th>
-                      <th>เลขตัวถัง</th>
-                      <th>ส่งเล่มเมื่อ</th>
-                      <th>สถานะ</th>
-                      <th></th>
+                      <th scope="col">ลูกค้า</th>
+                      <th scope="col">ทะเบียน</th>
+                      <th scope="col">เลขตัวถัง</th>
+                      <th scope="col">ส่งเล่มเมื่อ</th>
+                      <th scope="col">สถานะ</th>
+                      <th scope="col"></th>
                     </tr>
                   </thead>
                   <tbody>

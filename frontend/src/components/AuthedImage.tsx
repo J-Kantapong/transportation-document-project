@@ -115,7 +115,7 @@ export function AuthedImage({
 
   if (failed) {
     return (
-      <div style={{ ...style, display: "flex", alignItems: "center", justifyContent: "center", background: "#f1f3f8", color: "#8a94a6", fontSize: 11, textAlign: "center" }}>
+      <div style={{ ...style, display: "flex", alignItems: "center", justifyContent: "center", background: "#f1f3f8", color: "#5f6b80", fontSize: 12, textAlign: "center" }}>
         โหลดรูปไม่สำเร็จ
       </div>
     );

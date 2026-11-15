@@ -195,13 +195,13 @@ export function SupplierRatesPage() {
             <table>
               <thead>
                 <tr>
-                  <th>จังหวัด</th>
-                  <th style={{ textAlign: "right" }}>ค่าดำเนินการ</th>
-                  <th style={{ textAlign: "right" }}>ค่าช่อง</th>
-                  <th style={{ textAlign: "right" }}>นำรถเข้าตรวจสภาพ</th>
-                  <th style={{ textAlign: "right" }}>รวมต่อคัน</th>
-                  <th>สลับป้าย (อ้างอิง)</th>
-                  <th>แก้ล่าสุด</th>
+                  <th scope="col">จังหวัด</th>
+                  <th scope="col" style={{ textAlign: "right" }}>ค่าดำเนินการ</th>
+                  <th scope="col" style={{ textAlign: "right" }}>ค่าช่อง</th>
+                  <th scope="col" style={{ textAlign: "right" }}>นำรถเข้าตรวจสภาพ</th>
+                  <th scope="col" style={{ textAlign: "right" }}>รวมต่อคัน</th>
+                  <th scope="col">สลับป้าย (อ้างอิง)</th>
+                  <th scope="col">แก้ล่าสุด</th>
                   <th />
                 </tr>
               </thead>
@@ -215,7 +215,7 @@ export function SupplierRatesPage() {
                       ) : r.total === null ? (
                         <span className="badge warn">ยังไม่มีราคา</span>
                       ) : null}
-                      {r.note && <div style={{ fontSize: 12, color: "#8a94a6" }}>{r.note}</div>}
+                      {r.note && <div style={{ fontSize: 12, color: "#5f6b80" }}>{r.note}</div>}
                     </td>
                     <td style={{ textAlign: "right" }}>{money(r.serviceFee)}</td>
                     <td style={{ textAlign: "right" }}>{money(r.channelFee)}</td>

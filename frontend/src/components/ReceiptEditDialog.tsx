@@ -36,7 +36,7 @@ const FLAG_STYLE = { border: "2px solid #e0a31a", background: "#fff8e6" };
 
 function Flag({ text }: { text: string | null }) {
   if (!text) return null;
-  return <div style={{ fontSize: 12, color: "#b5651d", marginTop: 4 }}>⚠ {text}</div>;
+  return <div style={{ fontSize: 12, color: "#9a4f12", marginTop: 4 }}>⚠ {text}</div>;
 }
 
 export function ReceiptEditButton(props: Props) {
@@ -205,7 +205,7 @@ export function ReceiptEditButton(props: Props) {
                 ยกเลิก
               </button>
             </div>
-            <div style={{ fontSize: 12, color: "#8a94a6" }}>ยังไม่บันทึกลงระบบ - กด &quot;บันทึกใบยื่นนี้&quot; ด้านล่างตารางอีกครั้ง</div>
+            <div style={{ fontSize: 12, color: "#5f6b80" }}>ยังไม่บันทึกลงระบบ - กด &quot;บันทึกใบยื่นนี้&quot; ด้านล่างตารางอีกครั้ง</div>
           </div>
         </div>
       </dialog>
@@ -455,7 +455,7 @@ export function ReceivedReceiptFixButton({
                   style={{ width: 180 }}
                 />
               </label>
-              <div style={{ fontSize: 12, color: "#8a94a6" }}>
+              <div style={{ fontSize: 12, color: "#5f6b80" }}>
                 วันที่ยื่น {isoToDisplayDate(s.submitDate.slice(0, 10))} ≤ วันที่ในใบเสร็จ ≤ วันที่รับใบเสร็จ ≤ วันนี้ · พิมพ์ปี พ.ศ. ได้
               </div>
               <label className="field">
@@ -482,7 +482,7 @@ export function ReceivedReceiptFixButton({
                   ยกเลิก
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: "#8a94a6" }}>
+              <div style={{ fontSize: 12, color: "#5f6b80" }}>
                 บันทึกลงระบบทันทีและเก็บประวัติการแก้ - สถานะยังเป็นได้ใบเสร็จแล้ว · ใบส่งงาน/บิลที่ออกไปแล้วไม่เปลี่ยนตาม
               </div>
             </div>

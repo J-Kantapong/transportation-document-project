@@ -109,14 +109,14 @@ export function PayrollListPage() {
           <table>
             <thead>
               <tr>
-                <th>เดือน</th>
-                <th>สถานะ</th>
-                <th style={{ textAlign: "right" }}>คน</th>
-                <th style={{ textAlign: "right" }}>รายได้รวม</th>
-                <th style={{ textAlign: "right" }}>ประกันสังคม</th>
-                <th style={{ textAlign: "right" }}>ภาษี</th>
-                <th style={{ textAlign: "right" }}>จ่ายสุทธิ</th>
-                <th>วันที่จ่าย</th>
+                <th scope="col">เดือน</th>
+                <th scope="col">สถานะ</th>
+                <th scope="col" style={{ textAlign: "right" }}>คน</th>
+                <th scope="col" style={{ textAlign: "right" }}>รายได้รวม</th>
+                <th scope="col" style={{ textAlign: "right" }}>ประกันสังคม</th>
+                <th scope="col" style={{ textAlign: "right" }}>ภาษี</th>
+                <th scope="col" style={{ textAlign: "right" }}>จ่ายสุทธิ</th>
+                <th scope="col">วันที่จ่าย</th>
               </tr>
             </thead>
             <tbody>
