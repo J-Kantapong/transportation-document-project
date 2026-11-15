@@ -3,13 +3,23 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { pushLine, type LineMessage } from './line-client.js';
 import { buildYamahaNoticeMessage, type NoticeInvoice } from './mail-message.js';
 import { isYamahaNotice, MailFormatError, parseYamahaNotice, type MailMessage, type YamahaNotice } from './yamaha-mail.js';
+import {
+  buildYamahaDoMessage,
+  buildYamahaPoMessage,
+  isYamahaDoMail,
+  isYamahaPoMail,
+  parseYamahaDoMail,
+  parseYamahaPoMail,
+  type PoStatus,
+  type WaitingQuotation,
+} from './yamaha-po-mail.js';
 
 export const MAX_MAILS_PER_CALL = 20;
 const MAX_BODY_CHARS = 20_000;
 const MAX_REMEMBERED = 500;
 
 // sent = ส่งการ์ดเข้าไลน์แล้ว · nothing-to-do = อ่านได้แต่ไม่มีอะไรต้องแจ้ง · duplicate = เคยรับเมลนี้แล้ว
-// ignored = ไม่ใช่เมลแจ้งโอนของยามาฮ่า · unreadable = เป็นเมลแจ้งโอนแต่อ่านรูปแบบไม่ออก (แจ้งเจ้าของในไลน์ให้เปิดเมลเอง)
+// ignored = ไม่ใช่เมลของยามาฮ่าที่รู้จัก (แจ้งโอน / PO / DO) · unreadable = เป็นเมลแจ้งโอนแต่อ่านรูปแบบไม่ออก (แจ้งเจ้าของในไลน์ให้เปิดเมลเอง)
 export type MailStatus = 'sent' | 'nothing-to-do' | 'duplicate' | 'ignored' | 'unreadable';
 export interface MailResult {
   id: string;
@@ -44,7 +54,64 @@ export class MailService {
     this.seen.add(id);
   }
 
+  private baseUrl(): string | undefined {
+    const origin = process.env.FRONTEND_ORIGIN?.trim();
+    return origin && /^https?:\/\//i.test(origin) ? origin.replace(/\/+$/, '') : undefined;
+  }
+
+  // เมล PO / DO จากระบบจัดซื้อของยามาฮ่า (ผู้ใช้ 2026-11-16): แจ้งเตือนอย่างเดียว ไม่บันทึกอะไรจากเมล
+  private async handlePurchasing(mail: MailMessage): Promise<MailStatus | null> {
+    const isPo = isYamahaPoMail(mail);
+    if (!isPo && !isYamahaDoMail(mail)) return null;
+    try {
+      if (isPo) {
+        const poNumbers = parseYamahaPoMail(mail);
+        const statuses = await this.loadPoStatuses(poNumbers);
+        const waiting = statuses.some((p) => p.state === 'new') ? await this.loadWaitingQuotations() : [];
+        const message = buildYamahaPoMessage(statuses, waiting, this.baseUrl());
+        if (!message) return 'nothing-to-do';
+        await pushLine([message]);
+      } else {
+        await pushLine([buildYamahaDoMessage(parseYamahaDoMail(mail))]);
+      }
+      return 'sent';
+    } catch (error) {
+      if (!(error instanceof MailFormatError)) throw error;
+      await pushLine([{ type: 'text', text: `มีเมล ${isPo ? 'PO' : 'DO'} จากยามาฮ่าที่อ่านไม่ออก (${error.message}) - เปิดเมลดูเอง: ${mail.subject.slice(0, 120)}` }]);
+      return 'unreadable';
+    }
+  }
+
+  async loadPoStatuses(poNumbers: string[]): Promise<PoStatus[]> {
+    const match = poNumbers.map((po) => ({ poNumber: { contains: po, mode: 'insensitive' as const } }));
+    const [invoices, quotations] = await Promise.all([
+      this.prisma.invoice.findMany({ where: { OR: match, status: { not: 'VOID' } }, select: { invoiceNo: true, poNumber: true, quotationNo: true } }),
+      this.prisma.quotation.findMany({ where: { OR: match, status: 'APPROVED' }, select: { quotationNo: true, poNumber: true } }),
+    ]);
+    const has = (value: string | null, po: string) => (value ?? '').toUpperCase().includes(po);
+    return poNumbers.map((poNumber): PoStatus => {
+      const invoice = invoices.find((i) => has(i.poNumber, poNumber));
+      const quotation = quotations.find((q) => has(q.poNumber, poNumber));
+      if (invoice) return { poNumber, state: 'billed', invoiceNo: invoice.invoiceNo, quotationNo: invoice.quotationNo ?? quotation?.quotationNo ?? null };
+      if (quotation) return { poNumber, state: 'approved', invoiceNo: null, quotationNo: quotation.quotationNo };
+      return { poNumber, state: 'new', invoiceNo: null, quotationNo: null };
+    });
+  }
+
+  // ใบเสนอราคาที่ออกแล้วและยังรออนุมัติ ของงานยามาฮ่าหรือลูกค้าที่ต้องมีใบเสนอราคาก่อนวางบิล
+  async loadWaitingQuotations(): Promise<WaitingQuotation[]> {
+    const rows = await this.prisma.quotation.findMany({
+      where: { status: 'ISSUED', quotationNo: { not: null }, OR: [{ yamahaMonth: { not: null } }, { customer: { billingRequiresQuotation: true } }] },
+      orderBy: { issueDate: 'asc' },
+      take: 20,
+      select: { quotationNo: true, title: true, netTotal: true },
+    });
+    return rows.map((r) => ({ quotationNo: r.quotationNo ?? '', title: r.title, netTotal: Number(r.netTotal) }));
+  }
+
   private async handleOne(mail: MailMessage): Promise<MailStatus> {
+    const purchasing = await this.handlePurchasing(mail);
+    if (purchasing) return purchasing;
     if (!isYamahaNotice(mail)) return 'ignored';
     let notice: YamahaNotice;
     try {
