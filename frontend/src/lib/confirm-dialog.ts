@@ -52,6 +52,31 @@ export function confirmDialog(message: string, options: ConfirmOptions = {}): Pr
   });
 }
 
+// แจ้งข้อความ (แทน window.alert) - ปุ่มเดียว "ตกลง" · ไม่ต้อง await ก็ได้ เพราะไม่มีอะไรรอคำตอบ
+export function alertDialog(message: string): Promise<void> {
+  if (typeof document === "undefined" || typeof HTMLDialogElement === "undefined") {
+    if (typeof window !== "undefined") window.alert(message);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const { dialog, cancel, ok } = build(message, { confirmLabel: "ตกลง" });
+    cancel.remove();
+    const finish = () => {
+      dialog.close();
+      dialog.remove();
+      resolve();
+    };
+    ok.addEventListener("click", finish);
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish();
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    ok.focus();
+  });
+}
+
 // ถามข้อความ (เช่น เหตุผล) - คืน null เมื่อยกเลิก
 export function promptDialog(message: string, options: ConfirmOptions = {}): Promise<string | null> {
   if (typeof document === "undefined" || typeof HTMLDialogElement === "undefined") {

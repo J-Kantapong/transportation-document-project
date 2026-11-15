@@ -710,6 +710,7 @@ export function TaxRenewalPage() {
                       <td>
                         <input
                           type="checkbox"
+                          aria-label="มี พ.ร.บ. แล้ว"
                           checked={row.insuranceConfirmed}
                           disabled={!editable}
                           onChange={(e) => void patch(row.id, { insuranceConfirmed: e.target.checked })}

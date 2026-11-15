@@ -17,6 +17,7 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { DateInput } from "@/components/DateInput";
 import { downloadYamahaAttachmentsPdf } from "@/lib/yamaha-attachments-pdf";
+import { alertDialog } from "@/lib/confirm-dialog";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -69,7 +70,7 @@ async function openAuthedFile(url: string, fileName: string) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดไฟล์ไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -255,9 +256,9 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
       const notes: string[] = [];
       if (!result.pages) notes.push("ไม่มีรูปให้ export (มีแต่ไฟล์ PDF)");
       if (result.skippedPdfs.length) notes.push(`ข้ามไฟล์ที่เป็น PDF ${result.skippedPdfs.length} ไฟล์ (รวมเข้า PDF ไม่ได้): ${result.skippedPdfs.join(", ")}`);
-      if (notes.length) window.alert(notes.join("\n"));
+      if (notes.length) void alertDialog(notes.join("\n"));
     } catch {
-      window.alert("สร้าง PDF ไม่สำเร็จ กรุณาลองใหม่");
+      void alertDialog("สร้าง PDF ไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setExporting(false);
       setExportProgress("");

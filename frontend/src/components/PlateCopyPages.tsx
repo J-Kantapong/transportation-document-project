@@ -26,7 +26,7 @@ import {
   type PlateCopy,
 } from "@/lib/plate-copy-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
-import { confirmDialog } from "@/lib/confirm-dialog";
+import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // (มอเตอร์ไซค์เปิดใช้ 2026-10-09: ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนหลังบันทึกไม่ได้ / มอเตอร์ไซค์มีป้ายใบเดียวจึงไม่มีชนิดการคัดป้าย)
@@ -1157,7 +1157,7 @@ async function openPlatePhoto(plateCopyId: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 

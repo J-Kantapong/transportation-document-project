@@ -28,7 +28,7 @@ import {
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
-import { confirmDialog } from "@/lib/confirm-dialog";
+import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
@@ -91,7 +91,7 @@ export async function openReceiptImage(id: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 
@@ -272,7 +272,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
 
   async function save() {
     if (needsRemark && !remark.trim()) {
-      window.alert("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ทะเบียนใหม่");
+      void alertDialog("งานนี้รับเอกสารกลับแล้ว - กรุณาระบุเหตุผลที่แก้ทะเบียนใหม่");
       return;
     }
     setBusy(true);
@@ -281,7 +281,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
       setEditing(false);
       setRemark("");
     } catch (err) {
-      window.alert(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
+      void alertDialog(errorText(err, "บันทึกทะเบียนใหม่ไม่สำเร็จ"));
     } finally {
       setBusy(false);
     }
@@ -1314,7 +1314,7 @@ function SubmittedRow({
     try {
       await onRelink(swap, vehicle);
     } catch (err) {
-      window.alert(errorText(err, "บันทึกไม่สำเร็จ"));
+      void alertDialog(errorText(err, "บันทึกไม่สำเร็จ"));
     }
   }
 
@@ -1798,7 +1798,7 @@ async function openPlateSwapPhoto(kind: PlateOrBook, swapId: string) {
     else window.open(objectUrl, "_blank");
   } catch {
     win?.close();
-    if (getToken()) window.alert("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
+    if (getToken()) void alertDialog("เปิดรูปไม่สำเร็จ กรุณาลองใหม่");
   }
 }
 

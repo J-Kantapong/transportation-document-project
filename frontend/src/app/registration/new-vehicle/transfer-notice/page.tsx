@@ -228,6 +228,7 @@ function PendingVehicleTable({
                     type="number"
                     min={0}
                     step="any"
+                    aria-label="ค่าใช้จ่าย (บาท)"
                     value={row.costText}
                     disabled={readOnly}
                     onChange={(e) => patchRow(v.id, { costText: e.target.value })}
