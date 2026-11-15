@@ -5,7 +5,9 @@ import type { LineMessage } from './line-client.js';
 
 // ข้อมูลใน postback ของปุ่ม: st|<คำสั่ง>|<invoiceId>|<วันที่เงินเข้า>|<หัก ณ ที่จ่าย>
 //   tv = ขอออกใบกำกับ (ถามยืนยันก่อน) · tvgo = ยืนยันออกใบกำกับ · pay = ขอบันทึกรับเงิน · paygo = ยืนยันบันทึกรับเงิน
-export type StatementAction = 'tv' | 'tvgo' | 'pay' | 'paygo';
+//   tvb / tvbgo = ออกใบกำกับก่อนรับเงิน (เมลแจ้งโอนของยามาฮ่า): วันที่ = วันที่ลูกค้าจะโอน บิลยังรอรับเงิน
+export const STATEMENT_ACTIONS = ['tv', 'tvgo', 'pay', 'paygo', 'tvb', 'tvbgo'] as const;
+export type StatementAction = (typeof STATEMENT_ACTIONS)[number];
 export interface StatementPostback {
   action: StatementAction;
   invoiceId: string;
@@ -18,10 +20,10 @@ export const postbackData = (p: StatementPostback) => `st|${p.action}|${p.invoic
 export function parseStatementPostback(data: string | undefined): StatementPostback | null {
   const [prefix, action, invoiceId, date, wht, ...rest] = (data ?? '').split('|');
   if (prefix !== 'st' || rest.length || !invoiceId) return null;
-  if (action !== 'tv' && action !== 'tvgo' && action !== 'pay' && action !== 'paygo') return null;
+  if (!(STATEMENT_ACTIONS as readonly string[]).includes(action ?? '')) return null;
   const whtAmount = Number(wht);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') || !Number.isFinite(whtAmount) || whtAmount < 0) return null;
-  return { action, invoiceId, date, whtAmount };
+  return { action: action as StatementAction, invoiceId, date, whtAmount };
 }
 
 export const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
@@ -131,7 +133,7 @@ export function buildConfirmMessage(card: ConfirmCard): LineMessage {
   return { type: 'flex', altText: card.title, contents: bubble };
 }
 
-export function buildIssuedMessage(input: { taxInvoiceNo: string; invoiceNo: string; customerName: string; date: string; printUrl?: string }): LineMessage {
+export function buildIssuedMessage(input: { taxInvoiceNo: string; invoiceNo: string; customerName: string; date: string; printUrl?: string; beforePayment?: boolean }): LineMessage {
   const bubble: Record<string, unknown> = {
     type: 'bubble',
     size: 'mega',
@@ -142,7 +144,7 @@ export function buildIssuedMessage(input: { taxInvoiceNo: string; invoiceNo: str
       spacing: 'sm',
       contents: [
         text(`${input.invoiceNo} ${input.customerName}`, { size: 'sm' }),
-        text(`วันที่ใบกำกับ ${dmy(input.date)} · บันทึกรับเงินแล้ว`, { size: 'sm' }),
+        text(`วันที่ใบกำกับ ${dmy(input.date)} · ${input.beforePayment ? 'ออกก่อนรับเงิน บิลยังรอรับเงิน' : 'บันทึกรับเงินแล้ว'}`, { size: 'sm' }),
         text(input.printUrl ? 'กดปุ่มด้านล่างเพื่อเปิดใบกำกับ (ต้นฉบับ + สำเนา) แล้วปริ้นหรือส่งต่อลิงก์ให้พนักงาน ลิงก์ใช้ได้ 7 วัน' : 'เปิดปริ้นได้ที่หน้าใบกำกับภาษีในระบบ', { size: 'xs', color: '#666666' }),
       ],
     },
