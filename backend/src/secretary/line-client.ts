@@ -89,6 +89,19 @@ export function pushLineText(text: string, config?: LineConfig, fetchImpl?: Fetc
   return pushLine([{ type: 'text', text }], config, fetchImpl);
 }
 
+// โหลดไฟล์ที่ผู้ใช้ส่งเข้าแชต (เช่น CSV รายการเดินบัญชี) - LINE เก็บไว้ชั่วคราว ต้องโหลดด้วย token ของบอท
+const CONTENT_URL = (messageId: string) => `https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`;
+
+export async function fetchLineContent(messageId: string, config: LineConfig = lineConfigFromEnv(), fetchImpl: FetchLike = fetch): Promise<Buffer> {
+  const response = await fetchImpl(CONTENT_URL(messageId), {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${config.token}` },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`LINE ตอบกลับ ${response.status} ตอนโหลดไฟล์`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 // ตอบกลับข้อความที่ผู้ใช้เพิ่งพิมพ์ (ใช้ replyToken ที่ LINE ส่งมากับ webhook - หมดอายุเร็ว ใช้ได้ครั้งเดียว)
 export async function replyLine(
   replyToken: string,

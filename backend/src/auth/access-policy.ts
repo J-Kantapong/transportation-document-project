@@ -28,7 +28,8 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/auth(\/|$)/, access: 'ANY_USER' },
   // เลขาส่วนตัว (ผู้ใช้ 2026-10-07): webhook ของ LINE และ run (ตัวตั้งเวลา GitHub Actions) เปิดสาธารณะเพราะไม่มี token ของระบบ - ตรวจลายเซ็น/กุญแจใน SecretaryController
   // (ไม่ผ่านลายเซ็นตอบ 401 ก่อนแตะข้อมูล) · route อื่นใน /api/secretary ถ้ามีในอนาคต = ADMIN เท่านั้น
-  { pattern: /^\/api\/secretary\/(webhook|run)$/, access: 'PUBLIC' },
+  // tax-invoice = ใบกำกับสำหรับลิงก์ปริ้นจากไลน์ (ผู้ใช้ 2026-11-16) ตรวจ token ที่ลงลายเซ็นและมีวันหมดอายุใน SecretaryController
+  { pattern: /^\/api\/secretary\/(webhook|run|tax-invoice)$/, access: 'PUBLIC' },
   { pattern: /^\/api\/secretary(\/|$)/, access: ['ADMIN'] },
   // บอทไลน์ลูกค้า (ผู้ใช้ 2026-10-09): webhook เปิดสาธารณะ ตรวจลายเซ็นใน CustomerLineController · route อื่น = ADMIN
   { pattern: /^\/api\/customer-line\/webhook$/, access: 'PUBLIC' },

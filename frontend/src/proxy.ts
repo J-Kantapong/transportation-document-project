@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { canAccessPage, homeFor, PUBLIC_PATHS, rolesFromToken, TOKEN_COOKIE } from '@/lib/auth';
+import { canAccessPage, homeFor, isOpenPath, PUBLIC_PATHS, rolesFromToken, TOKEN_COOKIE } from '@/lib/auth';
 
 // กันเข้าหน้าโดยไม่ล็อกอิน (Next 16 เรียกไฟล์นี้ว่า proxy แทน middleware) - ตรวจแค่ว่ามี token และ roles ใน
 // payload เข้าหน้านั้นได้ไหม ส่วนสิทธิ์ข้อมูลจริง backend ตรวจทุกคำขอ (backend/src/auth/auth.guard.ts)
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (isOpenPath(pathname)) return NextResponse.next(); // ใบกำกับจากลิงก์ในไลน์ - ไม่ดูสถานะล็อกอิน
   const token = request.cookies.get(TOKEN_COOKIE)?.value ?? '';
   const roles = token ? rolesFromToken(token) : [];
   const loggedIn = roles.length > 0;

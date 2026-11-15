@@ -14,6 +14,8 @@ import { buildMorningMessage } from './morning-message.js';
 import { dueReminders, reminderMessage, remindersText } from './reminders.js';
 import type { Slot } from './run-key.js';
 import { helpText, overdueText, spendText, stuckText, textMessage, withQuickReply } from './replies.js';
+import { parseStatementPostback } from './statement-message.js';
+import { StatementService } from './statement.service.js';
 
 const total = (s: Omit<EveningInput['staff'][number], 'name'>) => s.entered + s.submitted + s.received + s.edits + s.slips;
 
@@ -25,6 +27,7 @@ export class SecretaryService {
     private readonly overviewService: OverviewService,
     private readonly prisma: PrismaService,
     private readonly notes: NotesService,
+    private readonly statements: StatementService,
   ) {}
 
   // ที่อยู่เว็บสำหรับลิงก์ในการ์ด (ใช้ FRONTEND_ORIGIN ถ้าตั้งไว้เป็น URL จริง - ไม่ตั้ง = การ์ดไม่มีลิงก์)
@@ -112,15 +115,23 @@ export class SecretaryService {
   async handleEvents(events: LineEvent[]): Promise<void> {
     const owner = lineConfigFromEnv().userId;
     for (const event of events) {
-      if (event.type !== 'message' || event.message?.type !== 'text' || !event.replyToken) continue;
-      if (event.source?.userId !== owner) continue;
-      if (event.deliveryContext?.isRedelivery) continue; // LINE ส่งซ้ำเมื่อไม่ได้รับตอบ - กันตอบสองรอบ
+      if (!event.replyToken || event.source?.userId !== owner) continue;
+      if (event.deliveryContext?.isRedelivery) continue; // LINE ส่งซ้ำเมื่อไม่ได้รับตอบ - กันตอบสองรอบ (และกันออกใบกำกับซ้ำ)
+      // ไฟล์ statement จาก K BIZ และปุ่มในการ์ดจับคู่ยอดเงินเข้า (ผู้ใช้ 2026-11-16)
+      const isText = event.type === 'message' && event.message?.type === 'text';
+      const isFile = event.type === 'message' && event.message?.type === 'file' && !!event.message.id;
+      const postback = event.type === 'postback' ? parseStatementPostback(event.postback?.data) : null;
+      if (!isText && !isFile && !postback) continue;
 
       let messages: LineMessage[];
       try {
-        const typed = event.message.text ?? '';
-        const note = parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
-        messages = note ? await this.notes.run(note) : await this.answer(parseCommand(typed));
+        if (postback) messages = await this.statements.handlePostback(postback);
+        else if (isFile) messages = await this.statements.handleFile(event.message!.id!, event.message!.fileName ?? '');
+        else {
+          const typed = event.message?.text ?? '';
+          const note = parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
+          messages = note ? await this.notes.run(note) : await this.answer(parseCommand(typed));
+        }
       } catch (error) {
         console.error('เลขาตอบคำสั่งไม่สำเร็จ:', error instanceof Error ? error.message : error);
         messages = [textMessage('ขออภัย ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง')];
