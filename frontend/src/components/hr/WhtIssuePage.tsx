@@ -514,7 +514,7 @@ export function WhtIssuePage() {
                   <td style={{ textAlign: "right" }}>{formatMoney(r.income)}</td>
                   <td style={{ textAlign: "right" }}>{formatMoney(r.tax)}</td>
                   <td style={{ textAlign: "right" }}>{formatMoney(r.sso)}</td>
-                  <td>{r.certificate ? <span className="badge done">ออกแล้ว {r.certificate.certificateNo}</span> : r.idValid ? <span className="badge">ยังไม่ออก</span> : <span className="badge warn">เลขประจำตัวไม่ถูกต้อง</span>}</td>
+                  <td>{r.certificate ? <span className="badge done">ออกแล้ว {r.certificate.certificateNo}</span> : r.idValid ? <span className="badge">ยังไม่ออก</span> : <span className="badge alert">เลขประจำตัวไม่ถูกต้อง</span>}</td>
                 </tr>
               ))}
             </tbody>

@@ -31,7 +31,7 @@ export function TransferReceiptCell({
   if (!v.transferReceipt) {
     return (
       <div>
-        <span className="badge warn">ยังไม่แนบ</span>
+        <span className="badge alert">ยังไม่แนบ</span>
         {canEdit && (
           <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 12 }}>
             <input type="checkbox" checked={picked} onChange={(e) => onPick(e.target.checked)} aria-label={`เลือก ${v.chassis} เพื่อแนบใบเสร็จแจ้งย้าย`} />

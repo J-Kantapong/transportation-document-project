@@ -727,7 +727,7 @@ export function ReceivingQueuePage({
                       {st ? `${st.submitted} คัน` : `${sheet.rows.length} คัน`}
                       {done > 0 && ` · ${doneLabel} ${done}`} · {waitingLabel} {sheet.rows.length}
                       {incomplete && (
-                        <span className="badge warn queue-warn">
+                        <span className="badge alert queue-warn">
                           ⚠ ยื่นไม่ครบ:
                           {st.waitingReceipt > 0 && ` ยังไม่ได้ใบเสร็จ ${st.waitingReceipt}`}
                           {st.waitingReceipt > 0 && st.failed > 0 && " ·"}

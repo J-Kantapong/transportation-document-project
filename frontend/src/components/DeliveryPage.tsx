@@ -494,7 +494,7 @@ export function DeliveryPage() {
                       {pickedHere > 0 && <span className="badge done queue-warn">เลือกแล้ว {pickedHere}</span>}
                       {notReady > 0 && <span className="badge warn queue-warn">⚠ ยังไม่พร้อม {notReady}</span>}
                       {waitTone !== "ok" && (
-                        <span className="badge warn queue-warn" style={{ color: AGING_COLOR[waitTone], fontWeight: 700 }} title="ของครบแล้วแต่ยังไม่ได้ลงส่งงาน - ส่งแล้วอย่าลืมลง">
+                        <span className={`badge ${waitTone === "late" ? "alert" : "warn"} queue-warn`} title="ของครบแล้วแต่ยังไม่ได้ลงส่งงาน - ส่งแล้วอย่าลืมลง">
                           ⏰ {agingText(waitDays)}
                         </span>
                       )}

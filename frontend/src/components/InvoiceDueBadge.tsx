@@ -11,7 +11,7 @@ export function InvoiceDueBadge({ status, dueDate, today }: { status: string; du
   if (days === null) return null;
   if (days < 0) {
     return (
-      <span className="badge" style={{ background: "#fde8e8", color: "#b43434" }} title="เลยวันที่ลูกค้าปกติจ่ายแล้ว - เช็ก statement ว่าได้รับแล้วแต่ยังไม่ลง หรือตามลูกค้า">
+      <span className="badge alert" title="เลยวันที่ลูกค้าปกติจ่ายแล้ว - เช็ก statement ว่าได้รับแล้วแต่ยังไม่ลง หรือตามลูกค้า">
         เลยวันคาดรับเงิน {-days} วัน - เช็กว่าได้รับแล้ว?
       </span>
     );

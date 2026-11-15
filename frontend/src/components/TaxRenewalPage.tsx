@@ -683,7 +683,7 @@ export function TaxRenewalPage() {
                         {row.vehicleClass === "TRANSPORT" ? (
                           // รถ ขส. (ผู้ใช้ 2026-11-09): ตรวจสภาพทุกปี - บันทึกเป็นวันที่ตรวจ (แก้/ล้างผ่าน ✎ แก้) ไม่ใช่ติ๊กใบ ตรอ.
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            {!row.inspectionDate && <span className="badge warn">ต้องตรวจ</span>}
+                            {!row.inspectionDate && <span className="badge alert">ต้องตรวจ</span>}
                             <DateCell
                               key={`inspection:${row.inspectionDate ?? ""}`}
                               value={row.inspectionDate}

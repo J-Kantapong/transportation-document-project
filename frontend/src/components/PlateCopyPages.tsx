@@ -1250,7 +1250,7 @@ function ReceivePlateRow({
               คาดว่าได้ป้ายภายใน {isoToDisplayDate(dueIso)} (ปกติ {PLATE_COPY_EXPECTED_DAYS} วันทำการ)
             </div>
             {overdueDays > 0 && (
-              <span className="badge" style={{ background: "#fff1dc", color: "#9a5a00" }}>
+              <span className="badge alert">
                 ⚠ เกินกำหนด {overdueDays} วัน
               </span>
             )}

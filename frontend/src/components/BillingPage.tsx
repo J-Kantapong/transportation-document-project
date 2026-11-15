@@ -765,7 +765,7 @@ export function BillingPage() {
               </span>
             </div>
             {problemCount > 0 && (
-              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fff4e5", color: "#8a4b00", fontSize: 13 }}>
+              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fde0e0", color: "#8f1d1d", border: "1px solid #e59a9a", fontWeight: 600, fontSize: 13 }}>
                 ⚠ ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
               </div>
             )}
@@ -868,7 +868,7 @@ export function BillingPage() {
                               <span style={{ fontSize: 12, background: "#f5b400", color: "#3d2b00", borderRadius: 6, padding: "1px 6px", marginRight: 6 }}>กำหนดเอง</span>
                             )}
                             {problem ? (
-                              <span className="customer-message error" title={problem}>
+                              <span className="badge alert" title={problem}>
                                 ⚠ ต้องตรวจ
                               </span>
                             ) : (

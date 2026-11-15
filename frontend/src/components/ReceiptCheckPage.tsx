@@ -91,7 +91,7 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
   const mismatched = AMOUNT_RE.test(text) && billNow !== null && Math.round((Number(text) - billNow) * 100) !== 0;
   const sizeHints = useSizeHints(s.id, mismatched ? text : "");
   if (!text) return null;
-  if (!AMOUNT_RE.test(text)) return <span className="badge warn">ตัวเลขไม่ถูกต้อง</span>;
+  if (!AMOUNT_RE.test(text)) return <span className="badge alert">ตัวเลขไม่ถูกต้อง</span>;
   const bill = billOf(s);
   if (bill === null) return <span className="badge">เทียบไม่ได้ (ยังคำนวณภาษีไม่ได้)</span>;
   const diff = Math.round((Number(text) - bill) * 100) / 100;
@@ -99,7 +99,7 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
   const hint = otherProvinceHint(s, diff);
   return (
     <>
-      <span className="badge warn">
+      <span className="badge alert">
         ไม่ตรง Bill ({diff > 0 ? "+" : ""}
         {money(diff)})
       </span>
@@ -332,7 +332,7 @@ const initialInput = (s: DocumentSubmission): RowInput =>
 
 function StatusText({ s }: { s: DocumentSubmission }) {
   if (s.status === "RECEIPT_RECEIVED") return <span className="badge done">ได้ใบเสร็จแล้ว</span>;
-  if (s.status === "FAILED") return <span className="badge warn">ยื่นไม่สำเร็จ: {s.failRemark || "—"}</span>;
+  if (s.status === "FAILED") return <span className="badge alert">ยื่นไม่สำเร็จ: {s.failRemark || "—"}</span>;
   return <span className="badge">ย้ายไปค้างจากใบก่อนแล้ว</span>;
 }
 
@@ -891,7 +891,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                     {open > 0 && ` · รอตรวจ ${open}`}
                     {withPhoto > 0 && ` · แนบรูปแล้ว ${withPhoto}`}
                     {short > 0 && (
-                      <span className="badge warn" style={{ fontWeight: 600 }}>
+                      <span className="badge alert" style={{ fontWeight: 600 }}>
                         ยังขาด {short} คัน
                       </span>
                     )}
@@ -971,7 +971,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                               {photo ? (
                                 <span className="badge">ค้างจากรอบก่อน - แนบรูปแล้ว รอบันทึก</span>
                               ) : (
-                                <span className="badge warn">ยังขาด - ค้างจากรอบก่อน</span>
+                                <span className="badge alert">ยังขาด - ค้างจากรอบก่อน</span>
                               )}
                             </div>
                           )}
