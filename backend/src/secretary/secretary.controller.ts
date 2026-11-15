@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { TaxInvoiceService } from '../billing/tax-invoice.service.js';
 import { verifyLineSignature, type LineWebhookBody } from './line-webhook.js';
+import { MailService } from './mail.service.js';
 import { verifyPrintToken } from './print-link.js';
 import { isSlot, MIN_KEY_LENGTH, verifyRunKey } from './run-key.js';
 import { SecretaryService } from './secretary.service.js';
@@ -10,6 +11,7 @@ export class SecretaryController {
   constructor(
     private readonly secretary: SecretaryService,
     private readonly taxInvoices: TaxInvoiceService,
+    private readonly mails: MailService,
   ) {}
 
   // webhook ของ LINE (เปิดสาธารณะใน access-policy.ts เพราะ LINE ไม่มี token ของระบบ) - ความปลอดภัยอยู่ที่ลายเซ็น:
@@ -33,6 +35,19 @@ export class SecretaryController {
     const id = verifyPrintToken(token, process.env.AUTH_SECRET?.trim() ?? '');
     if (!id) throw new UnauthorizedException({ error: 'ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว' });
     return { taxInvoice: await this.taxInvoices.get(id) };
+  }
+
+  // เมลแจ้งโอนของยามาฮ่า (ผู้ใช้ 2026-11-16): สคริปต์ใน Gmail (backend/scripts/gmail-yamaha-forwarder.gs) ส่งเมลใหม่เข้ามา
+  // { messages: [{ id, from, subject, body }] } -> { results: [{ id, status }] } · เปิดสาธารณะใน access-policy.ts เพราะ Gmail ไม่มี token ของระบบ
+  // ความปลอดภัยอยู่ที่กุญแจ SECRETARY_RUN_KEY ใน header x-secretary-key (ตัวเดียวกับ run) - ผิด = 401 ก่อนแตะข้อมูล
+  // เมลเป็นข้อมูลจากภายนอก: อ่านแค่วันที่/ยอด/เลขบิล แล้วส่งการ์ดให้เจ้าของกดเอง ไม่ออกใบกำกับจากเมลโดยตรง
+  @Post('mail')
+  @HttpCode(200)
+  async mail(@Headers('x-secretary-key') key: string | undefined, @Body() body: unknown) {
+    const expected = process.env.SECRETARY_RUN_KEY?.trim();
+    if (!expected || expected.length < MIN_KEY_LENGTH) throw new ServiceUnavailableException('ยังไม่ได้ตั้งค่า SECRETARY_RUN_KEY');
+    if (!verifyRunKey(key, expected)) throw new UnauthorizedException();
+    return { results: await this.mails.handleMails(body) };
   }
 
   // ตั้งเวลาส่งสรุป (GitHub Actions เรียกตามเวลา 09:00 / 16:00 เวลาไทย): POST /api/secretary/run?slot=morning|evening|reminder (reminder = เตือนประจำสัปดาห์ที่ถึงเวลาแล้ว reminders.ts)

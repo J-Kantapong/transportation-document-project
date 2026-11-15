@@ -100,8 +100,8 @@ export class StatementService {
 
   async handlePostback(p: StatementPostback): Promise<LineMessage[]> {
     try {
-      if (p.action === 'tv') return [await this.confirmTaxInvoice(p)];
-      if (p.action === 'tvgo') return [await this.issueTaxInvoice(p)];
+      if (p.action === 'tv' || p.action === 'tvb') return [await this.confirmTaxInvoice(p)];
+      if (p.action === 'tvgo' || p.action === 'tvbgo') return [await this.issueTaxInvoice(p)];
       if (p.action === 'pay') return [await this.confirmPaid(p)];
       return [await this.markPaid(p)];
     } catch (error) {
@@ -134,31 +134,37 @@ export class StatementService {
           : `มีใบกำกับ ${last.taxInvoiceNo} ลงวันที่ ${dmy(last.issueDate)} แล้ว ระบบไม่ให้ย้อนข้ามเดือน`,
       );
     }
-    const blocked = !preview.enabled || preview.missing.length > 0;
+    // ออกก่อนรับเงิน (เมลแจ้งโอนของยามาฮ่า): เฉพาะลูกค้าที่ตั้งไว้ วันที่ = วันที่ลูกค้าจะโอน บิลยังรอรับเงิน
+    const before = p.action === 'tvb';
+    if (before && !preview.beforePaymentAllowed) warnings.push('ลูกค้ารายนี้ยังไม่ได้ตั้ง "ออกใบกำกับก่อนรับเงิน" ในเงื่อนไขลูกค้า');
+    if (before && p.date > bangkokToday()) warnings.push('ลงวันที่ล่วงหน้า - ใบกำกับใบอื่นที่ออกหลังจากนี้ต้องลงวันที่นี้ขึ้นไป');
+    const blocked = !preview.enabled || preview.missing.length > 0 || (before && !preview.beforePaymentAllowed);
     return buildConfirmMessage({
-      title: `ยืนยันออกใบกำกับ ${invoice.invoiceNo}`,
+      title: `ยืนยันออกใบกำกับ ${invoice.invoiceNo}${before ? ' (ก่อนรับเงิน)' : ''}`,
       lines: [
         invoice.customerName,
         `เลขที่จะได้: ${preview.nextNo ?? '-'}`,
-        `วันที่ใบกำกับ (วันที่รับเงิน): ${dmy(p.date)}`,
+        before ? `วันที่ใบกำกับ (วันที่ลูกค้าจะโอน): ${dmy(p.date)}` : `วันที่ใบกำกับ (วันที่รับเงิน): ${dmy(p.date)}`,
         p.whtAmount > 0 ? `หัก ณ ที่จ่าย ${money(p.whtAmount)} (${invoice.whtMethod === 'EWHT' ? 'e-WHT' : '50 ทวิ กระดาษ'})` : 'ไม่หัก ณ ที่จ่าย',
         'ออกแล้วแก้ไม่ได้ ต้องยกเลิกแล้วออกใหม่',
       ],
       warnings,
-      confirm: blocked ? null : { label: 'ยืนยันออกใบกำกับ', data: postbackData({ ...p, action: 'tvgo' }) },
+      confirm: blocked ? null : { label: 'ยืนยันออกใบกำกับ', data: postbackData({ ...p, action: before ? 'tvbgo' : 'tvgo' }) },
     });
   }
 
   private async issueTaxInvoice(p: StatementPostback): Promise<LineMessage> {
     const invoice = await this.invoiceOf(p.invoiceId);
     if (!invoice) return textOf('ไม่พบบิลนี้แล้ว');
+    const before = p.action === 'tvbgo';
     const tv = await this.taxInvoices.issue(p.invoiceId, {
       paidDate: p.date,
       whtAmount: p.whtAmount,
       whtMethod: p.whtAmount > 0 ? invoice.whtMethod : 'NONE',
       backdateConfirmed: true, // ผู้ใช้เห็นคำเตือนย้อนวันที่ในการ์ดยืนยันแล้ว
+      beforePayment: before,
     });
-    return buildIssuedMessage({ taxInvoiceNo: tv.taxInvoiceNo, invoiceNo: invoice.invoiceNo, customerName: invoice.customerName, date: p.date, printUrl: this.printUrl(tv.id) });
+    return buildIssuedMessage({ taxInvoiceNo: tv.taxInvoiceNo, invoiceNo: invoice.invoiceNo, customerName: invoice.customerName, date: p.date, printUrl: this.printUrl(tv.id), beforePayment: before });
   }
 
   private async confirmPaid(p: StatementPostback): Promise<LineMessage> {
