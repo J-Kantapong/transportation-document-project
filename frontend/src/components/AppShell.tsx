@@ -22,6 +22,7 @@ import {
   getCachedUser,
   getToken,
   initials,
+  isOpenPath,
   PUBLIC_PATHS,
   ROLE_LABELS,
   saveSession,
@@ -141,7 +142,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  // หน้า /tv (ใบกำกับจากลิงก์ในไลน์) ก็ไม่มีเมนูของระบบเหมือนหน้า login
+  const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) || isOpenPath(pathname);
 
   useEffect(() => {
     if (isPublic || !getToken()) return;

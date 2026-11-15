@@ -10,5 +10,7 @@ import { TaxInvoiceService } from './tax-invoice.service.js';
 @Module({
   controllers: [BillingController, TaxInvoiceController, QuotationController],
   providers: [BillingService, TaxInvoiceService, QuotationService, receiptStorageProvider],
+  // เลขาส่วนตัวใช้ออกใบกำกับ/บันทึกรับเงินจากไลน์ (secretary/statement.service.ts)
+  exports: [BillingService, TaxInvoiceService],
 })
 export class BillingModule {}

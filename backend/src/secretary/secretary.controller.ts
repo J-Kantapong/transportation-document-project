@@ -1,11 +1,16 @@
-import { BadRequestException, Body, Controller, Headers, HttpCode, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { TaxInvoiceService } from '../billing/tax-invoice.service.js';
 import { verifyLineSignature, type LineWebhookBody } from './line-webhook.js';
+import { verifyPrintToken } from './print-link.js';
 import { isSlot, MIN_KEY_LENGTH, verifyRunKey } from './run-key.js';
 import { SecretaryService } from './secretary.service.js';
 
 @Controller('api/secretary')
 export class SecretaryController {
-  constructor(private readonly secretary: SecretaryService) {}
+  constructor(
+    private readonly secretary: SecretaryService,
+    private readonly taxInvoices: TaxInvoiceService,
+  ) {}
 
   // webhook ของ LINE (เปิดสาธารณะใน access-policy.ts เพราะ LINE ไม่มี token ของระบบ) - ความปลอดภัยอยู่ที่ลายเซ็น:
   // ไม่ผ่านลายเซ็น = ตอบ 401 ก่อนอ่านข้อมูล/ฐานข้อมูลใดๆ · ตอบ LINE ทันที แล้วค่อยหาคำตอบเบื้องหลัง
@@ -19,6 +24,15 @@ export class SecretaryController {
     const events = Array.isArray(body?.events) ? body.events : [];
     void this.secretary.handleEvents(events).catch((error: unknown) => console.error('เลขารับข้อความไม่สำเร็จ:', error instanceof Error ? error.message : error));
     return {};
+  }
+
+  // ใบกำกับภาษีสำหรับหน้า /tv ของเว็บ (ลิงก์ที่เลขาส่งในไลน์หลังกดออกใบกำกับ, ผู้ใช้ 2026-11-16) - เปิดสาธารณะใน access-policy.ts
+  // ความปลอดภัยอยู่ที่ token (HMAC ด้วย AUTH_SECRET หมดอายุใน 7 วัน, print-link.ts): token ไม่ผ่าน = 401 ก่อนแตะฐานข้อมูล
+  @Get('tax-invoice')
+  async taxInvoice(@Query('token') token: string | undefined) {
+    const id = verifyPrintToken(token, process.env.AUTH_SECRET?.trim() ?? '');
+    if (!id) throw new UnauthorizedException({ error: 'ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว' });
+    return { taxInvoice: await this.taxInvoices.get(id) };
   }
 
   // ตั้งเวลาส่งสรุป (GitHub Actions เรียกตามเวลา 09:00 / 16:00 เวลาไทย): POST /api/secretary/run?slot=morning|evening|reminder (reminder = เตือนประจำสัปดาห์ที่ถึงเวลาแล้ว reminders.ts)

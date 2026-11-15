@@ -3,9 +3,10 @@ import type { OverviewService } from '../overview/overview.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { NotesService } from './notes.service.js';
 import { SecretaryService } from './secretary.service.js';
+import type { StatementService } from './statement.service.js';
 
 function service() {
-  const s = new SecretaryService({} as OverviewService, {} as PrismaService, {} as NotesService);
+  const s = new SecretaryService({} as OverviewService, {} as PrismaService, {} as NotesService, {} as StatementService);
   const morning = vi.spyOn(s, 'sendMorning').mockResolvedValue();
   const evening = vi.spyOn(s, 'sendEvening').mockResolvedValue();
   return { s, morning, evening };
