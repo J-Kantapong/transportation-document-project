@@ -289,6 +289,7 @@ describe('ReceiptsService - ขอบเขตการดูรูป / ถา�
 const READING: ReceiptReading = {
   receiptNo: '69/0035358',
   pcNo: null,
+  cc: null,
   date: '2026-09-07',
   plateCategory: '8ขก',
   plateNumber: '3484',

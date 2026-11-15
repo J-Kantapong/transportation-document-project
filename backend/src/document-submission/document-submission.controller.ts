@@ -56,6 +56,12 @@ export class DocumentSubmissionController {
     return this.documentSubmissionService.updateReceiptDate(id, body?.receiptDate, body?.remark);
   }
 
+  // ใช้ CC ตามใบเสร็จ (2026-11-09): แก้ Vehicle.cc (+ ช่วงประเภทรถ รย.12) ให้ตรงกับ CC ที่ AI อ่านจากใบเสร็จของรายการนี้ - ดู applyReceiptCc
+  @Post('document-submission/:id/apply-receipt-cc')
+  applyReceiptCc(@Param('id') id: string, @Body() body: { remark?: unknown }) {
+    return this.documentSubmissionService.applyReceiptCc(id, body?.remark);
+  }
+
   // แก้ข้อมูลใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ทะเบียน/เลขที่/ยอด/วันที่รับ/วันที่ในใบเสร็จ) ต้องมี remark ไม่เปลี่ยนสถานะ
   // - ดู DocumentSubmissionService.updateReceiptFields
   @Patch('document-submission/:id/receipt-fields')

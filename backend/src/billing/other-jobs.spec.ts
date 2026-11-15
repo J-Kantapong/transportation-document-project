@@ -243,7 +243,7 @@ describe('BillingService.createInvoice with other jobs', () => {
       voidReason: null,
       faceLayout: 'SUMMARY',
       ...data,
-      lines: data.lines.createMany.data.map((l: object, n: number) => ({ id: `l${n}`, ...l })),
+      lines: (data.lines?.createMany.data ?? []).map((l: object, n: number) => ({ id: `l${n}`, ...l })),
       items: data.items ? data.items.createMany.data.map((it: object, n: number) => ({ id: `it${n}`, ...it })) : [],
     }));
     const queryRawUnsafe = vi.fn().mockResolvedValue([]);
@@ -305,6 +305,23 @@ describe('BillingService.createInvoice with other jobs', () => {
     const invoice = await svc.createInvoice(mixedDto({ jobs: undefined, items: undefined }));
     expect(invoice).toMatchObject({ feeTotal: 3745, serviceTotal: 700 });
     expect(create.mock.calls[0][0].data.items).toBeUndefined();
+  });
+
+  // หน้าวางบิลรวม (ผู้ใช้ 2026-11-11): ลูกค้าที่มีแต่งานอื่น ออกบิลจากหน้าเดียวกับรถได้ บัญชี = บัญชี ณ วันออกบิล
+  it('issues a bill with jobs only (no vehicles), taking the account at the issue date', async () => {
+    const { svc, create } = mixedSetup({ periods: [{ account: 'PERSONAL', effectiveFrom: new Date('2026-10-01T00:00:00.000Z') }] });
+    const invoice = await svc.createInvoice(mixedDto({ lines: [], items: undefined }));
+    const data = create.mock.calls[0][0].data;
+    expect(data.lines).toBeUndefined();
+    expect(data.account).toBe('PERSONAL');
+    expect(invoice.lines).toEqual([]);
+    expect(invoice).toMatchObject({ feeTotal: 125, serviceTotal: 400 });
+  });
+
+  it('refuses a bill with neither vehicles nor jobs', async () => {
+    const { svc, create } = mixedSetup();
+    await expect(svc.createInvoice(mixedDto({ lines: [], jobs: undefined, items: undefined }))).rejects.toMatchObject({ response: { error: expect.stringContaining('อย่างน้อย 1 รายการ') } });
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

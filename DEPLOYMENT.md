@@ -49,10 +49,17 @@ unbuilt TypeScript directly via `nest start` and will fail with "property does n
 type PrismaService" errors since the Prisma client and compiled output were never produced).
 
 Free-tier Render web services spin down after ~15 minutes idle; the first request after that
-takes about a minute (cold start; over 8 minutes was seen on 2026-10-09). To avoid that during
-office hours, `.github/workflows/keep-awake.yml` calls `GET /` on the production backend every
-10 minutes, Monday to Saturday 07:00-19:00 Thai time (secret `SECRETARY_BACKEND_URL`; runs only
-from `master`). Outside those hours the service still sleeps. Upgrading the plan removes the need.
+takes about a minute (cold start; over 8 minutes was seen on 2026-10-09). To avoid that, a
+cron-job.org job ("Wake backend (Render)", in the owner's cron-job.org account, not in this repo)
+calls `GET /` on the production backend every 10 minutes, every day of the week, 05:00-01:50 Thai
+time (crontab `*/10 0-1,5-23 * * *`, time zone Asia/Bangkok; 2026-11-15, the user asked for the
+most uptime the free plan allows). It replaced the GitHub Actions workflow `keep-awake.yml`:
+GitHub ran that schedule only 2-3 times a day instead of 72, so the backend still slept. The
+service sleeps only from about 02:05 to 05:00. This keeps production awake about 21 hours a day,
+roughly 655 of the workspace's 750 free instance hours in a 31-day month, leaving about 95 hours
+for the dev service, which shares them. Running around the clock would use 744 and leave almost
+nothing, and Render suspends the free services when the hours run out. Upgrading the plan removes
+the need.
 
 ## 3. Vercel (frontend)
 

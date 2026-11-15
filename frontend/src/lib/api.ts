@@ -359,6 +359,7 @@ export interface DocumentSubmission {
   vehicle: {
     chassis: string;
     body: string | null;
+    cc?: string | null; // CC ที่คีย์ไว้ - เทียบกับ CC ที่ AI อ่านจากใบเสร็จ (2026-11-09) มีเฉพาะผลจาก listDocumentSubmissions
     plateCategory: string | null;
     plateNumber: string | null;
     // id = กุญแจใบยื่น/ใบส่งงาน (ผู้ใช้ 2026-09-27) ชื่อซ้ำกันได้ - ชื่อ/บริษัท/สาขาใช้แสดงเท่านั้น
@@ -393,10 +394,11 @@ export interface ReceiptReading {
   plateCategory: string | null;
   plateNumber: string | null;
   chassis: string | null;
+  cc?: number | null; // ขนาด CC บนใบเสร็จ (2026-11-09) - ใบที่อ่านก่อนหน้านี้ไม่มี · เทียบกับ CC ที่คีย์ (vehicle.cc)
   weightKg: number | null;
   items: Array<{ label: string; amount: number }>;
   total: number | null;
-  uncertainFields: string[]; // ช่องที่ AI ไม่มั่นใจ: receiptNo | date | plate | chassis | weightKg | items | total
+  uncertainFields: string[]; // ช่องที่ AI ไม่มั่นใจ: receiptNo | date | plate | chassis | cc | weightKg | items | total
 }
 
 // ใบเสร็จที่ AI อ่านได้ซ้ำกับที่มีในระบบ: receiptNo = เลขที่ใบเสร็จซ้ำ · chassis = รถคันนี้มีใบเสร็จแล้ว (เตือน ไม่บล็อก)
@@ -423,6 +425,14 @@ export type ReceiptExtraction = (
 
 // readPending = รูปที่จับคู่ระหว่าง AI ยังอ่านอยู่ - หน้ารับใบเสร็จถามผลต่อด้วย getReceipts
 export type ReceiptSummary = Pick<ReceiptImage, 'id' | 'extractionSource' | 'extraction' | 'readPending' | 'createdAt'>;
+
+// ผลของ applyReceiptCc - cc/body ใหม่ของรถ และช่องที่เปลี่ยน
+export interface ReceiptCcApplyResult {
+  vehicleId: string;
+  cc: number;
+  body: string | null;
+  changes: Record<string, { from: string | null; to: string | null }>;
+}
 
 // แก้ข้อมูลใบเสร็จของรายการที่ได้ใบเสร็จแล้ว (ผู้ใช้ 2026-09-27) - ส่งเฉพาะช่องที่แก้, วันที่เป็น ค.ศ. YYYY-MM-DD
 export interface ReceiptFieldsFix {
@@ -1096,6 +1106,13 @@ export const api = {
   // ยกเลิกรายการที่ยังรอใบเสร็จ (รถยนต์/จักรยานยนต์, รูปใบเสร็จที่แนบถูกถอดไปรอจับคู่) - รถกลับไปอยู่ในคิวรอยื่นเอกสาร ยื่นใหม่ได้, ต้องมีเหตุผล
   cancelDocumentSubmission: (submissionId: string, remark: string) =>
     request<{ id: string; cancelled: true }>(`/api/vehicles/document-submission/${submissionId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+
+  // ใช้ CC ตามใบเสร็จ (2026-11-09): แก้ CC ของรถ (+ ช่วงประเภทรถ รย.12) ให้ตรงกับที่ AI อ่านจากใบเสร็จของรายการนี้ - ลง VehicleEditLog
+  applyReceiptCc: (submissionId: string, remark?: string) =>
+    request<ReceiptCcApplyResult>(`/api/vehicles/document-submission/${submissionId}/apply-receipt-cc`, {
       method: 'POST',
       body: JSON.stringify({ remark }),
     }),

@@ -14,6 +14,8 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
+import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
+import { receiptCcMismatch, receiptCcOf } from '../receipts/receipt-cc.js';
 import { expectedPaymentDate, isPayWeekday, PAY_WEEKS_AFTER_MAX, type PaySchedule } from './payment-schedule.js';
 import { ACCOUNT_LABEL, accountOn, isBillingAccount, type AccountPeriod } from './billing-account.js';
 import {
@@ -478,6 +480,7 @@ const QUEUE_VEHICLE_INCLUDE = {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
     select: {
+      id: true, // หน้าวางบิลเรียก apply-receipt-cc ของรายการนี้ (2026-11-09)
       status: true,
       receiptNo: true,
       receiptAmount: true,
@@ -490,8 +493,8 @@ const QUEUE_VEHICLE_INCLUDE = {
       newPlateOption: true,
       relocateAddon: true,
       stopUseRelocateOut: true,
-      // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28)
-      receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true } },
+      // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28) · extraction = CC ที่ AI อ่าน (2026-11-09)
+      receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true, extraction: true, createdAt: true } },
     },
   },
 } as const;
@@ -587,6 +590,7 @@ export class BillingService {
             const sub = v.documentSubmissions[0];
             const isMoto = isMotorcycle(v.body);
             const cc = num(v.cc);
+            const receiptCc = receiptCcOf(sub?.receipts ?? []);
             const rate = suggestRate(rates, { isMoto, cc, chassis: v.chassis, registrationProvince: v.registrationProvince, body: v.body });
             // ยอดบนใบเสร็จจริงมาก่อน ถ้าพนักงานไม่ได้กรอกไว้ใช้ยอด Bill ที่ระบบคำนวณ (ค่าธรรมเนียม + ภาษี) แทนและบอกให้บัญชีตรวจ
             const receiptAmount = num(sub?.receiptAmount);
@@ -628,6 +632,11 @@ export class BillingService {
               // = ใบเสร็จบอกว่าขอใช้/ไม่ขอใช้ต่างจากข้อมูลรถ หน้าวางบิลเสนอปุ่ม "ใช้ตามใบเสร็จ" · คำนวณไม่ได้ = null (ไม่เสนอ)
               receiptEstimateFlipped: currentBillEstimate(flipOtherProvince(v, otherProvince), sub, feeRules),
               receiptImageIds: sub?.receipts?.map((r) => r.id) ?? [],
+              // CC ตรวจกับใบเสร็จ (ผู้ใช้ 2026-11-09 "ในใบเสร็จมี CC อยู่"): ราคาที่เสนอเลือกจาก CC ที่คีย์ ถ้าไม่ตรงใบเสร็จ = ราคาผิดแถวได้
+              // ccWarning = ไม่ตรงใบเสร็จ หรือ (ไม่มี CC ในใบเสร็จ) CC ไม่อยู่ในช่วงของประเภทรถ - หน้าวางบิลไม่ให้ติ๊กจนกว่าจะแก้/ยืนยัน
+              submissionId: sub?.id ?? null,
+              receiptCc,
+              ccWarning: receiptCcMismatch(cc, receiptCc) ?? (v.body && cc !== null ? motorcycleCcMismatch(v.body, String(cc)) : null),
               // ขอใช้เลขทะเบียน - เผื่อเคสลูกค้าชำระค่าขอใช้เลขเอง; SWAP_* (มีคนทำสลับเลขมาให้) ไม่ใช่การขอใช้เลข (ผู้ใช้ 2026-09-27)
               requestedPlateNumber,
               urgent,
@@ -902,9 +911,9 @@ export class BillingService {
     const jobLabel = optionalText(dto.jobLabel, 'ชื่องาน');
     if (!jobLabel) throw bad('ต้องใส่ชื่องานที่จะแสดงบนบิล');
     if (typeof dto.customerId !== 'string') throw bad('ต้องระบุลูกค้า');
-    if (!Array.isArray(dto.lines) || dto.lines.length === 0) throw bad('ต้องเลือกรถอย่างน้อย 1 คัน');
+    if (dto.lines !== undefined && !Array.isArray(dto.lines)) throw bad('รายการรถไม่ถูกต้อง');
 
-    const lineInputs = (dto.lines as Array<Record<string, unknown>>).map((l) => {
+    const lineInputs = ((dto.lines ?? []) as Array<Record<string, unknown>>).map((l) => {
       if (typeof l?.vehicleId !== 'string') throw bad('รายการรถไม่ถูกต้อง');
       return { vehicleId: l.vehicleId, ...parseLineAmounts(l) };
     });
@@ -913,6 +922,8 @@ export class BillingService {
     const extras = parseExtras(dto.extras);
     const customItems = dto.items === undefined ? [] : parseItems(dto.items);
     const picks = parseJobPicks(dto.jobs);
+    // หน้าวางบิลรวม (ผู้ใช้ 2026-11-11): บิลเดียวมีรถ งานอื่นๆ หรือทั้งสองอย่างก็ได้ - ต้องมีอย่างใดอย่างหนึ่ง
+    if (lineInputs.length === 0 && picks.length === 0) throw bad('ต้องเลือกรถหรืองานอย่างน้อย 1 รายการ');
     const whtOverride = parseWhtOverride(dto.whtRate);
 
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { accountPeriods: { select: { account: true, effectiveFrom: true } } } });
@@ -960,8 +971,9 @@ export class BillingService {
           // บัญชีของบิล = บัญชีของลูกค้า ณ วันส่งงานของรถ - บิลเดียวต้องอยู่บัญชีเดียว (ช่วงย้ายบัญชีต้องแยกบิล)
           const accounts = new Set(lines.map((l) => accountOn(periods, iso(l.deliveredDate)!)));
           if (accounts.size > 1) throw bad('รถในบิลนี้ส่งงานคนละช่วงบัญชี (บริษัท/บุคคล) - แยกออกเป็นบิลละบัญชี');
-          const account = [...accounts][0];
           const issueIso = issueDate.toISOString().slice(0, 10);
+          // ไม่มีรถในบิล (มีแต่งานอื่นๆ) = บัญชีของลูกค้า ณ วันออกบิล เหมือน createJobInvoice
+          const account = accounts.size ? [...accounts][0] : accountOn(periods, issueIso);
           // งานอื่นๆ ที่พ่วงมา (ผู้ใช้ 2026-10-07): บัญชีของงานยึดวันออกบิล (ไม่มีวันส่งงาน) ต้องตรงกับบัญชีของรถ · ล็อกหลังรถเสมอ
           if (picks.length && accountOn(periods, issueIso) !== account) {
             throw bad('งานอื่นๆ ที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) กับรถในบิลนี้ ณ วันออกบิล - แยกออกเป็นบิลละบัญชี');
@@ -990,7 +1002,7 @@ export class BillingService {
               whtAmount: totals.whtAmount,
               netTotal: totals.netTotal,
               // createMany = คำสั่งเดียว บิลหลายสิบคันไม่ชน timeout ของ transaction
-              lines: { createMany: { data: lines } },
+              ...(lines.length ? { lines: { createMany: { data: lines } } } : {}),
               ...(items.length ? { items: { createMany: { data: items } } } : {}),
             },
             include: INVOICE_INCLUDE,
