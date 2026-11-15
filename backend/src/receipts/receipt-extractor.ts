@@ -45,8 +45,10 @@ export class NoAiReceiptExtractor implements ReceiptExtractor {
   }
 }
 
-// Claude Sonnet 5 - ผู้ใช้เลือกหลังทดสอบกับใบเสร็จจริง 22 ใบ (ถูกทุกช่อง; Haiku 4.5 อ่านทะเบียน/เลขตัวถังผิดบ่อย)
-export const RECEIPT_MODEL = 'claude-sonnet-5';
+// Claude Sonnet 5.5 (ผู้ใช้ 2026-11-16, ราคาเท่า Sonnet 5) - ทดสอบกับใบเสร็จ production 60 ใบเทียบค่าที่พนักงานยืนยัน:
+// ไม่ตรง 8 ใบ (Sonnet 5 ไม่ตรง 30 ใบในชุดเดียวกัน, Haiku 5.5 ไม่ตรง 51 ใบ - อ่านหมวด 2ฆ เป็น 2ม และหยิบเลขแบบฟอร์มแทนเลขที่ใบเสร็จ)
+// รุ่นนี้ปิด thinking ด้วย { type: 'disabled' } ไม่ได้ (400) และบังคับ tool_choice ไม่ได้ - โค้ดด้านล่างไม่ได้ใช้ทั้งสองอย่าง
+export const RECEIPT_MODEL = 'claude-sonnet-5-5';
 
 @Injectable()
 export class ClaudeReceiptExtractor implements ReceiptExtractor {
