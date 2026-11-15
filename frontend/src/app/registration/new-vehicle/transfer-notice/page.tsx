@@ -131,23 +131,23 @@ function PendingVehicleTable({
       <table>
         <thead>
           <tr>
-            <th>วันที่รับงาน</th>
-            <th>ชื่อลูกค้า</th>
-            <th>เลขตัวถัง</th>
-            <th>ยี่ห้อ</th>
-            <th>ประเภทรถ</th>
-            <th>จังหวัดที่จดทะเบียน</th>
-            <th>สถานะ</th>
-            <th>ใบเสร็จแจ้งย้าย</th>
-            <th>
+            <th scope="col">วันที่รับงาน</th>
+            <th scope="col">ชื่อลูกค้า</th>
+            <th scope="col">เลขตัวถัง</th>
+            <th scope="col">ยี่ห้อ</th>
+            <th scope="col">ประเภทรถ</th>
+            <th scope="col">จังหวัดที่จดทะเบียน</th>
+            <th scope="col">สถานะ</th>
+            <th scope="col">ใบเสร็จแจ้งย้าย</th>
+            <th scope="col">
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "inherit" }}>
                 <input type="checkbox" checked={allSelected} disabled={!editable.length} onChange={(e) => onSelectAll(e.target.checked)} />
                 ดำเนินการแล้ว
               </label>
             </th>
-            <th>วันที่เสร็จ</th>
-            <th>ค่าใช้จ่าย</th>
-            <th></th>
+            <th scope="col">วันที่เสร็จ</th>
+            <th scope="col">ค่าใช้จ่าย</th>
+            <th scope="col"></th>
           </tr>
         </thead>
         <tbody>
@@ -178,7 +178,7 @@ function PendingVehicleTable({
                   {/* ข้ามใบเสร็จ (ผู้ใช้ 2026-10-19): แจ้งย้ายไปแล้วนอกระบบ/ไม่มีใบเสร็จ - ต้องระบุเหตุผล บันทึกลงประวัติรถ */}
                   {!readOnly && receiptMissing(v) && (
                     <div style={{ marginTop: 4 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
                         <input
                           type="checkbox"
                           checked={row.waive}
@@ -196,7 +196,7 @@ function PendingVehicleTable({
                           maxLength={200}
                           aria-label="เหตุผลที่ข้ามใบเสร็จแจ้งย้าย"
                           onChange={(e) => patchRow(v.id, { waiveReason: e.target.value })}
-                          style={{ width: 170, marginTop: 2, fontSize: 11 }}
+                          style={{ width: 170, marginTop: 2, fontSize: 12 }}
                         />
                       )}
                     </div>
@@ -233,19 +233,19 @@ function PendingVehicleTable({
                     onChange={(e) => patchRow(v.id, { costText: e.target.value })}
                     style={{ width: 90 }}
                   />
-                  {v.suggestedCost && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {v.suggestedCost} บาท</div>}
-                  {v.receiptRequired && <div style={{ fontSize: 11, color: "var(--muted, #738197)" }}>เฉพาะ No bill (ไม่รวมใบเสร็จ)</div>}
+                  {v.suggestedCost && <div style={{ fontSize: 12, color: "var(--ink-muted)" }}>แนะนำ {v.suggestedCost} บาท</div>}
+                  {v.receiptRequired && <div style={{ fontSize: 12, color: "var(--ink-muted)" }}>เฉพาะ No bill (ไม่รวมใบเสร็จ)</div>}
                 </td>
                 <td>
                   {readOnly ? (
-                    <span className="muted" style={{ fontSize: 11 }}>ดูอย่างเดียว</span>
+                    <span className="muted" style={{ fontSize: 12 }}>ดูอย่างเดียว</span>
                   ) : (
                     <button className="text-button" disabled={row.saving || bulkSaving} onClick={() => onSave(v)}>
                       บันทึก
                     </button>
                   )}
                   {row.message.text && (
-                    <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 11 }} role="status">
+                    <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 12 }} role="status">
                       {row.message.text}
                     </div>
                   )}
@@ -763,15 +763,15 @@ export default function TransferNoticePage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่รับงาน</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ยี่ห้อ</th>
-                  <th>สถานะ</th>
-                  <th>วันที่เสร็จ</th>
-                  <th>ค่าใช้จ่าย</th>
-                  <th>ใบเสร็จแจ้งย้าย</th>
-                  <th></th>
+                  <th scope="col">วันที่รับงาน</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ยี่ห้อ</th>
+                  <th scope="col">สถานะ</th>
+                  <th scope="col">วันที่เสร็จ</th>
+                  <th scope="col">ค่าใช้จ่าย</th>
+                  <th scope="col">ใบเสร็จแจ้งย้าย</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -802,7 +802,7 @@ export default function TransferNoticePage() {
                       </button>
                       {canEdit(v) &&
                         (v.submitted ? (
-                          <span className="muted" style={{ fontSize: 11, marginLeft: 8 }} title="ยื่นเอกสารแล้ว - ย้อนกลับไปแก้ขั้นตอนก่อนหน้าไม่ได้">
+                          <span className="muted" style={{ fontSize: 12, marginLeft: 8 }} title="ยื่นเอกสารแล้ว - ย้อนกลับไปแก้ขั้นตอนก่อนหน้าไม่ได้">
                             ยื่นแล้ว
                           </span>
                         ) : (
@@ -927,7 +927,7 @@ export default function TransferNoticePage() {
                       style={{ width: 130 }}
                     />
                     {correction.vehicle.suggestedCost && (
-                      <span style={{ fontSize: 11, color: "var(--muted, #738197)" }}>แนะนำ {correction.vehicle.suggestedCost} บาท</span>
+                      <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>แนะนำ {correction.vehicle.suggestedCost} บาท</span>
                     )}
                   </label>
                 </div>

@@ -190,7 +190,7 @@ export function TaxInvoicesPage() {
             {rows.map((r) => {
               const cancelled = r.status === "CANCELLED";
               return (
-                <div key={r.id} style={{ padding: "10px 23px", borderTop: "1px solid #f0f2f6", color: cancelled ? "#8a94a6" : undefined }}>
+                <div key={r.id} style={{ padding: "10px 23px", borderTop: "1px solid #f0f2f6", color: cancelled ? "#5f6b80" : undefined }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                     <span>
                       <b>{r.taxInvoiceNo}</b> · {isoToDisplayDate(r.issueDate)} · {r.customer.name}

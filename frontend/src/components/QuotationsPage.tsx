@@ -147,7 +147,7 @@ export function QuotationsPage() {
                 <Link
                   key={row.id}
                   href={quotationHref(row)}
-                  style={{ padding: "12px 23px", borderTop: "1px solid #f0f2f6", textDecoration: "none", display: "block", color: closed ? "#8a94a6" : undefined }}
+                  style={{ padding: "12px 23px", borderTop: "1px solid #f0f2f6", textDecoration: "none", display: "block", color: closed ? "#5f6b80" : undefined }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <span>

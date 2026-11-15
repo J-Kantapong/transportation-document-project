@@ -145,6 +145,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   // หน้า /tv (ใบกำกับจากลิงก์ในไลน์) ก็ไม่มีเมนูของระบบเหมือนหน้า login
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) || isOpenPath(pathname);
 
+  // เมนูมือถือ: กด Escape ปิดได้ (a11y)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   useEffect(() => {
     if (isPublic || !getToken()) return;
     // แสดงชื่อจาก cache ทันที แล้วดึงข้อมูลสดจาก backend (ถ้า token หมดอายุ request() พาไปหน้า login เอง)
@@ -299,7 +309,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main>
         <header>
           <div className="screen-title">
-            <button className="mobile-menu" aria-label="เปิดเมนู" onClick={() => setOpen((v) => !v)}>
+            <button className="mobile-menu" aria-label="เปิดเมนู" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
               ☰
             </button>
             <Breadcrumb pathname={pathname} roles={roles} home={home} />

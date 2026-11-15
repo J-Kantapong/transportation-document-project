@@ -110,14 +110,14 @@ export function EmployeesPage() {
           <table>
             <thead>
               <tr>
-                <th>รหัส</th>
-                <th>ชื่อ-สกุล</th>
-                <th>ตำแหน่ง</th>
-                <th>เลขประจำตัว</th>
-                <th style={{ textAlign: "right" }}>เงินเดือน</th>
-                <th>ประกันสังคม</th>
-                <th>ภาษี</th>
-                <th>สถานะ</th>
+                <th scope="col">รหัส</th>
+                <th scope="col">ชื่อ-สกุล</th>
+                <th scope="col">ตำแหน่ง</th>
+                <th scope="col">เลขประจำตัว</th>
+                <th scope="col" style={{ textAlign: "right" }}>เงินเดือน</th>
+                <th scope="col">ประกันสังคม</th>
+                <th scope="col">ภาษี</th>
+                <th scope="col">สถานะ</th>
                 <th />
               </tr>
             </thead>
@@ -413,15 +413,15 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
             <table>
               <thead>
                 <tr>
-                  <th>แถว</th>
-                  <th>รหัส</th>
-                  <th>ชื่อ-สกุล</th>
-                  <th>ตำแหน่ง</th>
-                  <th>เลขประจำตัว</th>
-                  <th>วันเกิด</th>
-                  <th style={{ textAlign: "right" }}>เงินเดือน</th>
-                  <th>ประกันสังคม</th>
-                  <th>ตรวจ</th>
+                  <th scope="col">แถว</th>
+                  <th scope="col">รหัส</th>
+                  <th scope="col">ชื่อ-สกุล</th>
+                  <th scope="col">ตำแหน่ง</th>
+                  <th scope="col">เลขประจำตัว</th>
+                  <th scope="col">วันเกิด</th>
+                  <th scope="col" style={{ textAlign: "right" }}>เงินเดือน</th>
+                  <th scope="col">ประกันสังคม</th>
+                  <th scope="col">ตรวจ</th>
                 </tr>
               </thead>
               <tbody>

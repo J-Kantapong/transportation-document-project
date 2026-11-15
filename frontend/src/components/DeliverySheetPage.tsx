@@ -276,11 +276,11 @@ export function DeliverySheetPage() {
                         </tr>
                         {s.source !== "YAMAHA" && (
                           <tr>
-                            <th>ทะเบียน</th>
-                            <th>เลขตัวถัง</th>
-                            <th>ยี่ห้อ</th>
-                            <th>{s.source === "TRANSFER" ? "ผู้รับโอน" : "ชื่อเจ้าของ"}</th>
-                            <th>รายการ</th>
+                            <th scope="col">ทะเบียน</th>
+                            <th scope="col">เลขตัวถัง</th>
+                            <th scope="col">ยี่ห้อ</th>
+                            <th scope="col">{s.source === "TRANSFER" ? "ผู้รับโอน" : "ชื่อเจ้าของ"}</th>
+                            <th scope="col">รายการ</th>
                             <th aria-label="แก้" />
                           </tr>
                         )}

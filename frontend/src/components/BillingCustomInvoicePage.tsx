@@ -693,7 +693,7 @@ export function BillingCustomInvoicePage() {
                 className="muted"
                 style={{
                   fontSize: 12,
-                  color: unknownProfit ? "#bb8527" : undefined,
+                  color: unknownProfit ? "#946712" : undefined,
                 }}
               >
                 {unknownProfit

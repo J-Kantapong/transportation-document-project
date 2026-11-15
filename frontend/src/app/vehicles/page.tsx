@@ -330,14 +330,14 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
             <table>
               <thead>
                 <tr>
-                  <th>วันที่</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>ชื่อเจ้าของ</th>
-                  <th>เลขตัวถัง / เลขเครื่อง</th>
-                  <th>ทะเบียน</th>
-                  <th>ยี่ห้อ</th>
-                  <th>สถานะ</th>
-                  {(canSeePhotos || canEdit) && <th>จัดการ</th>}
+                  <th scope="col">วันที่</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">ชื่อเจ้าของ</th>
+                  <th scope="col">เลขตัวถัง / เลขเครื่อง</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">ยี่ห้อ</th>
+                  <th scope="col">สถานะ</th>
+                  {(canSeePhotos || canEdit) && <th scope="col">จัดการ</th>}
                 </tr>
               </thead>
               <tbody>
@@ -420,14 +420,14 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>ประเภทงาน</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>ชื่อเจ้าของ</th>
-                  <th>เลขตัวถัง / เลขเครื่อง</th>
-                  <th>ทะเบียน</th>
-                  <th>ยี่ห้อ</th>
-                  <th>สถานะ</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">ประเภทงาน</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">ชื่อเจ้าของ</th>
+                  <th scope="col">เลขตัวถัง / เลขเครื่อง</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">ยี่ห้อ</th>
+                  <th scope="col">สถานะ</th>
                 </tr>
               </thead>
               <tbody>

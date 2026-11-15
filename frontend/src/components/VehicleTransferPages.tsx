@@ -694,16 +694,16 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>ผู้โอน → ผู้รับโอน</th>
-                    <th>ประเภทรถ</th>
-                    <th>ทะเบียน</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">ผู้โอน → ผู้รับโอน</th>
+                    <th scope="col">ประเภทรถ</th>
+                    <th scope="col">ทะเบียน</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {showActions && <th />}
                   </tr>
                 </thead>
@@ -906,13 +906,13 @@ export function VehicleTransferInspectionPage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>ผู้โอน → ผู้รับโอน</th>
-                  <th>ประเภทรถ</th>
-                  <th>ทะเบียน</th>
-                  <th>{tab === "to-send" ? "" : "ส่งตรวจ"}</th>
-                  <th>{tab === "inspected" ? "ผลตรวจ" : ""}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">ผู้โอน → ผู้รับโอน</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">{tab === "to-send" ? "" : "ส่งตรวจ"}</th>
+                  <th scope="col">{tab === "inspected" ? "ผลตรวจ" : ""}</th>
                   {anyWritable && <th />}
                 </tr>
               </thead>
@@ -1218,14 +1218,14 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>ผู้โอน → ผู้รับโอน</th>
-                  <th>ประเภทรถ</th>
-                  <th>ทะเบียน</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>ข้อมูลใบเสร็จ</th>
-                  <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">ผู้โอน → ผู้รับโอน</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">ข้อมูลใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                   {anyWritable && <th />}
                 </tr>
               </thead>

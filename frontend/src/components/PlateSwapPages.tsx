@@ -344,7 +344,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
   const text = newPlateText(swap);
   return (
     <div className="sub">
-      {text ? `ใหม่: ${text}` : <span style={{ color: "#bb8527" }}>ยังไม่ได้เลขใหม่</span>}
+      {text ? `ใหม่: ${text}` : <span style={{ color: "#946712" }}>ยังไม่ได้เลขใหม่</span>}
       {canWrite && (
         <button type="button" className="text-button" style={{ paddingLeft: 6 }} onClick={() => setEditing(true)}>
           {text ? "แก้ไข" : "กรอกเลข"}
@@ -1225,16 +1225,16 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถเก่า</th>
-                    <th>ทะเบียนเก่า / ใหม่</th>
-                    <th>รถใหม่ที่ลิงก์</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถเก่า</th>
+                    <th scope="col">ทะเบียนเก่า / ใหม่</th>
+                    <th scope="col">รถใหม่ที่ลิงก์</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -1508,14 +1508,14 @@ export function PlateSwapReturnPage({
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถเก่า</th>
-                    <th>ทะเบียนเก่า / ใหม่</th>
-                    <th>รถใหม่ที่ลิงก์</th>
-                    <th>รูปใบเสร็จ</th>
-                    <th>ข้อมูลใบเสร็จ</th>
-                    <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถเก่า</th>
+                    <th scope="col">ทะเบียนเก่า / ใหม่</th>
+                    <th scope="col">รถใหม่ที่ลิงก์</th>
+                    <th scope="col">รูปใบเสร็จ</th>
+                    <th scope="col">ข้อมูลใบเสร็จ</th>
+                    <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -2016,12 +2016,12 @@ function PlateSwapReceivePlateOrBookPage({
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถเก่า</th>
-                  <th>ทะเบียนเก่า</th>
-                  <th>รถใหม่ที่ลิงก์</th>
-                  <th>{label}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถเก่า</th>
+                  <th scope="col">ทะเบียนเก่า</th>
+                  <th scope="col">รถใหม่ที่ลิงก์</th>
+                  <th scope="col">{label}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2484,15 +2484,15 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถ</th>
-                    <th>ทะเบียนเดิม / ที่ได้</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถ</th>
+                    <th scope="col">ทะเบียนเดิม / ที่ได้</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>

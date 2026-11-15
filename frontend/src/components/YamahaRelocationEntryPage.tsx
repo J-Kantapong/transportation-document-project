@@ -405,10 +405,10 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
             <table>
               <thead>
                 <tr>
-                  <th>วันที่</th>
-                  <th>จำนวนคัน</th>
-                  <th>ใบเสร็จ</th>
-                  <th>Report</th>
+                  <th scope="col">วันที่</th>
+                  <th scope="col">จำนวนคัน</th>
+                  <th scope="col">ใบเสร็จ</th>
+                  <th scope="col">Report</th>
                   {canEdit && <th />}
                 </tr>
               </thead>

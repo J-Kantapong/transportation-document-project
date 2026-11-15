@@ -170,11 +170,11 @@ export function SuppliersPage() {
           <table>
             <thead>
               <tr>
-                <th>ชื่อ</th>
-                <th>เลขประจำตัว</th>
-                <th>ค่าเริ่มต้น</th>
-                <th style={{ textAlign: "right" }}>50 ทวิ ที่ออก</th>
-                <th>สถานะ</th>
+                <th scope="col">ชื่อ</th>
+                <th scope="col">เลขประจำตัว</th>
+                <th scope="col">ค่าเริ่มต้น</th>
+                <th scope="col" style={{ textAlign: "right" }}>50 ทวิ ที่ออก</th>
+                <th scope="col">สถานะ</th>
                 <th />
               </tr>
             </thead>

@@ -513,15 +513,15 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ยื่น</th>
-                    <th>เจ้าของงาน</th>
-                    <th>รถ</th>
-                    <th>ทะเบียน</th>
-                    <th>Bill</th>
-                    <th>No Bill</th>
-                    <th>ค่าอากร</th>
-                    <th>รวม</th>
-                    <th>สถานะ</th>
+                    <th scope="col">วันที่ยื่น</th>
+                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">รถ</th>
+                    <th scope="col">ทะเบียน</th>
+                    <th scope="col">Bill</th>
+                    <th scope="col">No Bill</th>
+                    <th scope="col">ค่าอากร</th>
+                    <th scope="col">รวม</th>
+                    <th scope="col">สถานะ</th>
                     {canWrite && <th />}
                   </tr>
                 </thead>
@@ -788,13 +788,13 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ยื่น</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถ</th>
-                  <th>ทะเบียน</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>ข้อมูลใบเสร็จ</th>
-                  <th>{status === "pending" ? "" : "วันที่รับกลับ"}</th>
+                  <th scope="col">วันที่ยื่น</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถ</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">ข้อมูลใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
                   {canWrite && <th />}
                 </tr>
               </thead>

@@ -185,8 +185,8 @@ export function QuotationDetailPage() {
         {/* ขั้นของใบ */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {steps.map((s, i) => (
-            <div key={s.label} style={{ flex: "1 1 150px", borderTop: `3px solid ${s.done ? "#278f6b" : "#dce2ec"}`, paddingTop: 8, fontSize: 13 }}>
-              <b style={{ fontWeight: 600, color: s.done ? "#278f6b" : "#8a94a6" }}>
+            <div key={s.label} style={{ flex: "1 1 150px", borderTop: `3px solid ${s.done ? "#1d7556" : "#dce2ec"}`, paddingTop: 8, fontSize: 13 }}>
+              <b style={{ fontWeight: 600, color: s.done ? "#1d7556" : "#5f6b80" }}>
                 {i + 1}. {s.label} {s.done ? "✓" : ""}
               </b>
               {s.sub && <div className="muted">{s.sub}</div>}

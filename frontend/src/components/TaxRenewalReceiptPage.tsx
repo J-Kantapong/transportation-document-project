@@ -124,12 +124,12 @@ export function TaxRenewalReceiptPage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ชำระ</th>
-                  <th>เจ้าของงาน</th>
-                  <th>รถ</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>ข้อมูลใบเสร็จ</th>
-                  <th>{tab === "pending" ? "" : "วันที่รับ"}</th>
+                  <th scope="col">วันที่ชำระ</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">รถ</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">ข้อมูลใบเสร็จ</th>
+                  <th scope="col">{tab === "pending" ? "" : "วันที่รับ"}</th>
                 </tr>
               </thead>
               <tbody>

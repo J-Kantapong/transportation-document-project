@@ -78,9 +78,9 @@ export function SupplierFeeLine({
           </button>
         )}
       </div>
-      <div style={{ fontSize: 11, color: "#8a94a6" }}>{s.noBillItems.map((i) => `${i.label} ${money(Number(i.amount))}`).join(" + ")}</div>
+      <div style={{ fontSize: 12, color: "#5f6b80" }}>{s.noBillItems.map((i) => `${i.label} ${money(Number(i.amount))}`).join(" + ")}</div>
       {receipt !== null && (
-        <div style={{ fontSize: 11, color: "#8a94a6" }}>จ่ายซับรวม {money(receipt + Number(s.noBillTotal))} (ใบเสร็จ + ค่าจ้างซับ)</div>
+        <div style={{ fontSize: 12, color: "#5f6b80" }}>จ่ายซับรวม {money(receipt + Number(s.noBillTotal))} (ใบเสร็จ + ค่าจ้างซับ)</div>
       )}
       <dialog
         ref={dialogRef}

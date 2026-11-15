@@ -76,7 +76,7 @@ export function EditImpactWarning({
     >
       {hasData && (
         <>
-          <strong style={{ color: "#bb8527" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
+          <strong style={{ color: "#946712" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
           <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 4 }}>
             {warning.dataWarnings.map((w) => (
               <li key={w.key}>{w.message}</li>
@@ -89,7 +89,7 @@ export function EditImpactWarning({
       )}
       {hasImpact && (
         <>
-          <strong style={{ color: "#bb8527" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
+          <strong style={{ color: "#946712" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
           <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 6 }}>
             {warning.affected.map((a) => (
               <li key={a.step}>

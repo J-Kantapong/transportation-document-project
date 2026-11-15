@@ -151,9 +151,9 @@ export default function SubmitDonePage() {
             <table>
               <thead>
                 <tr>
-                  <th>เลขตัวถัง</th>
-                  <th>เจ้าของงาน</th>
-                  <th>สาเหตุ</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">สาเหตุ</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,11 +227,11 @@ export default function SubmitDonePage() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: 36 }}>ปริ้น</th>
-                <th>วันที่ยื่น</th>
-                <th>เจ้าของงาน</th>
-                <th>แบบใบส่งงาน</th>
-                <th style={{ textAlign: "right" }}>จำนวน</th>
+                <th scope="col" style={{ width: 36 }}>ปริ้น</th>
+                <th scope="col">วันที่ยื่น</th>
+                <th scope="col">เจ้าของงาน</th>
+                <th scope="col">แบบใบส่งงาน</th>
+                <th scope="col" style={{ textAlign: "right" }}>จำนวน</th>
               </tr>
             </thead>
             <tbody>

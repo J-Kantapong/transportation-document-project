@@ -279,10 +279,10 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
           <table>
             <thead>
               <tr>
-                <th>ตั้งแต่วันที่</th>
-                <th>บัญชี</th>
-                <th>เหตุผล</th>
-                <th>ผู้ตั้ง</th>
+                <th scope="col">ตั้งแต่วันที่</th>
+                <th scope="col">บัญชี</th>
+                <th scope="col">เหตุผล</th>
+                <th scope="col">ผู้ตั้ง</th>
               </tr>
             </thead>
             <tbody>
@@ -457,18 +457,18 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
           <table>
             <thead>
               <tr>
-                <th>ประเภท</th>
-                <th>ชื่อรายการ</th>
-                <th>ชนิดรถ</th>
-                <th>CC ตั้งแต่</th>
-                <th>CC น้อยกว่า</th>
-                <th>เลขตัวถังขึ้นต้น</th>
-                <th>จังหวัดที่จด</th>
-                <th>ประเภทรถ</th>
-                <th>ราคา (บาท)</th>
-                <th>ราคารวม VAT</th>
-                <th>ราคารวมใบเสร็จ</th>
-                <th></th>
+                <th scope="col">ประเภท</th>
+                <th scope="col">ชื่อรายการ</th>
+                <th scope="col">ชนิดรถ</th>
+                <th scope="col">CC ตั้งแต่</th>
+                <th scope="col">CC น้อยกว่า</th>
+                <th scope="col">เลขตัวถังขึ้นต้น</th>
+                <th scope="col">จังหวัดที่จด</th>
+                <th scope="col">ประเภทรถ</th>
+                <th scope="col">ราคา (บาท)</th>
+                <th scope="col">ราคารวม VAT</th>
+                <th scope="col">ราคารวมใบเสร็จ</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>

@@ -39,14 +39,14 @@ function WorkTable({ rows, linkLabel }: { rows: WorkRow[]; linkLabel: string }) 
       <table className="exec-table stuck-table">
         <thead>
           <tr>
-            <th>ความเร่งด่วน</th>
-            {showKind && <th>ประเภท</th>}
-            <th>รายการ</th>
-            <th>ลูกค้า</th>
-            <th>ขั้น</th>
-            <th className="num-col">ค้างมา</th>
-            <th>สาเหตุ / สิ่งที่ต้องทำ</th>
-            {showAmount && <th className="num-col">ยอด (บาท)</th>}
+            <th scope="col">ความเร่งด่วน</th>
+            {showKind && <th scope="col">ประเภท</th>}
+            <th scope="col">รายการ</th>
+            <th scope="col">ลูกค้า</th>
+            <th scope="col">ขั้น</th>
+            <th scope="col" className="num-col">ค้างมา</th>
+            <th scope="col">สาเหตุ / สิ่งที่ต้องทำ</th>
+            {showAmount && <th scope="col" className="num-col">ยอด (บาท)</th>}
             <th aria-label="ลิงก์" />
           </tr>
         </thead>
@@ -264,12 +264,12 @@ export function MyWorkPage() {
           <table className="exec-table">
             <thead>
               <tr>
-                <th>ขั้น</th>
-                <th className="num-col">ค้าง</th>
-                <th className="num-col">รถยนต์</th>
-                <th className="num-col">จักรยานยนต์</th>
-                <th className="num-col">นานสุด</th>
-                <th className="num-col">เกินกำหนด</th>
+                <th scope="col">ขั้น</th>
+                <th scope="col" className="num-col">ค้าง</th>
+                <th scope="col" className="num-col">รถยนต์</th>
+                <th scope="col" className="num-col">จักรยานยนต์</th>
+                <th scope="col" className="num-col">นานสุด</th>
+                <th scope="col" className="num-col">เกินกำหนด</th>
                 <th aria-label="ลิงก์" />
               </tr>
             </thead>

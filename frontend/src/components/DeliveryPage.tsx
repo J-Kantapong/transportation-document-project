@@ -505,15 +505,15 @@ export function DeliveryPage() {
                       <table>
                         <thead>
                           <tr>
-                            <th style={{ width: 40 }}>ลำดับ</th>
-                            <th style={{ width: 40 }}>ส่ง</th>
-                            <th>เลขตัวถัง</th>
-                            <th>ทะเบียน</th>
-                            <th>เลขที่ใบเสร็จ</th>
-                            <th>ใบเสร็จ</th>
-                            <th>เล่ม</th>
-                            <th>ป้าย</th>
-                            <th>ยี่ห้อ / ประเภทรถ</th>
+                            <th scope="col" style={{ width: 40 }}>ลำดับ</th>
+                            <th scope="col" style={{ width: 40 }}>ส่ง</th>
+                            <th scope="col">เลขตัวถัง</th>
+                            <th scope="col">ทะเบียน</th>
+                            <th scope="col">เลขที่ใบเสร็จ</th>
+                            <th scope="col">ใบเสร็จ</th>
+                            <th scope="col">เล่ม</th>
+                            <th scope="col">ป้าย</th>
+                            <th scope="col">ยี่ห้อ / ประเภทรถ</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -595,14 +595,14 @@ export function DeliveryPage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่ส่ง</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>ทะเบียน</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ผู้รับ</th>
-                  <th>ป้าย</th>
-                  <th>วางบิล</th>
-                  <th>หมายเหตุ</th>
+                  <th scope="col">วันที่ส่ง</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ผู้รับ</th>
+                  <th scope="col">ป้าย</th>
+                  <th scope="col">วางบิล</th>
+                  <th scope="col">หมายเหตุ</th>
                 </tr>
               </thead>
               <tbody>

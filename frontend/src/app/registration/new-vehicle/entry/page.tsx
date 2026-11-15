@@ -1163,13 +1163,13 @@ export default function VehicleEntryPage() {
                     <table>
                       <thead>
                         <tr>
-                          <th>แถว</th>
-                          <th>ชื่อลูกค้า</th>
-                          <th>เลขตัวถัง</th>
-                          <th>ยี่ห้อ</th>
-                          <th>ประเภทเชื้อเพลิง</th>
-                          <th>ประเภทรถ</th>
-                          <th>ผลตรวจสอบ</th>
+                          <th scope="col">แถว</th>
+                          <th scope="col">ชื่อลูกค้า</th>
+                          <th scope="col">เลขตัวถัง</th>
+                          <th scope="col">ยี่ห้อ</th>
+                          <th scope="col">ประเภทเชื้อเพลิง</th>
+                          <th scope="col">ประเภทรถ</th>
+                          <th scope="col">ผลตรวจสอบ</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1184,7 +1184,7 @@ export default function VehicleEntryPage() {
                             <td className={row.issues.length ? "import-error" : "import-ok"}>
                               {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
                               {(batchWarningsByChassis.get(row.chassis) ?? []).map((w) => (
-                                <div key={w.key} style={{ color: "#b5651d" }}>
+                                <div key={w.key} style={{ color: "#9a4f12" }}>
                                   ⚠ {w.short}
                                 </div>
                               ))}
@@ -1299,13 +1299,13 @@ export default function VehicleEntryPage() {
             <table>
               <thead>
                 <tr>
-                  <th>วันที่</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ยี่ห้อ</th>
-                  <th>จังหวัดที่จดทะเบียน</th>
-                  <th>สถานะ</th>
-                  <th></th>
+                  <th scope="col">วันที่</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ยี่ห้อ</th>
+                  <th scope="col">จังหวัดที่จดทะเบียน</th>
+                  <th scope="col">สถานะ</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1385,13 +1385,13 @@ export default function VehicleEntryPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่ลบ</th>
-                    <th>ชื่อลูกค้า</th>
-                    <th>เลขตัวถัง</th>
-                    <th>ยี่ห้อ</th>
-                    <th>เหตุผลที่ลบ</th>
-                    <th>ผู้ลบ</th>
-                    <th></th>
+                    <th scope="col">วันที่ลบ</th>
+                    <th scope="col">ชื่อลูกค้า</th>
+                    <th scope="col">เลขตัวถัง</th>
+                    <th scope="col">ยี่ห้อ</th>
+                    <th scope="col">เหตุผลที่ลบ</th>
+                    <th scope="col">ผู้ลบ</th>
+                    <th scope="col"></th>
                   </tr>
                 </thead>
                 <tbody>

@@ -202,15 +202,15 @@ export function PayrollRunPage() {
           <table>
             <thead>
               <tr>
-                <th>รหัส</th>
-                <th>ชื่อ-สกุล</th>
-                <th>ตำแหน่ง</th>
-                <th style={{ textAlign: "right" }}>เงินเดือน</th>
-                <th style={{ textAlign: "right" }}>รายได้อื่น</th>
-                <th style={{ textAlign: "right" }}>ประกันสังคม</th>
-                <th style={{ textAlign: "right" }}>ภาษี</th>
-                <th style={{ textAlign: "right" }}>หักอื่น</th>
-                <th style={{ textAlign: "right" }}>จ่ายสุทธิ</th>
+                <th scope="col">รหัส</th>
+                <th scope="col">ชื่อ-สกุล</th>
+                <th scope="col">ตำแหน่ง</th>
+                <th scope="col" style={{ textAlign: "right" }}>เงินเดือน</th>
+                <th scope="col" style={{ textAlign: "right" }}>รายได้อื่น</th>
+                <th scope="col" style={{ textAlign: "right" }}>ประกันสังคม</th>
+                <th scope="col" style={{ textAlign: "right" }}>ภาษี</th>
+                <th scope="col" style={{ textAlign: "right" }}>หักอื่น</th>
+                <th scope="col" style={{ textAlign: "right" }}>จ่ายสุทธิ</th>
                 <th />
               </tr>
             </thead>

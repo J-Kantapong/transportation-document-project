@@ -434,11 +434,11 @@ export default function CustomersPage() {
             <table>
               <thead>
                 <tr>
-                  <th>ชื่อลูกค้า</th>
-                  <th>บริษัท / สาขา</th>
-                  <th>เบอร์โทรศัพท์</th>
-                  <th>อีเมล</th>
-                  <th></th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">บริษัท / สาขา</th>
+                  <th scope="col">เบอร์โทรศัพท์</th>
+                  <th scope="col">อีเมล</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>

@@ -299,7 +299,7 @@ export function InvoiceItemsEditor({
                         ...READONLY,
                         color:
                           p === null
-                            ? "#bb8527"
+                            ? "#946712"
                             : p < 0
                               ? "#c0392b"
                               : undefined,

@@ -118,15 +118,15 @@ export function GroupTable({
             <thead>
               <tr>
                 {selectable.length > 0 && <th aria-label="เลือก" />}
-                <th>#</th>
-                <th>เลขตัวถัง</th>
-                <th>ประเภทรถ</th>
-                <th>เจ้าของงาน</th>
-                <th>เจ้าของรถ</th>
-                {showUrgent && <th>ด่วน</th>}
-                <th>เลขทะเบียนที่ขอ</th>
-                <th>ยอดรวม (ไม่รวมอากร)</th>
-                <th>สถานะ</th>
+                <th scope="col">#</th>
+                <th scope="col">เลขตัวถัง</th>
+                <th scope="col">ประเภทรถ</th>
+                <th scope="col">เจ้าของงาน</th>
+                <th scope="col">เจ้าของรถ</th>
+                {showUrgent && <th scope="col">ด่วน</th>}
+                <th scope="col">เลขทะเบียนที่ขอ</th>
+                <th scope="col">ยอดรวม (ไม่รวมอากร)</th>
+                <th scope="col">สถานะ</th>
                 {onCancel && <th aria-label="ยกเลิก" />}
               </tr>
             </thead>
@@ -212,14 +212,14 @@ function FailedTable({ rows }: { rows: DocumentSubmission[] }) {
           <table>
             <thead>
               <tr>
-                <th>#</th>
-                <th>เลขตัวถัง</th>
-                <th>ประเภทรถ</th>
-                <th>เจ้าของงาน</th>
-                <th>วันที่ยื่นเอกสาร</th>
-                <th>ด่วน</th>
-                <th>ยอดรวม (ไม่รวมอากร)</th>
-                <th>เหตุผลที่ยื่นไม่สำเร็จ</th>
+                <th scope="col">#</th>
+                <th scope="col">เลขตัวถัง</th>
+                <th scope="col">ประเภทรถ</th>
+                <th scope="col">เจ้าของงาน</th>
+                <th scope="col">วันที่ยื่นเอกสาร</th>
+                <th scope="col">ด่วน</th>
+                <th scope="col">ยอดรวม (ไม่รวมอากร)</th>
+                <th scope="col">เหตุผลที่ยื่นไม่สำเร็จ</th>
               </tr>
             </thead>
             <tbody>

@@ -502,16 +502,16 @@ export function OtherJobsBillingPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>
+                      <th scope="col">
                         <input type="checkbox" checked={selected.length > 0 && selected.length === jobs.filter((j) => !blockedReason(j)).length} onChange={toggleAll} aria-label="เลือกทุกงาน" />
                       </th>
-                      <th>ส่งลูกค้าเมื่อ</th>
-                      <th>งาน</th>
-                      <th>ทะเบียน / เลขตัวถัง</th>
-                      <th>เจ้าของรถ</th>
-                      <th style={{ textAlign: "right" }}>ค่าธรรมเนียม</th>
-                      <th style={{ textAlign: "right" }}>ค่าบริการ (ก่อน VAT)</th>
-                      <th></th>
+                      <th scope="col">ส่งลูกค้าเมื่อ</th>
+                      <th scope="col">งาน</th>
+                      <th scope="col">ทะเบียน / เลขตัวถัง</th>
+                      <th scope="col">เจ้าของรถ</th>
+                      <th scope="col" style={{ textAlign: "right" }}>ค่าธรรมเนียม</th>
+                      <th scope="col" style={{ textAlign: "right" }}>ค่าบริการ (ก่อน VAT)</th>
+                      <th scope="col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -557,7 +557,7 @@ export function OtherJobsBillingPage() {
                               aria-label={`ค่าบริการ ${j.plateText || j.chassis}`}
                             />
                             {j.warnings.map((w) => (
-                              <div key={w} style={{ fontSize: 12, color: "#bb8527", textAlign: "right" }}>
+                              <div key={w} style={{ fontSize: 12, color: "#946712", textAlign: "right" }}>
                                 ⚠ {w}
                               </div>
                             ))}

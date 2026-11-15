@@ -652,16 +652,16 @@ export function TaxRenewalPage() {
             <table>
               <thead>
                 <tr>
-                  <th>ทะเบียน</th>
-                  <th>ประเภทรถ</th>
-                  <th>ครบกำหนด</th>
-                  <th>ตรอ.</th>
-                  <th>พ.ร.บ.</th>
-                  <th>ยอด Bill</th>
-                  <th>ลงขัน</th>
-                  <th>วันที่ชำระ</th>
-                  <th>รับป้ายภาษี</th>
-                  <th>คืนลูกค้า</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">ประเภทรถ</th>
+                  <th scope="col">ครบกำหนด</th>
+                  <th scope="col">ตรอ.</th>
+                  <th scope="col">พ.ร.บ.</th>
+                  <th scope="col">ยอด Bill</th>
+                  <th scope="col">ลงขัน</th>
+                  <th scope="col">วันที่ชำระ</th>
+                  <th scope="col">รับป้ายภาษี</th>
+                  <th scope="col">คืนลูกค้า</th>
                   {canWrite && <th />}
                 </tr>
               </thead>

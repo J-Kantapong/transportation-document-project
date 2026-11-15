@@ -476,14 +476,14 @@ export function ExecutiveOverview() {
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่</th>
-                    <th className="num-col">ใช้เงิน</th>
-                    <th className="num-col">Bill</th>
-                    <th className="num-col">No bill</th>
-                    <th className="num-col">ค่าอากร (แยก)</th>
-                    <th className="num-col">รับเงิน</th>
-                    <th className="num-col">วางบิล</th>
-                    <th className="num-col">ยื่นเอกสาร (คัน)</th>
+                    <th scope="col">วันที่</th>
+                    <th scope="col" className="num-col">ใช้เงิน</th>
+                    <th scope="col" className="num-col">Bill</th>
+                    <th scope="col" className="num-col">No bill</th>
+                    <th scope="col" className="num-col">ค่าอากร (แยก)</th>
+                    <th scope="col" className="num-col">รับเงิน</th>
+                    <th scope="col" className="num-col">วางบิล</th>
+                    <th scope="col" className="num-col">ยื่นเอกสาร (คัน)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -517,9 +517,9 @@ export function ExecutiveOverview() {
             <table className="exec-table">
               <thead>
                 <tr>
-                  <th>ประเภทงาน</th>
-                  <th className="num-col">{isToday ? "วันนี้" : isoToDisplayDate(data.asOf)}</th>
-                  <th className="num-col">30 วัน</th>
+                  <th scope="col">ประเภทงาน</th>
+                  <th scope="col" className="num-col">{isToday ? "วันนี้" : isoToDisplayDate(data.asOf)}</th>
+                  <th scope="col" className="num-col">30 วัน</th>
                   <th aria-label="สัดส่วน" />
                 </tr>
               </thead>
@@ -592,12 +592,12 @@ export function ExecutiveOverview() {
           {wc.topCustomers.length > 0 && (
             <div className="exec-block">
               <h3>ลูกค้าที่มียอดค้างมากสุด</h3>
-              <table className="exec-table">
+              <div className="table-wrap"><table className="exec-table">
                 <thead>
                   <tr>
-                    <th>ลูกค้า</th>
-                    <th className="num-col">รอวางบิล</th>
-                    <th className="num-col">รอรับเงิน</th>
+                    <th scope="col">ลูกค้า</th>
+                    <th scope="col" className="num-col">รอวางบิล</th>
+                    <th scope="col" className="num-col">รอรับเงิน</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -609,7 +609,7 @@ export function ExecutiveOverview() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
         </section>
@@ -659,11 +659,11 @@ export function ExecutiveOverview() {
             <table className="exec-table">
               <thead>
                 <tr>
-                  <th>สัปดาห์</th>
-                  <th className="num-col">เงินเข้า (คาด)</th>
-                  <th className="num-col">เงินออก (คาด)</th>
-                  <th className="num-col">สุทธิ</th>
-                  <th className="num-col">สะสม</th>
+                  <th scope="col">สัปดาห์</th>
+                  <th scope="col" className="num-col">เงินเข้า (คาด)</th>
+                  <th scope="col" className="num-col">เงินออก (คาด)</th>
+                  <th scope="col" className="num-col">สุทธิ</th>
+                  <th scope="col" className="num-col">สะสม</th>
                 </tr>
               </thead>
               <tbody>

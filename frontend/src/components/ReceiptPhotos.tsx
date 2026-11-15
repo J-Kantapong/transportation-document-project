@@ -68,7 +68,7 @@ export function ReceiptThumbs({ receipts, onDelete }: { receipts: ReceiptSummary
                 border: "none",
                 background: "#c0392b",
                 color: "#fff",
-                fontSize: 11,
+                fontSize: 12,
                 lineHeight: "18px",
                 padding: 0,
                 cursor: "pointer",
@@ -301,21 +301,21 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                     style={{ width: "100%", height: 150, objectFit: "cover", objectPosition: "top", borderRadius: 4, display: "block" }}
                   />
                   {r.originalName && (
-                    <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.originalName}>
+                    <div style={{ fontSize: 12, color: "#5f6b80", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.originalName}>
                       {r.originalName}
                     </div>
                   )}
-                  {r.readPending && <div style={{ fontSize: 11, color: "#4a5a78", fontWeight: 600, marginTop: 2 }}>⏳ กำลังอ่านใบเสร็จ…</div>}
+                  {r.readPending && <div style={{ fontSize: 12, color: "#4a5a78", fontWeight: 600, marginTop: 2 }}>⏳ กำลังอ่านใบเสร็จ…</div>}
                   {r.extraction?.duplicate && (
-                    <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 2 }}>⚠️ {receiptDuplicateText(r.extraction.duplicate)}</div>
+                    <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600, marginTop: 2 }}>⚠️ {receiptDuplicateText(r.extraction.duplicate)}</div>
                   )}
                   {r.extraction && "reading" in r.extraction && !r.extraction.duplicate && (
-                    <div style={{ fontSize: 11, color: "#bb8527", marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: "#946712", marginTop: 2 }}>
                       AI อ่านเลขตัวถัง {r.extraction.reading.chassis ?? "ไม่ออก"} - ไม่พบรถที่รอใบเสร็จ
                     </div>
                   )}
                   {r.extraction && "error" in r.extraction && (
-                    <div style={{ fontSize: 11, color: "#b43434", marginTop: 2 }}>{r.extraction.error}</div>
+                    <div style={{ fontSize: 12, color: "#b43434", marginTop: 2 }}>{r.extraction.error}</div>
                   )}
                   <select
                     value={choice[r.id] ?? ""}

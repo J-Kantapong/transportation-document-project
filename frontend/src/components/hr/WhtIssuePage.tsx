@@ -190,12 +190,12 @@ function OtherDialog({ year, replaces, suppliers, onClose, onDone }: { year: num
         <table>
           <thead>
             <tr>
-              <th>ประเภทเงินได้</th>
-              <th>รายละเอียด</th>
-              <th>วันที่จ่าย</th>
-              <th style={{ textAlign: "right" }}>จำนวนเงินที่จ่าย</th>
-              <th>อัตรา</th>
-              <th style={{ textAlign: "right" }}>ภาษีที่หัก</th>
+              <th scope="col">ประเภทเงินได้</th>
+              <th scope="col">รายละเอียด</th>
+              <th scope="col">วันที่จ่าย</th>
+              <th scope="col" style={{ textAlign: "right" }}>จำนวนเงินที่จ่าย</th>
+              <th scope="col">อัตรา</th>
+              <th scope="col" style={{ textAlign: "right" }}>ภาษีที่หัก</th>
               <th />
             </tr>
           </thead>
@@ -461,7 +461,7 @@ export function WhtIssuePage() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: 36 }}>
+                <th scope="col" style={{ width: 36 }}>
                   <input
                     type="checkbox"
                     aria-label="เลือกทุกคนที่ยังไม่ได้ออก"
@@ -469,14 +469,14 @@ export function WhtIssuePage() {
                     onChange={(e) => setPicked(e.target.checked ? new Set(eligible.map((r) => r.employeeId)) : new Set())}
                   />
                 </th>
-                <th>รหัส</th>
-                <th>ชื่อ</th>
-                <th>เลขประจำตัว</th>
-                <th>ช่วงที่จ่าย</th>
-                <th style={{ textAlign: "right" }}>เงินได้รวม</th>
-                <th style={{ textAlign: "right" }}>ภาษีที่หัก</th>
-                <th style={{ textAlign: "right" }}>ประกันสังคม</th>
-                <th>สถานะ</th>
+                <th scope="col">รหัส</th>
+                <th scope="col">ชื่อ</th>
+                <th scope="col">เลขประจำตัว</th>
+                <th scope="col">ช่วงที่จ่าย</th>
+                <th scope="col" style={{ textAlign: "right" }}>เงินได้รวม</th>
+                <th scope="col" style={{ textAlign: "right" }}>ภาษีที่หัก</th>
+                <th scope="col" style={{ textAlign: "right" }}>ประกันสังคม</th>
+                <th scope="col">สถานะ</th>
               </tr>
             </thead>
             <tbody>
@@ -556,7 +556,7 @@ export function WhtIssuePage() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: 36 }}>
+                <th scope="col" style={{ width: 36 }}>
                   <input
                     type="checkbox"
                     aria-label="เลือกทุกใบ"
@@ -564,14 +564,14 @@ export function WhtIssuePage() {
                     onChange={(e) => setPrintPicked(e.target.checked ? new Set((certs ?? []).map((c) => c.id)) : new Set())}
                   />
                 </th>
-                <th>เลขที่</th>
-                <th>ผู้รับ</th>
-                <th>เลขประจำตัว</th>
-                <th>แบบ</th>
-                <th style={{ textAlign: "right" }}>เงินที่จ่าย</th>
-                <th style={{ textAlign: "right" }}>ภาษีที่หัก</th>
-                <th>วันที่ออก</th>
-                <th>สถานะ</th>
+                <th scope="col">เลขที่</th>
+                <th scope="col">ผู้รับ</th>
+                <th scope="col">เลขประจำตัว</th>
+                <th scope="col">แบบ</th>
+                <th scope="col" style={{ textAlign: "right" }}>เงินที่จ่าย</th>
+                <th scope="col" style={{ textAlign: "right" }}>ภาษีที่หัก</th>
+                <th scope="col">วันที่ออก</th>
+                <th scope="col">สถานะ</th>
                 <th />
               </tr>
             </thead>

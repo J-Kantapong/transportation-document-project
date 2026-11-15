@@ -103,14 +103,14 @@ function CompareBadge({ s, amountText, canEditVehicle }: { s: DocumentSubmission
         {money(diff)})
       </span>
       {/* ข้อมูลรถผิดที่ต้นทาง (ผู้ใช้ 2026-09-28) - บอกว่าน่าจะผิดตรงไหน + ปุ่มไปแก้ข้อมูลรถ (เฉพาะคนที่แก้ข้อมูลรถได้) */}
-      {hint && <div style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{hint}</div>}
-      {sizeHints.map((h) => (<div key={sizeHintText(h)} style={{ fontSize: 11, color: "#b5651d", marginTop: 2 }}>{sizeHintText(h)}</div>))}
+      {hint && <div style={{ fontSize: 12, color: "#9a4f12", marginTop: 2 }}>{hint}</div>}
+      {sizeHints.map((h) => (<div key={sizeHintText(h)} style={{ fontSize: 12, color: "#9a4f12", marginTop: 2 }}>{sizeHintText(h)}</div>))}
       {canEditVehicle ? (
-        <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 11 }}>
+        <a href={focusHref("/registration/new-vehicle/entry", s.vehicle.chassis, { edit: "1" })} target="_blank" rel="noopener" className="text-button" style={{ fontSize: 12 }}>
           แก้ข้อมูลรถ ↗
         </a>
       ) : (
-        hint && <div style={{ fontSize: 11, color: "#576781" }}>แจ้งผู้ลงข้อมูลรถให้แก้จังหวัด</div>
+        hint && <div style={{ fontSize: 12, color: "#576781" }}>แจ้งผู้ลงข้อมูลรถให้แก้จังหวัด</div>
       )}
     </>
   );
@@ -290,7 +290,7 @@ function AiFindings({ s, ai, amountText, wrong, reviewed }: { s: DocumentSubmiss
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {lines.map((text) => (
-        <span key={text} style={{ fontSize: 12, color: "#b5651d" }}>
+        <span key={text} style={{ fontSize: 12, color: "#9a4f12" }}>
           ⚠ {text}
         </span>
       ))}
@@ -337,7 +337,7 @@ function StatusText({ s }: { s: DocumentSubmission }) {
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" }) {
   const bg = tone === "ok" ? "#eaf7f2" : tone === "warn" ? "#fff6e7" : "#f4f6fa";
-  const color = tone === "ok" ? "#23825f" : tone === "warn" ? "#bb8527" : "#576781";
+  const color = tone === "ok" ? "#1d7556" : tone === "warn" ? "#946712" : "#576781";
   return (
     <div style={{ background: bg, borderRadius: 8, padding: "10px 14px", minWidth: 120 }}>
       <div style={{ fontSize: 12, color }}>{label}</div>
@@ -879,7 +879,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                     textAlign: "left",
                     padding: "12px 14px",
                     borderRadius: 8,
-                    border: selected ? `2px solid ${short ? "#bb8527" : "#2854d9"}` : `1px solid ${short ? "#f0d9ae" : "#dfe5f0"}`,
+                    border: selected ? `2px solid ${short ? "#946712" : "#2854d9"}` : `1px solid ${short ? "#f0d9ae" : "#dfe5f0"}`,
                     background: short ? "#fffaf0" : "#fff",
                     cursor: "pointer",
                   }}
@@ -937,11 +937,11 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
               <table className="receipt-check-table receipt-sheet-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 44 }}>ลำดับ</th>
-                    <th>รถ / รูปใบเสร็จ</th>
-                    <th>ข้อมูลตามใบเสร็จ</th>
-                    <th>ยอดเงิน</th>
-                    <th>ตรวจ / แก้ไข</th>
+                    <th scope="col" style={{ width: 44 }}>ลำดับ</th>
+                    <th scope="col">รถ / รูปใบเสร็จ</th>
+                    <th scope="col">ข้อมูลตามใบเสร็จ</th>
+                    <th scope="col">ยอดเงิน</th>
+                    <th scope="col">ตรวจ / แก้ไข</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -962,7 +962,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                         <td>{i + 1}</td>
                         <td>
                           <div style={{ fontFamily: "monospace" }}>{s.vehicle.chassis}</div>
-                          <div style={{ fontSize: 11, color: "#8a94a6", marginBottom: 6 }}>
+                          <div style={{ fontSize: 12, color: "#5f6b80", marginBottom: 6 }}>
                             {s.vehicle.brand.name}
                           </div>
                           {isCarried(s) && (
@@ -977,10 +977,10 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                           <ReceiptThumbs receipts={receipts[s.id] ?? []} onDelete={canEdit && active ? (rid) => removeReceipt(s.id, rid) : undefined} />
                           {active && (() => {
                             const dup = duplicateOf(receipts[s.id]);
-                            return dup && <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
+                            return dup && <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600, marginTop: 4 }}>⚠️ {receiptDuplicateText(dup)}</div>;
                           })()}
                           {active && ai && (
-                            <div style={{ fontSize: 11, color: "#8a94a6", marginTop: 4 }}>
+                            <div style={{ fontSize: 12, color: "#5f6b80", marginTop: 4 }}>
                               {ai.match === "chassis" && "จับคู่ด้วยเลขตัวถัง"}
                               {ai.match === "chassis-near" && "จับคู่ด้วยเลขตัวถังที่ใกล้เคียง"}
                             </div>
@@ -1059,7 +1059,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                             <span>Bill</span>
                             <div>
                               <div>{bill === null ? "—" : money(bill)}</div>
-                              <div style={{ fontSize: 11, color: "#8a94a6" }}>
+                              <div style={{ fontSize: 12, color: "#5f6b80" }}>
                                 ค่าธรรมเนียม {money(Number(s.billFeeTotal))} + ภาษี {s.taxAmount === null ? "?" : money(Number(s.taxAmount))}
                               </div>
                             </div>
@@ -1148,7 +1148,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
                             </div>
                           )}
                           {rowError && (
-                            <div className="customer-message error" style={{ fontSize: 11 }} role="alert">
+                            <div className="customer-message error" style={{ fontSize: 12 }} role="alert">
                               {rowError}
                             </div>
                           )}
@@ -1214,17 +1214,17 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
             <table className="receipt-check-table">
               <thead>
                 <tr>
-                  <th>วันที่ยื่นเอกสาร</th>
-                  <th>ชื่อลูกค้า</th>
-                  <th>เลขตัวถัง</th>
-                  <th>ทะเบียน</th>
-                  <th>เลขที่ใบเสร็จ</th>
-                  <th>วันที่ในใบเสร็จ</th>
-                  <th>วันที่รับใบเสร็จ</th>
-                  <th>รูปใบเสร็จ</th>
-                  <th>Bill</th>
-                  <th>ยอดใบเสร็จ</th>
-                  {canEdit && <th>แก้ไข</th>}
+                  <th scope="col">วันที่ยื่นเอกสาร</th>
+                  <th scope="col">ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง</th>
+                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">เลขที่ใบเสร็จ</th>
+                  <th scope="col">วันที่ในใบเสร็จ</th>
+                  <th scope="col">วันที่รับใบเสร็จ</th>
+                  <th scope="col">รูปใบเสร็จ</th>
+                  <th scope="col">Bill</th>
+                  <th scope="col">ยอดใบเสร็จ</th>
+                  {canEdit && <th scope="col">แก้ไข</th>}
                 </tr>
               </thead>
               <tbody>
