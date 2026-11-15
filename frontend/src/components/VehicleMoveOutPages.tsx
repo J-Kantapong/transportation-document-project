@@ -22,6 +22,7 @@ import {
   type VehicleMoveOut,
 } from "@/lib/vehicle-move-out-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // ย้ายออก (หมวด "อื่นๆ", ผู้ใช้ 2026-10-06) - เก็บข้อมูลแบบเดียวกับงานยกเลิกการใช้รถ (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์ ค่าใช้จ่ายตายตัวเฉพาะมอเตอร์ไซค์ (Bill 25 / ลงขัน 80 / ด่วนเพิ่ม 50 / ค่าอากร 10 แยกต่างหาก) รถยนต์ยังไม่มีอัตรา
 // หน้ายื่น (VehicleMoveOutSubmitPage): เจ้าของงาน + ข้อมูลรถ + วันที่ยื่น
@@ -770,7 +771,7 @@ export function VehicleMoveOutReturnPage({ vehicleClass = "CAR" }: { vehicleClas
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
+    const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
       await vehicleMoveOutApi.markReturned(item.id, returnDate);
@@ -929,7 +930,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await vehicleMoveOutApi.removeReceipt(item.id, receiptId, returned ? receiptRemark.trim() : undefined)).moveOut);
     } catch (err) {

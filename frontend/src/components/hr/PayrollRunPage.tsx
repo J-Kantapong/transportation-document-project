@@ -9,6 +9,7 @@ import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { downloadCsv, hrApi, monthLabel, STATUS_LABEL, type PayrollItem, type PayrollRun, type PayrollStatus, type PayslipSignature } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
 import { printPayslips } from "@/lib/payslip-print";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // รายละเอียดรอบเงินเดือน (ผู้ใช้ 2026-10-05): ตรวจ/แก้รายคน (ร่างเท่านั้น) -> อนุมัติ (ล็อก) -> บันทึกว่าจ่ายแล้ว + พิมพ์สลิป / CSV
 // รอบเปลี่ยนสถานะระหว่างที่เปิดหน้าไว้ = backend ตอบ 409 หน้านี้โหลดรอบใหม่ให้เห็นสถานะจริง
@@ -158,8 +159,8 @@ export function PayrollRunPage() {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => {
-                    if (window.confirm("คำนวณใหม่จากทะเบียนพนักงาน? รายการที่แก้ไว้ในรอบนี้ทั้งหมดจะถูกแทนที่")) void quiet(() => hrApi.recalculate(run.id), "คำนวณใหม่จากทะเบียนพนักงานแล้ว");
+                  onClick={async () => {
+                    if (await confirmDialog("คำนวณใหม่จากทะเบียนพนักงาน? รายการที่แก้ไว้ในรอบนี้ทั้งหมดจะถูกแทนที่")) void quiet(() => hrApi.recalculate(run.id), "คำนวณใหม่จากทะเบียนพนักงานแล้ว");
                   }}
                 >
                   คำนวณใหม่จากทะเบียนพนักงาน

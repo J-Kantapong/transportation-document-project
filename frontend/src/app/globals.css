@@ -576,3 +576,12 @@ tr.row-selected td{background:#f3f6ff}
 @media (max-width:900px){.mw-kpis{grid-template-columns:1fr}}
 .date-input-weekday{flex:none;font-size:12px;color:#6b7690;white-space:nowrap}
 .date-input-weekday.weekend{color:#c2410c;font-weight:600}
+.billing-queue-scroll{overflow-x:auto}
+.billing-queue-inner{min-width:640px}
+@media(max-width:550px){.heading{flex-wrap:wrap}.exec-date{max-width:100%}.exec-date span{min-width:0;flex:1}}
+.confirm-dialog{width:min(460px,92vw);padding:24px}
+.confirm-dialog-text{white-space:pre-line;color:var(--ink);font-size:15px;line-height:1.8;margin:0}
+.confirm-dialog-input{width:100%;margin-top:14px;min-height:42px}
+.confirm-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.confirm-dialog-cancel{border:1px solid var(--line-2);background:white;border-radius:8px;padding:12px 20px;color:var(--ink-2)}
+.confirm-dialog-cancel:hover{background:var(--surface-2)}

@@ -26,6 +26,7 @@ import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { ChassisCounter, DataWarningBox, KnownModelHint } from "@/components/VehicleDataCheck";
 import { rowWarningsOf, warningKeys, type RowDataWarnings } from "@/lib/vehicle-data-check";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -970,7 +971,7 @@ export default function VehicleEntryPage() {
   }
 
   async function handleRestore(vehicle: DeletedVehicle) {
-    if (!window.confirm(`กู้คืนรถเลขตัวถัง ${vehicle.chassis} กลับเข้ารายการ?`)) return;
+    if (!await confirmDialog(`กู้คืนรถเลขตัวถัง ${vehicle.chassis} กลับเข้ารายการ?`)) return;
     setRestoringId(vehicle.id);
     setDeletedMessage({ text: "" });
     try {

@@ -28,6 +28,7 @@ import {
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
@@ -1446,7 +1447,7 @@ export function PlateSwapReturnPage({
       return;
     }
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล (ผู้ใช้ 2026-09-27)
-    const ok = window.confirm(
+    const ok = await confirmDialog(
       `ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถเก่า: ${swap.oldOwnerName} (ทะเบียนเก่า ${oldPlateText(swap)})\nทะเบียนใหม่ที่รถเก่าได้: ${newPlateCategory} ${newPlateNumber}${
         swap.newVehicle ? `\nรถใหม่ที่รับเลข ${oldPlateText(swap)}: ${swap.newVehicle.chassis}` : ""
       }`,
@@ -1617,7 +1618,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await plateSwapApi.removeReceipt(swap.id, receiptId, returned ? receiptRemark.trim() : undefined)).swap);
     } catch (err) {

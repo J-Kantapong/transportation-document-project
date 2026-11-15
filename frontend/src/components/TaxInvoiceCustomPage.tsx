@@ -11,6 +11,7 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { checkBackdate } from "@/lib/tax-invoice-date";
 import { computeTotals, formatMoney, round2 } from "@/lib/invoice";
 import { buildTaxInvoiceHtml, printTaxInvoice } from "@/lib/tax-invoice-print";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // ใบกำกับภาษี/ใบเสร็จรับเงินกำหนดเอง (ผู้ใช้ 2026-10-05): งานนอกระบบที่ไม่มีใบวางบิล - พิมพ์บรรทัดเอง ออกตอนรับเงิน
 // เลขชุดเดียวกับใบที่ออกจากใบวางบิล (TV{ปี}-{3 หลัก}) · VAT 7% เสมอ · ค่าธรรมเนียมราชการไม่มี VAT · ลูกค้าบัญชีบริษัทเท่านั้น
@@ -158,7 +159,7 @@ export function TaxInvoiceCustomPage() {
     const p = problem();
     if (p || wht === null) return setError(p ?? "ยอดหัก ณ ที่จ่ายไม่ถูกต้อง");
     const backdate = checkBackdate(preview?.lastIssued, paidIso);
-    if (backdate.kind === "confirm" && !window.confirm(backdate.message)) return;
+    if (backdate.kind === "confirm" && !await confirmDialog(backdate.message)) return;
     setSaving(true);
     setError("");
     try {

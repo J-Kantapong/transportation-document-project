@@ -13,6 +13,7 @@ import { ReceiptAttachButton, ReceiptBatchPanel, ReceiptThumbs, toReceiptSummary
 import { SupplierFeeLine } from "./SupplierFeeLine";
 import { DateInput } from "@/components/DateInput";
 import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
@@ -635,7 +636,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
   }
 
   async function removeReceipt(submissionId: string, receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       await api.deleteReceipt(receiptId);
       localChange.current++;

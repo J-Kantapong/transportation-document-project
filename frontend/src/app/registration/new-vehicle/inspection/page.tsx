@@ -1111,7 +1111,7 @@ export default function InspectionPage() {
     }
 
     // วันที่ตรงกับเสาร์-อาทิตย์ = ถามยืนยันก่อน (ผู้ใช้ 2026-10-13 ดู lib/date-check.ts)
-    if (!confirmDates("บันทึกส่งตรวจ", [dateIso])) return;
+    if (!await confirmDates("บันทึกส่งตรวจ", [dateIso])) return;
 
     patchSendRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
@@ -1153,7 +1153,7 @@ export default function InspectionPage() {
     const sentOut = parsed.filter((p) => p.type === "ส่งตรวจนอก").length;
     const sendNote =
       `ส่งตรวจนอก ${sentOut} · เอารถมาตรวจเอง ${parsed.length - sentOut}` + (parsed.length > PAGE_SIZE ? " · รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู" : "");
-    if (!confirmDates("บันทึกส่งตรวจ", parsed.map((p) => p.dateIso), { always: true, note: sendNote })) return;
+    if (!await confirmDates("บันทึกส่งตรวจ", parsed.map((p) => p.dateIso), { always: true, note: sendNote })) return;
 
     setSendBulkSaving(true);
     setSendBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -1228,7 +1228,7 @@ export default function InspectionPage() {
       return;
     }
 
-    if (!confirmDates("บันทึกผลตรวจ", [dateIso])) return;
+    if (!await confirmDates("บันทึกผลตรวจ", [dateIso])) return;
 
     patchResultRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
@@ -1272,7 +1272,7 @@ export default function InspectionPage() {
     const passed = parsed.filter((p) => p.result === "ผ่าน").length;
     const resultNote =
       `ผ่าน ${passed} · ไม่ผ่าน ${parsed.length - passed}` + (parsed.length > PAGE_SIZE ? " · รวมแถวในหน้าอื่นที่อาจยังไม่ได้เปิดดู" : "");
-    if (!confirmDates("บันทึกผลตรวจ", parsed.map((p) => p.dateIso), { always: true, note: resultNote })) return;
+    if (!await confirmDates("บันทึกผลตรวจ", parsed.map((p) => p.dateIso), { always: true, note: resultNote })) return;
 
     setResultBulkSaving(true);
     setResultBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -1332,7 +1332,7 @@ export default function InspectionPage() {
       setEditMessage({ text: "กรุณาระบุเหตุผลที่แก้ไขผลตรวจ", error: true });
       return;
     }
-    if (!confirmDates("แก้วันที่ทราบผล", [dateIso])) return;
+    if (!await confirmDates("แก้วันที่ทราบผล", [dateIso])) return;
 
     setEditSaving(true);
     setEditMessage({ text: "กำลังบันทึก…" });
@@ -1389,7 +1389,7 @@ export default function InspectionPage() {
       setSentMessage({ text: editSent.mode === "edit" ? "กรุณาระบุเหตุผลที่แก้การส่งตรวจ" : "กรุณาระบุเหตุผลที่ยกเลิกส่งตรวจ", error: true });
       return;
     }
-    if (editSent.mode === "edit" && !confirmDates("แก้วันที่ส่งตรวจ", [dateIso])) return;
+    if (editSent.mode === "edit" && !await confirmDates("แก้วันที่ส่งตรวจ", [dateIso])) return;
 
     setSentSaving(true);
     setSentMessage({ text: "กำลังบันทึก…" });
@@ -1460,7 +1460,7 @@ export default function InspectionPage() {
     }
     const skipped = parsed.length - changing.length;
     const note = `เหตุผล: ${remark}` + (skipped ? ` · ข้าม ${skipped} คันที่เป็นวันนี้อยู่แล้ว` : "");
-    if (!confirmDates("แก้วันที่ส่งตรวจ", changing.map((p) => p.dateIso), { always: true, note })) return;
+    if (!await confirmDates("แก้วันที่ส่งตรวจ", changing.map((p) => p.dateIso), { always: true, note })) return;
 
     setBulkSentSaving(true);
     setBulkSentMessage({ text: "กำลังบันทึก…" });

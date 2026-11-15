@@ -426,7 +426,7 @@ export default function TransferNoticePage() {
     }
 
     // วันที่เสร็จตรงกับเสาร์-อาทิตย์ = ถามยืนยันก่อน (ผู้ใช้ 2026-10-13 ดู lib/date-check.ts)
-    if (row.done && completedDateIso && !confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", [completedDateIso])) return;
+    if (row.done && completedDateIso && !await confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", [completedDateIso])) return;
 
     patchRow(id, { saving: true, message: { text: "กำลังบันทึก…" } });
     try {
@@ -482,7 +482,7 @@ export default function TransferNoticePage() {
 
     // บันทึกหลายคัน: ยืนยันวันที่เสร็จทุกครั้ง (วันที่ผิดทั้งชุดต้องตามแก้ทีละคัน)
     const doneDates = parsed.filter((p) => p.done && p.completedDateIso).map((p) => p.completedDateIso);
-    if (!confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", doneDates, { always: true })) return;
+    if (!await confirmDates("บันทึกแจ้งย้าย/ตัดบัญชี", doneDates, { always: true })) return;
 
     setBulkSaving(true);
     setBulkMessage({ text: "กำลังบันทึกทั้งหมด…" });
@@ -568,7 +568,7 @@ export default function TransferNoticePage() {
       }
       const cost = correction.costText.trim();
       if (cost && !/^\d+(\.\d+)?$/.test(cost)) return fail("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0");
-      if (!confirmDates("แก้วันที่เสร็จ", [completedDateIso])) return;
+      if (!await confirmDates("แก้วันที่เสร็จ", [completedDateIso])) return;
       body = { done: true, completedDate: completedDateIso, cost: cost || null, remark };
     }
 

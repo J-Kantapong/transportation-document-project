@@ -19,6 +19,7 @@ import {
   type VehicleTransfer,
 } from "@/lib/vehicle-transfer-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตาเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง รถยนต์ + มอเตอร์ไซค์รวมกันในหน้าเดียว (เลือกประเภทรถในฟอร์ม)
 // 2 แบบ: โอนตามผู้ถือกรรมสิทธิ์ (ยื่น -> รับใบเสร็จ) / โอนตรวจรถ (ยื่น -> ตรวจรถ -> รับใบเสร็จ) - ตรวจรถแยกจากคิวตรวจรถของรถจดใหม่
@@ -840,7 +841,7 @@ export function VehicleTransferInspectionPage() {
   async function send(item: VehicleTransfer) {
     const sentDate = checkDate();
     if (!sentDate) return;
-    if (!window.confirm(`ยืนยันบันทึกส่งตรวจ?\n\nวันที่ส่งตรวจ: ${isoToDisplayDate(sentDate)}\nรถ: ${label(item)}`)) return;
+    if (!await confirmDialog(`ยืนยันบันทึกส่งตรวจ?\n\nวันที่ส่งตรวจ: ${isoToDisplayDate(sentDate)}\nรถ: ${label(item)}`)) return;
     try {
       await vehicleTransferApi.markInspectionSent(item.id, sentDate);
       drop(item.id);
@@ -854,7 +855,7 @@ export function VehicleTransferInspectionPage() {
     const resultDate = checkDate();
     if (!resultDate) return;
     const resultText = result === "PASS" ? "ผ่าน" : "ไม่ผ่าน";
-    if (!window.confirm(`ยืนยันบันทึกผลตรวจ "${resultText}"?\n\nวันที่ผลตรวจ: ${isoToDisplayDate(resultDate)}\nรถ: ${label(item)}`)) return;
+    if (!await confirmDialog(`ยืนยันบันทึกผลตรวจ "${resultText}"?\n\nวันที่ผลตรวจ: ${isoToDisplayDate(resultDate)}\nรถ: ${label(item)}`)) return;
     try {
       await vehicleTransferApi.recordInspectionResult(item.id, result, resultDate);
       drop(item.id);
@@ -1163,7 +1164,7 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${label(item)}`);
+    const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${label(item)}`);
     if (!ok) return;
     try {
       await vehicleTransferApi.markReturned(item.id, returnDate);
@@ -1325,7 +1326,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await vehicleTransferApi.removeReceipt(item.id, receiptId, returned ? receiptRemark.trim() : undefined)).transfer);
     } catch (err) {

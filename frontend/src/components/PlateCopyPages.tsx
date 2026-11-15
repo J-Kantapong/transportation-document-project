@@ -26,6 +26,7 @@ import {
   type PlateCopy,
 } from "@/lib/plate-copy-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // (มอเตอร์ไซค์เปิดใช้ 2026-10-09: ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนหลังบันทึกไม่ได้ / มอเตอร์ไซค์มีป้ายใบเดียวจึงไม่มีชนิดการคัดป้าย)
@@ -846,7 +847,7 @@ export function PlateCopyReturnPage() {
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = auto || window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
+    const ok = auto || await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
       await plateCopyApi.markReturned(item.id, returnDate);
@@ -1011,7 +1012,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await plateCopyApi.removeReceipt(item.id, receiptId, returned ? receiptRemark.trim() : undefined)).plateCopy);
     } catch (err) {
@@ -1209,7 +1210,7 @@ function ReceivePlateRow({
     if (!date) return onMessage("กรุณากรอกวันที่รับป้ายให้ถูกต้อง", true);
     if (date > todayIso()) return onMessage("วันที่รับป้ายต้องไม่เกินวันนี้", true);
     if (!file) return onMessage("กรุณาถ่ายหรือเลือกรูปป้ายที่ได้รับก่อนยืนยัน", true);
-    if (!window.confirm(`ยืนยันรับป้าย?\n\n${item.ownerName} · ทะเบียน ${plateText(item)}\nวันที่รับป้าย: ${isoToDisplayDate(date)}`)) return;
+    if (!await confirmDialog(`ยืนยันรับป้าย?\n\n${item.ownerName} · ทะเบียน ${plateText(item)}\nวันที่รับป้าย: ${isoToDisplayDate(date)}`)) return;
     setBusy(true);
     onMessage("");
     try {

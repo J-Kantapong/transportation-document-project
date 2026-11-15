@@ -10,6 +10,7 @@ import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { useCustomerOptions } from "@/components/TaxRenewalPage";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { confirmDialog, promptDialog } from "@/lib/confirm-dialog";
 
 // หน้ารับใบเสร็จของงานต่อภาษี (ผู้ใช้ 2026-10-08, แบบเดียวกับหน้ารับใบเสร็จรถจดใหม่/ย้ายออก)
 // แนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วยืนยันวันที่รับใบเสร็จ (receivedDate)
@@ -68,7 +69,7 @@ export function TaxRenewalReceiptPage() {
   async function confirm(row: TaxRenewal) {
     if (!receivedDate) return setMessage({ text: "กรุณากรอกวันที่รับใบเสร็จให้ถูกต้อง", error: true });
     if (receivedDate > todayIso()) return setMessage({ text: "วันที่รับใบเสร็จต้องไม่เกินวันนี้", error: true });
-    if (!window.confirm(`ยืนยันรับใบเสร็จ?\n\nวันที่รับ: ${isoToDisplayDate(receivedDate)}\nรถ: ทะเบียน ${plateText(row)}`)) return;
+    if (!await confirmDialog(`ยืนยันรับใบเสร็จ?\n\nวันที่รับ: ${isoToDisplayDate(receivedDate)}\nรถ: ทะเบียน ${plateText(row)}`)) return;
     try {
       await api.updateTaxRenewal(row.id, { receivedDate });
       await load();
@@ -321,7 +322,7 @@ function ReceiptRow({
     if (!customerId || customerId === row.customerId) return;
     let remark: string | undefined;
     if (row.customerId) {
-      const answer = window.prompt("เปลี่ยนเจ้าของงาน - กรุณาระบุเหตุผล");
+      const answer = await promptDialog("เปลี่ยนเจ้าของงาน - กรุณาระบุเหตุผล");
       if (!answer?.trim()) return;
       remark = answer.trim();
     }
@@ -335,7 +336,7 @@ function ReceiptRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange(await api.removeTaxRenewalReceipt(row.id, receiptId, received ? receiptRemark.trim() : undefined));
     } catch (err) {

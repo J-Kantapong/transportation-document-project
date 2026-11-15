@@ -769,6 +769,8 @@ export function BillingPage() {
                 ⚠ ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
               </div>
             )}
+            {/* จอแคบ: คอลัมน์รวมกว้าง ~620px ให้เลื่อนด้านข้างในกล่องนี้แทนที่ทั้งหน้าจะล้น */}
+            <div className="billing-queue-scroll"><div className="billing-queue-inner">
             {dates.map((date) => {
               const group = vehicles.filter((v) => v.deliveredDate === date);
               return (
@@ -1179,6 +1181,7 @@ export function BillingPage() {
               <span style={{ textAlign: "right" }}>{formatMoney(round2(draftLines.reduce((s, l) => s + (l.serviceFee ?? 0), 0)))}</span>
               <span />
             </div>
+            </div></div>
           </section>
           )}
 

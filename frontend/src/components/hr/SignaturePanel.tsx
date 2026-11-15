@@ -6,6 +6,7 @@ import { errorText } from "@/components/hr/HrDialog";
 import { hrApi, type PayslipSignature } from "@/lib/hr-api";
 import { cleanSignatureImage } from "@/lib/signature-image";
 import { timestampToDisplayDate } from "@/lib/date";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // ลายเซ็นผู้จ่ายเงินบนสลิป (ผู้ใช้ 2026-10-06): อัปโหลดรูปลายเซ็น (ถ่ายหรือสแกน) หน้าเว็บลบพื้นกระดาษให้โปร่งใสก่อน
 // สลิปทุกใบพิมพ์ลายเซ็น + ชื่อ + วันที่จ่ายให้เอง เหลือช่องผู้รับเงินให้พนักงานเซ็น - เห็นและแก้ได้เฉพาะ ADMIN
@@ -66,7 +67,7 @@ export function SignaturePanel() {
   }
 
   async function remove() {
-    if (!window.confirm("ลบลายเซ็นผู้จ่ายเงิน? สลิปจะกลับเป็นช่องเซ็นเปล่า")) return;
+    if (!await confirmDialog("ลบลายเซ็นผู้จ่ายเงิน? สลิปจะกลับเป็นช่องเซ็นเปล่า")) return;
     setBusy(true);
     try {
       setSig(await hrApi.removeSignature());

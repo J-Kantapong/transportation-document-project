@@ -55,6 +55,7 @@ import {
   whtOverrideOf,
   whtProblem,
 } from "@/components/WhtRatePicker";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // บิลกำหนดเอง (ผู้ใช้ 2026-09-29): บรรทัดพิมพ์เอง ไม่ผูกกับรถ - งานเก่าที่ย้ายมาจากระบบเดิม (ไม่มีข้อมูลรถในระบบนี้) / ขายสินค้า
 // แต่ละบรรทัดเลือกประเภทภาษี: ค่าธรรมเนียมราชการ (ไม่มี VAT ไม่หัก) · ค่าบริการ (VAT + หัก) · ขายสินค้า (VAT ไม่หัก)
@@ -242,7 +243,7 @@ export function BillingCustomInvoicePage() {
     if (
       hasContent &&
       !untouched &&
-      !window.confirm("บรรทัดที่กรอกไว้จะถูกแทนที่ด้วยยอดของเดือนนี้ ดำเนินการต่อ?")
+      !await confirmDialog("บรรทัดที่กรอกไว้จะถูกแทนที่ด้วยยอดของเดือนนี้ ดำเนินการต่อ?")
     )
       return;
     setYamahaMonthPick(month);

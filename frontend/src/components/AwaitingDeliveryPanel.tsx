@@ -7,6 +7,7 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { AGING_COLOR, agingText, agingTone, daysSince } from "@/lib/delivery-aging";
 import { deliveryCustomerLabels, deliveryRowCustomer, printDeliverySlips } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // "รอลงส่งงาน" บนหน้าวางบิล (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2): ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่พนักงานยังไม่ลง
 // วันส่งงาน จึงยังไม่เข้าคิววางบิล - บัญชีเห็นตรงนี้และลงส่งงานให้ได้เลย (เป็นใบ DL จริง พิมพ์ให้ลูกค้าเซ็นย้อนหลังได้) แทนที่จะรอพนักงาน
@@ -90,7 +91,7 @@ export function AwaitingDeliveryPanel({ only, onRecorded }: { only: "all" | "job
     if (!dateIso) return fail("วันที่ส่งไม่ถูกต้อง");
     if (!recipient.trim()) return fail("ใส่ชื่อผู้รับงาน (คนที่เซ็นรับ)");
     const days = daysSince(dateIso);
-    if (days !== null && days > 60 && !window.confirm(`วันที่ส่ง ${isoToDisplayDate(dateIso)} ย้อนหลัง ${days} วัน ถูกต้องหรือไม่`)) return;
+    if (days !== null && days > 60 && !await confirmDialog(`วันที่ส่ง ${isoToDisplayDate(dateIso)} ย้อนหลัง ${days} วัน ถูกต้องหรือไม่`)) return;
     setSaving(true);
     setMessage({ text: "กำลังบันทึก…" });
     try {

@@ -8,6 +8,7 @@ import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { uploadReceiptsInBackground, useAutoRefresh, usePendingReceipts } from "@/lib/receipt-upload";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // รูปใบเสร็จในหน้ารับใบเสร็จ: แนบทีละแถว (ReceiptAttachButton) หรืออัปโหลดหลายใบแล้วจับคู่กับรถ (ReceiptBatchPanel)
 // มี AI = อ่านทะเบียน/ยอด/เลขตัวถังแล้วจับคู่ให้ · ไม่มี AI = เก็บรูปอย่างเดียว พนักงานกรอกยอด/ทะเบียนเอง
@@ -241,7 +242,7 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
   }
 
   async function remove(receiptId: string) {
-    if (!window.confirm("ลบรูปนี้?")) return;
+    if (!await confirmDialog("ลบรูปนี้?")) return;
     try {
       await api.deleteReceipt(receiptId, true);
       localChange.current++;

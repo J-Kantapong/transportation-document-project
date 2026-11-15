@@ -15,6 +15,7 @@ import {
   type VehicleUseCancellation,
 } from "@/lib/vehicle-use-cancel-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { confirmDialog } from "@/lib/confirm-dialog";
 
 // ยกเลิกการใช้รถ (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // หน้ายื่น (VehicleUseCancelSubmitPage): เจ้าของงาน + ข้อมูลรถ + วันที่ยื่น (ค่าใช้จ่ายตายตัว Bill 25 / No Bill 100 ไม่ต้องกรอก)
@@ -732,7 +733,7 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = window.confirm(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
+    const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
       await vehicleUseCancelApi.markReturned(item.id, returnDate);
@@ -891,7 +892,7 @@ function ReturnRow({
   }
 
   async function removeReceipt(receiptId: string) {
-    if (!window.confirm("ลบรูปใบเสร็จนี้?")) return;
+    if (!await confirmDialog("ลบรูปใบเสร็จนี้?")) return;
     try {
       onChange((await vehicleUseCancelApi.removeReceipt(item.id, receiptId, returned ? receiptRemark.trim() : undefined)).cancellation);
     } catch (err) {
