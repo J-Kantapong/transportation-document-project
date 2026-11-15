@@ -13,6 +13,10 @@ import { RECEIPT_READING_PROMPT, ReceiptReadingSchema, checkReading, type Receip
 const MODEL = 'claude-sonnet-5';
 // ราคา Sonnet 5 ต่อ 1 ล้าน token (USD) - cache write 1.25x, cache read 0.1x, Batch API ลดครึ่งทุกช่อง
 const PRICE = { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 };
+type Price = typeof PRICE;
+// รุ่นอื่นที่เอามาเทียบ (ราคา ณ 2026-11): Sonnet 5.5 ราคาเท่า Sonnet 5 ยกเว้น cache read, Haiku 5.5 ถูกกว่า ~20 เท่า
+const SONNET_55 = { model: 'claude-sonnet-5-5', price: { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 } };
+const HAIKU_55 = { model: 'claude-haiku-5-5', price: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 } };
 const THB_PER_USD = 35;
 const CONCURRENCY = 4;
 
@@ -23,6 +27,8 @@ interface Variant {
   maxEdge: number | null; // null = ใช้รูปตามที่อัปมา
   cachePrompt: boolean; // true = ย้าย prompt ไป system + cache_control
   batch: boolean; // true = ส่งผ่าน Batch API (ลด 50% แต่ไม่ได้ผลทันที)
+  model?: string; // ไม่ใส่ = MODEL
+  price?: Price; // ไม่ใส่ = PRICE
 }
 
 const VARIANTS: Variant[] = [
@@ -32,6 +38,11 @@ const VARIANTS: Variant[] = [
   { name: 'low-800', note: 'effort low + ย่อรูปด้านยาวเหลือ 800px', effort: 'low', maxEdge: 800, cachePrompt: false, batch: false },
   { name: 'medium-1000', note: 'effort medium + ย่อรูปเหลือ 1000px', effort: 'medium', maxEdge: 1000, cachePrompt: false, batch: false },
   { name: 'cached', note: 'effort low + ย้าย prompt ไป system แล้ว cache ไว้', effort: 'low', maxEdge: null, cachePrompt: true, batch: false },
+  // เทียบรุ่น: ตั้งค่าเหมือนที่ใช้จริงใน receipt-extractor.ts (effort medium + cache prompt) ต่างกันแค่รุ่น
+  { name: 'prod', note: 'Sonnet 5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false },
+  { name: 'sonnet55', note: 'Sonnet 5.5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false, ...SONNET_55 },
+  { name: 'haiku55', note: 'Haiku 5.5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false, ...HAIKU_55 },
+  { name: 'haiku55-high', note: 'Haiku 5.5 effort high', effort: 'high', maxEdge: null, cachePrompt: true, batch: false, ...HAIKU_55 },
   { name: 'batch-low', note: 'effort low ส่งผ่าน Batch API (ถูกลงครึ่งหนึ่ง แต่ต้องรอ)', effort: 'low', maxEdge: null, cachePrompt: false, batch: true },
 ];
 
@@ -108,7 +119,7 @@ function buildParams(v: Variant, image: Buffer, mimeType: string): Record<string
   if (v.cachePrompt) {
     // prompt = ส่วนที่ซ้ำทุก request -> ย้ายไป system แล้ว cache; รูปที่เปลี่ยนทุกใบอยู่หลัง breakpoint
     return {
-      model: MODEL,
+      model: v.model ?? MODEL,
       max_tokens: 8000,
       output_config: { effort: v.effort, format },
       system: [{ type: 'text', text: RECEIPT_READING_PROMPT, cache_control: { type: 'ephemeral' } }],
@@ -116,7 +127,7 @@ function buildParams(v: Variant, image: Buffer, mimeType: string): Record<string
     };
   }
   return {
-    model: MODEL,
+    model: v.model ?? MODEL,
     max_tokens: 8000,
     output_config: { effort: v.effort, format },
     messages: [{ role: 'user', content: [imageBlock(image, mimeType), { type: 'text', text: RECEIPT_READING_PROMPT }] }],
@@ -144,8 +155,8 @@ const readUsage = (u: {
   cacheRead: u.cache_read_input_tokens ?? 0,
 });
 
-function costUsd(u: Usage, batch: boolean): number {
-  const full = (u.input * PRICE.input + u.output * PRICE.output + u.cacheWrite * PRICE.cacheWrite + u.cacheRead * PRICE.cacheRead) / 1_000_000;
+function costUsd(u: Usage, batch: boolean, price: Price = PRICE): number {
+  const full = (u.input * price.input + u.output * price.output + u.cacheWrite * price.cacheWrite + u.cacheRead * price.cacheRead) / 1_000_000;
   return batch ? full / 2 : full;
 }
 
@@ -290,7 +301,7 @@ async function main(): Promise<void> {
     const cost = originals.reduce((sum, o) => {
       const img = o.dim ? imageTokens(o.dim.w, o.dim.h, v.maxEdge) : 2200;
       const out = v.effort === 'low' ? 700 : v.effort === 'medium' ? 1100 : 1800;
-      return sum + costUsd({ ...ZERO, input: img + 900, output: out }, v.batch);
+      return sum + costUsd({ ...ZERO, input: img + 900, output: out }, v.batch, v.price);
     }, 0);
     estimate += cost;
     console.log(`  - ${v.name.padEnd(12)} ${v.note}  ~${(cost * THB_PER_USD).toFixed(2)} บาท`);
@@ -338,7 +349,7 @@ async function main(): Promise<void> {
     // เฉลี่ยเฉพาะใบที่อ่านสำเร็จ - ถ้าหารด้วยจำนวนใบทั้งหมด แบบที่อ่านพังบ่อยจะดูถูกกว่าความจริง
     const basis = okRows.length || 1;
     const avg = (f: (r: Row) => number): number => Math.round(okRows.reduce((s, r) => s + f(r), 0) / basis);
-    const perImageThb = (okRows.reduce((s, r) => s + costUsd(r.usage, v.batch), 0) / basis) * THB_PER_USD;
+    const perImageThb = (okRows.reduce((s, r) => s + costUsd(r.usage, v.batch, v.price), 0) / basis) * THB_PER_USD;
     const allChecks = okRows.filter((r) => Object.values(checkReading(r.reading!)).every(Boolean)).length;
     summary[name] = perImageThb;
     console.log(
@@ -356,21 +367,22 @@ async function main(): Promise<void> {
   }
 
   // ช่องที่อ่านต่างจากแบบปัจจุบัน - เปิดรูปดูเองว่าฝั่งไหนถูก (นี่คือตัวตัดสินว่าลดได้จริงไหม)
-  const base = results.get('current');
+  const baseName = arg('base') ?? 'current';
+  const base = results.get(baseName);
   if (base) {
     console.log('\n=== ช่องที่อ่านต่างจาก current (เปิดรูปเทียบว่าฝั่งไหนถูก) ===');
     for (const [name, rows] of results) {
-      if (name === 'current') continue;
+      if (name === baseName) continue;
       const diffs = diffAgainstBase(base, rows);
       console.log(`\n${name}: ต่างกัน ${diffs.length} ช่อง`);
       for (const d of diffs.slice(0, 25)) console.log(`  ${d.file}  ${d.field}: current=${d.base}  ${name}=${d.other}`);
       if (diffs.length > 25) console.log(`  ... และอีก ${diffs.length - 25} ช่อง (ดูในไฟล์ผลดิบ)`);
     }
-    const cur = summary['current'];
+    const cur = summary[baseName];
     if (cur) {
-      console.log('\n=== ถูกลงกี่ % เทียบกับ current ===');
+      console.log(`\n=== ถูกลงกี่ % เทียบกับ ${baseName} ===`);
       for (const [name, thb] of Object.entries(summary)) {
-        if (name === 'current') continue;
+        if (name === baseName) continue;
         console.log(`  ${name.padEnd(13)} ลดลง ${(((cur - thb) / cur) * 100).toFixed(0)}%  (${thb.toFixed(3)} บาท/ใบ)`);
       }
     }
