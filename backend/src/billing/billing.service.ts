@@ -402,6 +402,7 @@ export function currentBillEstimate(
     relocateAddon: boolean;
     stopUseRelocateOut: boolean;
     urgent: boolean;
+    taxExempt?: boolean; // รถยกเว้นภาษี - ต้อง select มาด้วย ไม่งั้นยอดประมาณการจะสูงกว่าใบเสร็จ
   } | undefined,
   rules: DocumentFeeRuleSet | null,
 ): number | null {
@@ -416,6 +417,7 @@ export function currentBillEstimate(
         relocateAddon: sub.relocateAddon,
         stopUseRelocateOut: sub.stopUseRelocateOut,
         urgent: sub.urgent,
+        taxExempt: sub.taxExempt === true,
       },
       rules,
       { billOnly: true }, // ใช้แค่ยอด Bill - รถที่ส่งซับจดไม่ต้องโหลดตารางราคาซับ
@@ -493,6 +495,7 @@ const QUEUE_VEHICLE_INCLUDE = {
       newPlateOption: true,
       relocateAddon: true,
       stopUseRelocateOut: true,
+      taxExempt: true,
       // รูปใบเสร็จของการยื่นล่าสุด - หน้าวางบิลแสดงให้เทียบยอด (ผู้ใช้ 2026-09-28) · extraction = CC ที่ AI อ่าน (2026-11-09)
       receipts: { orderBy: { createdAt: 'desc' as const }, select: { id: true, extraction: true, createdAt: true } },
     },

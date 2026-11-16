@@ -23,6 +23,7 @@ export function CostLines({ fee, tax, ownerMissing }: { fee: FeePreview; tax: Ta
         <div className="cost-row">
           <span>
             ค่าภาษี
+            {tax?.status === "EXEMPT" ? <span className="muted"> (รถยกเว้นภาษี)</span> : null}
             {tax && taxAmount !== null && tax.juristicMultiplier > 1 ? <span className="muted"> ({tax.juristicReason})</span> : null}
           </span>
           {taxAmount !== null ? (

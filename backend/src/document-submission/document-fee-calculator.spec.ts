@@ -212,6 +212,29 @@ describe('requestsPlateNumber / isSwapPlateOption', () => {
   });
 });
 
+// ผู้ใช้ 2026-11-16: รถยกเว้นภาษี - ไม่มีค่าคำขอ / ค่าตรวจสภาพรถ / ค่าใบคู่มือ เหลือค่าแผ่นป้าย (รถยนต์ 200)
+describe('computeDocumentFees - รถยกเว้นภาษี', () => {
+  it('รถยนต์: Bill เหลือค่าแผ่นป้าย 200 - No bill ไม่เปลี่ยน', () => {
+    const normal = computeDocumentFees(carVehicle(), baseOptions(), baseRules());
+    const exempt = computeDocumentFees(carVehicle(), baseOptions({ taxExempt: true }), baseRules());
+    expect(exempt.billItems).toEqual([{ label: 'ค่าแผ่นป้ายทะเบียนรถ', amount: 200 }]);
+    expect(exempt.billTotal).toBe(200);
+    expect(exempt.noBillItems).toEqual(normal.noBillItems);
+  });
+
+  it('มอเตอร์ไซค์: Bill เหลือค่าแผ่นป้าย 100', () => {
+    const exempt = computeDocumentFees(motoVehicle(), baseOptions({ taxExempt: true }), baseRules());
+    expect(exempt.billItems).toEqual([{ label: 'ค่าแผ่นป้ายทะเบียน', amount: 100 }]);
+  });
+
+  it('รายการที่เลือกเพิ่ม (ขอใช้เลข) ยังคิดตามปกติ และ billOnly ให้ยอดเดียวกัน', () => {
+    const options = baseOptions({ taxExempt: true, plateNumberOption: 'NORMAL' });
+    const exempt = computeDocumentFees(carVehicle(), options, baseRules());
+    expect(exempt.billTotal).toBe(700);
+    expect(computeDocumentFees(carVehicle(), options, baseRules(), { billOnly: true }).billTotal).toBe(700);
+  });
+});
+
 // ผู้ใช้ 2026-10-08: จังหวัดอื่นนอกจากกรุงเทพฯ/สมุทรปราการ ส่งซับจด - No bill = ค่าจ้างซับตามตารางจังหวัด (คิดทุกคัน ทั้ง 3 ช่อง)
 describe('computeDocumentFees - ส่งซับจดต่างจังหวัด', () => {
   const rates = [
@@ -247,6 +270,17 @@ describe('computeDocumentFees - ส่งซับจดต่างจังห
     expect(at('น่าน')).toThrow('ยังไม่มีราคาซับของจังหวัดน่าน');
     expect(at('ตราด')).toThrow('ยังไม่ครบ (ค่าช่อง)');
     expect(() => computeDocumentFees(carVehicle({ registrationProvince: 'น่าน' }), baseOptions(), baseRules())).toThrow('ยังไม่มีราคาซับ');
+  });
+
+  // ผู้ใช้ 2026-11-16: บางคันลูกค้านำรถไปตรวจเอง - ไม่คิดค่านำรถเข้าตรวจของซับ (บรรทัดยังอยู่ครบ 3 เป็น 0)
+  it('supplierInspection = false -> นำรถเข้าตรวจสภาพ 0 รายการอื่นเท่าเดิม', () => {
+    const fee = computeDocumentFees(carVehicle({ registrationProvince: 'เชียงใหม่', ownerProvince: 'เชียงใหม่' }), baseOptions({ supplierInspection: false }), rules());
+    expect(fee.noBillItems).toEqual([
+      { label: 'ค่าดำเนินการซับ', amount: 1000 },
+      { label: 'ค่าช่อง', amount: 300 },
+      { label: 'นำรถเข้าตรวจสภาพ', amount: 0 },
+    ]);
+    expect(fee.noBillTotal).toBe(1300);
   });
 
   it('billOnly (หน้าวางบิล): ได้ยอด Bill โดยไม่ต้องมีตารางราคาซับ', () => {

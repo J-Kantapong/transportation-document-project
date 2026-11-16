@@ -46,6 +46,8 @@ export function parseDocumentSubmissionOptions(raw: unknown, isMoto: boolean): D
     relocateAddon,
     stopUseRelocateOut,
     urgent,
+    taxExempt: Boolean(body.taxExempt), // รถยกเว้นภาษี (ผู้ใช้ 2026-11-16)
+    supplierInspection: body.supplierInspection === undefined ? true : Boolean(body.supplierInspection), // ไม่ส่ง = ซับตรวจรถ
   };
 }
 

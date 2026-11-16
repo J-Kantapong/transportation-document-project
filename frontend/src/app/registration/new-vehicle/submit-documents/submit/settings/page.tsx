@@ -286,6 +286,28 @@ export default function SubmitSettingsPage() {
                             แจ้งย้ายออกต่างจังหวัด (+50)
                           </label>
                         )}
+                        {/* รถยกเว้นภาษี (ผู้ใช้ 2026-11-16): ไม่มีค่าคำขอ / ค่าตรวจสภาพ / ค่าคู่มือ และภาษี 0 - ทุกประเภทรถ ทุกเส้นทาง */}
+                        <label className="review-inline-check">
+                          <input
+                            type="checkbox"
+                            checked={s.options.taxExempt}
+                            onChange={(e) => setOne(v, (cur) => ({ ...cur, options: { ...cur.options, taxExempt: e.target.checked } }))}
+                          />
+                          รถยกเว้นภาษี
+                        </label>
+                        {/* รถส่งซับ: ไม่ติ๊ก = ลูกค้านำรถไปตรวจเอง ไม่คิดค่านำรถเข้าตรวจของซับ (ผู้ใช้ 2026-11-16) */}
+                        {viaSupplier && (
+                          <label className="review-inline-check">
+                            <input
+                              type="checkbox"
+                              checked={s.options.supplierInspection}
+                              onChange={(e) =>
+                                setOne(v, (cur) => ({ ...cur, options: { ...cur.options, supplierInspection: e.target.checked } }))
+                              }
+                            />
+                            ซับนำรถเข้าตรวจสภาพ
+                          </label>
+                        )}
                         {isMoto && !viaSupplier && s.options.stopUseRelocateOut && (
                           <div className="sub" style={{ color: "#c07a1e" }}>
                             * ค่าธรรมเนียมอื่นของรายการนี้ยังไม่มีข้อมูล (ปรับเฉพาะลงขันเป็น 250)

@@ -351,6 +351,7 @@ export class OverviewService {
           relocateAddon: true,
           stopUseRelocateOut: true,
           urgent: true,
+          taxExempt: true,
           vehicle: { select: { ...vehicleRef, registrationProvince: true, ownerProvince: true } },
         },
       }),

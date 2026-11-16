@@ -317,6 +317,8 @@ export interface DocumentSubmissionOptionsInput {
   relocateAddon: boolean; // รถยนต์เท่านั้น
   stopUseRelocateOut: boolean; // มอเตอร์ไซค์เท่านั้น
   urgent: boolean;
+  taxExempt: boolean; // รถยกเว้นภาษี (ผู้ใช้ 2026-11-16): ไม่มีค่าคำขอ/ค่าตรวจสภาพ/ค่าคู่มือ ภาษี 0
+  supplierInspection: boolean; // รถส่งซับ: false = ซับไม่ได้นำรถเข้าตรวจ (ลูกค้าไปตรวจเอง) ค่านำรถเข้าตรวจ 0
 }
 
 export interface CreateDocumentSubmissionInput extends DocumentSubmissionOptionsInput {
@@ -342,6 +344,8 @@ export interface DocumentSubmission {
   relocateAddon: boolean;
   stopUseRelocateOut: boolean;
   urgent: boolean;
+  taxExempt?: boolean; // รถยกเว้นภาษี
+  supplierInspection?: boolean; // รถส่งซับ: ซับนำรถเข้าตรวจหรือไม่
   viaSupplier?: boolean; // รายการนี้ = ส่งงานให้ซับจดต่างจังหวัด (noBillItems = ค่าจ้างซับ)
   billItems: FeeItem[];
   noBillItems: FeeItem[];
@@ -558,7 +562,7 @@ export interface TaxBreakdown {
   amount: number | null;
   amountSatang: number | null;
   reason: string | null;
-  status: 'CALCULATED' | 'MISSING_INPUT' | 'MISSING_VERIFIED_RULE';
+  status: 'CALCULATED' | 'MISSING_INPUT' | 'MISSING_VERIFIED_RULE' | 'EXEMPT'; // EXEMPT = รถยกเว้นภาษี (preview ตอนยื่นเท่านั้น)
 }
 
 export interface TaxCalculation {
