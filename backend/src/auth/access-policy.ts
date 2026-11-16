@@ -30,7 +30,8 @@ const RULES: Rule[] = [
   // (ไม่ผ่านลายเซ็นตอบ 401 ก่อนแตะข้อมูล) · route อื่นใน /api/secretary ถ้ามีในอนาคต = ADMIN เท่านั้น
   // tax-invoice = ใบกำกับสำหรับลิงก์ปริ้นจากไลน์ (ผู้ใช้ 2026-11-16) ตรวจ token ที่ลงลายเซ็นและมีวันหมดอายุใน SecretaryController
   // mail = เมลแจ้งโอนของยามาฮ่าจากสคริปต์ใน Gmail (ผู้ใช้ 2026-11-16) ตรวจกุญแจ SECRETARY_RUN_KEY เหมือน run
-  { pattern: /^\/api\/secretary\/(webhook|run|tax-invoice|mail)$/, access: 'PUBLIC' },
+  // invoice = ใบวางบิลสำหรับลิงก์ดาวน์โหลดจากไลน์ (ผู้ใช้ 2026-11-16) ตรวจ token ชนิด iv แบบเดียวกับ tax-invoice
+  { pattern: /^\/api\/secretary\/(webhook|run|tax-invoice|invoice|mail)$/, access: 'PUBLIC' },
   { pattern: /^\/api\/secretary(\/|$)/, access: ['ADMIN'] },
   // บอทไลน์ลูกค้า (ผู้ใช้ 2026-10-09): webhook เปิดสาธารณะ ตรวจลายเซ็นใน CustomerLineController · route อื่น = ADMIN
   { pattern: /^\/api\/customer-line\/webhook$/, access: 'PUBLIC' },

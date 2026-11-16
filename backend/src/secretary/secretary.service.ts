@@ -6,6 +6,7 @@ import { parseCommand, type Command } from './commands.js';
 import { buildEveningMessage, type EveningInput } from './evening-message.js';
 import { buildFinanceMessage } from './finance-message.js';
 import { loadFinancePending } from './finance-pending.js';
+import { parseInvoiceLinkCommand } from './invoice-link.js';
 import { lineConfigFromEnv, pushLine, replyLine, type LineMessage } from './line-client.js';
 import type { LineEvent } from './line-webhook.js';
 import { NotesService } from './notes.service.js';
@@ -129,8 +130,13 @@ export class SecretaryService {
         else if (isFile) messages = await this.statements.handleFile(event.message!.id!, event.message!.fileName ?? '');
         else {
           const typed = event.message?.text ?? '';
-          const note = parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
-          messages = note ? await this.notes.run(note) : await this.answer(parseCommand(typed));
+          // "บิลล่าสุด" / "บิล IV…" = ลิงก์ดาวน์โหลดใบวางบิล (ผู้ใช้ 2026-11-16) - รูปแบบเฉพาะ (ทั้งข้อความต้องตรง) จึงมาก่อนตู้ข้อความ
+          // ไม่งั้น "ขอบิลล่าสุด" จะไปตกคำสั่ง "ขอ" ของตู้ข้อความ
+          const invoiceLink = parseInvoiceLinkCommand(typed);
+          const note = invoiceLink ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
+          if (invoiceLink) messages = await this.statements.invoiceLinks(invoiceLink);
+          else if (note) messages = await this.notes.run(note);
+          else messages = await this.answer(parseCommand(typed));
         }
       } catch (error) {
         console.error('เลขาตอบคำสั่งไม่สำเร็จ:', error instanceof Error ? error.message : error);

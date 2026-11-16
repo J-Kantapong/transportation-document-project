@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Query, Req, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BillingService } from '../billing/billing.service.js';
 import { TaxInvoiceService } from '../billing/tax-invoice.service.js';
 import { verifyLineSignature, type LineWebhookBody } from './line-webhook.js';
 import { MailService } from './mail.service.js';
@@ -12,6 +13,7 @@ export class SecretaryController {
     private readonly secretary: SecretaryService,
     private readonly taxInvoices: TaxInvoiceService,
     private readonly mails: MailService,
+    private readonly billing: BillingService,
   ) {}
 
   // webhook ของ LINE (เปิดสาธารณะใน access-policy.ts เพราะ LINE ไม่มี token ของระบบ) - ความปลอดภัยอยู่ที่ลายเซ็น:
@@ -35,6 +37,15 @@ export class SecretaryController {
     const id = verifyPrintToken(token, process.env.AUTH_SECRET?.trim() ?? '');
     if (!id) throw new UnauthorizedException({ error: 'ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว' });
     return { taxInvoice: await this.taxInvoices.get(id) };
+  }
+
+  // ใบวางบิลสำหรับหน้า /iv ของเว็บ (ลิงก์ดาวน์โหลดที่เลขาส่งเมื่อพิมพ์ "บิลล่าสุด" / "บิล IV…", ผู้ใช้ 2026-11-16) - เปิดสาธารณะใน access-policy.ts
+  // รับเฉพาะ token ชนิด iv (ลิงก์ใบกำกับใช้เปิดใบวางบิลไม่ได้ และกลับกัน) ไม่ผ่าน = 401 ก่อนแตะฐานข้อมูล
+  @Get('invoice')
+  async invoice(@Query('token') token: string | undefined) {
+    const id = verifyPrintToken(token, process.env.AUTH_SECRET?.trim() ?? '', Date.now(), 'iv');
+    if (!id) throw new UnauthorizedException({ error: 'ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว' });
+    return { invoice: await this.billing.getInvoice(id) };
   }
 
   // เมลแจ้งโอนของยามาฮ่า (ผู้ใช้ 2026-11-16): สคริปต์ใน Gmail (backend/scripts/gmail-yamaha-forwarder.gs) ส่งเมลใหม่เข้ามา
