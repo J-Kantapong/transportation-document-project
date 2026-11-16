@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { actionFor, matchDeposit, matchStatement, parseKbizCsv, StatementFormatError, type Deposit, type StatementInvoice } from './bank-statement.js';
 import { createPrintToken, verifyPrintToken } from './print-link.js';
-import { buildStatementMessages, parseStatementPostback, postbackData } from './statement-message.js';
+import { buildDownloadLinkMessage, buildIssuedMessage, buildStatementMessages, parseStatementPostback, pdfDownloadUrl, postbackData } from './statement-message.js';
 
 // รูปแบบเดียวกับไฟล์ที่โหลดจาก K BIZ (ยอดและบิลเป็นข้อมูลสมมติ)
 const CSV = [
@@ -155,5 +155,26 @@ describe('print link token', () => {
     expect(verifyPrintToken('', secret, now)).toBeNull();
     expect(verifyPrintToken(undefined, secret, now)).toBeNull();
     expect(verifyPrintToken(token, '', now)).toBeNull();
+  });
+});
+
+describe('issued card download link', () => {
+  const printUrl = 'https://app.example/tv?token=abc.def';
+  it('adds a PDF download button and keeps the open button', () => {
+    const card = buildIssuedMessage({ taxInvoiceNo: 'TV2026-200', invoiceNo: 'IV2026-200', customerName: 'ลูกค้า', date: '2026-11-16', printUrl }) as unknown as {
+      contents: { footer: { contents: Array<{ action: { label: string; uri: string } }> } };
+    };
+    const buttons = card.contents.footer.contents.map((b) => b.action);
+    expect(buttons.map((b) => b.label)).toEqual(['ดาวน์โหลด PDF', 'เปิดใบกำกับ']);
+    expect(buttons[0].uri).toBe(`${printUrl}&download=1&openExternalBrowser=1`);
+    expect(buttons[1].uri).toBe(printUrl);
+  });
+  it('builds a plain text link that can be forwarded, and no footer without a link', () => {
+    const text = buildDownloadLinkMessage({ taxInvoiceNo: 'TV2026-200', customerName: 'ลูกค้า', printUrl }) as { type: string; text: string };
+    expect(text.type).toBe('text');
+    expect(text.text).toContain('TV2026-200 ลูกค้า');
+    expect(text.text).toContain(pdfDownloadUrl(printUrl));
+    const noLink = buildIssuedMessage({ taxInvoiceNo: 'TV2026-200', invoiceNo: 'IV2026-200', customerName: 'ลูกค้า', date: '2026-11-16' }) as unknown as { contents: { footer?: unknown } };
+    expect(noLink.contents.footer).toBeUndefined();
   });
 });

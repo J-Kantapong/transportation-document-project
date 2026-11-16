@@ -145,10 +145,31 @@ export function buildIssuedMessage(input: { taxInvoiceNo: string; invoiceNo: str
       contents: [
         text(`${input.invoiceNo} ${input.customerName}`, { size: 'sm' }),
         text(`วันที่ใบกำกับ ${dmy(input.date)} · ${input.beforePayment ? 'ออกก่อนรับเงิน บิลยังรอรับเงิน' : 'บันทึกรับเงินแล้ว'}`, { size: 'sm' }),
-        text(input.printUrl ? 'กดปุ่มด้านล่างเพื่อเปิดใบกำกับ (ต้นฉบับ + สำเนา) แล้วปริ้นหรือส่งต่อลิงก์ให้พนักงาน ลิงก์ใช้ได้ 7 วัน' : 'เปิดปริ้นได้ที่หน้าใบกำกับภาษีในระบบ', { size: 'xs', color: '#666666' }),
+        text(input.printUrl ? 'กดปุ่มเพื่อดาวน์โหลด PDF หรือเปิดใบกำกับ (ต้นฉบับ + สำเนา) · ข้อความถัดไปคือลิงก์ดาวน์โหลดสำหรับส่งต่อให้พนักงาน ลิงก์ใช้ได้ 7 วัน' : 'เปิดปริ้นได้ที่หน้าใบกำกับภาษีในระบบ', { size: 'xs', color: '#666666' }),
       ],
     },
   };
-  if (input.printUrl) bubble.footer = { type: 'box', layout: 'vertical', contents: [{ type: 'button', style: 'primary', height: 'sm', action: { type: 'uri', label: 'เปิดใบกำกับ', uri: input.printUrl } }] };
+  if (input.printUrl) {
+    bubble.footer = {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        { type: 'button', style: 'primary', height: 'sm', action: { type: 'uri', label: 'ดาวน์โหลด PDF', uri: pdfDownloadUrl(input.printUrl) } },
+        { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: 'เปิดใบกำกับ', uri: input.printUrl } },
+      ],
+    };
+  }
   return { type: 'flex', altText: `ออก ${input.taxInvoiceNo} แล้ว`, contents: bubble };
+}
+
+// ลิงก์ดาวน์โหลด PDF (ผู้ใช้ 2026-11-16 "ส่งเป็นลิ้งดาวโหลดมาเลย"): หน้า /tv เดิม + download=1 = เปิดแล้วสร้างไฟล์ PDF ให้ทันที
+// openExternalBrowser=1 = LINE เปิดด้วยเบราว์เซอร์ของเครื่อง (เบราว์เซอร์ในแอป LINE บันทึกไฟล์ไม่ได้)
+export function pdfDownloadUrl(printUrl: string): string {
+  return `${printUrl}${printUrl.includes('?') ? '&' : '?'}download=1&openExternalBrowser=1`;
+}
+
+// ข้อความธรรมดาที่มีลิงก์ดาวน์โหลด - กดค้างแล้วส่งต่อให้พนักงานได้ (การ์ดส่งต่อยากกว่า)
+export function buildDownloadLinkMessage(input: { taxInvoiceNo: string; customerName: string; printUrl: string }): LineMessage {
+  return { type: 'text', text: `ดาวน์โหลด PDF ${input.taxInvoiceNo} ${input.customerName}\n${pdfDownloadUrl(input.printUrl)}\n(ลิงก์ใช้ได้ 7 วัน)` };
 }

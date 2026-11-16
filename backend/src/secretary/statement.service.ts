@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { matchStatement, parseKbizCsv, StatementFormatError, type StatementInvoice } from './bank-statement.js';
 import { fetchLineContent, type LineMessage } from './line-client.js';
 import { createPrintToken } from './print-link.js';
-import { buildConfirmMessage, buildIssuedMessage, buildStatementMessages, dmy, postbackData, type StatementPostback } from './statement-message.js';
+import { buildConfirmMessage, buildDownloadLinkMessage, buildIssuedMessage, buildStatementMessages, dmy, postbackData, type StatementPostback } from './statement-message.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const LOOKBACK_MONTHS = 12;
@@ -101,7 +101,7 @@ export class StatementService {
   async handlePostback(p: StatementPostback): Promise<LineMessage[]> {
     try {
       if (p.action === 'tv' || p.action === 'tvb') return [await this.confirmTaxInvoice(p)];
-      if (p.action === 'tvgo' || p.action === 'tvbgo') return [await this.issueTaxInvoice(p)];
+      if (p.action === 'tvgo' || p.action === 'tvbgo') return await this.issueTaxInvoice(p);
       if (p.action === 'pay') return [await this.confirmPaid(p)];
       return [await this.markPaid(p)];
     } catch (error) {
@@ -153,9 +153,9 @@ export class StatementService {
     });
   }
 
-  private async issueTaxInvoice(p: StatementPostback): Promise<LineMessage> {
+  private async issueTaxInvoice(p: StatementPostback): Promise<LineMessage[]> {
     const invoice = await this.invoiceOf(p.invoiceId);
-    if (!invoice) return textOf('ไม่พบบิลนี้แล้ว');
+    if (!invoice) return [textOf('ไม่พบบิลนี้แล้ว')];
     const before = p.action === 'tvbgo';
     const tv = await this.taxInvoices.issue(p.invoiceId, {
       paidDate: p.date,
@@ -164,7 +164,10 @@ export class StatementService {
       backdateConfirmed: true, // ผู้ใช้เห็นคำเตือนย้อนวันที่ในการ์ดยืนยันแล้ว
       beforePayment: before,
     });
-    return buildIssuedMessage({ taxInvoiceNo: tv.taxInvoiceNo, invoiceNo: invoice.invoiceNo, customerName: invoice.customerName, date: p.date, printUrl: this.printUrl(tv.id), beforePayment: before });
+    const printUrl = this.printUrl(tv.id);
+    const card = buildIssuedMessage({ taxInvoiceNo: tv.taxInvoiceNo, invoiceNo: invoice.invoiceNo, customerName: invoice.customerName, date: p.date, printUrl, beforePayment: before });
+    // ข้อความที่สอง = ลิงก์ดาวน์โหลด PDF แบบข้อความธรรมดา ส่งต่อให้พนักงานได้ทันที
+    return printUrl ? [card, buildDownloadLinkMessage({ taxInvoiceNo: tv.taxInvoiceNo, customerName: invoice.customerName, printUrl })] : [card];
   }
 
   private async confirmPaid(p: StatementPostback): Promise<LineMessage> {
