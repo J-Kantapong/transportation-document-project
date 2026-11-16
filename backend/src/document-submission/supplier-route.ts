@@ -38,14 +38,16 @@ export type SupplierFeeKey = keyof typeof SUPPLIER_FEE_LABELS;
 export const SUPPLIER_FEE_KEYS = Object.keys(SUPPLIER_FEE_LABELS) as SupplierFeeKey[];
 
 // รายการ No bill ของรถที่ส่งซับ = ค่าจ้างซับตามตารางของจังหวัดที่จด - ไม่มีราคา/ซับไม่รับ = ยื่นไม่ได้ (ไม่เดาราคาให้)
-export function supplierFeeItems(province: string, rates: SupplierRateRow[] | undefined): FeeItem[] {
+// inspected = false: ซับไม่ได้นำรถเข้าตรวจ (ผู้ใช้ 2026-11-16: ลูกค้านำรถไปตรวจเอง) - บรรทัด "นำรถเข้าตรวจสภาพ" ยังอยู่แต่เป็น 0
+// (คงครบ 3 บรรทัดให้หน้าแก้ค่าจ้างซับอ่านได้เหมือนเดิม) ตารางราคายังต้องครบทั้ง 3 ช่อง
+export function supplierFeeItems(province: string, rates: SupplierRateRow[] | undefined, inspected = true): FeeItem[] {
   const rate = rates?.find((r) => r.province === province);
   if (!rate) throw new Error(`ยังไม่มีราคาซับของจังหวัด${province} - ให้ผู้ดูแลระบบตั้งราคาที่หน้า "ราคาซับจดต่างจังหวัด" ก่อน`);
   if (!rate.accepts) throw new Error(`ซับไม่รับจดทะเบียนจังหวัด${province}`);
   return SUPPLIER_FEE_KEYS.map((key) => {
     const amount = rate[key];
     if (amount === null) throw new Error(`ราคาซับของจังหวัด${province} ยังไม่ครบ (${SUPPLIER_FEE_LABELS[key]})`);
-    return { label: SUPPLIER_FEE_LABELS[key], amount };
+    return { label: SUPPLIER_FEE_LABELS[key], amount: key === 'inspectionFee' && !inspected ? 0 : amount };
   });
 }
 

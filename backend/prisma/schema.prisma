@@ -686,6 +686,10 @@ model DocumentSubmission {
   // noBillItems = ค่าจ้างซับตามตารางจังหวัด (ค่าดำเนินการ/ค่าช่อง/นำรถเข้าตรวจสภาพ) แก้ได้ตอนรับใบเสร็จถ้าซับคิดต่างจากตาราง
   // billItems = ประมาณการค่าธรรมเนียมราชการที่ซับจ่ายแทน ใช้เทียบกับใบเสร็จขนส่งที่ซับส่งกลับมา
   viaSupplier         Boolean   @default(false)
+  // รถยกเว้นภาษี (ผู้ใช้ 2026-11-16): Bill ไม่มีค่าคำขอ/ค่าตรวจสภาพ/ค่าใบคู่มือ และ taxAmount = 0 (ไม่สร้าง TaxCalculation)
+  taxExempt           Boolean   @default(false)
+  // รถส่งซับ: ซับนำรถเข้าตรวจสภาพหรือไม่ (false = ลูกค้านำรถไปตรวจเอง ค่า "นำรถเข้าตรวจสภาพ" ใน noBillItems = 0)
+  supplierInspection  Boolean   @default(true)
   billItems           Json // snapshot [{label, amount}] ไม่รวมภาษี
   noBillItems         Json
   billFeeTotal        Decimal   @db.Decimal(12, 2)

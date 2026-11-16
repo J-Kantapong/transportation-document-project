@@ -249,7 +249,7 @@ export class DocumentSubmissionService {
 
     type Computed =
       | { vehicleId: unknown; error: string }
-      | { vehicleId: string; fee: ReturnType<typeof computeDocumentFees>; taxInput: Parameters<TaxService['previewMany']>[0][number] };
+      | { vehicleId: string; fee: ReturnType<typeof computeDocumentFees>; taxExempt: boolean; taxInput: Parameters<TaxService['previewMany']>[0][number] };
     const scope = currentWriteScope(); // ยื่นได้เฉพาะประเภทรถที่บัญชีนี้แก้ได้
     const computed: Computed[] = entries.map((entry) => {
       const vehicle = typeof entry?.vehicleId === 'string' ? byId.get(entry.vehicleId) : undefined;
@@ -273,6 +273,7 @@ export class DocumentSubmissionService {
         return {
           vehicleId: vehicle.id,
           fee,
+          taxExempt: options.taxExempt === true,
           taxInput: {
             vehicle: {
               body: vehicle.body,
@@ -294,7 +295,18 @@ export class DocumentSubmissionService {
 
     const ok = computed.filter((c): c is Extract<Computed, { fee: unknown }> => 'fee' in c);
     const taxes = await this.taxService.previewMany(ok.map((c) => c.taxInput));
-    const taxByEntry = new Map(ok.map((c, i) => [c, taxes[i]]));
+    // รถยกเว้นภาษี: ภาษี 0 เสมอ (แทนผลจากตารางอัตรา - รวมกรณีที่ตารางคำนวณไม่ได้)
+    const exemptTax = (tax: (typeof taxes)[number]) => ({
+      ...tax,
+      baseAmount: 0,
+      discountPercent: null,
+      juristicMultiplier: 1 as const,
+      amount: 0,
+      amountSatang: 0,
+      reason: null,
+      status: 'EXEMPT',
+    });
+    const taxByEntry = new Map(ok.map((c, i) => [c, c.taxExempt ? exemptTax(taxes[i]) : taxes[i]]));
     return {
       results: computed.map((c) => ('fee' in c ? { vehicleId: c.vehicleId, fee: c.fee, tax: taxByEntry.get(c) } : c)),
     };
@@ -309,6 +321,7 @@ export class DocumentSubmissionService {
     if (!sub || sub.vehicle.deletedAt) throw new NotFoundException({ error: 'ไม่พบรายการที่ยื่นเอกสาร' });
     assertVehicleReadable(sub.vehicle.body);
     const v = sub.vehicle;
+    if (sub.taxExempt) return { hints: [] }; // รถยกเว้นภาษี: ยอดไม่ขึ้นกับ CC/น้ำหนัก/ประเภทรถ ไม่มีอะไรให้เดา
     const [feeRules, taxRules] = await Promise.all([this.loadRuleSet(), this.taxService.loadRuleSet()]);
     const owner: GovernmentTaxOwnerInput | null = v.owner
       ? { ownerType: v.owner.ownerType, isHirePurchaseBusiness: v.owner.isHirePurchaseBusiness, hirerType: v.owner.hirerType }
@@ -392,7 +405,8 @@ export class DocumentSubmissionService {
           await tx.vehicle.update({ where: { id: vehicleId }, data: vehicleUpdateData });
         }
 
-        const taxCalculation = await this.taxService.calculateAndSave(vehicleId, { client: tx, rules: ctx.taxRules });
+        // รถยกเว้นภาษี (ผู้ใช้ 2026-11-16): ภาษี 0 ไม่คิดจากตารางอัตรา จึงไม่สร้าง TaxCalculation
+        const taxCalculation = options.taxExempt ? null : await this.taxService.calculateAndSave(vehicleId, { client: tx, rules: ctx.taxRules });
 
         const submission = await tx.documentSubmission.create({
           data: {
@@ -405,11 +419,13 @@ export class DocumentSubmissionService {
             stopUseRelocateOut: options.stopUseRelocateOut,
             urgent: options.urgent,
             viaSupplier: fees.viaSupplier,
+            taxExempt: options.taxExempt === true,
+            supplierInspection: fees.viaSupplier ? options.supplierInspection !== false : true, // ออฟฟิศยื่นเอง = ไม่เกี่ยว เก็บค่าตั้งต้น
             billItems: JSON.parse(JSON.stringify(fees.billItems)),
             noBillItems: JSON.parse(JSON.stringify(fees.noBillItems)),
             billFeeTotal: fees.billTotal,
             noBillTotal: fees.noBillTotal,
-            taxAmount: taxCalculation.finalAmount,
+            taxAmount: taxCalculation ? taxCalculation.finalAmount : 0,
             createdById: currentUser()?.id ?? null, // ผู้ทำ (ผู้ใช้ 2026-10-08): คนกดยื่นเอกสาร
             ...(ctx.createdAt ? { createdAt: ctx.createdAt } : {}),
           },

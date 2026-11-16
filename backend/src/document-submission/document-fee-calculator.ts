@@ -40,6 +40,12 @@ export interface DocumentSubmissionOptionsInput {
   relocateAddon: boolean; // รถยนต์เท่านั้น
   stopUseRelocateOut: boolean; // มอเตอร์ไซค์เท่านั้น
   urgent: boolean;
+  // รถยกเว้นภาษี (ผู้ใช้ 2026-11-16): ไม่มีค่าคำขอ / ค่าตรวจสภาพรถ / ค่าใบคู่มือจดทะเบียน และภาษีประจำปี = 0
+  // Bill เหลือค่าแผ่นป้าย (+ รายการขอใช้เลข/ทำป้ายใหม่ถ้าเลือก) - รถยนต์และมอเตอร์ไซค์ ทุกเส้นทาง · ไม่ส่ง = false
+  taxExempt?: boolean;
+  // รถส่งซับ: ซับนำรถเข้าตรวจสภาพหรือไม่ (ผู้ใช้ 2026-11-16: บางคันลูกค้านำรถไปตรวจเอง) false = ค่า "นำรถเข้าตรวจสภาพ" เป็น 0
+  // ไม่ส่ง = true · ไม่มีผลกับรถที่ออฟฟิศยื่นเอง
+  supplierInspection?: boolean;
 }
 
 export interface FeeItem {
@@ -110,12 +116,15 @@ export function computeDocumentFees(
   const bill = isMoto ? rules.motoBill : rules.carBill;
   const noBill = isMoto ? rules.motoNoBill : rules.carNoBill;
 
+  const exempt = options.taxExempt === true; // รถยกเว้นภาษี: ไม่มีค่าคำขอ / ค่าตรวจสภาพรถ / ค่าใบคู่มือ
   const billItems: FeeItem[] = [];
-  billItems.push(
-    hasExtraRequest
-      ? { label: 'ค่าคำขอ (ขอใช้จังหวัดอื่น)', amount: lookupFee(bill, 'ค่าคำขอ (ขอใช้จังหวัดอื่น)') }
-      : { label: 'ค่าคำขอ (ปกติ)', amount: lookupFee(bill, 'ค่าคำขอ (ปกติ)') },
-  );
+  if (!exempt) {
+    billItems.push(
+      hasExtraRequest
+        ? { label: 'ค่าคำขอ (ขอใช้จังหวัดอื่น)', amount: lookupFee(bill, 'ค่าคำขอ (ขอใช้จังหวัดอื่น)') }
+        : { label: 'ค่าคำขอ (ปกติ)', amount: lookupFee(bill, 'ค่าคำขอ (ปกติ)') },
+    );
+  }
   if (isOtherProvince) {
     billItems.push({ label: 'ค่าธรรมเนียมอื่นๆ (ขอใช้จังหวัดอื่น)', amount: lookupFee(bill, 'ค่าธรรมเนียมอื่นๆ (ขอใช้จังหวัดอื่น)') });
   }
@@ -125,13 +134,13 @@ export function computeDocumentFees(
   // เลขจากงานสลับเลข (SWAP_*) คิดค่าแผ่นป้ายตามปกติเสมอ (ผู้ใช้ 2026-09-27)
   const includePlate = options.plateNumberOption === 'NONE' || isSwapPlateOption(options.plateNumberOption) || options.includePlateFee;
   if (isMoto) {
-    billItems.push({ label: 'ค่าตรวจสภาพรถ (จยย.)', amount: lookupFee(bill, 'ค่าตรวจสภาพรถ (จยย.)') });
+    if (!exempt) billItems.push({ label: 'ค่าตรวจสภาพรถ (จยย.)', amount: lookupFee(bill, 'ค่าตรวจสภาพรถ (จยย.)') });
     if (includePlate) billItems.push({ label: 'ค่าแผ่นป้ายทะเบียน', amount: lookupFee(bill, 'ค่าแผ่นป้ายทะเบียน') });
-    billItems.push({ label: 'ค่าใบคู่มือจดทะเบียน', amount: lookupFee(bill, 'ค่าใบคู่มือจดทะเบียน') });
+    if (!exempt) billItems.push({ label: 'ค่าใบคู่มือจดทะเบียน', amount: lookupFee(bill, 'ค่าใบคู่มือจดทะเบียน') });
   } else {
-    billItems.push({ label: 'ค่าตรวจสภาพรถ', amount: lookupFee(bill, 'ค่าตรวจสภาพรถ (Step4)') });
+    if (!exempt) billItems.push({ label: 'ค่าตรวจสภาพรถ', amount: lookupFee(bill, 'ค่าตรวจสภาพรถ (Step4)') });
     if (includePlate) billItems.push({ label: 'ค่าแผ่นป้ายทะเบียนรถ', amount: lookupFee(bill, 'ค่าแผ่นป้ายทะเบียนรถ') });
-    billItems.push({ label: 'ค่าใบคู่มือการจดทะเบียน', amount: lookupFee(bill, 'ค่าใบคู่มือการจดทะเบียน') });
+    if (!exempt) billItems.push({ label: 'ค่าใบคู่มือการจดทะเบียน', amount: lookupFee(bill, 'ค่าใบคู่มือการจดทะเบียน') });
     if (options.relocateAddon) billItems.push({ label: 'ค่าย้ายออกต่างจังหวัด', amount: lookupFee(bill, 'ค่าย้ายออกต่างจังหวัด') });
   }
 
@@ -158,7 +167,7 @@ export function computeDocumentFees(
     return { isMoto, isOtherProvince, hasExtraRequest, viaSupplier, billItems, noBillItems: [], billTotal: billOnlyTotal, noBillTotal: 0 };
   }
   if (viaSupplier) {
-    const supplierItems = supplierFeeItems(vehicle.registrationProvince as string, rules.supplierRates);
+    const supplierItems = supplierFeeItems(vehicle.registrationProvince as string, rules.supplierRates, options.supplierInspection !== false);
     return {
       isMoto,
       isOtherProvince,

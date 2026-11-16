@@ -31,6 +31,8 @@ export const DEFAULT_OPTIONS: DocumentSubmissionOptionsInput = {
   relocateAddon: false,
   stopUseRelocateOut: false,
   urgent: false,
+  taxExempt: false,
+  supplierInspection: true,
 };
 
 // ตั้งค่ารายคันในขั้นตรวจทาน - ownerType undefined = ใช้เจ้าของรถเดิม (ถ้ารถยังไม่มีเจ้าของด้วย = ยังไม่ระบุ ยื่นไม่ได้)
