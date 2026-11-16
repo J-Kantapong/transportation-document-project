@@ -5,7 +5,8 @@ import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { matchStatement, parseKbizCsv, StatementFormatError, type StatementInvoice } from './bank-statement.js';
 import { fetchLineContent, type LineMessage } from './line-client.js';
-import { createPrintToken } from './print-link.js';
+import { buildInvoiceLinkMessages, invoiceDownloadUrl, type InvoiceLinkCommand } from './invoice-link.js';
+import { createPrintToken, PRINT_LINK_DAYS } from './print-link.js';
 import { buildConfirmMessage, buildDownloadLinkMessage, buildIssuedMessage, buildStatementMessages, dmy, postbackData, type StatementPostback } from './statement-message.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -193,5 +194,32 @@ export class StatementService {
     const secret = process.env.AUTH_SECRET?.trim();
     if (!origin || !/^https?:\/\//i.test(origin) || !secret) return undefined;
     return `${origin.replace(/\/+$/, '')}/tv?token=${encodeURIComponent(createPrintToken(taxInvoiceId, secret))}`;
+  }
+
+  // ลิงก์ดาวน์โหลดใบวางบิล (ผู้ใช้ 2026-11-16): "บิลล่าสุด" = ใบที่ออกล่าสุด ไม่นับใบที่ยกเลิก · "บิล IV…" = ตามเลข (ใบที่ยกเลิกแล้วก็เปิดได้ มีลายน้ำ)
+  // อ่านอย่างเดียว ไม่แก้ข้อมูล · ลิงก์แสดงราคาในบิล จึงส่งให้เฉพาะเจ้าของ (handleEvents ตอบเฉพาะเจ้าของ) และหมดอายุใน 7 วัน
+  async invoiceLinks(command: InvoiceLinkCommand): Promise<LineMessage[]> {
+    const origin = process.env.FRONTEND_ORIGIN?.trim();
+    const secret = process.env.AUTH_SECRET?.trim();
+    if (!origin || !/^https?:\/\//i.test(origin) || !secret) return [textOf('ยังสร้างลิงก์ไม่ได้: ระบบยังไม่ได้ตั้งค่า FRONTEND_ORIGIN / AUTH_SECRET')];
+    const select = { id: true, invoiceNo: true, issueDate: true, netTotal: true, status: true, customer: { select: { name: true, company: true } } } as const;
+    const found =
+      command.kind === 'latest'
+        ? await this.prisma.invoice.findMany({ where: { status: { not: 'VOID' } }, orderBy: [{ createdAt: 'desc' }, { invoiceNo: 'desc' }], take: command.count, select })
+        : await this.prisma.invoice.findMany({ where: { invoiceNo: { in: command.invoiceNos } }, select });
+    const ordered = command.kind === 'latest' ? found : command.invoiceNos.flatMap((no) => found.filter((i) => i.invoiceNo === no));
+    const missing = command.kind === 'numbers' ? command.invoiceNos.filter((no) => !found.some((i) => i.invoiceNo === no)) : [];
+    const base = origin.replace(/\/+$/, '');
+    return buildInvoiceLinkMessages(
+      ordered.map((i) => ({
+        invoiceNo: i.invoiceNo,
+        customerName: i.customer.company || i.customer.name,
+        issueDate: i.issueDate.toISOString().slice(0, 10),
+        netTotal: Number(i.netTotal),
+        status: i.status,
+        url: invoiceDownloadUrl(base, createPrintToken(i.id, secret, Date.now(), PRINT_LINK_DAYS, 'iv')),
+      })),
+      missing,
+    );
   }
 }

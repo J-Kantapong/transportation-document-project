@@ -138,8 +138,9 @@ export function tokenHasRoles(token: string | null, roles: UserRole[]): boolean 
 
 export const PUBLIC_PATHS = ['/login', '/register'];
 // หน้าที่เปิดได้ทั้งตอนล็อกอินและไม่ล็อกอิน ไม่มีเมนูของระบบ: /tv = ใบกำกับจากลิงก์ที่เลขาส่งในไลน์ (ผู้ใช้ 2026-11-16)
-// สิทธิ์อยู่ที่ token ในลิงก์ ซึ่ง backend ตรวจ (GET /api/secretary/tax-invoice)
-export const OPEN_PATHS = ['/tv'];
+// /iv = ใบวางบิลจากลิงก์ดาวน์โหลดที่เลขาส่งในไลน์ (ผู้ใช้ 2026-11-16)
+// สิทธิ์อยู่ที่ token ในลิงก์ ซึ่ง backend ตรวจ (GET /api/secretary/tax-invoice, GET /api/secretary/invoice)
+export const OPEN_PATHS = ['/tv', '/iv'];
 export const isOpenPath = (pathname: string) => OPEN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 const ENTRY_STAFF: UserRole[] = ['ADMIN', 'STAFF_ENTRY'];
