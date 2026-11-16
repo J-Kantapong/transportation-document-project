@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { accessFor } from '../auth/access-policy.js';
-import { buildInvoiceLinkMessages, invoiceDownloadUrl, parseInvoiceLinkCommand, type InvoiceLinkRow } from './invoice-link.js';
+import { buildInvoiceLinkMessages, buildTaxInvoiceLinkMessages, documentDownloadUrl, invoiceDownloadUrl, parseInvoiceLinkCommand, type InvoiceLinkRow, type TaxInvoiceLinkRow } from './invoice-link.js';
 import { parseNoteCommand } from './notes.js';
 import { createPrintToken, verifyPrintToken } from './print-link.js';
 
 describe('parseInvoiceLinkCommand', () => {
   it('reads "latest" with a default of 2 and a cap of 5', () => {
-    expect(parseInvoiceLinkCommand('บิลล่าสุด')).toEqual({ kind: 'latest', count: 2 });
-    expect(parseInvoiceLinkCommand('ใบวางบิลที่ออกล่าสุด 2 อัน')).toEqual({ kind: 'latest', count: 2 });
-    expect(parseInvoiceLinkCommand('ขอบิลล่าสุด 3 ใบ')).toEqual({ kind: 'latest', count: 3 });
-    expect(parseInvoiceLinkCommand('บิลล่าสุด 20')).toEqual({ kind: 'latest', count: 5 });
-    expect(parseInvoiceLinkCommand('บิลล่าสุด 0')).toEqual({ kind: 'latest', count: 1 });
+    expect(parseInvoiceLinkCommand('บิลล่าสุด')).toEqual({ doc: 'iv', kind: 'latest', count: 2 });
+    expect(parseInvoiceLinkCommand('ใบวางบิลที่ออกล่าสุด 2 อัน')).toEqual({ doc: 'iv', kind: 'latest', count: 2 });
+    expect(parseInvoiceLinkCommand('ขอบิลล่าสุด 3 ใบ')).toEqual({ doc: 'iv', kind: 'latest', count: 3 });
+    expect(parseInvoiceLinkCommand('บิลล่าสุด 20')).toEqual({ doc: 'iv', kind: 'latest', count: 5 });
+    expect(parseInvoiceLinkCommand('บิลล่าสุด 0')).toEqual({ doc: 'iv', kind: 'latest', count: 1 });
   });
 
   it('reads invoice numbers, without duplicates', () => {
-    expect(parseInvoiceLinkCommand('บิล iv2026-155')).toEqual({ kind: 'numbers', invoiceNos: ['IV2026-155'] });
-    expect(parseInvoiceLinkCommand('IV2026-155, IV2026-156 และ IV2026-155')).toEqual({ kind: 'numbers', invoiceNos: ['IV2026-155', 'IV2026-156'] });
+    expect(parseInvoiceLinkCommand('บิล iv2026-155')).toEqual({ doc: 'iv', kind: 'numbers', numbers: ['IV2026-155'] });
+    expect(parseInvoiceLinkCommand('IV2026-155, IV2026-156 และ IV2026-155')).toEqual({ doc: 'iv', kind: 'numbers', numbers: ['IV2026-155', 'IV2026-156'] });
   });
 
   it('leaves other messages to the other commands', () => {
@@ -73,5 +73,69 @@ describe('print token kinds', () => {
     expect(accessFor('/api/secretary/invoice', 'GET')).toBe('PUBLIC');
     expect(accessFor('/api/secretary/invoice/x', 'GET')).toEqual(['ADMIN']);
     expect(accessFor('/api/secretary/invoices', 'GET')).toEqual(['ADMIN']);
+  });
+});
+
+describe('tax invoice links', () => {
+  it('reads the tax invoice commands and keeps them apart from bills', () => {
+    expect(parseInvoiceLinkCommand('ใบกำกับล่าสุด')).toEqual({ doc: 'tv', kind: 'latest', count: 2 });
+    expect(parseInvoiceLinkCommand('ขอใบกำกับภาษีล่าสุด 3 ใบ')).toEqual({ doc: 'tv', kind: 'latest', count: 3 });
+    expect(parseInvoiceLinkCommand('ใบกำกับ tv2026-146')).toEqual({ doc: 'tv', kind: 'numbers', numbers: ['TV2026-146'] });
+    expect(parseInvoiceLinkCommand('TV2026-145 TV2026-146')).toEqual({ doc: 'tv', kind: 'numbers', numbers: ['TV2026-145', 'TV2026-146'] });
+    expect(parseInvoiceLinkCommand('บิลล่าสุด')).toEqual({ doc: 'iv', kind: 'latest', count: 2 });
+    expect(parseInvoiceLinkCommand('TV2026-146 IV2026-155')).toBeNull(); // เลขสองชนิดปนกัน - ไม่เดา
+    expect(parseInvoiceLinkCommand('ใบกำกับ')).toBeNull();
+  });
+
+  const tv = (over: Partial<TaxInvoiceLinkRow> = {}): TaxInvoiceLinkRow => ({
+    taxInvoiceNo: 'TV2026-146',
+    invoiceNo: 'IV2026-159',
+    customerName: 'ลูกค้า ก',
+    issueDate: '2026-11-16',
+    vatRate: 7,
+    feeTotal: 26_580,
+    serviceTotal: 55_860,
+    goodsTotal: 0,
+    vatAmount: 3_910.2,
+    grandTotal: 86_350.2,
+    whtAmount: 1_675.8,
+    receivedAmount: 84_674.4,
+    beforePayment: false,
+    status: 'ISSUED',
+    url: 'https://app.example/tv?token=t',
+    ...over,
+  });
+
+  it('lists the amounts, VAT and withholding tax of each tax invoice', () => {
+    const [t] = textsOf(buildTaxInvoiceLinkMessages([tv()]));
+    expect(t.split('\n')).toEqual([
+      'ใบกำกับภาษี TV2026-146 ลูกค้า ก',
+      'วันที่ 16/11/2026 · บิล IV2026-159',
+      '',
+      'ค่าธรรมเนียม 26,580.00',
+      'ค่าบริการ 55,860.00',
+      'VAT 7% 3,910.20',
+      'รวมทั้งสิ้น 86,350.20',
+      'หัก ณ ที่จ่าย 3% 1,675.80',
+      'ยอดรวม 84,674.40 บาท',
+      '',
+      'ดาวน์โหลด PDF: https://app.example/tv?token=t',
+      '(ลิงก์ใช้ได้ 7 วัน)',
+    ]);
+    // e-WHT 1% และใบที่ไม่มีค่าบริการ (ไม่มีฐานให้คิด %)
+    expect(textsOf(buildTaxInvoiceLinkMessages([tv({ whtAmount: 558.6, receivedAmount: 85_791.6 })]))[0]).toContain('หัก ณ ที่จ่าย 1% 558.60');
+    expect(textsOf(buildTaxInvoiceLinkMessages([tv({ serviceTotal: 0, whtAmount: 50 })]))[0]).toContain('หัก ณ ที่จ่าย 50.00');
+  });
+
+  it('marks no withholding, before-payment, cancelled and custom tax invoices', () => {
+    const [t] = textsOf(buildTaxInvoiceLinkMessages([tv({ whtAmount: 0, receivedAmount: 86_350.2, beforePayment: true, invoiceNo: null, feeTotal: 0, goodsTotal: 100, status: 'CANCELLED' })]));
+    expect(t).toContain('วันที่ 16/11/2026 · ออกก่อนรับเงิน · ยกเลิกแล้ว');
+    expect(t).toContain('หัก ณ ที่จ่าย ไม่มี');
+    expect(t).toContain('ยอดรวม 86,350.20 บาท');
+    expect(t).toContain('ค่าสินค้า 100.00');
+    expect(t).not.toContain('ค่าธรรมเนียม');
+    expect(textsOf(buildTaxInvoiceLinkMessages([], ['TV2026-999']))).toEqual(['ไม่พบเลขใบกำกับ: TV2026-999']);
+    expect(textsOf(buildTaxInvoiceLinkMessages([]))).toEqual(['ยังไม่มีใบกำกับภาษีในระบบ']);
+    expect(documentDownloadUrl('https://app.example', 'tv', 'a.b')).toBe('https://app.example/tv?token=a.b&download=1&openExternalBrowser=1');
   });
 });

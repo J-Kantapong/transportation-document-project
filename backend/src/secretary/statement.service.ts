@@ -5,7 +5,7 @@ import { bangkokToday } from '../overview/overview-calculator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { matchStatement, parseKbizCsv, StatementFormatError, type StatementInvoice } from './bank-statement.js';
 import { fetchLineContent, type LineMessage } from './line-client.js';
-import { buildInvoiceLinkMessages, invoiceDownloadUrl, type InvoiceLinkCommand } from './invoice-link.js';
+import { buildInvoiceLinkMessages, buildTaxInvoiceLinkMessages, documentDownloadUrl, invoiceDownloadUrl, type InvoiceLinkCommand } from './invoice-link.js';
 import { createPrintToken, PRINT_LINK_DAYS } from './print-link.js';
 import { buildConfirmMessage, buildDownloadLinkMessage, buildIssuedMessage, buildStatementMessages, dmy, postbackData, type StatementPostback } from './statement-message.js';
 
@@ -202,14 +202,15 @@ export class StatementService {
     const origin = process.env.FRONTEND_ORIGIN?.trim();
     const secret = process.env.AUTH_SECRET?.trim();
     if (!origin || !/^https?:\/\//i.test(origin) || !secret) return [textOf('ยังสร้างลิงก์ไม่ได้: ระบบยังไม่ได้ตั้งค่า FRONTEND_ORIGIN / AUTH_SECRET')];
+    const base = origin.replace(/\/+$/, '');
+    if (command.doc === 'tv') return this.taxInvoiceLinks(command, base, secret);
     const select = { id: true, invoiceNo: true, issueDate: true, netTotal: true, status: true, customer: { select: { name: true, company: true } } } as const;
     const found =
       command.kind === 'latest'
         ? await this.prisma.invoice.findMany({ where: { status: { not: 'VOID' } }, orderBy: [{ createdAt: 'desc' }, { invoiceNo: 'desc' }], take: command.count, select })
-        : await this.prisma.invoice.findMany({ where: { invoiceNo: { in: command.invoiceNos } }, select });
-    const ordered = command.kind === 'latest' ? found : command.invoiceNos.flatMap((no) => found.filter((i) => i.invoiceNo === no));
-    const missing = command.kind === 'numbers' ? command.invoiceNos.filter((no) => !found.some((i) => i.invoiceNo === no)) : [];
-    const base = origin.replace(/\/+$/, '');
+        : await this.prisma.invoice.findMany({ where: { invoiceNo: { in: command.numbers } }, select });
+    const ordered = command.kind === 'latest' ? found : command.numbers.flatMap((no) => found.filter((i) => i.invoiceNo === no));
+    const missing = command.kind === 'numbers' ? command.numbers.filter((no) => !found.some((i) => i.invoiceNo === no)) : [];
     return buildInvoiceLinkMessages(
       ordered.map((i) => ({
         invoiceNo: i.invoiceNo,
@@ -219,6 +220,59 @@ export class StatementService {
         status: i.status,
         url: invoiceDownloadUrl(base, createPrintToken(i.id, secret, Date.now(), PRINT_LINK_DAYS, 'iv')),
       })),
+      missing,
+    );
+  }
+
+  // ลิงก์ดาวน์โหลดใบกำกับภาษี + สรุปยอด (ผู้ใช้ 2026-11-16 "สรุปยอดมาด้วยพร้อมระบุหัก ณ ที่จ่าย vat เท่าไหร่"): "ใบกำกับล่าสุด" = ใบที่ออกล่าสุด
+  // ไม่นับใบที่ยกเลิก · "ใบกำกับ TV…" = ตามเลข (ใบที่ยกเลิกแล้วก็เปิดได้ มีลายน้ำ) · ยอดอ่านจากใบกำกับตรงๆ ไม่คำนวณใหม่ · อ่านอย่างเดียว
+  private async taxInvoiceLinks(command: InvoiceLinkCommand, base: string, secret: string): Promise<LineMessage[]> {
+    const select = {
+      id: true,
+      taxInvoiceNo: true,
+      issueDate: true,
+      beforePayment: true,
+      customerSnapshot: true,
+      vatRate: true,
+      feeTotal: true,
+      serviceTotal: true,
+      goodsTotal: true,
+      vatAmount: true,
+      grandTotal: true,
+      whtAmount: true,
+      receivedAmount: true,
+      status: true,
+      invoice: { select: { invoiceNo: true } },
+      customer: { select: { name: true, company: true } },
+    } as const;
+    const found =
+      command.kind === 'latest'
+        ? await this.prisma.taxInvoice.findMany({ where: { status: 'ISSUED' }, orderBy: [{ createdAt: 'desc' }, { taxInvoiceNo: 'desc' }], take: command.count, select })
+        : await this.prisma.taxInvoice.findMany({ where: { taxInvoiceNo: { in: command.numbers } }, select });
+    const ordered = command.kind === 'latest' ? found : command.numbers.flatMap((no) => found.filter((t) => t.taxInvoiceNo === no));
+    const missing = command.kind === 'numbers' ? command.numbers.filter((no) => !found.some((t) => t.taxInvoiceNo === no)) : [];
+    return buildTaxInvoiceLinkMessages(
+      ordered.map((t) => {
+        // ชื่อบนใบกำกับ = ชื่อ ณ วันออกใบ (customerSnapshot) ไม่ใช่ชื่อปัจจุบันของลูกค้า
+        const snapshotName = (t.customerSnapshot as { name?: unknown } | null)?.name;
+        return {
+          taxInvoiceNo: t.taxInvoiceNo,
+          invoiceNo: t.invoice?.invoiceNo ?? null,
+          customerName: typeof snapshotName === 'string' && snapshotName.trim() ? snapshotName.trim() : t.customer.company || t.customer.name,
+          issueDate: t.issueDate.toISOString().slice(0, 10),
+          vatRate: Number(t.vatRate),
+          feeTotal: Number(t.feeTotal),
+          serviceTotal: Number(t.serviceTotal),
+          goodsTotal: Number(t.goodsTotal),
+          vatAmount: Number(t.vatAmount),
+          grandTotal: Number(t.grandTotal),
+          whtAmount: Number(t.whtAmount),
+          receivedAmount: Number(t.receivedAmount),
+          beforePayment: t.beforePayment,
+          status: t.status,
+          url: documentDownloadUrl(base, 'tv', createPrintToken(t.id, secret)),
+        };
+      }),
       missing,
     );
   }
