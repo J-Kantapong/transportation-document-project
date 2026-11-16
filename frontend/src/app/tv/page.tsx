@@ -2,23 +2,23 @@
 
 // หน้าเปิดใบกำกับภาษีจากลิงก์ที่เลขาส่งในไลน์ (ผู้ใช้ 2026-11-16) - ไม่ต้องล็อกอิน ใช้ token ในลิงก์ (หมดอายุ 7 วัน)
 // backend: GET /api/secretary/tax-invoice?token= · แสดงเฉพาะใบกำกับใบนั้น ไม่มีเมนูหรือข้อมูลอื่นของระบบ
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// ปุ่มและไฟล์ PDF (รวมแผ่นแชร์บนมือถือ) อยู่ใน DocumentLinkView ใช้ร่วมกับ /iv
+import { useEffect, useMemo, useState } from "react";
+import { DocumentLinkView } from "@/components/DocumentLinkView";
 import type { TaxInvoice } from "@/lib/billing-api";
-import { downloadHtmlAsPdf } from "@/lib/pdf-export";
 import { buildTaxInvoiceHtml, printTaxInvoice } from "@/lib/tax-invoice-print";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
 
 // ชื่อไฟล์ = เลขใบกำกับ + ชื่อลูกค้า (ผู้ใช้ 2026-11-16: ให้รู้ว่าส่งให้ใครโดยไม่ต้องเปิดไฟล์) - ตัดอักขระที่ใช้ในชื่อไฟล์ไม่ได้
 function pdfFileName(t: TaxInvoice): string {
-  const customer = t.customer.name.replace(/[\\/:*?"<>|\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  const customer = t.customer.name.replace(/[\/:*?"<>|\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   return `${t.taxInvoiceNo}${customer ? ` ${customer}` : ""}.pdf`;
 }
 
 export default function TaxInvoiceLinkPage() {
   const [taxInvoice, setTaxInvoice] = useState<TaxInvoice | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("token") ?? "";
@@ -41,29 +41,6 @@ export default function TaxInvoiceLinkPage() {
   // ใบที่ยกเลิกแล้ว buildTaxInvoiceHtml พิมพ์เป็นสำเนามีลายน้ำเอง
   const html = useMemo(() => (taxInvoice ? buildTaxInvoiceHtml(taxInvoice, "original") : ""), [taxInvoice]);
 
-  const savePdf = useCallback(async () => {
-    if (!taxInvoice) return;
-    setBusy(true);
-    try {
-      await downloadHtmlAsPdf(html, pdfFileName(taxInvoice), { orientation: "portrait", marginMm: 12 });
-    } catch {
-      setError("สร้างไฟล์ PDF ไม่สำเร็จ ลองกดปริ้นแทน");
-    } finally {
-      setBusy(false);
-    }
-  }, [taxInvoice, html]);
-
-  // ลิงก์ดาวน์โหลดจากไลน์ (?download=1, ผู้ใช้ 2026-11-16): เปิดแล้วสร้างไฟล์ PDF ให้เองหนึ่งครั้ง ปุ่มยังอยู่เผื่อเบราว์เซอร์กันการดาวน์โหลดอัตโนมัติ
-  const autoDownloaded = useRef(false);
-  useEffect(() => {
-    if (!taxInvoice || autoDownloaded.current) return;
-    if (new URLSearchParams(window.location.search).get("download") !== "1") return;
-    autoDownloaded.current = true;
-    // เลื่อนไปรอบถัดไป: ไม่ตั้ง state ระหว่าง effect และให้ iframe แสดงใบกำกับก่อน
-    const timer = window.setTimeout(() => void savePdf(), 0);
-    return () => window.clearTimeout(timer);
-  }, [taxInvoice, savePdf]);
-
   if (error && !taxInvoice) {
     return (
       <main style={{ padding: 24, maxWidth: 520, margin: "0 auto" }}>
@@ -76,21 +53,12 @@ export default function TaxInvoiceLinkPage() {
   if (!taxInvoice) return <main style={{ padding: 24 }}>กำลังโหลดใบกำกับ…</main>;
 
   return (
-    <main style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
-      <header style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <h1 style={{ fontSize: 18, flex: "1 1 200px", margin: 0 }}>
-          {taxInvoice.taxInvoiceNo} · {taxInvoice.customer.name}
-          {taxInvoice.status === "CANCELLED" ? " (ยกเลิกแล้ว)" : ""}
-        </h1>
-        <button type="button" className="button" onClick={() => printTaxInvoice(taxInvoice, "original")}>
-          ปริ้น
-        </button>
-        <button type="button" className="button" onClick={savePdf} disabled={busy}>
-          {busy ? "กำลังสร้าง PDF…" : "บันทึกเป็น PDF"}
-        </button>
-      </header>
-      {error ? <p role="alert">{error}</p> : null}
-      <iframe title={`ใบกำกับภาษี ${taxInvoice.taxInvoiceNo}`} srcDoc={html} style={{ width: "100%", height: "80vh", border: "1px solid #ddd", background: "#fff" }} />
-    </main>
+    <DocumentLinkView
+      title={`${taxInvoice.taxInvoiceNo} · ${taxInvoice.customer.name}${taxInvoice.status === "CANCELLED" ? " (ยกเลิกแล้ว)" : ""}`}
+      html={html}
+      fileName={pdfFileName(taxInvoice)}
+      frameTitle={`ใบกำกับภาษี ${taxInvoice.taxInvoiceNo}`}
+      onPrint={() => printTaxInvoice(taxInvoice, "original")}
+    />
   );
 }
