@@ -2,7 +2,7 @@
 
 // หน้าเปิดใบกำกับภาษีจากลิงก์ที่เลขาส่งในไลน์ (ผู้ใช้ 2026-11-16) - ไม่ต้องล็อกอิน ใช้ token ในลิงก์ (หมดอายุ 7 วัน)
 // backend: GET /api/secretary/tax-invoice?token= · แสดงเฉพาะใบกำกับใบนั้น ไม่มีเมนูหรือข้อมูลอื่นของระบบ
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TaxInvoice } from "@/lib/billing-api";
 import { downloadHtmlAsPdf } from "@/lib/pdf-export";
 import { buildTaxInvoiceHtml, printTaxInvoice } from "@/lib/tax-invoice-print";
@@ -41,7 +41,7 @@ export default function TaxInvoiceLinkPage() {
   // ใบที่ยกเลิกแล้ว buildTaxInvoiceHtml พิมพ์เป็นสำเนามีลายน้ำเอง
   const html = useMemo(() => (taxInvoice ? buildTaxInvoiceHtml(taxInvoice, "original") : ""), [taxInvoice]);
 
-  async function savePdf() {
+  const savePdf = useCallback(async () => {
     if (!taxInvoice) return;
     setBusy(true);
     try {
@@ -51,7 +51,18 @@ export default function TaxInvoiceLinkPage() {
     } finally {
       setBusy(false);
     }
-  }
+  }, [taxInvoice, html]);
+
+  // ลิงก์ดาวน์โหลดจากไลน์ (?download=1, ผู้ใช้ 2026-11-16): เปิดแล้วสร้างไฟล์ PDF ให้เองหนึ่งครั้ง ปุ่มยังอยู่เผื่อเบราว์เซอร์กันการดาวน์โหลดอัตโนมัติ
+  const autoDownloaded = useRef(false);
+  useEffect(() => {
+    if (!taxInvoice || autoDownloaded.current) return;
+    if (new URLSearchParams(window.location.search).get("download") !== "1") return;
+    autoDownloaded.current = true;
+    // เลื่อนไปรอบถัดไป: ไม่ตั้ง state ระหว่าง effect และให้ iframe แสดงใบกำกับก่อน
+    const timer = window.setTimeout(() => void savePdf(), 0);
+    return () => window.clearTimeout(timer);
+  }, [taxInvoice, savePdf]);
 
   if (error && !taxInvoice) {
     return (
