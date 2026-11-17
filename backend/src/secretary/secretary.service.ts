@@ -12,6 +12,14 @@ import type { LineEvent } from './line-webhook.js';
 import { NotesService } from './notes.service.js';
 import { parseNoteCommand } from './notes.js';
 import { buildMorningMessage } from './morning-message.js';
+import {
+  ambiguousProvinceText,
+  parseProvinceRateCommand,
+  provinceRateTableTexts,
+  provinceRateText,
+  type ProvinceRateCommand,
+  type SupplierCostRow,
+} from './province-rates.js';
 import { dueReminders, reminderMessage, remindersText } from './reminders.js';
 import type { Slot } from './run-key.js';
 import { helpText, overdueText, spendText, stuckText, textMessage, withQuickReply } from './replies.js';
@@ -111,6 +119,24 @@ export class SecretaryService {
     }
   }
 
+  // เรทจดต่างจังหวัด (ผู้ใช้ 2026-11-17): เรทเสนอ + ต้องนำรถไปตรวจไหม จาก province-rates.ts · ต้นทุนซับอ่านจากตารางราคาซับสด
+  async provinceRates(command: ProvinceRateCommand): Promise<LineMessage[]> {
+    if (command.kind === 'ambiguous') return [textMessage(ambiguousProvinceText(command.candidates))];
+    const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    const found = await this.prisma.supplierProvinceRate.findMany(command.kind === 'province' ? { where: { province: command.province } } : undefined);
+    const rows: SupplierCostRow[] = found.map((r) => ({
+      province: r.province,
+      accepts: r.accepts,
+      serviceFee: num(r.serviceFee),
+      channelFee: num(r.channelFee),
+      inspectionFee: num(r.inspectionFee),
+      plateSwapFee: num(r.plateSwapFee),
+      plateSwapNote: r.plateSwapNote,
+    }));
+    if (command.kind === 'province') return [textMessage(provinceRateText(command.province, rows[0]))];
+    return provinceRateTableTexts(rows).map(textMessage);
+  }
+
   // ข้อความที่ผู้ใช้พิมพ์ในแชตกับบอท (LINE ส่งมาที่ webhook) - ตอบเฉพาะเจ้าของ คนอื่นเงียบ ไม่ตอบอะไรเลย
   // ไม่ throw: webhook ตอบ LINE ไปแล้ว งานนี้ทำต่อเบื้องหลัง
   async handleEvents(events: LineEvent[]): Promise<void> {
@@ -133,8 +159,11 @@ export class SecretaryService {
           // "บิลล่าสุด" / "บิล IV…" = ลิงก์ดาวน์โหลดใบวางบิล (ผู้ใช้ 2026-11-16) - รูปแบบเฉพาะ (ทั้งข้อความต้องตรง) จึงมาก่อนตู้ข้อความ
           // ไม่งั้น "ขอบิลล่าสุด" จะไปตกคำสั่ง "ขอ" ของตู้ข้อความ
           const invoiceLink = parseInvoiceLinkCommand(typed);
-          const note = invoiceLink ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
+          // "เรทจังหวัด" / "เรท ภูเก็ต" (ผู้ใช้ 2026-11-17) - ก่อนตู้ข้อความ ไม่งั้น "ขอนแก่น" จะไปตกคำสั่ง "ขอ"
+          const provinceRate = invoiceLink ? null : parseProvinceRateCommand(typed);
+          const note = invoiceLink || provinceRate ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
           if (invoiceLink) messages = await this.statements.invoiceLinks(invoiceLink);
+          else if (provinceRate) messages = await this.provinceRates(provinceRate);
           else if (note) messages = await this.notes.run(note);
           else messages = await this.answer(parseCommand(typed));
         }
