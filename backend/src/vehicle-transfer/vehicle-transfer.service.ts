@@ -22,7 +22,8 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-ex
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
-import { calculateTransferCarNoBill, calculateTransferMotoFees } from './vehicle-transfer-fee.js';
+import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
+import { calculateTransferCarNoBill, calculateTransferMotoFees, defaultTransferContribution, TRANSFER_DEFAULT_PROVINCE, transferUrgentAmount } from './vehicle-transfer-fee.js';
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตา/ขั้นตอนเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง (ไม่ผูกตาราง Vehicle) รถยนต์ + มอเตอร์ไซค์รวมกัน
 // 2 แบบ: OWNER = โอนตามผู้ถือกรรมสิทธิ์ (ไม่มีตรวจรถ) / INSPECTION = โอนตรวจรถ (ตรวจรถแยกจากคิวตรวจรถของรถจดใหม่)
@@ -60,6 +61,7 @@ export interface VehicleTransferRow {
   dutyAmount: string; // ค่าอากร - แยกต่างหาก ไม่รวมใน No Bill และไม่นับในยอดรวม
   useRequest: boolean; // โอนขอใช้ (มอเตอร์ไซค์)
   urgent: boolean; // งานด่วน
+  submitProvince: string | null; // จังหวัดที่ยื่น (ผู้ใช้ 2026-11-18) - null = งานก่อนมีช่องนี้
   fineAmount: string; // ค่าปรับ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
   inspectionResult: InspectionResult | null;
@@ -92,6 +94,8 @@ export interface CreateVehicleTransferDto {
   submitDate?: unknown;
   useRequest?: unknown; // โอนขอใช้ (มอเตอร์ไซค์ - ค่าเริ่มต้น false = โอนปกติ)
   urgent?: unknown; // งานด่วน (ทั้งสองประเภทรถ)
+  submitProvince?: unknown; // จังหวัดที่ยื่น - ไม่ส่ง = กรุงเทพมหานคร
+  contribution?: unknown; // ลงขัน (No Bill) - ไม่ส่ง = อัตราตั้งต้นของจังหวัด / จังหวัดที่ยังไม่มีอัตราต้องส่ง (0 ได้)
   fineAmount?: unknown; // ค่าปรับ (มอเตอร์ไซค์ - ว่าง = 0)
   billTotal?: unknown; // Bill - รถยนต์เท่านั้น (บังคับ) มอเตอร์ไซค์ backend คิดเอง / No Bill ทั้งสองประเภท backend คิดเอง ไม่รับยอดจากหน้าเว็บ
 }
@@ -109,6 +113,8 @@ export interface UpdateVehicleTransferDto {
   submitDate?: unknown;
   useRequest?: unknown;
   urgent?: unknown;
+  submitProvince?: unknown;
+  contribution?: unknown;
   fineAmount?: unknown;
   billTotal?: unknown;
   noBillTotal?: unknown;
@@ -173,6 +179,7 @@ interface FeeSnapshot {
 interface FeeInput {
   useRequest: boolean;
   urgent: boolean;
+  contribution?: number; // ลงขัน - ไม่ส่ง = อัตรากรุงเทพฯ
   fineAmount: number;
   billTotal?: unknown; // รถยนต์เท่านั้น
 }
@@ -183,7 +190,7 @@ const CAR_NO_RATE_ERROR = 'รถยนต์ยังไม่มีอัต�
 
 export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInput): FeeSnapshot {
   if (vehicleClass === 'MOTO') {
-    const fees = calculateTransferMotoFees({ useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount });
+    const fees = calculateTransferMotoFees({ useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
     return {
       billTotal: fees.billTotal,
       noBillTotal: fees.noBillTotal,
@@ -196,12 +203,27 @@ export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInp
   if (input.useRequest || input.fineAmount > 0) throw new BadRequestException({ error: CAR_NO_RATE_ERROR });
   return {
     billTotal: requiredAmount(input.billTotal, 'Bill'),
-    noBillTotal: calculateTransferCarNoBill({ urgent: input.urgent }).noBillTotal,
+    noBillTotal: calculateTransferCarNoBill({ urgent: input.urgent, contribution: input.contribution }).noBillTotal,
     dutyAmount: 0,
     useRequest: false,
     urgent: input.urgent,
     fineAmount: 0,
   };
+}
+
+// จังหวัดที่ยื่น - ต้องเป็นชื่อในรายการ 77 จังหวัด / ไม่ส่ง = undefined
+function parseSubmitProvince(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'string' && (PROVINCES as readonly string[]).includes(value.trim())) return value.trim();
+  throw new BadRequestException({ error: 'จังหวัดที่ยื่นไม่ถูกต้อง' });
+}
+
+// ลงขันของงาน: ที่พนักงานกรอก (0 ได้ = ไม่เสีย) หรืออัตราตั้งต้นของจังหวัด - จังหวัดที่ยังไม่มีอัตราต้องกรอก (ผู้ใช้ 2026-11-18)
+function resolveContribution(vehicleClass: TransferVehicleClass, province: string | null, value: unknown): number {
+  if (!(value === undefined || value === null || (typeof value === 'string' && !value.trim()))) return requiredAmount(value, 'ลงขัน');
+  const fallback = defaultTransferContribution(vehicleClass, province);
+  if (fallback === null) throw new BadRequestException({ error: `กรุณากรอกลงขัน - จังหวัด${province}ยังไม่มีอัตรา (ไม่เสียใส่ 0)` });
+  return fallback;
 }
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
@@ -234,6 +256,7 @@ interface TransferRecord {
   dutyAmount: Prisma.Decimal | number;
   useRequest: boolean;
   urgent: boolean;
+  submitProvince?: string | null;
   fineAmount: Prisma.Decimal | number;
   inspectionSentDate: Date | null;
   inspectionResult: string | null;
@@ -266,6 +289,7 @@ export function serializeTransfer(row: TransferRecord): VehicleTransferRow {
     dutyAmount: String(row.dutyAmount),
     useRequest: row.useRequest,
     urgent: row.urgent,
+    submitProvince: row.submitProvince ?? null,
     fineAmount: String(row.fineAmount),
     inspectionSentDate: isoDate(row.inspectionSentDate),
     inspectionResult: row.inspectionResult === 'PASS' || row.inspectionResult === 'FAIL' ? row.inspectionResult : null,
@@ -346,15 +370,17 @@ export class VehicleTransferService {
     const plateNumber = requiredText(dto?.plateNumber, 'เลขทะเบียน', 10);
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
+    const submitProvince = parseSubmitProvince(dto?.submitProvince) ?? TRANSFER_DEFAULT_PROVINCE;
     const fees = feeSnapshotFor(vehicleClass, {
       useRequest: parseFlag(dto?.useRequest, 'โอนขอใช้'),
       urgent: parseFlag(dto?.urgent, 'งานด่วน'),
+      contribution: resolveContribution(vehicleClass, submitProvince, dto?.contribution),
       fineAmount: parseFine(dto?.fineAmount),
       billTotal: dto?.billTotal,
     });
 
     const row = await this.prisma.vehicleTransfer.create({
-      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, ...fees },
+      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, submitProvince, ...fees },
       include: transferInclude,
     });
     return { transfer: serializeTransfer(row) };
@@ -569,6 +595,8 @@ export class VehicleTransferService {
       throw new BadRequestException({ error: 'วันที่ยื่นต้องไม่หลังวันที่ส่งตรวจ' });
     }
 
+    const submitProvince = has('submitProvince') ? (parseSubmitProvince(dto.submitProvince) ?? null) : (existing.submitProvince ?? null);
+
     let returnedDate = existing.returnedDate;
     if (has('returnedDate')) {
       if (!existing.returnedDate) {
@@ -596,7 +624,8 @@ export class VehicleTransferService {
       plateCategory: has('plateCategory') ? requiredText(dto.plateCategory, 'หมวดทะเบียน', 10) : existing.plateCategory,
       plateNumber: has('plateNumber') ? requiredText(dto.plateNumber, 'เลขทะเบียน', 10) : existing.plateNumber,
       submitDate,
-      ...this.updatedFees(existing, vehicleClass, dto, has),
+      submitProvince,
+      ...this.updatedFees(existing, vehicleClass, submitProvince, dto, has),
       returnedDate,
     };
     const changes: AuditChanges = diffChanges(existing, next);
@@ -615,10 +644,11 @@ export class VehicleTransferService {
     return this.reload(id);
   }
 
-  // ค่าใช้จ่ายหลังแก้: ไม่ได้แตะประเภทรถ/ขอใช้/ด่วน/ค่าปรับ/ยอดที่กรอก = เก็บ snapshot เดิม (แก้ชื่อผิดต้องไม่ทำให้ยอดเก่าเปลี่ยนตามอัตราใหม่)
+  // ค่าใช้จ่ายหลังแก้: ไม่ได้แตะประเภทรถ/ขอใช้/ด่วน/ค่าปรับ/จังหวัด/ลงขัน/ยอดที่กรอก = เก็บ snapshot เดิม (แก้ชื่อผิดต้องไม่ทำให้ยอดเก่าเปลี่ยนตามอัตราใหม่)
   private updatedFees(
     existing: TransferRecord,
     vehicleClass: TransferVehicleClass,
+    submitProvince: string | null,
     dto: UpdateVehicleTransferDto,
     has: (key: keyof UpdateVehicleTransferDto) => boolean,
   ): FeeSnapshot {
@@ -634,19 +664,29 @@ export class VehicleTransferService {
     const useRequest = has('useRequest') ? parseFlag(dto.useRequest, 'โอนขอใช้') : snapshot.useRequest;
     const urgent = has('urgent') ? parseFlag(dto.urgent, 'งานด่วน') : snapshot.urgent;
     const fineAmount = has('fineAmount') ? parseFine(dto.fineAmount) : snapshot.fineAmount;
+    // ลงขันเดิม = No Bill เดิมหักด่วนเพิ่ม · กรอกมา = ใช้ตามนั้น · เปลี่ยนจังหวัด/ประเภทรถโดยไม่กรอก = อัตราตั้งต้นของจังหวัดใหม่
+    const existingContribution = Math.max(0, snapshot.noBillTotal - transferUrgentAmount(existing.vehicleClass as TransferVehicleClass, snapshot.urgent));
+    const provinceChanged = submitProvince !== (existing.submitProvince ?? null);
+    const contribution = has('contribution')
+      ? resolveContribution(vehicleClass, submitProvince, dto.contribution)
+      : classChanged || provinceChanged
+        ? resolveContribution(vehicleClass, submitProvince, undefined)
+        : existingContribution;
+    const contributionSame = contribution === existingContribution;
     if (vehicleClass === 'MOTO') {
-      const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount;
-      return !classChanged && same ? snapshot : feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount });
+      const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
+      return !classChanged && same ? snapshot : feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution });
     }
     // รถยนต์: ขอใช้/ค่าปรับยังไม่มีอัตรา / No Bill (ลงขัน 100 + ด่วน 100) คิดใหม่เมื่อย้ายมาจากมอเตอร์ไซค์หรือเปลี่ยนติ๊กด่วนเท่านั้น
     // ย้ายมาจากมอเตอร์ไซค์ต้องกรอก Bill ใหม่เอง / แก้เฉพาะ Bill ที่กรอก No Bill เดิมคงไว้
     if ((has('useRequest') && useRequest) || (has('fineAmount') && fineAmount > 0)) throw new BadRequestException({ error: CAR_NO_RATE_ERROR });
-    if (!classChanged && urgent === snapshot.urgent) {
+    if (!classChanged && urgent === snapshot.urgent && contributionSame) {
       return has('billTotal') ? { ...snapshot, billTotal: requiredAmount(dto.billTotal, 'Bill') } : snapshot;
     }
     return feeSnapshotFor('CAR', {
       useRequest: false,
       urgent,
+      contribution,
       fineAmount: 0,
       billTotal: has('billTotal') ? dto.billTotal : classChanged ? undefined : snapshot.billTotal,
     });
@@ -704,6 +744,7 @@ export class VehicleTransferService {
           dutyAmount: existing.dutyAmount,
           useRequest: existing.useRequest,
           urgent: existing.urgent,
+          submitProvince: existing.submitProvince ?? null,
           fineAmount: existing.fineAmount,
           inspectionSentDate: existing.inspectionSentDate,
           inspectionResult: existing.inspectionResult,

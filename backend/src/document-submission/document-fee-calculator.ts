@@ -11,6 +11,8 @@ import { isSupplierProvince, supplierFeeItems, type SupplierRateRow } from './su
 // มอเตอร์ไซค์ที่จดสมุทรปราการ (รย.12 / รย.17) ลงขัน 100 บาท แทน 40 ของกรุงเทพฯ (ผู้ใช้ 2026-10-08) - แถวใน FeeMotorcycleNoBillParam
 const SAMUT_PRAKAN = 'สมุทรปราการ';
 export const MOTO_SAMUT_PRAKAN_NO_BILL_KEY = 'ลงขัน - จดสมุทรปราการ';
+// รถยนต์ที่จดสมุทรปราการ ลงขัน 200 บาท ทุกประเภทรถ แทน 40 ของกรุงเทพฯ (ผู้ใช้ 2026-11-17) - แถวใน FeeCarNoBillParam
+export const CAR_SAMUT_PRAKAN_NO_BILL_KEY = 'ลงขัน - จดสมุทรปราการ';
 
 // SWAP_NORMAL / SWAP_AUCTION = "มีคนทำสลับเลขมาให้" (ผู้ใช้ 2026-09-27): คนอื่นทำสลับเลขแล้วส่งเลขมาให้ แผ่นป้ายขาวดำ / ประมูล
 // ต้องกรอกหมวด+เลข ไม่มีค่าขอใช้เลข คิดค่าแผ่นป้ายตามปกติ และไม่นับเป็นคำขอเพิ่ม (ค่าคำขอ/ค่าอากรตามปกติ) - รถยนต์เท่านั้น
@@ -201,8 +203,13 @@ export function computeDocumentFees(
   } else {
     // ลงขันรถยนต์แปรผันตามประเภทรถ (vehicle.body) จริง ไม่ใช่ราคาเดียวกันทุกประเภทแบบที่ mockup สมมติไว้
     // ตอน demo - คีย์คือ "ลงขัน - " + ประเภทรถเป๊ะๆ (ดู FeeCarNoBillParam ใน seed.ts)
+    // จดที่สมุทรปราการ (ออฟฟิศจดเอง): ลงขัน 200 บาท ทุกประเภทรถ (ผู้ใช้ 2026-11-17)
     const key = `ลงขัน - ${vehicle.body ?? ''}`;
-    noBillItems.push({ label: `ลงขัน (${vehicle.body ?? '-'})`, amount: lookupFee(noBill, key) });
+    noBillItems.push(
+      vehicle.registrationProvince === SAMUT_PRAKAN
+        ? { label: 'ลงขัน (จดสมุทรปราการ)', amount: lookupFee(noBill, CAR_SAMUT_PRAKAN_NO_BILL_KEY) }
+        : { label: `ลงขัน (${vehicle.body ?? '-'})`, amount: lookupFee(noBill, key) },
+    );
   }
   if (options.urgent) {
     noBillItems.push(

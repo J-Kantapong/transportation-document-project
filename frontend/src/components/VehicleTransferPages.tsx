@@ -6,7 +6,16 @@ import { api } from "@/lib/api";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht, type FeeItem } from "@/lib/plate-swap-fee";
-import { calculateTransferCarNoBill, calculateTransferMotoFees, TRANSFER_CAR_URGENT_ITEM, TRANSFER_MOTO_URGENT_ITEM } from "@/lib/vehicle-transfer-fee";
+import {
+  calculateTransferCarNoBill,
+  calculateTransferMotoFees,
+  defaultTransferContribution,
+  TRANSFER_CAR_URGENT_ITEM,
+  TRANSFER_DEFAULT_PROVINCE,
+  TRANSFER_MOTO_URGENT_ITEM,
+  transferUrgentAmount,
+} from "@/lib/vehicle-transfer-fee";
+import { PROVINCES } from "@/lib/vehicle-reference-data";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   TRANSFER_TYPE_LABEL,
@@ -126,6 +135,8 @@ interface FormState {
   billTotal: string; // รถยนต์ - Bill กรอกเอง
   useRequest: boolean; // มอเตอร์ไซค์ - โอนขอใช้ (false = โอนปกติ)
   urgent: boolean; // งานด่วน (ทั้งสองประเภทรถ)
+  submitProvince: string; // จังหวัดที่ยื่น (ผู้ใช้ 2026-11-18)
+  contribution: string | null; // ลงขัน - null = ยังไม่แก้ ใช้อัตราตั้งต้นของจังหวัด (ดู contributionText)
   fineAmount: string; // มอเตอร์ไซค์ - ค่าปรับ
 }
 
@@ -142,6 +153,8 @@ const EMPTY_FORM: FormState = {
   billTotal: "",
   useRequest: false,
   urgent: false,
+  submitProvince: TRANSFER_DEFAULT_PROVINCE,
+  contribution: null,
   fineAmount: "",
 };
 
@@ -184,6 +197,42 @@ function FeeLines({ title, items, total }: { title: string; items: FeeItem[]; to
   );
 }
 
+// ลงขันที่แสดง/ส่ง: ที่พนักงานแก้ไว้ หรืออัตราตั้งต้นของจังหวัด - จังหวัดที่ยังไม่มีอัตรา = ว่าง ต้องกรอกเอง (0 ได้)
+function contributionText(form: FormState): string {
+  if (form.contribution !== null) return form.contribution;
+  if (!form.vehicleClass) return "";
+  const fallback = defaultTransferContribution(form.vehicleClass, form.submitProvince);
+  return fallback === null ? "" : String(fallback);
+}
+
+// จังหวัดที่ยื่น + ลงขัน (ผู้ใช้ 2026-11-18: แต่ละจังหวัดราคาไม่เท่ากัน บางทีไม่เสีย) - เปลี่ยนจังหวัด = เติมอัตราตั้งต้นใหม่
+function ProvinceContributionFields({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
+  const noRate = !!form.vehicleClass && defaultTransferContribution(form.vehicleClass, form.submitProvince) === null;
+  return (
+    <>
+      <label className="field" style={{ minWidth: 200 }}>
+        จังหวัดที่ยื่น *
+        <select value={form.submitProvince} onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}>
+          {PROVINCES.map((province) => (
+            <option key={province} value={province}>
+              {province}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field" style={{ minWidth: 200 }}>
+        ลงขัน (บาท) *
+        <input
+          value={contributionText(form)}
+          onChange={(e) => onChange({ contribution: moneyOnly(e.target.value) })}
+          inputMode="decimal"
+          placeholder={noRate ? "กรอกเอง - ไม่เสียใส่ 0" : "0"}
+        />
+      </label>
+    </>
+  );
+}
+
 function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
   if (!form.vehicleClass) {
     return (
@@ -194,24 +243,25 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
     );
   }
   if (form.vehicleClass === "CAR") {
-    const carNoBill = calculateTransferCarNoBill({ urgent: form.urgent });
+    const carNoBill = calculateTransferCarNoBill({ urgent: form.urgent, contribution: Number(contributionText(form)) || 0 });
     const bill = Number(form.billTotal) || 0;
     return (
       <>
         <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
-        {/* รถยนต์: No Bill คิดเอง (ลงขัน 100 + ด่วน 100) / Bill ยังไม่มีอัตรา กรอกเอง (ผู้ใช้ 2026-10-02) */}
+        {/* รถยนต์: No Bill = ลงขันตามจังหวัดที่ยื่น + ด่วน 100 / Bill ยังไม่มีอัตรา กรอกเอง (ผู้ใช้ 2026-10-02) */}
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label className="field" style={{ minWidth: 200 }}>
             Bill (บาท) *
             <input value={form.billTotal} onChange={(e) => onChange({ billTotal: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="0" />
           </label>
+          <ProvinceContributionFields form={form} onChange={onChange} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
             <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
             งานด่วน (+{formatBaht(TRANSFER_CAR_URGENT_ITEM.amount)} ใน No Bill)
           </label>
         </div>
         <p className="muted" style={{ margin: "6px 0 12px" }}>
-          รถยนต์ยังไม่มีอัตรา Bill - กรอกเอง (ไม่มีให้ใส่ 0) ส่วน No Bill ระบบคิดให้
+          รถยนต์ยังไม่มีอัตรา Bill - กรอกเอง (ไม่มีให้ใส่ 0) · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
         </p>
         <div className="customer-grid">
           <FeeLines title="No Bill" items={carNoBill.noBillItems} total={carNoBill.noBillTotal} />
@@ -223,7 +273,7 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
       </>
     );
   }
-  const fees = calculateTransferMotoFees({ useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0 });
+  const fees = calculateTransferMotoFees({ useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0, contribution: Number(contributionText(form)) || 0 });
   return (
     <>
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
@@ -243,9 +293,10 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
           <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
           งานด่วน (+{formatBaht(TRANSFER_MOTO_URGENT_ITEM.amount)} ใน No Bill)
         </label>
+        <ProvinceContributionFields form={form} onChange={onChange} />
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
-        ค่าปรับใส่เมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก
+        ค่าปรับใส่เมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
       </p>
       <div className="customer-grid">
         <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
@@ -269,11 +320,12 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
   );
 }
 
-// ค่าใช้จ่ายที่ส่ง backend: มอเตอร์ไซค์ส่งตัวเลือก (backend คิดยอด) / รถยนต์ส่ง Bill ที่กรอก + ติ๊กด่วน (backend คิด No Bill)
+// ค่าใช้จ่ายที่ส่ง backend: มอเตอร์ไซค์ส่งตัวเลือก (backend คิดยอด) / รถยนต์ส่ง Bill ที่กรอก + ติ๊กด่วน / ทั้งคู่ส่งจังหวัดที่ยื่น + ลงขัน (backend รวม No Bill)
 function feePayload(form: FormState) {
+  const province = { submitProvince: form.submitProvince, contribution: contributionText(form) };
   return form.vehicleClass === "MOTO"
-    ? { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount }
-    : { billTotal: form.billTotal, urgent: form.urgent };
+    ? { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount, ...province }
+    : { billTotal: form.billTotal, urgent: form.urgent, ...province };
 }
 
 function VehicleFormFields({
@@ -318,7 +370,7 @@ function VehicleFormFields({
         {/* รถยนต์/มอเตอร์ไซค์รวมกันในหน้าเดียว (ผู้ใช้ 2026-10-02) - ราคาต่างกันจึงต้องระบุประเภทรถทุกงาน */}
         <label className="field" style={{ minWidth: 200 }}>
           ประเภทรถ *
-          <select value={form.vehicleClass} onChange={(e) => onChange({ vehicleClass: e.target.value as TransferVehicleClass | "" })}>
+          <select value={form.vehicleClass} onChange={(e) => onChange({ vehicleClass: e.target.value as TransferVehicleClass | "", contribution: null })}>
             <option value="">เลือกประเภทรถ</option>
             {classOptions.map((c) => (
               <option key={c} value={c}>
@@ -441,6 +493,9 @@ function EditDialog({
     billTotal: String(Number(item.billTotal)),
     useRequest: item.useRequest,
     urgent: item.urgent,
+    // งานก่อนมีช่องจังหวัด (null) แสดงเป็นกรุงเทพมหานคร · ลงขันเดิม = No Bill หักด่วนเพิ่ม (คงยอดเดิมไว้จนกว่าจะแก้)
+    submitProvince: item.submitProvince ?? TRANSFER_DEFAULT_PROVINCE,
+    contribution: String(Math.max(0, Number(item.noBillTotal) - transferUrgentAmount(item.vehicleClass, item.urgent))),
     fineAmount: Number(item.fineAmount) > 0 ? String(Number(item.fineAmount)) : "",
   });
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
@@ -722,6 +777,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
                         {CLASS_LABEL[item.vehicleClass]}
                         {item.useRequest && <div className="sub">โอนขอใช้</div>}
                         {item.urgent && <div className="sub">งานด่วน</div>}
+                        {item.submitProvince && item.submitProvince !== TRANSFER_DEFAULT_PROVINCE && <div className="sub">ยื่นที่{item.submitProvince}</div>}
                       </td>
                       <td>{plateText(item)}</td>
                       <td>

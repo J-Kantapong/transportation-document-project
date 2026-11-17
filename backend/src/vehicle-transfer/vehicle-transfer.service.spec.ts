@@ -26,6 +26,7 @@ function row(overrides: Record<string, unknown> = {}) {
     dutyAmount: 0,
     useRequest: false,
     urgent: false,
+    submitProvince: null,
     fineAmount: 0,
     inspectionSentDate: null,
     inspectionResult: null,
@@ -189,6 +190,24 @@ describe('VehicleTransferService.create - ค่าใช้จ่ายมอ�
     expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 305, noBillTotal: 110, dutyAmount: 20, urgent: true, fineAmount: 200 });
     await svc.create({ ...motoDto, useRequest: 'true', urgent: true, fineAmount: '50.5' });
     expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 180.5, noBillTotal: 110, dutyAmount: 40 });
+  });
+
+  // ผู้ใช้ 2026-11-17/18: ลงขันตามจังหวัดที่ยื่น - สมุทรปราการ 100 / จังหวัดอื่นกรอกเอง (0 ได้) / แก้อัตราตั้งต้นได้
+  it('ลงขันตามจังหวัดที่ยื่น: ไม่ส่งจังหวัด = กรุงเทพฯ 60 / สมุทรปราการ 100 / ตากต้องกรอก (0 ได้) / กรอกทับอัตราตั้งต้นได้', async () => {
+    const { svc, create } = service(null);
+    await svc.create({ ...motoDto });
+    expect(create.mock.calls[0][0].data).toMatchObject({ noBillTotal: 60, submitProvince: 'กรุงเทพมหานคร' });
+    await svc.create({ ...motoDto, submitProvince: 'สมุทรปราการ', urgent: true });
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 105, noBillTotal: 150, dutyAmount: 20, submitProvince: 'สมุทรปราการ' });
+    await expect(svc.create({ ...motoDto, submitProvince: 'ตาก' })).rejects.toMatchObject({ status: 400 });
+    await svc.create({ ...motoDto, submitProvince: 'ตาก', contribution: '0' });
+    expect(create.mock.calls[2][0].data).toMatchObject({ noBillTotal: 0, submitProvince: 'ตาก' });
+    await svc.create({ ...motoDto, submitProvince: 'ตาก', contribution: '150' });
+    expect(create.mock.calls[3][0].data).toMatchObject({ noBillTotal: 150 });
+    await svc.create({ ...motoDto, contribution: '80' });
+    expect(create.mock.calls[4][0].data).toMatchObject({ noBillTotal: 80 });
+    await expect(svc.create({ ...motoDto, submitProvince: 'ไม่มีจังหวัดนี้' })).rejects.toMatchObject({ status: 400 });
+    await expect(svc.create({ ...motoDto, contribution: '-5' })).rejects.toMatchObject({ status: 400 });
   });
 
   it('ยอดที่ส่งมาจากหน้าเว็บถูกเมิน - มอเตอร์ไซค์คิดจากอัตราเสมอ', async () => {

@@ -29,6 +29,7 @@ function baseRules(): DocumentFeeRuleSet {
       { key: 'ค่าอากร (ทำเพิ่มเติมเกิน 1 รายการ)', amount: 30 },
       { key: 'ลงขัน - รย.1-เก๋ง 2 ตอน', amount: 40 },
       { key: 'ลงขัน - รย.1-นั่ง 2 ตอน', amount: 40 },
+      { key: 'ลงขัน - จดสมุทรปราการ', amount: 200 },
       { key: 'งานด่วนเพิ่ม (ต่อคัน)', amount: 100 },
     ],
     motoBill: [
@@ -149,6 +150,20 @@ describe('computeDocumentFees - ลงขันรถยนต์ lookup ตา�
   it('รย.1-นั่ง 2 ตอน -> ลงขัน 40', () => {
     const result = computeDocumentFees(carVehicle({ body: 'รย.1-นั่ง 2 ตอน' }), baseOptions(), baseRules());
     expect(result.noBillItems.find((i) => i.label.includes('ลงขัน'))?.amount).toBe(40);
+  });
+});
+
+// ผู้ใช้ 2026-11-17: จดที่สมุทรปราการ ลงขันรถยนต์ 200 / มอเตอร์ไซค์ 100
+describe('computeDocumentFees - ลงขันจดสมุทรปราการ', () => {
+  const sp = { registrationProvince: 'สมุทรปราการ', ownerProvince: 'สมุทรปราการ' };
+  const share = (r: { noBillItems: { label: string; amount: number }[] }) => r.noBillItems.find((i) => i.label.includes('ลงขัน'))?.amount;
+  it('รถยนต์ 200 ทุกประเภทรถ + ด่วนเพิ่มตามเดิม', () => {
+    expect(share(computeDocumentFees(carVehicle(sp), baseOptions(), baseRules()))).toBe(200);
+    expect(share(computeDocumentFees(carVehicle({ ...sp, body: 'รย.1-นั่ง 2 ตอน' }), baseOptions(), baseRules()))).toBe(200);
+    expect(computeDocumentFees(carVehicle(sp), baseOptions({ urgent: true }), baseRules()).noBillTotal).toBe(10 + 200 + 100);
+  });
+  it('มอเตอร์ไซค์ 100', () => {
+    expect(share(computeDocumentFees(motoVehicle(sp), baseOptions(), baseRules()))).toBe(100);
   });
 });
 

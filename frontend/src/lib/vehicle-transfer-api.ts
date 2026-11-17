@@ -48,6 +48,7 @@ export interface VehicleTransfer {
   dutyAmount: string; // ค่าอากร - แยกแสดง ไม่นับในยอดรวม
   useRequest: boolean; // โอนขอใช้ (มอเตอร์ไซค์)
   urgent: boolean; // งานด่วน (มอเตอร์ไซค์)
+  submitProvince: string | null; // จังหวัดที่ยื่น - null = งานก่อนมีช่องนี้
   fineAmount: string; // ค่าปรับ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
   inspectionResult: InspectionResult | null;
@@ -76,6 +77,8 @@ export interface CreateVehicleTransferInput {
   // มอเตอร์ไซค์ส่ง useRequest / urgent / fineAmount รถยนต์ส่ง billTotal / urgent
   useRequest?: boolean;
   urgent?: boolean;
+  submitProvince?: string; // จังหวัดที่ยื่น (ไม่ส่ง = กรุงเทพมหานคร)
+  contribution?: string; // ลงขัน - ว่าง = อัตราตั้งต้นของจังหวัด / จังหวัดที่ยังไม่มีอัตราต้องกรอก (0 ได้)
   fineAmount?: string;
   billTotal?: string;
 }
@@ -93,6 +96,8 @@ export interface UpdateVehicleTransferInput {
   submitDate: string;
   useRequest?: boolean;
   urgent?: boolean;
+  submitProvince?: string; // จังหวัดที่ยื่น (ไม่ส่ง = กรุงเทพมหานคร)
+  contribution?: string; // ลงขัน - ว่าง = อัตราตั้งต้นของจังหวัด / จังหวัดที่ยังไม่มีอัตราต้องกรอก (0 ได้)
   fineAmount?: string;
   billTotal?: string;
   returnedDate?: string;
