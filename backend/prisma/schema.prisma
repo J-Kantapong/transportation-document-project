@@ -1040,6 +1040,7 @@ model VehicleTransfer {
   dutyAmount  Decimal @default(0) @db.Decimal(12, 2)
   useRequest  Boolean @default(false) // โอนขอใช้ (false = โอนปกติ) - เฉพาะมอเตอร์ไซค์
   urgent      Boolean @default(false) // งานด่วน +50 ใน No Bill - เฉพาะมอเตอร์ไซค์
+  submitProvince String? // จังหวัดที่ยื่น (ผู้ใช้ 2026-11-18) - ลงขันใน noBillTotal ตั้งต้นตามจังหวัด พนักงานแก้ได้ / null = งานก่อนมีช่องนี้
   fineAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าปรับ (เกิน 15 วันหลังออกใบเสร็จ/ใบกำกับภาษี) ใน Bill - พนักงานกรอก เฉพาะมอเตอร์ไซค์
 
   // ตรวจรถ (เฉพาะ INSPECTION) - ส่งตรวจ -> ผลตรวจ PASS | FAIL (ยกเลิกผลที่บันทึกผิด/ตรวจใหม่ได้ด้วยเหตุผล)
