@@ -26,6 +26,8 @@ export interface DeliveryRow {
   receiptNo: string | null;
   kind: DeliveryKind;
   plateReceived: boolean;
+  // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18): ไม่มีป้ายให้รับ/ส่ง - ส่งเล่มแล้วจบ (kind NO_PLATE -> DONE)
+  plateNotRequired?: boolean;
   deliveredDate: string | null;
   plateDeliveredDate: string | null; // null ทั้งที่ deliveredDate มีค่า = ป้ายค้างส่ง
   recipient: string | null;
@@ -75,6 +77,8 @@ export interface DeliverySlipItem {
   ownerName: string | null; // ติดไฟแนนซ์ = ผู้ครอบครอง, ไม่ติด = ผู้ถือกรรมสิทธิ์
   // ส่งเล่มในใบนี้ ป้ายส่งตามไปในใบอื่น (อ่านสด) - null = ป้ายไปในใบนี้แล้ว / ยังค้างส่ง
   plateSentLater: { slipNo: number; date: string } | null;
+  // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18): ช่องป้ายว่างเพราะไม่มีป้ายให้ส่ง ไม่ใช่ป้ายค้าง
+  plateNotRequired?: boolean;
 }
 
 export interface DeliverySlip {

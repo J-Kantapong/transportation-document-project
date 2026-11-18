@@ -10,6 +10,7 @@ import { INSPECTION_VALID_DAYS } from '../document-submission/submission-eligibi
 import { isSupplierProvince } from '../document-submission/supplier-route.js';
 import { PLATE_COPY_EXPECTED_CALENDAR_DAYS } from '../plate-copy/plate-copy-fee.js';
 import { transferHasInspection } from '../vehicle-transfer/transfer-type.js';
+import { plateNotRequired } from '../vehicles/plate-requirement.js';
 import { addDays, daysBetween, isoOf } from './overview-calculator.js';
 
 export type { VehicleKind };
@@ -86,6 +87,10 @@ export interface OpenVehicle {
     failRemark: string | null;
     receiptCarriedAt: Date | null;
     _count?: { receipts: number }; // รูปใบเสร็จที่แนบแล้ว - ค้างจากใบก่อนแต่แนบรูปแล้ว = รอบันทึก ไม่ใช่ "ไม่ทราบสาเหตุ"
+    // ตัวเลือกป้ายตอนยื่น - รถที่ไม่ซื้อป้ายไม่รอรับป้าย (vehicles/plate-requirement.ts, ผู้ใช้ 2026-11-18)
+    plateNumberOption?: string | null;
+    newPlateOption?: string | null;
+    includePlateFee?: boolean | null;
   } | null;
   hasPendingPlateSwap: boolean;
   billed: boolean; // อยู่ในบิลที่ยังไม่ถูกยกเลิกแล้ว
@@ -157,7 +162,7 @@ export function waitsFor(v: OpenVehicle, today: string): Wait[] {
   } else if (sub?.status === 'RECEIPT_RECEIVED') {
     // รายการก่อนมีช่องวันที่ในใบเสร็จ (ยังไม่ backfill) ใช้วันที่รับใบเสร็จ แล้วค่อยวันที่ยื่น
     const receiptDate = iso(sub.receiptDate ?? sub.receiptReceivedDate ?? sub.submitDate);
-    if (!v.plateReceivedDate) waits.push(wait('plate', receiptDate));
+    if (!v.plateReceivedDate && !plateNotRequired(sub)) waits.push(wait('plate', receiptDate));
     if (!v.bookReceivedDate) waits.push(wait('book', receiptDate));
     // ส่งงานได้เมื่อได้ใบเสร็จ + รับเล่มแล้ว (ป้ายส่งตามทีหลังได้) - ดู delivery.service.ts
     if (!v.deliveredDate && v.bookReceivedDate) waits.push(wait('delivery', iso(v.bookReceivedDate)));

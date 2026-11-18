@@ -21,3 +21,14 @@ Project documentation for Claude Code and Codex. Moved here unchanged from `CLAU
   A filter bar (วันที่ยื่น from/to; เจ้าของงาน dropdown; เลขที่ใบเสร็จ, เลขตัวรถ, ทะเบียน contain) sits above the list; each ใบยื่น card has a checkbox,
   and "🖨 ปริ้นชุดที่เลือก" prints the ticked sheets, one table per sheet in the current order, for handing to the DLT
   (`lib/receiving-print.ts`, user 2026-09-26).
+
+- Vehicles that did not buy a plate (user 2026-11-18 "รถคันที่ไม่ซื้อป้ายไม่ต้องรับป้าย ... ไม่ต้องแนบรูปแผ่นป้าย", no migration):
+  `plateNotRequired()` in `backend/src/vehicles/plate-requirement.ts` is the one rule, read from the vehicle's latest
+  `DocumentSubmission`: `plateNumberOption` NORMAL / AUCTION + `includePlateFee` false (รวมค่าแผ่นป้าย not ticked) + no new plate
+  ordered (`newPlateOption` NONE / null; a new plate ordered = still a plate to receive, Claude's choice). Such a vehicle never enters
+  the receive-plate queue and needs no plate photo; overview / my-work / vehicle search (`waitsFor`) raise no `plate` wait; on
+  Delivery it goes out as a book-only item (`kind` NO_PLATE, rows and slip items carry `plateNotRequired`, shown "ไม่ซื้อป้าย" /
+  "เล่ม (ไม่ซื้อป้าย)") and is `DONE` once the book is delivered (not in the queue, not in ป้ายค้างส่ง, not counted as
+  `platePending`, printed slip says "ไม่ซื้อแผ่นป้าย N คัน"); the customer portal drops the plate step and treats book delivery as
+  complete. If a plate photo was attached anyway (`plateReceivedDate` set), the normal rules apply. Always call `plateNotRequired`
+  (select `PLATE_OPTION_SELECT`), never test `plateReceivedDate` alone to decide "waiting for plate".

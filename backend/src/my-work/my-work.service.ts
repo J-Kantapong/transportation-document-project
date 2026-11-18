@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { currentUser } from '../auth/request-context.js';
 import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
+import { PLATE_OPTION_SELECT } from '../vehicles/plate-requirement.js';
 import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.service.js';
 import { WHT_OVERDUE_DAYS, WHT_PENDING_WHERE } from '../billing/tax-invoice.service.js';
 import type { UserRole } from '../generated/prisma/enums.js';
@@ -198,7 +199,7 @@ export class MyWorkService {
           documentSubmissions: {
             orderBy: { createdAt: 'desc' },
             take: 1,
-            select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true, _count: { select: { receipts: true } } },
+            select: { status: true, submitDate: true, receiptDate: true, receiptReceivedDate: true, failRemark: true, receiptCarriedAt: true, ...PLATE_OPTION_SELECT, _count: { select: { receipts: true } } },
           },
           plateSwapsAsNew: { where: { returnedDate: null, cancelledAt: null, vehicleClass: { not: 'MOTO' } }, take: 1, select: { id: true } },
           invoiceLines: { where: NOT_VOID, take: 1, select: { id: true } },

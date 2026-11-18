@@ -3,6 +3,7 @@ import { currentBillEstimate, loadDocumentFeeRules } from '../billing/billing.se
 import { WHT_OVERDUE_DAYS, WHT_PENDING_WHERE } from '../billing/tax-invoice.service.js';
 import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-eligibility.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PLATE_OPTION_SELECT } from '../vehicles/plate-requirement.js';
 import { findSuspectVehicles } from '../vehicles/vehicle-data-check.js';
 import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
 import { transferPage } from '../vehicle-transfer/transfer-type.js';
@@ -390,6 +391,7 @@ export class OverviewService {
               receiptReceivedDate: true,
               failRemark: true,
               receiptCarriedAt: true,
+              ...PLATE_OPTION_SELECT,
               _count: { select: { receipts: true } },
             },
           },

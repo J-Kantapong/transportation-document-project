@@ -21,7 +21,7 @@ import { WEEKEND_WARNING, isWeekend, weekdayName } from "@/lib/date-check";
 // ติ๊กข้ามการ์ดได้ถ้าเป็นลูกค้าเดียวกันและรถประเภทเดียวกัน - บันทึก 1 ครั้ง = ใบส่งงาน DL 1 ใบของลูกค้ารายเดียว
 // รถยนต์กับจักรยานยนต์ส่งคนละใบ (ผู้ใช้ 2026-09-27) - backend ตอบ 400 "ส่งรถยนต์กับจักรยานยนต์คนละใบ" อีกชั้น
 
-type ItemState = { state: "sent" | "ready" | "waiting" | "none"; date?: string | null };
+type ItemState = { state: "sent" | "ready" | "waiting" | "none" | "notNeeded"; date?: string | null };
 type Kind = "car" | "moto";
 
 const KIND_LABEL: Record<Kind, string> = { car: "รถยนต์", moto: "จักรยานยนต์" };
@@ -34,7 +34,8 @@ const kindOf = (r: DeliveryRow): Kind => r.vehicleKind ?? (isMotorcycleBody(r.bo
 // ใบยื่น = วันที่ยื่น + กลุ่ม + รหัสลูกค้า (ชื่อใช้แสดงอย่างเดียว - ผู้ใช้ 2026-09-27 ทุกหน้าแบ่งใบยื่นด้วยรหัสลูกค้า)
 // กลุ่มแยกรถยนต์/จักรยานยนต์อยู่แล้ว การ์ดหนึ่งจึงเป็นรถประเภทเดียว
 const lotKeyOf = (r: DeliveryRow) => jobSheetKey(r.submitDate ?? "", groupLabel(r), r.customerId);
-const fullyDelivered = (r: DeliveryRow) => !!r.deliveredDate && !!r.plateDeliveredDate;
+// รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18): ส่งเล่มแล้ว = ครบ (backend ตอบ kind DONE)
+const fullyDelivered = (r: DeliveryRow) => !!r.deliveredDate && (!!r.plateDeliveredDate || !!r.plateNotRequired);
 
 // คันที่ยังเลือกค้างไว้ได้หลังโหลดคิวใหม่: ยังอยู่ในคิวและติ๊กได้ + ลูกค้าเดียวกันและประเภทรถเดียวกันกับคันแรก (ลำดับคิว ตรงกับ lockReason)
 // พบ 2026-09-27: บันทึกไม่ผ่านเพราะมีคนแก้ลูกค้า/ประเภทรถของคันที่ติ๊กไว้ (F21 แก้ได้หลังเตือน) - เดิมเก็บชุดที่ปนกันไว้ทั้งหมด
@@ -62,7 +63,11 @@ function itemsOf(r: DeliveryRow): { receipt: ItemState; book: ItemState; plate: 
   return {
     receipt: { state: r.receiptReceived ? "ready" : "waiting" },
     book: docs(r.bookReceived),
-    plate: r.plateDeliveredDate ? { state: "sent", date: r.plateDeliveredDate } : { state: r.plateReceived ? "ready" : "waiting" },
+    plate: r.plateNotRequired
+      ? { state: "notNeeded" }
+      : r.plateDeliveredDate
+        ? { state: "sent", date: r.plateDeliveredDate }
+        : { state: r.plateReceived ? "ready" : "waiting" },
   };
 }
 
@@ -70,6 +75,7 @@ const WAIT_TEXT = { receipt: "รอใบเสร็จ", book: "รอเล�
 
 function ItemCell({ item, kind }: { item: ItemState; kind: keyof typeof WAIT_TEXT }) {
   if (item.state === "none") return <span className="muted">—</span>;
+  if (item.state === "notNeeded") return <span className="muted">ไม่ซื้อป้าย</span>;
   if (item.state === "sent") return <span className="delivery-item sent">ส่งแล้ว {item.date ? isoToDisplayDate(item.date).slice(0, 5) : ""}</span>;
   if (item.state === "ready") return <span className="delivery-item ready">✓ มีแล้ว</span>;
   return <span className="delivery-item waiting">⏳ {WAIT_TEXT[kind]}</span>;
@@ -620,6 +626,8 @@ export function DeliveryPage() {
                     <td>
                       {r.jobLabel && r.source !== "PLATE_COPY" ? (
                         <span className="muted">—</span>
+                      ) : r.plateNotRequired ? (
+                        <span className="muted">ไม่ซื้อป้าย</span>
                       ) : r.plateDeliveredDate ? (
                         <span className="badge done">ส่งแล้ว {isoToDisplayDate(r.plateDeliveredDate)}</span>
                       ) : (
@@ -729,7 +737,8 @@ function DeliveryConfirmDialog({
   const dayNote = days === 0 ? "วันนี้" : days < 0 ? `ย้อนหลัง ${-days} วัน` : `ล่วงหน้า ${days} วัน`;
   // รถจดใหม่/สลับเลขนับตามชนิดงาน - งานอื่น (ผู้ใช้ 2026-10-08) นับแยกเป็น "ใบเสร็จ<ชื่องาน>" (คัดป้าย = ใบเสร็จ + ป้าย)
   const vehicles = rows.filter((r) => !r.jobLabel);
-  const count = (kind: DeliveryRow["kind"]) => vehicles.filter((r) => r.kind === kind).length;
+  // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18) เป็น NO_PLATE เหมือนกัน แต่ไม่มีป้ายตามทีหลัง - นับแยก
+  const count = (kind: DeliveryRow["kind"], noPlate = false) => vehicles.filter((r) => r.kind === kind && !!r.plateNotRequired === noPlate).length;
   const jobCounts = new Map<string, number>();
   for (const r of rows) {
     if (!r.jobLabel) continue;
@@ -739,6 +748,7 @@ function DeliveryConfirmDialog({
   const parts = [
     [count("FULL"), "เล่ม + ป้าย"],
     [count("NO_PLATE"), "เล่ม (ป้ายตามทีหลัง)"],
+    [count("NO_PLATE", true), "เล่ม (ไม่ซื้อป้าย)"],
     [count("PLATE_ONLY"), "ส่งป้ายอย่างเดียว"],
     ...[...jobCounts.entries()].map(([label, n]) => [n, label]),
   ].filter(([n]) => n) as Array<[number, string]>;

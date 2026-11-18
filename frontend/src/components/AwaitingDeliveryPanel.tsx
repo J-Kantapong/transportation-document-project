@@ -19,7 +19,7 @@ const KIND_LABEL: Record<Kind, string> = { car: "รถยนต์", moto: "จ
 const plateOf = (r: DeliveryRow) => (r.plateCategory && r.plateNumber ? `${r.plateCategory} ${r.plateNumber}` : "—");
 // รอส่งครั้งแรก (ใบเสร็จ/เล่ม/ป้ายครบแล้ว) เท่านั้น - ป้ายตามทีหลัง (PLATE_ONLY) ไม่ได้กั้นการวางบิล จึงไม่ต้องเตือนที่นี่
 const awaiting = (r: DeliveryRow) => !r.deliveredDate && (r.kind === "FULL" || r.kind === "NO_PLATE");
-const whatOf = (r: DeliveryRow) => (r.jobLabel ? `ใบเสร็จ${r.source === "PLATE_COPY" ? " + ป้าย" : ""}` : r.kind === "FULL" ? "เล่ม + ป้าย" : "เล่ม (ป้ายตามทีหลัง)");
+const whatOf = (r: DeliveryRow) => (r.jobLabel ? `ใบเสร็จ${r.source === "PLATE_COPY" ? " + ป้าย" : ""}` : r.kind === "FULL" ? "เล่ม + ป้าย" : r.plateNotRequired ? "เล่ม (ไม่ซื้อป้าย)" : "เล่ม (ป้ายตามทีหลัง)");
 
 export function AwaitingDeliveryPanel({ only, onRecorded }: { only: "all" | "jobs"; onRecorded?: () => void }) {
   const [rows, setRows] = useState<DeliveryRow[]>([]);

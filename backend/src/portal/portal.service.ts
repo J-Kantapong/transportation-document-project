@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { isSupplierProvince } from '../document-submission/supplier-route.js';
+import { PLATE_OPTION_SELECT, plateNotRequired, type PlateOptionFields } from '../vehicles/plate-requirement.js';
 
 // Portal ลูกค้า (เฟสแรก ผู้ใช้ตกลง 2026-09-22): ดูรถของบริษัทตัวเองพร้อมสถานะ 8 ขั้นตอน + กดยืนยันรับของ
 // ห้ามส่งราคา/ค่าธรรมเนียม/ค่าใช้จ่ายใดๆ ออกไปจากที่นี่
@@ -57,7 +58,7 @@ const VEHICLE_SELECT = {
   documentSubmissions: {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
-    select: { status: true, submitDate: true, receiptReceivedDate: true },
+    select: { status: true, submitDate: true, receiptReceivedDate: true, ...PLATE_OPTION_SELECT },
   },
 } as const;
 
@@ -82,7 +83,7 @@ type Row = {
   deliveryConfirmedAt: Date | null;
   createdAt: Date;
   brand: { name: string };
-  documentSubmissions: Array<{ status: string; submitDate: Date; receiptReceivedDate: Date | null }>;
+  documentSubmissions: Array<{ status: string; submitDate: Date; receiptReceivedDate: Date | null } & PlateOptionFields>;
 };
 
 export function buildSteps(v: Row): PortalStep[] {
@@ -91,6 +92,8 @@ export function buildSteps(v: Row): PortalStep[] {
   // รถที่ส่งซับจดต่างจังหวัด (supplier-route.ts) ซับตรวจรถให้ - ถือว่าขั้นตรวจรถเสร็จเมื่อส่งงานให้ซับแล้ว (ไม่มีวันที่ตรวจในระบบ)
   const submitted = Boolean(submission) && submission.status !== 'FAILED';
   const inspectionPassed = v.inspectionResult === 'ผ่าน' || (isSupplierProvince(v.registrationProvince) && submitted);
+  // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18): ไม่มีขั้นรับป้าย ส่งเล่มแล้วถือว่าส่งมอบครบ (ถ้าเคยแนบรูปป้ายไว้แล้วแสดงตามปกติ)
+  const noPlate = plateNotRequired(submission) && !v.plateReceivedDate;
   const raw: Array<Omit<PortalStep, 'state'> & { done: boolean; failed?: boolean }> = [
     { key: 'entry', title: 'รับข้อมูลรถ', done: true, date: isoDate(v.date), note: null },
     {
@@ -122,12 +125,12 @@ export function buildSteps(v: Row): PortalStep[] {
     {
       key: 'delivery',
       title: 'ส่งมอบให้ลูกค้า',
-      done: Boolean(v.deliveredDate) && Boolean(v.plateDeliveredDate),
+      done: Boolean(v.deliveredDate) && (noPlate || Boolean(v.plateDeliveredDate)),
       date: isoDate(v.plateDeliveredDate ?? v.deliveredDate),
       // ใบเสร็จไม่ได้ไปกับงานแล้ว ไปพร้อมใบวางบิล (ผู้ใช้ 2026-09-26) - เดิมข้อความบอกว่าส่งใบเสร็จไปด้วย (พบ 2026-09-27)
-      note: v.deliveredDate && !v.plateDeliveredDate ? 'ส่งเล่มแล้ว ป้ายจะส่งตามทีหลัง' : null,
+      note: v.deliveredDate && !v.plateDeliveredDate && !noPlate ? 'ส่งเล่มแล้ว ป้ายจะส่งตามทีหลัง' : null,
     },
-  ];
+  ].filter((s) => !(noPlate && s.key === 'plate'));
   // ขั้นที่ยังไม่เสร็จขั้นแรก = CURRENT (ป้ายอาจออกช้ากว่าเล่มได้ จึงดูเป็นรายขั้น ไม่บังคับเรียงหลังใบเสร็จ)
   let currentFound = false;
   return raw.map((s) => {

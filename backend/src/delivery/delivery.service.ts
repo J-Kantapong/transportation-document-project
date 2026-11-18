@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
+import { PLATE_OPTION_SELECT, plateNotRequired, type PlateOptionFields } from '../vehicles/plate-requirement.js';
 import {
   assertVehicleInScope,
   currentDeliveryScope,
@@ -48,7 +49,7 @@ const VEHICLE_INCLUDE = {
   documentSubmissions: {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
-    select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true, receiptReceivedDate: true },
+    select: { status: true, receiptNo: true, submitDate: true, urgent: true, createdAt: true, receiptReceivedDate: true, ...PLATE_OPTION_SELECT },
   },
   invoiceLines: { where: NOT_VOID, select: { invoice: { select: { invoiceNo: true } } } },
   // ใบส่งเล่มที่ยังไม่ยกเลิก - รายงานส่งงานใช้กับปุ่ม "ป้ายไปพร้อมเล่มแล้ว" ของรถที่ป้ายค้างส่ง (ผู้ใช้ 2026-09-27)
@@ -77,7 +78,7 @@ const SLIP_INCLUDE = {
           // ชื่อเจ้าของบนใบส่งงาน (ผู้ใช้ 2026-09-26) - อ่านสดจาก VehicleOwner
           owner: { select: { name: true, hirerName: true } },
           // ลำดับในใบยื่น (เวลาบันทึกยื่นล่าสุด) - ใบส่งงานเรียงตามนี้ให้ตรงกับใบยื่นที่พิมพ์ (ผู้ใช้ 2026-09-30)
-          documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { createdAt: true } },
+          documentSubmissions: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { createdAt: true, ...PLATE_OPTION_SELECT } },
         },
       },
     },
@@ -200,7 +201,10 @@ function parseIsoDate(raw: unknown): Date {
   return new Date(`${raw}T00:00:00.000Z`);
 }
 
-export function deliveryKind(v: { deliveredDate: Date | null; plateReceivedDate: Date | null; plateDeliveredDate: Date | null }): DeliveryKind {
+// plateNotRequired = รถที่ไม่ซื้อป้าย (vehicles/plate-requirement.ts, ผู้ใช้ 2026-11-18): ไม่มีป้ายให้ส่ง - ส่งเล่มอย่างเดียว (NO_PLATE) แล้วจบ (DONE)
+// ไม่ค้าง "รอป้าย" · ถ้ามีการแนบรูปป้ายไว้จริง (plateReceivedDate) ใช้กฎปกติ
+export function deliveryKind(v: { deliveredDate: Date | null; plateReceivedDate: Date | null; plateDeliveredDate: Date | null; plateNotRequired?: boolean }): DeliveryKind {
+  if (v.plateNotRequired && !v.plateReceivedDate) return v.deliveredDate ? 'DONE' : 'NO_PLATE';
   if (v.deliveredDate && v.plateDeliveredDate) return 'DONE';
   if (v.deliveredDate) return v.plateReceivedDate ? 'PLATE_ONLY' : 'WAITING_PLATE';
   return v.plateReceivedDate ? 'FULL' : 'NO_PLATE';
@@ -223,6 +227,7 @@ interface Deliverable {
   plateReceivedDate: Date | null;
   plateDeliveredDate: Date | null;
   deliveryNote: string | null;
+  plateNotRequired?: boolean; // รถจดใหม่ที่ไม่ซื้อป้าย - ดู deliveryKind()
   // พร้อมส่งครั้งแรกไหม - รถจดใหม่: การยื่นล่าสุดได้ใบเสร็จ + รับเล่มแล้ว / สลับเลข: รับใบเสร็จ (returnedDate) + รับเล่มแล้ว
   // งานอื่น: ใบเสร็จกลับแล้ว (คัดป้าย + ป้าย, ต่อภาษี + ชำระแล้ว)
   readyForFirstDelivery: boolean;
@@ -374,7 +379,9 @@ export class DeliveryService {
     // some(RECEIPT_RECEIVED) ยังนับรถที่เคยได้ใบเสร็จแล้วยื่นใหม่ค้าง PENDING - เอาเฉพาะที่การยื่นล่าสุดได้ใบเสร็จจริง
     const vehicleRows = vehicles
       .filter((v) => v.deliveredDate || v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED')
-      .map((v) => this.mapRow(v));
+      .map((v) => this.mapRow(v))
+      // รถที่ไม่ซื้อป้าย ส่งเล่มแล้ว = จบ ไม่ค้างคิวรอป้าย (ผู้ใช้ 2026-11-18)
+      .filter((r) => r.kind !== 'DONE');
     // งานสลับเลขส่งคืนลูกค้าในใบเดียวกันได้ (ผู้ใช้ 2026-09-28) - อยู่คิวเดียวกันเลย
     // งานอื่นๆ ที่ใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-08: ทุกงานส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) - คิวเดียวกัน
     return [...vehicleRows, ...(await this.plateSwapQueue()), ...(await this.jobQueue())];
@@ -446,7 +453,8 @@ export class DeliveryService {
       orderBy: [{ submitDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: PLATE_SWAP_SELECT,
     });
-    return [...vehicles.map((v) => this.mapRow(v)), ...swaps.map((s) => this.mapPlateSwapRow(s))];
+    // รถที่ไม่ซื้อป้ายไม่มีป้ายค้างส่ง (ผู้ใช้ 2026-11-18)
+    return [...vehicles.map((v) => this.mapRow(v)).filter((r) => r.kind !== 'DONE'), ...swaps.map((s) => this.mapPlateSwapRow(s))];
   }
 
   // items = [{ vehicleId, kind }] ชนิดงานที่ผู้ใช้เห็นในป๊อปอัปยืนยัน (vehicleIds อย่างเดียว = แบบเดิม)
@@ -494,6 +502,7 @@ export class DeliveryService {
       plateReceivedDate: v.plateReceivedDate,
       plateDeliveredDate: v.plateDeliveredDate,
       deliveryNote: v.deliveryNote,
+      plateNotRequired: plateNotRequired(v.documentSubmissions[0]),
       readyForFirstDelivery: !!v.bookReceivedDate && v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED',
       jobType: null,
       jobDetail: null,
@@ -635,7 +644,7 @@ export class DeliveryService {
       // delivered = รถจดใหม่ + สลับเลขที่ส่งเล่ม (ไม่นับงานอื่น) / jobs = งานอื่นที่ส่งใบเสร็จในใบนี้
       delivered: ofKind('FULL').length + ofKind('NO_PLATE').length - jobItems.length,
       plateOnly: ofKind('PLATE_ONLY').length,
-      platePending: ofKind('NO_PLATE').length,
+      platePending: ofKind('NO_PLATE').filter((i) => !i.plateNotRequired).length, // รถที่ไม่ซื้อป้ายไม่มีป้ายค้าง
       jobs: jobItems.length,
     };
   }
@@ -1095,7 +1104,7 @@ export class DeliveryService {
         invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
         billingClosedAt: Date | null;
         owner: { name: string | null; hirerName: string | null } | null;
-        documentSubmissions: Array<{ createdAt: Date }>;
+        documentSubmissions: Array<{ createdAt: Date } & PlateOptionFields>;
       } | null;
     }>;
   }, later = new Map<string, { slipNo: number; date: string }>(), billedJobs = new Map<string, string>()) {
@@ -1151,6 +1160,8 @@ export class DeliveryService {
           billingClosed: i.vehicle?.billingClosedAt != null,
           // แถวสลับเลขใช้ชื่อเจ้าของที่ snapshot ไว้ (ไม่มี VehicleOwner ให้อ่านสด)
           ownerName: i.ownerName ?? ownerNameOf(i.vehicle?.owner ?? null),
+          // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18): ช่องป้ายว่างเพราะไม่มีป้ายให้ส่ง ไม่ใช่ป้ายค้าง (อ่านสดจากการยื่นล่าสุด)
+          plateNotRequired: i.book && !i.plate && plateNotRequired(i.vehicle?.documentSubmissions?.[0]),
           // ส่งเล่มในใบนี้ ป้ายส่งตามไปในใบอื่น (อ่านสด) - null = ป้ายไปในใบนี้แล้ว / ยังค้างส่ง
           plateSentLater:
             i.book && !i.plate && !i.cancelledAt
@@ -1174,12 +1185,14 @@ export class DeliveryService {
     bookReceivedDate: Date | null;
     customer: { id: string; name: string; company: string | null; branch?: string | null };
     brand: { name: string };
-    documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date; receiptReceivedDate?: Date | null }>;
+    documentSubmissions: Array<{ status: string; receiptNo: string | null; submitDate: Date; urgent: boolean; createdAt: Date; receiptReceivedDate?: Date | null } & PlateOptionFields>;
     invoiceLines: Array<{ invoice: { invoiceNo: string } }>;
     deliverySlipItems: Array<{ slip: { id: string; slipNo: number; date: Date } }>;
   }) {
     const bookSlip = v.deliveredDate ? v.deliverySlipItems[0]?.slip : undefined;
     const sub = v.documentSubmissions[0];
+    // ไม่ซื้อป้าย และไม่ได้แนบรูปป้ายไว้ = ไม่มีป้ายให้รับ/ส่ง (ผู้ใช้ 2026-11-18) - หน้าเว็บแสดง "ไม่ซื้อป้าย" แทน "รอป้าย"
+    const noPlate = plateNotRequired(sub) && !v.plateReceivedDate;
     // พร้อมส่งตั้งแต่ (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม): ส่งเล่ม = วันที่ได้ครบทั้งใบเสร็จและเล่ม / ส่งป้ายตามหลัง = วันที่รับป้าย
     const readySince = v.deliveredDate
       ? v.plateDeliveredDate
@@ -1203,7 +1216,8 @@ export class DeliveryService {
       plateCategory: v.plateCategory,
       plateNumber: v.plateNumber,
       receiptNo: v.documentSubmissions[0]?.receiptNo ?? null,
-      kind: deliveryKind(v),
+      kind: deliveryKind({ ...v, plateNotRequired: noPlate }),
+      plateNotRequired: noPlate,
       plateReceived: v.plateReceivedDate !== null,
       deliveredDate: v.deliveredDate?.toISOString().slice(0, 10) ?? null,
       plateDeliveredDate: v.plateDeliveredDate?.toISOString().slice(0, 10) ?? null,
@@ -1255,6 +1269,7 @@ export class DeliveryService {
       plateNumber: s.newPlateNumber,
       receiptNo: s.receiptNo,
       kind: deliveryKind(d),
+      plateNotRequired: false,
       plateReceived: s.plateReceivedDate !== null,
       deliveredDate: isoDay(s.deliveredDate),
       plateDeliveredDate: isoDay(s.plateDeliveredDate),
@@ -1294,6 +1309,7 @@ export class DeliveryService {
       plateNumber: j.plateNumber,
       receiptNo: j.receiptNo,
       kind: deliveryKind(d),
+      plateNotRequired: false,
       plateReceived: !!j.readySince,
       deliveredDate: isoDay(j.deliveredDate),
       plateDeliveredDate: isoDay(j.deliveredDate),
