@@ -131,6 +131,8 @@ export function OldVehicleJobsPage() {
 
   const [vehicles, setVehicles] = useState<HubVehicle[]>([]);
   const [truncated, setTruncated] = useState(false);
+  // จำนวนรถงานค้าง / งานเสร็จแล้ว (ผู้ใช้ 2026-11-19: หน้าแรกเปิดที่งานค้าง แต่บอกว่ามีงานเสร็จแล้วกี่คัน กดดูได้)
+  const [scopeCounts, setScopeCounts] = useState<{ open: number; done: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showIntake, setShowIntake] = useState(false);
@@ -159,6 +161,7 @@ export function OldVehicleJobsPage() {
         if (seq !== loadSeq.current) return;
         setVehicles(data.vehicles);
         setTruncated(data.truncated);
+        setScopeCounts(data.counts);
       } catch (err) {
         if (seq === loadSeq.current) setError(errorText(err, "โหลดรายการไม่สำเร็จ"));
       } finally {
@@ -320,10 +323,20 @@ export function OldVehicleJobsPage() {
             </select>
           )}
           <select value={scope} onChange={(e) => setScope(e.target.value as "open" | "done" | "all")} aria-label="ช่วงงาน">
-            <option value="open">รถที่ยังมีงานค้าง</option>
-            <option value="done">รถที่งานเสร็จหมดแล้ว</option>
-            <option value="all">ทั้งหมด</option>
+            <option value="open">รถที่ยังมีงานค้าง{scopeCounts ? ` (${scopeCounts.open})` : ""}</option>
+            <option value="done">รถที่งานเสร็จหมดแล้ว{scopeCounts ? ` (${scopeCounts.done})` : ""}</option>
+            <option value="all">ทั้งหมด{scopeCounts ? ` (${scopeCounts.open + scopeCounts.done})` : ""}</option>
           </select>
+          {scope === "open" && scopeCounts && scopeCounts.done > 0 && (
+            <button type="button" className="text-button" onClick={() => setScope("done")}>
+              งานเสร็จแล้ว {scopeCounts.done} คัน (ดู)
+            </button>
+          )}
+          {scope !== "open" && (
+            <button type="button" className="text-button" onClick={() => setScope("open")}>
+              ← กลับไปดูงานค้าง
+            </button>
+          )}
         </div>
 
         {loading ? (

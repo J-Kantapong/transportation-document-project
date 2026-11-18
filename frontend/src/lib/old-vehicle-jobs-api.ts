@@ -213,7 +213,8 @@ export const oldVehicleJobsApi = {
     const params = new URLSearchParams({ scope });
     if (q) params.set("q", q);
     if (vehicleClass) params.set("vehicleClass", vehicleClass);
-    return request<{ vehicles: HubVehicle[]; truncated: boolean }>(`/api/old-vehicle-jobs?${params}`);
+    // counts = จำนวนรถที่ยังมีงานค้าง / งานเสร็จหมดแล้ว ตามคำค้นเดียวกัน (ทุกช่วงงาน)
+    return request<{ vehicles: HubVehicle[]; truncated: boolean; counts: { open: number; done: number } }>(`/api/old-vehicle-jobs?${params}`);
   },
   // แถวรับงาน 1 งาน + ข้อมูลรถ - ฟอร์มยื่นของหน้างานเดิมใช้เติมข้อมูลให้เอง (?intake=<id>)
   job: (id: string) => request<IntakePrefill>(`/api/old-vehicle-jobs/jobs/${encodeURIComponent(id)}`),

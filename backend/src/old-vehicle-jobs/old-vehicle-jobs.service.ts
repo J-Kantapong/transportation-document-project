@@ -585,15 +585,20 @@ export class OldVehicleJobsService {
   // หน้ารวม: scope = open (ยังมีงานไม่เสร็จ - ค่าเริ่มต้น) | done (ทุกงานเสร็จ) | all · q = ทะเบียน / เลขตัวถัง / ชื่อเจ้าของรถ / ลูกค้า
   // ตัวกรองประเภทงานและสถานะทำที่หน้าเว็บ (ข้อมูลชุดเดียวกัน) - คืนไม่เกิน 500 คัน เรียงตามวันที่รับงานล่าสุด
   // scope = inspection: เฉพาะรถที่มีงานต้องตรวจรถและยังไม่ยื่น (หน้าตรวจรถ) - กรองใน SQL จึงไม่ขึ้นกับเพดานของหน้ารวม
-  async list(scopeParam = 'open', qParam?: string, classParam?: unknown): Promise<{ vehicles: HubVehicle[]; truncated: boolean }> {
+  // counts = จำนวนรถที่ยังมีงานค้าง / งานเสร็จหมดแล้ว ตามคำค้นเดียวกัน (ผู้ใช้ 2026-11-19: หน้าแรกบอกว่ามีงานเสร็จแล้วกี่คัน กดดูได้)
+  async list(
+    scopeParam = 'open',
+    qParam?: string,
+    classParam?: unknown,
+  ): Promise<{ vehicles: HubVehicle[]; truncated: boolean; counts: { open: number; done: number } }> {
     if (!['open', 'done', 'all', 'inspection'].includes(scopeParam)) {
       throw new BadRequestException({ error: 'พารามิเตอร์ scope ต้องเป็น open, done, all หรือ inspection' });
     }
     const wantClass = parseClass(classParam);
     const readScope = this.readScope();
-    if (readScope === 'NONE') return { vehicles: [], truncated: false };
+    if (readScope === 'NONE') return { vehicles: [], truncated: false, counts: { open: 0, done: 0 } };
     const classes: OldVehicleClass[] = readScope === 'ALL' ? (wantClass ? [wantClass] : ['CAR', 'MOTO']) : [readScope];
-    if (wantClass && !classes.includes(wantClass)) return { vehicles: [], truncated: false };
+    if (wantClass && !classes.includes(wantClass)) return { vehicles: [], truncated: false, counts: { open: 0, done: 0 } };
 
     // ผูกงานที่ยื่นจากหน้าเดิม + สร้างแถวย้อนหลัง - ล้มก็ยังแสดงรายการได้
     await this.sync().catch((err: unknown) => this.logger.error(`sync งานรถเก่าไม่สำเร็จ: ${String(err)}`));
@@ -622,7 +627,12 @@ export class OldVehicleJobsService {
     const open = (v: HubVehicle) => v.jobs.some((j) => !isClosedStatus(j.status));
     const filtered = scopeParam === 'all' || scopeParam === 'inspection' ? all : all.filter((v) => (scopeParam === 'open' ? open(v) : !open(v)));
     filtered.sort((a, b) => (b.jobs[0]?.receivedDate ?? '').localeCompare(a.jobs[0]?.receivedDate ?? ''));
-    return { vehicles: filtered.slice(0, PAGE_CAP), truncated: filtered.length > PAGE_CAP || rows.length === LOAD_CAP };
+    const openCount = all.filter(open).length;
+    return {
+      vehicles: filtered.slice(0, PAGE_CAP),
+      truncated: filtered.length > PAGE_CAP || rows.length === LOAD_CAP,
+      counts: { open: openCount, done: all.length - openCount },
+    };
   }
 
   // ค้นรถที่มีอยู่แล้วตอนพิมพ์ทะเบียน/เลขตัวถังในฟอร์มรับงาน - เจอ = เติมข้อมูลเดิมและรับงานเพิ่มให้คันเดิม
