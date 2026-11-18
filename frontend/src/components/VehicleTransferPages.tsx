@@ -165,6 +165,7 @@ interface FormState {
   fineAmount: string; // มอเตอร์ไซค์ - ค่าปรับ
   newPlateCategory: string; // โอนย้ายเข้า - ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า (submitProvince) ยังไม่รู้เว้นว่างได้จนถึงตอนรับใบเสร็จ
   newPlateNumber: string;
+  stampDutyAmount: string; // โอนย้ายเข้า - ค่าอากรโอนตามราคารถ ไม่บังคับ (บางงานไม่มี) ว่าง = ไม่มี
 }
 
 const EMPTY_FORM: FormState = {
@@ -185,6 +186,7 @@ const EMPTY_FORM: FormState = {
   fineAmount: "",
   newPlateCategory: "",
   newPlateNumber: "",
+  stampDutyAmount: "",
 };
 
 type Option = { id: string; label: string };
@@ -302,23 +304,19 @@ function ProvinceContributionFields({
 }
 
 // โอนย้ายเข้า: Bill ตายตัว 230 + ค่าปรับ + ค่าอากรโอน (stampDuty - กรอกที่ข้อมูลใบเสร็จ แสดงที่นี่เมื่อมีแล้ว) / ค่าอากรแยก 40 / ลงขันตั้งต้น 0
-function MoveInFeeSection({
-  form,
-  onChange,
-  stampDuty,
-  rates,
-}: {
-  form: FormState;
-  onChange: (patch: Partial<FormState>) => void;
-  stampDuty: number;
-  rates: TransferContributionRow[];
-}) {
+function MoveInFeeSection({ form, onChange, rates }: { form: FormState; onChange: (patch: Partial<FormState>) => void; rates: TransferContributionRow[] }) {
+  const stampDuty = Number(form.stampDutyAmount) || 0;
   const fees = calculateTransferMoveInFees({ urgent: form.urgent, fine: Number(form.fineAmount) || 0, stampDuty, contribution: Number(contributionText(form, rates, true)) || 0 });
   return (
     <>
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <ProvinceContributionFields form={form} onChange={onChange} rates={rates} moveIn />
+        {/* ค่าอากรโอน (ผู้ใช้ 2026-11-18): ไม่บังคับ บางงานมีบางงานไม่มี - รวมเข้า Bill */}
+        <label className="field" style={{ minWidth: 200 }}>
+          ค่าอากรโอน (บาท)
+          <input value={form.stampDutyAmount} onChange={(e) => onChange({ stampDutyAmount: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="ไม่มีเว้นว่าง" aria-label="ค่าอากรโอน" />
+        </label>
         <FineTick form={form} onChange={onChange} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
           <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
@@ -326,7 +324,7 @@ function MoveInFeeSection({
         </label>
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
-        ติ๊กค่าปรับเมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี (คงที่ 200 บาท) · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถรู้เมื่อใบเสร็จออก - กรอกที่หน้ารับใบเสร็จ ระบบบวกเข้า Bill ให้
+        ติ๊กค่าปรับเมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี (คงที่ 200 บาท) · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถไม่บังคับ (บางงานไม่มี) ยังไม่รู้เว้นว่างไว้ก่อน แล้วใส่ทีหลังที่ ✎ แก้ หรือที่หน้ารับใบเสร็จได้ ระบบบวกเข้า Bill ให้
       </p>
       <div className="customer-grid">
         <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
@@ -355,15 +353,13 @@ function FeeSection({
   onChange,
   rates,
   moveIn = false,
-  stampDuty = 0,
 }: {
   form: FormState;
   onChange: (patch: Partial<FormState>) => void;
   rates: TransferContributionRow[];
   moveIn?: boolean;
-  stampDuty?: number;
 }) {
-  if (moveIn) return <MoveInFeeSection form={form} onChange={onChange} stampDuty={stampDuty} rates={rates} />;
+  if (moveIn) return <MoveInFeeSection form={form} onChange={onChange} rates={rates} />;
   if (!form.vehicleClass) {
     return (
       <>
@@ -451,7 +447,7 @@ function FeeSection({
 function feePayload(form: FormState, rates: TransferContributionRow[], moveIn = false) {
   const province = { submitProvince: form.submitProvince, contribution: contributionText(form, rates, moveIn) };
   // โอนย้ายเข้าไม่มีโอนขอใช้
-  if (moveIn) return { urgent: form.urgent, fineAmount: form.fineAmount, ...province };
+  if (moveIn) return { urgent: form.urgent, fineAmount: form.fineAmount, stampDutyAmount: form.stampDutyAmount.trim(), ...province };
   return form.vehicleClass === "MOTO"
     ? { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount, ...province }
     : { billTotal: form.billTotal, urgent: form.urgent, ...province };
@@ -469,13 +465,11 @@ function VehicleFormFields({
   customerOptions,
   customerPlaceholder = "เลือกลูกค้า",
   moveIn = false,
-  stampDuty = 0,
   rates,
   children,
 }: {
   rates: TransferContributionRow[]; // ตารางลงขันรายจังหวัด
   moveIn?: boolean;
-  stampDuty?: number;
   children?: React.ReactNode; // ช่องเพิ่มท้ายข้อมูลรถ (ทะเบียนใหม่ของโอนย้ายเข้าในป๊อปอัปแก้)
   form: FormState;
   onChange: (patch: Partial<FormState>) => void;
@@ -619,7 +613,7 @@ function VehicleFormFields({
         {children}
       </div>
 
-      <FeeSection form={form} onChange={onChange} rates={rates} moveIn={moveIn} stampDuty={stampDuty} />
+      <FeeSection form={form} onChange={onChange} rates={rates} moveIn={moveIn} />
     </>
   );
 }
@@ -629,6 +623,7 @@ function validateForm(form: FormState, requireCustomer: boolean, moveIn = false)
   if (!form.vehicleClass) return "กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)";
   if (moveIn && form.vehicleClass !== "MOTO") return "โอนย้ายเข้ามีอัตราเฉพาะรถจักรยานยนต์";
   if (moveIn && !form.submitProvince) return "กรุณาเลือกจังหวัดที่ย้ายเข้า";
+  if (moveIn && form.stampDutyAmount.trim() && Number.isNaN(Number(form.stampDutyAmount))) return "ค่าอากรโอนไม่ถูกต้อง";
   if (moveIn && Boolean(form.newPlateCategory.trim()) !== Boolean(form.newPlateNumber.trim())) return "ทะเบียนใหม่ต้องกรอกทั้งหมวดและเลข (ยังไม่รู้เว้นว่างทั้งคู่)";
   if (requireCustomer && !form.customerId) return "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)";
   if (!form.transferorName.trim()) return "กรุณากรอกผู้โอน";
@@ -680,6 +675,7 @@ function EditDialog({
     fineAmount: Number(item.fineAmount) > 0 ? String(Number(item.fineAmount)) : "",
     newPlateCategory: item.newPlateCategory ?? "",
     newPlateNumber: item.newPlateNumber ?? "",
+    stampDutyAmount: Number(item.stampDutyAmount) > 0 ? String(Number(item.stampDutyAmount)) : "",
   });
   const moveIn = isMoveIn(item.transferType);
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
@@ -757,7 +753,6 @@ function EditDialog({
           customerOptions={customerOptions}
           customerPlaceholder={item.customer ? "เลือกลูกค้า" : "ยังไม่ระบุ"}
           moveIn={moveIn}
-          stampDuty={Number(item.stampDutyAmount) || 0}
           rates={rates}
         />
       </div>
