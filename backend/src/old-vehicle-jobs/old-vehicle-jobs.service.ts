@@ -239,7 +239,8 @@ export class OldVehicleJobsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // สิทธิ์ในหน้างานรถเก่า (ผู้ใช้ 2026-11-18: "admin staff entry delivery" คือคนคีย์รับงาน)
-  // - กลุ่มรับงาน (ADMIN / STAFF_ENTRY / DELIVERY): รับงาน แก้ข้อมูลรถ เลือกประเภทงาน ติดขัด ยกเลิกการรับงาน ได้ทุกประเภทรถ
+  // - กลุ่มรับงาน (ADMIN / STAFF_ENTRY / DELIVERY): รับงานใหม่ได้ทุกประเภทรถ - STAFF_ENTRY / DELIVERY "เพิ่มได้อย่างเดียว อันอื่นกดไม่ได้"
+  //   (ผู้ใช้ 2026-11-19): แก้ข้อมูลรถ / เปลี่ยนประเภทงาน / ติดขัด / ยกเลิก / ตรวจรถ ไม่ได้ ยกเว้นถือ STAFF_CAR / STAFF_MOTO ด้วย
   // - กลุ่มยื่นเอกสาร (STAFF_CAR / STAFF_MOTO): ทำทุกอย่างของประเภทรถตัวเอง "ยกเว้นรับงานใหม่" และเป็นกลุ่มเดียว (กับ ADMIN) ที่บันทึกตรวจรถได้
   // นอกคำขอ HTTP (unit test / script) ไม่จำกัด
   private isIntakeRole(): boolean {
@@ -251,8 +252,13 @@ export class OldVehicleJobsService {
     if (!this.isIntakeRole()) throw new ForbiddenException({ error: 'รับงานใหม่ได้เฉพาะ ADMIN / พนักงานคีย์ข้อมูล / พนักงานส่งของ' });
   }
 
+  // แก้ / จัดการงานที่รับแล้ว: ADMIN ทุกคัน / STAFF_CAR / STAFF_MOTO ตามประเภทรถ / คนรับงานอย่างเดียว (STAFF_ENTRY / DELIVERY) ไม่ได้
   private assertWritable(vehicleClass: string) {
-    if (this.isIntakeRole()) return;
+    const user = currentUser();
+    if (!user || user.roles.includes('ADMIN')) return;
+    if (!user.roles.some((r) => r === 'STAFF_CAR' || r === 'STAFF_MOTO')) {
+      throw new ForbiddenException({ error: 'บัญชีนี้รับงานได้อย่างเดียว - แก้หรือจัดการงานที่รับแล้วให้พนักงานยื่นเอกสาร' });
+    }
     assertKindInScope(vehicleClass === 'MOTO' ? 'moto' : 'car');
   }
 
@@ -813,7 +819,7 @@ export class OldVehicleJobsService {
             vehicle = { vehicleType, vehicleClass: create.vehicleClass as string };
           }
         }
-        this.assertWritable(vehicle.vehicleClass);
+        // รับงาน: ผ่าน assertCanIntake แล้ว (กลุ่มรับงานรับได้ทุกประเภทรถ) ไม่ตรวจขอบเขตการแก้ซ้ำ
         if (seen.has(key)) throw new BadRequestException({ error: 'เลขตัวถังซ้ำกับคันอื่นในฟอร์มนี้' });
         seen.add(key);
 

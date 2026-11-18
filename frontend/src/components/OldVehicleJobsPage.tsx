@@ -46,10 +46,11 @@ type Option = { id: string; label: string };
 function useWriteScope(): WriteScope | null {
   const [scope, setScope] = useState<WriteScope | null>(null);
   useEffect(() => {
-    // คนคีย์รับงาน (ADMIN / STAFF_ENTRY / DELIVERY) แก้ได้ทุกประเภทรถ - กลุ่มยื่นเอกสารตามประเภทรถของตัวเอง
+    // แก้ / จัดการงานที่รับแล้ว: ADMIN ทุกคัน / กลุ่มยื่นเอกสารตามประเภทรถ / คนรับงานอย่างเดียว (STAFF_ENTRY / DELIVERY) = ไม่ได้
+    // (ผู้ใช้ 2026-11-19: "คนรับงานเพิ่มได้เฉพาะเพิ่มงานรถเก่า อันอื่นกดไม่ได้") - ปุ่มรับงานใช้ useCanIntake แยกต่างหาก
     const roles = getCachedUser()?.roles ?? [];
     // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
-    setScope(canIntakeOldJobs(roles) ? "ALL" : submitWriteScopeFor(roles));
+    setScope(submitWriteScopeFor(roles));
   }, []);
   return scope;
 }
@@ -1231,7 +1232,8 @@ function JobDialog({
   const closed = isClosedStatus(job.status);
   // คู่สลับเลขรับเป็นคู่ - เปลี่ยนประเภทงานของคันเดียวไม่ได้ (ยกเลิกการรับงานแล้วรับใหม่)
   const canChangeType = canWrite && !submitted && !job.inspectionSentDate && !job.pair;
-  const next = nextStepHref(vehicle, job);
+  // คนรับงานอย่างเดียวไม่ได้ทำขั้นถัดไป - ไม่แสดงปุ่มไปหน้ายื่น / ใบเสร็จ
+  const next = canWrite ? nextStepHref(vehicle, job) : null;
 
   async function run(action: () => Promise<{ vehicle: HubVehicle }>) {
     setError("");

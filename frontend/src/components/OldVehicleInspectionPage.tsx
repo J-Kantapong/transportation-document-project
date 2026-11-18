@@ -239,7 +239,7 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
                 {rows.map((row) => {
                   const { vehicle, job } = row;
                   const editable = canWrite(vehicle);
-                  const submitHref = nextStepHref(vehicle, job);
+                  const submitHref = editable ? nextStepHref(vehicle, job) : null;
                   return (
                     <tr key={job.id}>
                       {tab === "to-send" && (
