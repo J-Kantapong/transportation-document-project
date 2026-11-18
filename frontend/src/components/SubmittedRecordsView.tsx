@@ -283,7 +283,10 @@ export function SubmittedRecordsView({
   const toggle = (ids: string[], on: boolean) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      for (const id of ids) (on ? next.add(id) : next.delete(id));
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   const bulkProps = (title: string) =>

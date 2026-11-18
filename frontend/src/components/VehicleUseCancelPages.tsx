@@ -15,6 +15,8 @@ import {
 } from "@/lib/vehicle-use-cancel-fee";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleUseCancelApi,
@@ -756,6 +758,8 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
   const replace = (updated: VehicleUseCancellation) => setItems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirmReturn(item: VehicleUseCancellation) {
     if (!returnDate) return setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
@@ -764,7 +768,7 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
     const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
-      await vehicleUseCancelApi.markReturned(item.id, returnDate);
+      if (!(await recheckConfirm((reason) => vehicleUseCancelApi.markReturned(item.id, returnDate, reason)))) return;
       drop(item.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${item.ownerName} (${plateText(item)})` });
     } catch (err) {
@@ -1010,6 +1014,7 @@ function ReturnRow({
       </td>
       <td>
         <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="USE_CANCEL" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
       </td>
       <td>
         {item.returnedDate ? (

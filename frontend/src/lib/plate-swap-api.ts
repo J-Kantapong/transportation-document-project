@@ -214,10 +214,11 @@ export const plateSwapApi = {
       method: "PATCH",
       body: JSON.stringify({ newPlateCategory, newPlateNumber, remark }),
     }),
-  markReturned: (id: string, returnedDate: string, newPlateCategory?: string, newPlateNumber?: string) =>
+  // recheckReason = เหตุผลเมื่อตรวจใบเสร็จไม่ผ่าน (ผู้ใช้ 2026-11-19)
+  markReturned: (id: string, returnedDate: string, newPlateCategory?: string, newPlateNumber?: string, recheckReason?: string) =>
     request<{ swap: PlateSwap }>(`/api/plate-swaps/${id}/return`, {
       method: "PATCH",
-      body: JSON.stringify({ returnedDate, ...(newPlateCategory && newPlateNumber ? { newPlateCategory, newPlateNumber } : {}) }),
+      body: JSON.stringify({ returnedDate, recheckReason, ...(newPlateCategory && newPlateNumber ? { newPlateCategory, newPlateNumber } : {}) }),
     }),
   undoReturn: (id: string, remark: string) =>
     request<{ swap: PlateSwap }>(`/api/plate-swaps/${id}/undo-return`, { method: "POST", body: JSON.stringify({ remark }) }),

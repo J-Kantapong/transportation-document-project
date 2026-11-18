@@ -81,6 +81,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   issue: 'ออกเอกสาร',
   invoice: 'ออกใบวางบิล',
   'undo-return': 'ยกเลิกการรับคืนเอกสาร',
+  'receipt-recheck-override': 'ยืนยันรับใบเสร็จทั้งที่ตรวจไม่ผ่าน (มีเหตุผล)',
   // งานรถเก่า (ผู้ใช้ 2026-11-18)
   'inspection-resend': 'ส่งตรวจรถใหม่หลังตรวจไม่ผ่าน',
   'inspection-result-undo': 'ยกเลิกผลตรวจรถ',

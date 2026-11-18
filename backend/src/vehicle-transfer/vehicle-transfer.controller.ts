@@ -50,8 +50,8 @@ export class VehicleTransferController {
 
   // { returnedDate } - โอนย้ายเข้าต้องส่งทะเบียนใหม่ { newPlateCategory, newPlateNumber } มาด้วย
   @Patch(':id/return')
-  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown }) {
-    return this.service.markReturned(id, body?.returnedDate, { category: body?.newPlateCategory, number: body?.newPlateNumber });
+  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown; recheckReason?: unknown }) {
+    return this.service.markReturned(id, body?.returnedDate, { category: body?.newPlateCategory, number: body?.newPlateNumber }, body?.recheckReason);
   }
 
   // ยกเลิกการรับเอกสารกลับที่กดผิด { remark }

@@ -819,6 +819,7 @@ export interface TaxRenewalInput {
 // PATCH /api/tax-renewals/:id - ติ๊ก/กรอกวันที่ที่ยังว่าง = งานปกติ / ช่องข้อมูลรถ-ภาษี ลงขัน และแก้หรือล้างวันที่ที่มีแล้ว
 // = แก้ข้อมูล ต้องส่ง remark (ผู้ใช้ 2026-09-27) - chassis/engine แก้ได้เฉพาะรถที่กรอกเอง, ownerType/financed เฉพาะเจ้าของที่ไม่ได้มาจากข้อมูลรถ
 export interface TaxRenewalUpdateInput {
+  recheckReason?: string; // เหตุผลเมื่อตรวจใบเสร็จไม่ผ่านตอนรับใบเสร็จ (ผู้ใช้ 2026-11-19)
   inspectionConfirmed?: boolean;
   inspectionDate?: string | null; // รถ ขส. เท่านั้น - เติมจากว่างเป็นงานปกติ แก้/ล้างต้องมี remark
   insuranceConfirmed?: boolean;

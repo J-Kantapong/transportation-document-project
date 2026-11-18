@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recheckBeforeReturn } from '../receipts/receipt-recheck.js';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { type AuditChanges, diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
@@ -875,15 +876,18 @@ export class PlateSwapService {
 
   // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูป และรู้เลขทะเบียนใหม่แล้ว (ส่งมาพร้อมกันได้)
   // วันที่รับกลับอยู่ระหว่างวันที่ยื่นถึงวันนี้ (เวลาไทย) - พิมพ์ปีผิดเป็นอนาคตไม่ได้ (พบ 2026-09-27)
-  async markReturned(id: string, returnedDateRaw: unknown, newPlateCategoryRaw?: unknown, newPlateNumberRaw?: unknown): Promise<{ swap: PlateSwapRow }> {
+  async markReturned(id: string, returnedDateRaw: unknown, newPlateCategoryRaw?: unknown, newPlateNumberRaw?: unknown, recheckReasonRaw?: unknown): Promise<{ swap: PlateSwapRow }> {
     const existing = await this.findOrThrow(id);
     const returnedDate = parseIsoDate(returnedDateRaw);
     if (!returnedDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่รับเอกสารกลับให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (existing.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว' });
     this.assertReturnedDateInRange(returnedDate, existing.submitDate);
     if (existing.receipts.length === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
+    // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ยอดตามใบเสร็จต้องมี และต้องตรงกับ Bill / เลขตัวถัง / ทะเบียนที่ AI อ่าน - ไม่ตรงต้องมีเหตุผล
+    const recheck = await recheckBeforeReturn(this.prisma, 'PLATE_SWAP', id, recheckReasonRaw);
     const parts = newPlateParts(newPlateCategoryRaw, newPlateNumberRaw);
     await this.prisma.$transaction(async (tx) => {
+      if (recheck) await writeAudit(tx, { entity: 'PlateSwap', entityId: id, action: 'receipt-recheck-override', remark: recheck.reason, changes: { problems: recheck.problems } });
       // นับรูปและอ่านทะเบียนใหม่หลังล็อกแถว - ลบรูปสุดท้าย/แก้เลขที่บันทึกแทรกกลางต้องไม่หลุดเข้ามา (พบ 2026-09-27)
       const live = await this.lockSwap(tx, id, null);
       if (live._count.receipts === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });

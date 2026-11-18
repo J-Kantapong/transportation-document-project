@@ -189,7 +189,6 @@ export function BillingPage() {
   const [jobPrices, setJobPrices] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- อ่าน localStorage หลัง mount
     setIsAdmin((getCachedUser()?.roles ?? []).includes("ADMIN"));
     setCanEditVehicle(canEditEntrySteps(getCachedUser()?.roles ?? []));
   }, []);
@@ -268,7 +267,6 @@ export function BillingPage() {
 
   useEffect(() => {
     // Standard fetch-on-mount; loadQueue sets the refreshing flag before its first await.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadQueue(true);
   }, []);
 

@@ -38,6 +38,8 @@ import {
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { confirmDialog } from "@/lib/confirm-dialog";
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตาเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง รถยนต์ + มอเตอร์ไซค์รวมกันในหน้าเดียว (เลือกประเภทรถในฟอร์ม)
@@ -1572,6 +1574,8 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
   const label = (item: VehicleTransfer) => `${item.transferorName} → ${item.transfereeName} (${plateText(item)})`;
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirmReturn(item: VehicleTransfer, newPlate?: { newPlateCategory: string; newPlateNumber: string }) {
     // โอนย้ายเข้า: ป้ายเปลี่ยนเป็นของจังหวัดที่ย้ายเข้า ต้องกรอกทะเบียนใหม่ก่อนยืนยัน
     if (isMoveIn(item.transferType) && (!newPlate?.newPlateCategory || !newPlate.newPlateNumber)) {
@@ -1585,7 +1589,7 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
     const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${label(item)}${plateLine}`);
     if (!ok) return;
     try {
-      await vehicleTransferApi.markReturned(item.id, returnDate, newPlate);
+      if (!(await recheckConfirm((reason) => vehicleTransferApi.markReturned(item.id, returnDate, newPlate, reason)))) return;
       drop(item.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${label(item)}` });
     } catch (err) {
@@ -1847,6 +1851,7 @@ function ReturnRow({
       </td>
       <td>
         <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="TRANSFER" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
       </td>
       <td>
         {item.returnedDate ? (

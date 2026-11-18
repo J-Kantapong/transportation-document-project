@@ -1,3 +1,4 @@
+import { recheckBeforeReturn } from '../receipts/receipt-recheck.js';
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
@@ -529,6 +530,8 @@ export class TaxRenewalService {
       const receiptCount = await this.prisma.receiptImage.count({ where: { taxRenewalId: id } });
       if (receiptCount === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
     }
+    // ตรวจใบเสร็จซ้ำตอนรับใบเสร็จครั้งแรก (ผู้ใช้ 2026-11-19) - ยอดตามใบเสร็จต้องมีและตรงกับ Bill / ตัวถัง / ทะเบียน ไม่ตรงต้องมีเหตุผล (recheckReason)
+    const recheck = receivedDate && !existing.receivedDate ? await recheckBeforeReturn(this.prisma, 'TAX_RENEWAL', id, body.recheckReason) : null;
     if (deliveredDate && !receivedDate) {
       throw new BadRequestException({ error: 'ต้องรับป้ายภาษี/ใบเสร็จก่อนคืนเอกสารให้ลูกค้า' });
     }
@@ -615,9 +618,18 @@ export class TaxRenewalService {
               deliveredDate: existing.deliveredDate,
             }
           : {};
-      return this.prisma.taxRenewal
-        .update({ where: { id, cancelledAt: null, ...datesAsChecked, ...(guard ? { updatedAt: guard } : {}) }, data: routine })
-        .catch(staleIfMissing);
+      if (!recheck) {
+        return this.prisma.taxRenewal
+          .update({ where: { id, cancelledAt: null, ...datesAsChecked, ...(guard ? { updatedAt: guard } : {}) }, data: routine })
+          .catch(staleIfMissing);
+      }
+      return this.prisma.$transaction(async (tx) => {
+        const updated = await tx.taxRenewal
+          .update({ where: { id, cancelledAt: null, ...datesAsChecked, ...(guard ? { updatedAt: guard } : {}) }, data: routine })
+          .catch(staleIfMissing);
+        await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'receipt-recheck-override', remark: recheck.reason, changes: { problems: recheck.problems } });
+        return updated;
+      });
     }
     const data: Prisma.TaxRenewalUpdateInput = {
       ...details,
@@ -646,6 +658,7 @@ export class TaxRenewalService {
         .update({ where: { id, cancelledAt: null, updatedAt: expectedUpdatedAt ?? existing.updatedAt }, data })
         .catch(staleIfMissing);
       await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'update', remark, changes });
+      if (recheck) await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'receipt-recheck-override', remark: recheck.reason, changes: { problems: recheck.problems } });
       return updated;
     });
   }

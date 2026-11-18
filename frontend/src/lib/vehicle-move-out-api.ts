@@ -95,8 +95,8 @@ export const vehicleMoveOutApi = {
     request<One>(`/api/vehicle-move-outs/${id}/receipts/${receiptId}`, { method: "DELETE", body: JSON.stringify({ remark }) }),
   updateReceiptFields: (id: string, data: { receiptNo?: string; receiptDate?: string; receiptAmount?: string }, remark?: string) =>
     request<One>(`/api/vehicle-move-outs/${id}/receipt-fields`, { method: "PATCH", body: JSON.stringify({ ...data, remark }) }),
-  markReturned: (id: string, returnedDate: string) =>
-    request<One>(`/api/vehicle-move-outs/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate }) }),
+  markReturned: (id: string, returnedDate: string, recheckReason?: string) =>
+    request<One>(`/api/vehicle-move-outs/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate, recheckReason }) }),
   undoReturn: (id: string, remark: string) =>
     request<One>(`/api/vehicle-move-outs/${id}/undo-return`, { method: "POST", body: JSON.stringify({ remark }) }),
   cancel: (id: string, remark: string) =>
