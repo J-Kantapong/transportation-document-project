@@ -13,6 +13,7 @@ import {
   defaultTransferContribution,
   TRANSFER_CAR_URGENT_ITEM,
   TRANSFER_DEFAULT_PROVINCE,
+  TRANSFER_FINE_AMOUNT,
   TRANSFER_MOTO_URGENT_ITEM,
   TRANSFER_MOVE_IN_CONTRIBUTION,
   transferUrgentAmount,
@@ -225,6 +226,18 @@ function FeeLines({ title, items, total }: { title: string; items: FeeItem[]; to
   );
 }
 
+// ค่าปรับโอนล่าช้า = ช่องติ๊ก คงที่ 200 บาท (ผู้ใช้ 2026-11-18 - เดิมพิมพ์ยอดเอง) ติ๊ก = ส่ง 200 / ไม่ติ๊ก = ไม่มีค่าปรับ
+// งานเก่าที่เคยกรอกยอดอื่นไว้: ป๊อปอัปแก้ยังคงยอดเดิมจนกว่าจะเอาติ๊กออก (ติ๊กใหม่ = 200)
+function FineTick({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
+  const amount = Number(form.fineAmount) || 0;
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
+      <input type="checkbox" checked={amount > 0} onChange={(e) => onChange({ fineAmount: e.target.checked ? String(TRANSFER_FINE_AMOUNT) : "" })} />
+      ค่าปรับโอนล่าช้า (+{formatBaht(amount > 0 ? amount : TRANSFER_FINE_AMOUNT)} ใน Bill)
+    </label>
+  );
+}
+
 // ตารางลงขันรายจังหวัด (ผู้ใช้ 2026-11-18) - โหลดครั้งเดียวต่อหน้า ระหว่างโหลด/โหลดไม่ได้ = [] (ช่องลงขันว่าง backend เติมอัตราของตารางให้เอง)
 function useContributionRates(): TransferContributionRow[] {
   const [rates, setRates] = useState<TransferContributionRow[]>([]);
@@ -306,17 +319,14 @@ function MoveInFeeSection({
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <ProvinceContributionFields form={form} onChange={onChange} rates={rates} moveIn />
-        <label className="field" style={{ minWidth: 200 }}>
-          ค่าปรับ (บาท)
-          <input value={form.fineAmount} onChange={(e) => onChange({ fineAmount: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="ไม่มีเว้นว่าง" />
-        </label>
+        <FineTick form={form} onChange={onChange} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
           <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
           งานด่วน (+{formatBaht(TRANSFER_MOTO_URGENT_ITEM.amount)} ใน No Bill)
         </label>
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
-        ค่าปรับใส่เมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถรู้เมื่อใบเสร็จออก - กรอกที่หน้ารับใบเสร็จ ระบบบวกเข้า Bill ให้
+        ติ๊กค่าปรับเมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี (คงที่ 200 บาท) · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถรู้เมื่อใบเสร็จออก - กรอกที่หน้ารับใบเสร็จ ระบบบวกเข้า Bill ให้
       </p>
       <div className="customer-grid">
         <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
@@ -405,10 +415,7 @@ function FeeSection({
             <option value="USE_REQUEST">โอนขอใช้</option>
           </select>
         </label>
-        <label className="field" style={{ minWidth: 200 }}>
-          ค่าปรับ (บาท)
-          <input value={form.fineAmount} onChange={(e) => onChange({ fineAmount: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="ไม่มีเว้นว่าง" />
-        </label>
+        <FineTick form={form} onChange={onChange} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
           <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
           งานด่วน (+{formatBaht(TRANSFER_MOTO_URGENT_ITEM.amount)} ใน No Bill)
@@ -416,7 +423,7 @@ function FeeSection({
         <ProvinceContributionFields form={form} onChange={onChange} rates={rates} />
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
-        ค่าปรับใส่เมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
+        ติ๊กค่าปรับเมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้ คงที่ 200 บาท) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
       </p>
       <div className="customer-grid">
         <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />

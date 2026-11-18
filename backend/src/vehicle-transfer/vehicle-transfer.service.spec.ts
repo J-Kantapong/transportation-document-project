@@ -198,8 +198,8 @@ describe('VehicleTransferService.create - ค่าใช้จ่ายมอ�
     const { svc, create } = service(null);
     await svc.create({ ...motoDto, urgent: true, fineAmount: '200' });
     expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 305, noBillTotal: 110, dutyAmount: 20, urgent: true, fineAmount: 200 });
-    await svc.create({ ...motoDto, useRequest: 'true', urgent: true, fineAmount: '50.5' });
-    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 180.5, noBillTotal: 110, dutyAmount: 40 });
+    await svc.create({ ...motoDto, useRequest: 'true', urgent: true, fineAmount: '200' });
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 330, noBillTotal: 110, dutyAmount: 40 });
   });
 
   // ผู้ใช้ 2026-11-17/18: ลงขันตามจังหวัดที่ยื่น - สมุทรปราการ 100 / จังหวัดอื่นกรอกเอง (0 ได้) / แก้อัตราตั้งต้นได้
@@ -526,8 +526,18 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
 
   it('แก้ค่าปรับหลังมีค่าอากรโอน - คิด Bill ใหม่โดยยังรวมค่าอากรโอน', async () => {
     const { svc, update } = service(moveInRow({ stampDutyAmount: 350, billTotal: 575 }));
-    await asUser(['ADMIN'], () => svc.update('t1', { fineAmount: '100', remark: 'ลืมค่าปรับ' }));
-    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 675, fineAmount: 100, noBillTotal: 0, dutyAmount: 40 });
+    await asUser(['ADMIN'], () => svc.update('t1', { fineAmount: '200', remark: 'ลืมค่าปรับ' }));
+    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 775, fineAmount: 200, noBillTotal: 0, dutyAmount: 40 });
+  });
+
+  it('ค่าปรับคงที่ 200 บาท - ยอดอื่น = 400 ยกเว้นส่งยอดเดิมของงานเก่ากลับมา', async () => {
+    const { svc } = service(null);
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, fineAmount: '150' }))).rejects.toMatchObject({ status: 400 });
+    // งานเก่าที่กรอกค่าปรับ 150 ไว้: แก้ติ๊กด่วนโดยส่ง 150 เดิมกลับมา = ยอดค่าปรับคงเดิม
+    const old = service(moveInRow({ fineAmount: 150, billTotal: 375 }));
+    await asUser(['ADMIN'], () => old.svc.update('t1', { fineAmount: '150', urgent: true, remark: 'เป็นงานด่วน' }));
+    expect(old.update.mock.calls[0][0].data).toMatchObject({ fineAmount: 150, billTotal: 375, noBillTotal: 50 });
+    await expect(asUser(['ADMIN'], () => old.svc.update('t1', { fineAmount: '300', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
   });
 
   it('คิวตรวจรถกรองตามแบบงานที่ขอ ไม่ระบุ = ทั้งโอนตรวจรถและโอนย้ายเข้า', async () => {

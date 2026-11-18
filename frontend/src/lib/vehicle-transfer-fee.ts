@@ -14,6 +14,8 @@ export const TRANSFER_MOTO_BILL_USE_REQUEST: FeeItem[] = [
 ];
 
 export const TRANSFER_FINE_LABEL = "ค่าปรับ";
+// ค่าปรับโอนล่าช้า (เกิน 15 วันหลังออกใบเสร็จ/ใบกำกับภาษี) คงที่ 200 บาท - ฟอร์มเป็นช่องติ๊ก (ผู้ใช้ 2026-11-18) / สำเนาจาก backend
+export const TRANSFER_FINE_AMOUNT = 200;
 
 export const TRANSFER_MOTO_NO_BILL_SHARE: FeeItem = { label: "ลงขัน", amount: 60 };
 

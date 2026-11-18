@@ -30,6 +30,7 @@ import {
   calculateTransferMotoFees,
   calculateTransferMoveInFees,
   TRANSFER_DEFAULT_PROVINCE,
+  TRANSFER_FINE_AMOUNT,
   TRANSFER_MOVE_IN_CONTRIBUTION,
   transferUrgentAmount,
 } from './vehicle-transfer-fee.js';
@@ -183,10 +184,15 @@ function parseFlag(value: unknown, label: string): boolean {
   throw new BadRequestException({ error: `${label} ต้องเป็น true หรือ false` });
 }
 
-// ค่าปรับ - ว่าง = 0
-function parseFine(value: unknown): number {
+// ค่าปรับโอนล่าช้า - คงที่ 200 บาท (ผู้ใช้ 2026-11-18): รับเฉพาะ 0/ว่าง (ไม่มี) หรือ 200
+// งานเก่าที่เคยกรอกยอดอื่นไว้ ส่งยอดเดิมกลับมาได้ (existing) เพื่อให้แก้ช่องอื่นได้โดยยอดเดิมไม่เปลี่ยน
+function parseFine(value: unknown, existing?: number): number {
   if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return 0;
-  return requiredAmount(value, 'ค่าปรับ');
+  const amount = requiredAmount(value, 'ค่าปรับ');
+  if (amount !== 0 && amount !== TRANSFER_FINE_AMOUNT && amount !== existing) {
+    throw new BadRequestException({ error: `ค่าปรับโอนล่าช้าเป็นอัตราคงที่ ${TRANSFER_FINE_AMOUNT} บาท` });
+  }
+  return amount;
 }
 
 interface FeeSnapshot {
@@ -756,7 +762,7 @@ export class VehicleTransferService {
     const classChanged = vehicleClass !== existing.vehicleClass;
     const useRequest = has('useRequest') ? parseFlag(dto.useRequest, 'โอนขอใช้') : snapshot.useRequest;
     const urgent = has('urgent') ? parseFlag(dto.urgent, 'งานด่วน') : snapshot.urgent;
-    const fineAmount = has('fineAmount') ? parseFine(dto.fineAmount) : snapshot.fineAmount;
+    const fineAmount = has('fineAmount') ? parseFine(dto.fineAmount, snapshot.fineAmount) : snapshot.fineAmount;
     // ลงขันเดิม = No Bill เดิมหักด่วนเพิ่ม · กรอกมา = ใช้ตามนั้น · เปลี่ยนจังหวัด/ประเภทรถโดยไม่กรอก = อัตราตั้งต้นของจังหวัดใหม่
     const existingContribution = Math.max(0, snapshot.noBillTotal - transferUrgentAmount(existing.vehicleClass as TransferVehicleClass, snapshot.urgent));
     const provinceChanged = submitProvince !== (existing.submitProvince ?? null);
