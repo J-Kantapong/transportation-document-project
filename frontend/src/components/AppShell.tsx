@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { FocusVehicleRow } from "./FocusVehicleRow";
+import { OldJobFlowBar } from "./OldJobFlowBar";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
   type RegistrationSubtask,
   NEW_VEHICLE_SUBTASKS,
@@ -338,6 +339,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         ) : (
           <>
+            <OldJobFlowBar />
             {children}
             <FocusVehicleRow />
           </>
