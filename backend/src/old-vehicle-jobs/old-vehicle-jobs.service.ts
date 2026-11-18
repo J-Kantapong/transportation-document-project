@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { dutyAmountOf, type FeeItem } from '../plate-swap/plate-swap-fee.js';
 import { type AuditChanges, diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
 import { assertKindInScope, currentVehicleScope } from '../auth/vehicle-scope.js';
@@ -50,6 +51,14 @@ export interface HubCustomer {
   company: string | null;
 }
 
+export interface HubJobFees {
+  bill: number | null; // ค่าธรรมเนียมตามใบเสร็จที่ระบบคิดไว้ (ต่อภาษีที่ยังไม่ชำระ = null)
+  noBill: number | null; // ลงขัน ฯลฯ ไม่รวมค่าอากร
+  duty: number; // ค่าอากร แยกต่างหาก
+  inspectionCost: number; // ค่าตรวจรถ (งานโอนที่มีขั้นตรวจ) - ไม่อยู่ใน noBill
+  receiptAmount: number | null; // ยอดบนใบเสร็จจริง (ถ้าแนบ / อ่านแล้ว)
+}
+
 export interface HubNewVehicle {
   id: string;
   chassis: string;
@@ -86,6 +95,8 @@ export interface HubJob {
   blockedReason: string | null;
   blockedReasonLabel: string | null;
   blockedNote: string | null;
+  // ยอดเงินของงานที่ยื่นแล้ว (snapshot ของงานจริง - ผู้ใช้ 2026-11-19 อยากเห็นในหน้ารวม) / null = ยังไม่ยื่น หรือบัญชีนี้ไม่เห็นราคา
+  fees: HubJobFees | null;
   updatedAt: string;
 }
 
@@ -178,6 +189,7 @@ interface UnlinkedJob {
 interface LinkedInfo {
   status: OldJobStatus;
   variant: string | null;
+  fees?: HubJobFees;
   newVehicleId?: string | null; // สลับเลขที่ยื่นแล้ว: รถใหม่ที่ผูกจริง
 }
 
@@ -189,6 +201,11 @@ const PAGE_CAP = 500; // จำนวนรถสูงสุดที่ส่�
 const newVehicleIdOf = (job: { jobId: string | null; newVehicleId: string | null }, linked: Map<string, LinkedInfo>): string | null =>
   job.jobId ? (linked.get(job.jobId)?.newVehicleId ?? null) : job.newVehicleId;
 const todayDate = () => toUtcDate(bangkokToday());
+// เห็นยอดเงินของงาน: ADMIN / ฝ่ายยื่นเอกสาร / บัญชี (นอกคำขอ HTTP = เห็น)
+const canSeePrices = () => {
+  const user = currentUser();
+  return !user || user.roles.some((r) => r === 'ADMIN' || r === 'STAFF_CAR' || r === 'STAFF_MOTO' || r === 'ACCOUNTANT');
+};
 // วันที่ตามเวลาไทยของเวลาที่บันทึก (createdAt เป็น UTC)
 const bangkokDateOf = (at: Date) => toUtcDate(bangkokToday(at));
 const isUniqueConflict = (err: unknown) => (err as { code?: string } | null)?.code === 'P2002';
@@ -265,8 +282,19 @@ export class OldVehicleJobsService {
       ids.set(table, [...(ids.get(table) ?? []), job.jobId]);
     }
     const out = new Map<string, LinkedInfo>();
-    const put = (id: string, status: OldJobStatus, variant: string | null = null, newVehicleId: string | null = null) => out.set(id, { status, variant, newVehicleId });
+    const put = (id: string, status: OldJobStatus, variant: string | null = null, newVehicleId: string | null = null, fees?: HubJobFees) =>
+      out.set(id, { status, variant, newVehicleId, fees });
     const base = { id: true, cancelledAt: true, returnedDate: true, deliveredDate: true } as const;
+    // ยอดเงินของงานจริง - ตารางส่วนใหญ่เก็บค่าอากรแยกที่ dutyAmount
+    const money = { billTotal: true, noBillTotal: true, dutyAmount: true, receiptAmount: true } as const;
+    const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    const feesOf = (r: { billTotal: unknown; noBillTotal: unknown; dutyAmount?: unknown; receiptAmount?: unknown; inspectionCost?: unknown }): HubJobFees => ({
+      bill: n(r.billTotal),
+      noBill: n(r.noBillTotal),
+      duty: n(r.dutyAmount) ?? 0,
+      inspectionCost: n(r.inspectionCost) ?? 0,
+      receiptAmount: n(r.receiptAmount),
+    });
     const idsOf = (table: string) => ids.get(table) ?? [];
 
     await Promise.all([
@@ -274,7 +302,20 @@ export class OldVehicleJobsService {
         ? this.prisma.plateSwap
             .findMany({
               where: { id: { in: idsOf('PLATE_SWAP') } },
-              select: { ...base, kind: true, newVehicleId: true, buyNormalPlate: true, buyAuctionPlate: true, plateReceivedDate: true, plateDeliveredDate: true, bookReceivedDate: true },
+              select: {
+                ...base,
+                kind: true,
+                newVehicleId: true,
+                buyNormalPlate: true,
+                buyAuctionPlate: true,
+                plateReceivedDate: true,
+                plateDeliveredDate: true,
+                bookReceivedDate: true,
+                billTotal: true,
+                noBillTotal: true,
+                noBillItems: true,
+                receiptAmount: true,
+              },
             })
             .then((rows) =>
               rows.forEach((r) =>
@@ -287,6 +328,11 @@ export class OldVehicleJobsService {
                   }),
                   r.kind,
                   r.newVehicleId,
+                  // สลับเลขเก็บค่าอากรรวมอยู่ใน noBillTotal - แยกออกให้ตรงกับงานอื่น
+                  (() => {
+                    const duty = dutyAmountOf(Array.isArray(r.noBillItems) ? (r.noBillItems as unknown as FeeItem[]) : []);
+                    return { ...feesOf({ ...r, dutyAmount: duty }), noBill: Number(r.noBillTotal) - duty };
+                  })(),
                 ),
               ),
             )
@@ -295,32 +341,32 @@ export class OldVehicleJobsService {
         ? this.prisma.vehicleTransfer
             .findMany({
               where: { id: { in: idsOf('TRANSFER') } },
-              select: { ...base, transferType: true, inspectionSentDate: true, inspectionResult: true },
+              select: { ...base, ...money, inspectionCost: true, transferType: true, inspectionSentDate: true, inspectionResult: true },
             })
-            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, hasInspection: transferHasInspection(r.transferType) }), r.transferType)))
+            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, hasInspection: transferHasInspection(r.transferType) }), r.transferType, null, feesOf(r))))
         : null,
       idsOf('TAX_RENEWAL').length
         ? this.prisma.taxRenewal
             .findMany({
               where: { id: { in: idsOf('TAX_RENEWAL') } },
-              select: { id: true, cancelledAt: true, paymentDate: true, receivedDate: true, deliveredDate: true },
+              select: { id: true, cancelledAt: true, paymentDate: true, receivedDate: true, deliveredDate: true, billTotal: true, noBillTotal: true, receiptAmount: true },
             })
-            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, returnedDate: r.receivedDate }))))
+            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, returnedDate: r.receivedDate }), null, null, feesOf(r))))
         : null,
       idsOf('USE_CANCEL').length
         ? this.prisma.vehicleUseCancellation
-            .findMany({ where: { id: { in: idsOf('USE_CANCEL') } }, select: base })
-            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus(r))))
+            .findMany({ where: { id: { in: idsOf('USE_CANCEL') } }, select: { ...base, ...money } })
+            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus(r), null, null, feesOf(r))))
         : null,
       idsOf('MOVE_OUT').length
         ? this.prisma.vehicleMoveOut
-            .findMany({ where: { id: { in: idsOf('MOVE_OUT') } }, select: base })
-            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus(r))))
+            .findMany({ where: { id: { in: idsOf('MOVE_OUT') } }, select: { ...base, ...money } })
+            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus(r), null, null, feesOf(r))))
         : null,
       idsOf('PLATE_COPY').length
         ? this.prisma.plateCopy
-            .findMany({ where: { id: { in: idsOf('PLATE_COPY') } }, select: { ...base, plateReceivedDate: true } })
-            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, needsPlate: true }))))
+            .findMany({ where: { id: { in: idsOf('PLATE_COPY') } }, select: { ...base, ...money, plateReceivedDate: true } })
+            .then((rows) => rows.forEach((r) => put(r.id, linkedStatus({ ...r, needsPlate: true }), null, null, feesOf(r))))
         : null,
     ]);
     return out;
@@ -366,6 +412,8 @@ export class OldVehicleJobsService {
       blockedReason: job.blockedReason,
       blockedReasonLabel: isBlockReason(job.blockedReason) ? BLOCK_REASON_LABEL[job.blockedReason] : job.blockedReason,
       blockedNote: job.blockedNote,
+      // ราคาไม่แสดงกับบัญชีที่ไม่ได้อยู่ฝ่ายยื่นเอกสาร / บัญชี (STAFF_ENTRY / DELIVERY ที่คีย์รับงาน)
+      fees: (job.jobId && canSeePrices() ? linked.get(job.jobId)?.fees : null) ?? null,
       updatedAt: job.updatedAt.toISOString(),
     };
   }
@@ -537,15 +585,20 @@ export class OldVehicleJobsService {
   // หน้ารวม: scope = open (ยังมีงานไม่เสร็จ - ค่าเริ่มต้น) | done (ทุกงานเสร็จ) | all · q = ทะเบียน / เลขตัวถัง / ชื่อเจ้าของรถ / ลูกค้า
   // ตัวกรองประเภทงานและสถานะทำที่หน้าเว็บ (ข้อมูลชุดเดียวกัน) - คืนไม่เกิน 500 คัน เรียงตามวันที่รับงานล่าสุด
   // scope = inspection: เฉพาะรถที่มีงานต้องตรวจรถและยังไม่ยื่น (หน้าตรวจรถ) - กรองใน SQL จึงไม่ขึ้นกับเพดานของหน้ารวม
-  async list(scopeParam = 'open', qParam?: string, classParam?: unknown): Promise<{ vehicles: HubVehicle[]; truncated: boolean }> {
+  // counts = จำนวนรถที่ยังมีงานค้าง / งานเสร็จหมดแล้ว ตามคำค้นเดียวกัน (ผู้ใช้ 2026-11-19: หน้าแรกบอกว่ามีงานเสร็จแล้วกี่คัน กดดูได้)
+  async list(
+    scopeParam = 'open',
+    qParam?: string,
+    classParam?: unknown,
+  ): Promise<{ vehicles: HubVehicle[]; truncated: boolean; counts: { open: number; done: number } }> {
     if (!['open', 'done', 'all', 'inspection'].includes(scopeParam)) {
       throw new BadRequestException({ error: 'พารามิเตอร์ scope ต้องเป็น open, done, all หรือ inspection' });
     }
     const wantClass = parseClass(classParam);
     const readScope = this.readScope();
-    if (readScope === 'NONE') return { vehicles: [], truncated: false };
+    if (readScope === 'NONE') return { vehicles: [], truncated: false, counts: { open: 0, done: 0 } };
     const classes: OldVehicleClass[] = readScope === 'ALL' ? (wantClass ? [wantClass] : ['CAR', 'MOTO']) : [readScope];
-    if (wantClass && !classes.includes(wantClass)) return { vehicles: [], truncated: false };
+    if (wantClass && !classes.includes(wantClass)) return { vehicles: [], truncated: false, counts: { open: 0, done: 0 } };
 
     // ผูกงานที่ยื่นจากหน้าเดิม + สร้างแถวย้อนหลัง - ล้มก็ยังแสดงรายการได้
     await this.sync().catch((err: unknown) => this.logger.error(`sync งานรถเก่าไม่สำเร็จ: ${String(err)}`));
@@ -574,7 +627,12 @@ export class OldVehicleJobsService {
     const open = (v: HubVehicle) => v.jobs.some((j) => !isClosedStatus(j.status));
     const filtered = scopeParam === 'all' || scopeParam === 'inspection' ? all : all.filter((v) => (scopeParam === 'open' ? open(v) : !open(v)));
     filtered.sort((a, b) => (b.jobs[0]?.receivedDate ?? '').localeCompare(a.jobs[0]?.receivedDate ?? ''));
-    return { vehicles: filtered.slice(0, PAGE_CAP), truncated: filtered.length > PAGE_CAP || rows.length === LOAD_CAP };
+    const openCount = all.filter(open).length;
+    return {
+      vehicles: filtered.slice(0, PAGE_CAP),
+      truncated: filtered.length > PAGE_CAP || rows.length === LOAD_CAP,
+      counts: { open: openCount, done: all.length - openCount },
+    };
   }
 
   // ค้นรถที่มีอยู่แล้วตอนพิมพ์ทะเบียน/เลขตัวถังในฟอร์มรับงาน - เจอ = เติมข้อมูลเดิมและรับงานเพิ่มให้คันเดิม
