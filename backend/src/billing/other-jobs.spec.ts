@@ -104,7 +104,7 @@ const transferRow = {
   transfereeName: 'B',
 };
 
-function setup(opts: { billedBy?: string; closedNote?: string; transfers?: unknown[]; customerOverride?: Record<string, unknown> } = {}) {
+function setup(opts: { quotedBy?: string; billedBy?: string; closedNote?: string; transfers?: unknown[]; customerOverride?: Record<string, unknown> } = {}) {
   const closureCreate = vi.fn().mockResolvedValue({});
   const closureDelete = vi.fn().mockResolvedValue({ count: 1 });
   const auditCreate = vi.fn().mockResolvedValue({ id: 'a1' });
@@ -124,6 +124,10 @@ function setup(opts: { billedBy?: string; closedNote?: string; transfers?: unkno
     invoice: { findUnique: vi.fn().mockResolvedValue(null), findFirst: vi.fn().mockResolvedValue({ invoiceNo: 'IV2026-120' }), create },
     invoiceItem: {
       findMany: vi.fn().mockResolvedValue(opts.billedBy ? [{ sourceType: 'TRANSFER', sourceId: 't1', invoice: { invoiceNo: opts.billedBy } }] : []),
+    },
+    // งานที่ผูกกับใบเสนอราคาที่ออกเลขแล้ว (ผู้ใช้ 2026-11-18) - ค่าเริ่มต้น = ไม่มี
+    quotationItem: {
+      findMany: vi.fn().mockResolvedValue(opts.quotedBy ? [{ sourceType: 'TRANSFER', sourceId: 't1', quotation: { quotationNo: opts.quotedBy, invoices: [] } }] : []),
     },
     jobBillingClosure: {
       findMany: vi.fn().mockResolvedValue(opts.closedNote ? [{ jobType: 'TRANSFER', jobId: 't1', note: opts.closedNote }] : []),
@@ -173,6 +177,11 @@ describe('BillingService.otherJobsQueue', () => {
   it('leaves out jobs that are already in a live invoice and warns when no price is set', async () => {
     const billed = setup({ billedBy: 'IV2026-100' });
     expect((await billed.svc.otherJobsQueue()).customers).toHaveLength(0);
+
+    // งานที่ผูกกับใบเสนอราคาที่ออกเลขแล้ว วางบิลผ่านใบเสนอราคา - ไม่อยู่ในคิว และวางบิลตรงจากคิวไม่ได้ (ผู้ใช้ 2026-11-18)
+    const quoted = setup({ quotedBy: 'QT2026-030' });
+    expect((await quoted.svc.otherJobsQueue()).customers).toHaveLength(0);
+    await expect(quoted.svc.createJobInvoice(dto())).rejects.toMatchObject({ response: { error: expect.stringContaining('ใบเสนอราคา QT2026-030') } });
 
     const noPrice = setup({ transfers: [{ ...transferRow, vehicleClass: 'CAR' }] });
     const job0 = (await noPrice.svc.otherJobsQueue()).customers[0].jobs[0];
@@ -251,6 +260,7 @@ describe('BillingService.createInvoice with other jobs', () => {
       customer: { findUnique: vi.fn().mockResolvedValue({ ...customer, accountPeriods: opts.periods ?? [] }) },
       invoice: { findUnique: vi.fn().mockResolvedValue(null), create },
       invoiceItem: { findMany: vi.fn().mockResolvedValue([]) },
+      quotationItem: { findMany: vi.fn().mockResolvedValue([]) },
       jobBillingClosure: { findMany: vi.fn().mockResolvedValue([]) },
       vehicle: { findMany: vi.fn().mockResolvedValue([vehicle]) },
       plateSwap: { findMany: vi.fn().mockResolvedValue([]) },

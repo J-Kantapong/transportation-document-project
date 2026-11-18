@@ -101,6 +101,7 @@ export interface VehicleTransferRow {
 export interface CreateVehicleTransferDto {
   transferType?: unknown; // OWNER | INSPECTION | MOVE_IN (บังคับ)
   moveOutId?: unknown; // โอนย้ายเข้า: งานย้ายออกที่รับใบเสร็จแล้ว (ไม่บังคับ)
+  stampDutyAmount?: unknown; // โอนย้ายเข้า: ค่าอากรโอนตามราคารถ (ไม่บังคับ - บางงานไม่มี ว่าง = 0) รวมเข้า Bill
   newPlateCategory?: unknown; // โอนย้ายเข้า: ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า - รู้ตอนยื่นก็กรอกได้เลย (ไม่บังคับจนกว่าจะรับใบเสร็จ)
   newPlateNumber?: unknown;
   vehicleClass?: unknown; // CAR | MOTO (บังคับ)
@@ -140,6 +141,7 @@ export interface UpdateVehicleTransferDto {
   billTotal?: unknown;
   noBillTotal?: unknown;
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
+  stampDutyAmount?: unknown; // โอนย้ายเข้า - ค่าอากรโอน (ว่าง = 0)
   newPlateCategory?: unknown; // โอนย้ายเข้า - แก้ทะเบียนใหม่ (รับกลับแล้วต้องมีครบ)
   newPlateNumber?: unknown;
   remark?: unknown;
@@ -202,6 +204,7 @@ interface FeeSnapshot {
   useRequest: boolean;
   urgent: boolean;
   fineAmount: number;
+  stampDutyAmount?: number; // ค่าอากรโอน - มีเฉพาะโอนย้ายเข้า (ไม่ใส่ = ไม่แตะคอลัมน์)
 }
 
 interface FeeInput {
@@ -225,7 +228,15 @@ export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInp
     if (vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
     if (input.useRequest) throw new BadRequestException({ error: MOVE_IN_NO_USE_REQUEST_ERROR });
     const fees = calculateTransferMoveInFees({ urgent: input.urgent, fine: input.fineAmount, stampDuty: input.stampDuty ?? 0, contribution: input.contribution });
-    return { billTotal: fees.billTotal, noBillTotal: fees.noBillTotal, dutyAmount: fees.dutyTotal, useRequest: false, urgent: input.urgent, fineAmount: input.fineAmount };
+    return {
+      billTotal: fees.billTotal,
+      noBillTotal: fees.noBillTotal,
+      dutyAmount: fees.dutyTotal,
+      useRequest: false,
+      urgent: input.urgent,
+      fineAmount: input.fineAmount,
+      stampDutyAmount: input.stampDuty ?? 0,
+    };
   }
   if (vehicleClass === 'MOTO') {
     const fees = calculateTransferMotoFees({ useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
@@ -457,6 +468,8 @@ export class VehicleTransferService {
       fineAmount: parseFine(dto?.fineAmount),
       billTotal: dto?.billTotal,
       moveIn,
+      // ค่าอากรโอน (ผู้ใช้ 2026-11-18): กรอกตอนยื่นได้ ไม่บังคับ เพราะบางงานไม่มี - ว่าง = 0
+      stampDuty: moveIn ? (optionalAmount(dto?.stampDutyAmount, 'ค่าอากรโอน') ?? 0) : 0,
     });
 
     const row = await this.prisma.vehicleTransfer.create({
@@ -774,11 +787,17 @@ export class VehicleTransferService {
         ? await this.resolveContribution(vehicleClass, submitProvince, undefined)
         : existingContribution;
     const contributionSame = contribution === existingContribution;
+    // ค่าอากรโอน (เฉพาะโอนย้ายเข้า): แก้อย่างเดียว = ปรับ Bill ตามส่วนต่าง ไม่คิดใหม่ทั้งชุด (งานเก่าไม่โดนอัตราใหม่)
+    const stampBefore = Number(existing.stampDutyAmount ?? 0);
+    const stampDuty = has('stampDutyAmount') ? (optionalAmount(dto.stampDutyAmount, 'ค่าอากรโอน') ?? 0) : stampBefore;
+    if (!moveIn && stampDuty > 0) throw new BadRequestException({ error: 'ค่าอากรโอนกรอกได้เฉพาะงานโอนย้ายเข้า' });
     if (vehicleClass === 'MOTO') {
       const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
-      return !classChanged && same
-        ? snapshot
-        : feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty: Number(existing.stampDutyAmount ?? 0) });
+      if (!classChanged && same) {
+        if (!moveIn || stampDuty === stampBefore) return snapshot;
+        return { ...snapshot, billTotal: Math.round((snapshot.billTotal - stampBefore + stampDuty) * 100) / 100, stampDutyAmount: stampDuty };
+      }
+      return feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty });
     }
     // รถยนต์: ขอใช้/ค่าปรับยังไม่มีอัตรา / No Bill (ลงขัน 100 + ด่วน 100) คิดใหม่เมื่อย้ายมาจากมอเตอร์ไซค์หรือเปลี่ยนติ๊กด่วนเท่านั้น
     // ย้ายมาจากมอเตอร์ไซค์ต้องกรอก Bill ใหม่เอง / แก้เฉพาะ Bill ที่กรอก No Bill เดิมคงไว้

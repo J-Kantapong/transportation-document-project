@@ -530,6 +530,21 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
     expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 780, fineAmount: 200, noBillTotal: 0, dutyAmount: 40 });
   });
 
+  it('ค่าอากรโอนกรอกตอนยื่น/ตอนแก้ได้ ไม่บังคับ - แก้อย่างเดียวปรับ Bill ตามส่วนต่าง', async () => {
+    const { svc, create } = service(null);
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, stampDutyAmount: '120' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 350, stampDutyAmount: 120 });
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, stampDutyAmount: '' }));
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 230, stampDutyAmount: 0 });
+    // งานเก่าที่ยื่นตอนคำขอยัง 5 บาท (Bill 225): ใส่ค่าอากรโอน 100 = 325 ไม่กระโดดไปอัตราใหม่
+    const old = service(moveInRow({ billTotal: 225 }));
+    await asUser(['ADMIN'], () => old.svc.update('t1', { stampDutyAmount: '100', remark: 'ใบเสร็จมีค่าอากรโอน' }));
+    expect(old.update.mock.calls[0][0].data).toMatchObject({ billTotal: 325, stampDutyAmount: 100 });
+    // งานแบบอื่นไม่มีค่าอากรโอน
+    const owner = service(row({ vehicleClass: 'MOTO', billTotal: 105, noBillTotal: 60, dutyAmount: 20 }));
+    await expect(asUser(['ADMIN'], () => owner.svc.update('t1', { stampDutyAmount: '100', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
+  });
+
   it('ค่าปรับคงที่ 200 บาท - ยอดอื่น = 400 ยกเว้นส่งยอดเดิมของงานเก่ากลับมา', async () => {
     const { svc } = service(null);
     await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, fineAmount: '150' }))).rejects.toMatchObject({ status: 400 });

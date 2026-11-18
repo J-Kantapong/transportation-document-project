@@ -17,6 +17,7 @@ import {
   type QuotationItem,
   type QuotationKind,
   type QuotationRateInput,
+  type MoveInQuoteJob,
   type YamahaCounts,
   type YamahaSize,
 } from "@/lib/quotation-api";
@@ -122,6 +123,9 @@ export function QuotationFormPage() {
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
   const [rateRows, setRateRows] = useState<RateRow[]>([emptyRateRow()]);
   const [yamahaPick, setYamahaPick] = useState(todayIso().slice(0, 7));
+  // งานโอนย้ายเข้าที่ดึงมาให้ติ๊ก (null = ยังไม่ได้ดึง / ปิดรายการแล้ว)
+  const [moveInJobs, setMoveInJobs] = useState<MoveInQuoteJob[] | null>(null);
+  const [moveInPicked, setMoveInPicked] = useState<Set<string>>(new Set());
   const [yamaha, setYamaha] = useState<{ month: string; size: YamahaSize | null; counts: YamahaCounts } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -144,7 +148,16 @@ export function QuotationFormPage() {
           setValidDaysText(String(q.validDays));
           setTitle(q.title);
           setConditions(q.conditions ?? "");
-          if (q.kind === "JOB") setRows(itemRowsFromItems(q.items));
+          // บรรทัดที่ผูกกับงาน (sourceType) ต้องอยู่ในตัวแก้ด้วย - itemRowsFromItems ของบิลตัดบรรทัดแบบนี้ออก จึงแปลงทีละบรรทัดแล้วใส่ค่าผูกกลับ
+          if (q.kind === "JOB") {
+            setRows(
+              q.items.map((it) => ({
+                ...itemRowsFromItems([{ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: it.amount, cost: it.cost }])[0],
+                sourceType: it.sourceType ?? null,
+                sourceId: it.sourceId ?? null,
+              })),
+            );
+          }
           else setRateRows(rateRowsFromItems(q.items));
           if (q.yamahaMonth && q.yamahaCounts) setYamaha({ month: q.yamahaMonth, size: q.yamahaSize, counts: q.yamahaCounts });
         }
@@ -206,7 +219,18 @@ export function QuotationFormPage() {
       validDays,
       title: title.trim(),
       conditions: conditions.trim(),
-      items: kind === "JOB" ? items.map(({ kind: k, description, quantity, unitPrice, cost }) => ({ kind: k, description, quantity, unitPrice, cost })) : rateRowsToInput(rateRows),
+      items:
+        kind === "JOB"
+          ? items.map(({ kind: k, description, quantity, unitPrice, cost }, i) => ({
+              kind: k,
+              description,
+              quantity,
+              unitPrice,
+              cost,
+              // บรรทัดที่ดึงจากงานโอนย้ายเข้า - ส่งค่าผูกงานไปด้วย (items เรียงตรงกับ rows)
+              ...(rows[i]?.sourceId ? { sourceType: rows[i].sourceType, sourceId: rows[i].sourceId } : {}),
+            }))
+          : rateRowsToInput(rateRows),
       yamahaMonth: kind === "JOB" ? (yamaha?.month ?? null) : null,
       yamahaSize: kind === "JOB" ? (yamaha?.size ?? null) : null,
     };
@@ -235,6 +259,40 @@ export function QuotationFormPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // งานโอนย้ายเข้าที่รับใบเสร็จแล้วของลูกค้า (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ) - ติ๊กงานแล้วเพิ่มเป็นบรรทัด แก้ต่อได้
+  async function loadMoveInJobs() {
+    if (!customerId || isNew) return setError("เลือกลูกค้าในระบบก่อนดึงงานโอนย้ายเข้า");
+    setError("");
+    try {
+      const res = await quotationApi.moveInJobs(customerId, editing?.id);
+      // งานที่มีบรรทัดอยู่ในใบนี้แล้วไม่แสดงซ้ำ
+      const inRows = new Set(rows.map((r) => r.sourceId).filter(Boolean));
+      const jobs = res.jobs.filter((j) => !inRows.has(j.id));
+      setMoveInJobs(jobs);
+      setMoveInPicked(new Set(jobs.map((j) => j.id)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "ดึงงานโอนย้ายเข้าไม่สำเร็จ");
+    }
+  }
+
+  function addMoveInJobs() {
+    const picked = (moveInJobs ?? []).filter((j) => moveInPicked.has(j.id));
+    if (picked.length === 0) return setError("ติ๊กงานโอนย้ายเข้าอย่างน้อย 1 งาน");
+    setError("");
+    // แต่ละบรรทัดผูกกับงานของมัน (sourceType / sourceId) - ลบบรรทัด = เลิกผูก
+    const added = picked.flatMap((j) =>
+      j.items.map((it) => ({
+        ...itemRowsFromItems([{ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: round2(it.quantity * it.unitPrice), cost: it.cost }])[0],
+        sourceType: "TRANSFER",
+        sourceId: j.id,
+      })),
+    );
+    // บรรทัดว่างที่ยังไม่ได้พิมพ์อะไรไม่เก็บไว้ - ที่พิมพ์ไว้แล้วอยู่ต่อ
+    setRows((prev) => [...prev.filter((r) => r.description.trim() || r.unitPriceText.trim()), ...added]);
+    if (!title.trim()) setTitle(`งานโอนย้ายเข้า ${picked.length} คัน`);
+    setMoveInJobs(null);
   }
 
   // รถเล็กกับรถใหญ่ส่งคนละแผนก ออกคนละใบ (ผู้ใช้ 2026-10-05) - ดึงทีละขนาด
@@ -415,6 +473,56 @@ export function QuotationFormPage() {
                 <span className="muted" style={{ fontSize: 12, flexBasis: "100%" }}>
                   ออกเลขแล้วรายการแจ้งย้าย{yamaha.size ? YAMAHA_SIZE_LABEL[yamaha.size] : ""}ของเดือนนี้จะถูกล็อก (เพิ่ม / แก้ / ยกเลิกไม่ได้) จนกว่าจะยกเลิกใบเสนอราคา · รถเล็กกับรถใหญ่ออกคนละใบ (ส่งคนละแผนก)
                 </span>
+              )}
+            </div>
+            <div style={{ border: "1px dashed #c9d6f5", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <span>งานโอนย้ายเข้า:</span>
+                <button type="button" onClick={loadMoveInJobs}>
+                  ดึงงานที่รับใบเสร็จแล้วของลูกค้านี้
+                </button>
+                {moveInJobs && (
+                  <button type="button" className="text-button" onClick={() => setMoveInJobs(null)}>
+                    ปิดรายการ
+                  </button>
+                )}
+              </div>
+              {moveInJobs && moveInJobs.length === 0 && <span className="muted">ลูกค้านี้ไม่มีงานโอนย้ายเข้าที่รับใบเสร็จแล้วและยังไม่ได้วางบิล</span>}
+              {moveInJobs && moveInJobs.length > 0 && (
+                <>
+                  {moveInJobs.map((j) => (
+                    <label key={j.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <input
+                        type="checkbox"
+                        checked={moveInPicked.has(j.id)}
+                        onChange={(e) =>
+                          setMoveInPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(j.id);
+                            else next.delete(j.id);
+                            return next;
+                          })
+                        }
+                        style={{ marginTop: 3 }}
+                      />
+                      <span>
+                        {j.plate}
+                        {j.newPlate ? ` → ${j.newPlate}` : j.province ? ` ย้ายเข้า${j.province}` : ""} · {j.transfereeName} · ค่าธรรมเนียม {formatMoney(j.fee)}
+                        {j.feeSource === "ESTIMATE" ? " (ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด)" : " (ตามใบเสร็จ)"} · ค่าบริการ{" "}
+                        {j.serviceFee !== null && j.serviceFee > 0 ? formatMoney(j.serviceFee) : "ยังไม่ตั้งราคา - เพิ่มบรรทัดเอง"}
+                      </span>
+                    </label>
+                  ))}
+                  <div>
+                    <button type="button" className="primary" onClick={addMoveInJobs}>
+                      เพิ่มงานที่ติ๊กลงรายการ
+                    </button>
+                  </div>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    บรรทัดที่เพิ่มแก้ข้อความ/ยอดได้ และผูกกับงานนั้นอยู่ (ลบบรรทัด = เลิกผูก) · ออกเลขใบเสนอราคาแล้วงานจะออกจากคิววางบิลงานอื่นๆ และดึงเข้าใบอื่นไม่ได้ จนกว่าใบนี้จะถูกยกเลิก / ไม่อนุมัติ ·
+                    ออกใบวางบิลจากใบนี้ได้เมื่อส่งงานลูกค้า (ใบ DL) แล้ว
+                  </span>
+                </>
               )}
             </div>
             <InvoiceItemsEditor rows={rows} onChange={setRows} minRows={1} />
