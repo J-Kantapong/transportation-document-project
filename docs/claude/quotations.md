@@ -39,22 +39,25 @@ Project documentation for Claude Code and Codex. Moved here unchanged from `CLAU
   `GET /:id/history` (AuditLog entity `Quotation`). Print: `frontend/src/lib/quotation-print.ts` (same CSS as the
   invoice; total before WHT, WHT as a note; draft / cancelled watermark).
 
-- Move-in transfers on a quotation (user 2026-11-18: quote after the job is done, "เพราะผมไม่รู้ราคาที่แน่ชัดว่าเท่าไหร่"): the JOB form has
-  "งานโอนย้ายเข้า: ดึงงานที่รับใบเสร็จแล้วของลูกค้านี้" (`GET /api/billing/quotations/move-in-jobs?customerId=`, `QuotationService.moveInJobs`).
-  It lists the customer's `VehicleTransfer` rows with `transferType` MOVE_IN that are returned (receipt received), not cancelled and not on a
-  non-VOID invoice; delivery (DL) is not required for quoting. Each job offers a FEE line = the real receipt amount (`receiptAmount`, else
-  the system's `billTotal`, shown as an estimate) and a SERVICE line from the customer's `JobFeeRate` (TRANSFER / MOTO / variant MOVE_IN,
-  cost = No Bill + ค่าอากร) - no rate set = no service line, the accountant adds it. ค่าอากร is not a line (same rule as other-jobs billing).
-  Ticked jobs are appended to the editable rows, and each pulled line is linked to its job (user 2026-11-18, migration
-  `20261118120000_quotation_item_job_link`): `QuotationItem.sourceType` = `TRANSFER` + `sourceId`, no FK, sent back per line in `items`
-  (description and amount stay editable; deleting the line drops the link; "ทำฉบับแก้ไข" copies the links). Rules:
-  - Saving (`attachJobLinks`) refuses a job that is not this customer's returned, non-cancelled MOVE_IN transfer, or that is already taken
+- Customer jobs on a quotation (user 2026-11-18: quote after the job is done, "เพราะผมไม่รู้ราคาที่แน่ชัดว่าเท่าไหร่"; first built for move-in
+  transfers only, widened the same day: "ควรมีงานทุกแบบมาเลยของลูกค้านั้นๆ"; migration `20261118120000_quotation_item_job_link`): the JOB form has
+  "งานอื่นๆ ของลูกค้า: ดึงงานที่เสร็จแล้วของลูกค้านี้" (`GET /api/billing/quotations/customer-jobs?customerId=&quotationId=`,
+  `QuotationService.customerJobs`). It lists every other-job type of the customer that is done - transfers of all three types, vehicle use
+  cancellation, plate copy, move out (receipt returned) and tax renewal (paid) - through `BillingService.jobsForQuotation`, the billing
+  loader without the delivery requirement, so a job can be quoted before its DL slip. Each job offers a FEE line = the real receipt amount
+  (else the system's `billTotal`, shown as an estimate; tax renewal = the tax paid) and a SERVICE line from the customer's `JobFeeRate`
+  (cost = No Bill + ค่าอากร) - no rate set = no service line, the accountant adds it. ค่าอากร is not a line (same rule as other-jobs billing).
+  A move-in transfer and the move-out it was prefilled from (`VehicleTransfer.moveOutId`) come back as a pair (`pairedWith`) and are ticked
+  and unticked together. Ticked jobs are appended to the editable rows and each pulled line is linked to its job:
+  `QuotationItem.sourceType` (the job type) + `sourceId`, no FK, sent back per line in `items` (description and amount stay editable;
+  deleting the line drops the link; "ทำฉบับแก้ไข" copies the links). Rules:
+  - Saving (`attachJobLinks`) refuses a job that is not this customer's done, non-cancelled job, or that is already taken
     (`jobsTaken`): on a non-VOID invoice, closed as billed outside, or on another quotation in DRAFT / ISSUED / APPROVED (the draft being
-    edited and the quotation it revises do not count). `move-in-jobs` hides taken jobs the same way (`&quotationId=` = the draft being edited).
+    edited and the quotation it revises do not count). `customer-jobs` hides taken jobs the same way (`&quotationId=` = the draft being edited).
   - The other-jobs billing queue (`BillingService.loadJobs`) treats a job linked to an ISSUED / APPROVED quotation as already billed
     (`billedInvoiceNo` = the invoice number once invoiced, else "ใบเสนอราคา QT…"), so it leaves the queue and cannot be billed there; a
     cancelled / rejected / superseded quotation or a DRAFT frees it again. The invoice made from the quotation keeps plain custom lines
     (no `InvoiceItem.sourceType`), so its printed face is unchanged.
   - "ออกใบวางบิลจากใบนี้" (`assertLinkedJobsBillable`) requires every linked job to be delivered (DL slip, the same rule as the queue),
     not cancelled and not billed or closed elsewhere.
-  Not built: linking other job types, a marker on linked rows in the editor.
+  Not built: a marker on linked rows in the editor, pulling new-registration vehicles.

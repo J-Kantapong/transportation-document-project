@@ -20,10 +20,10 @@ export class QuotationController {
     return this.quotations.yamahaMonth(month, size);
   }
 
-  // งานโอนย้ายเข้าของลูกค้าที่รับใบเสร็จแล้ว (ยังไม่อยู่ในบิล / ใบเสนอราคาอื่น) + บรรทัดที่เสนอ ?customerId=&quotationId=<ร่างที่กำลังแก้> (ผู้ใช้ 2026-11-18)
-  @Get('move-in-jobs')
-  moveInJobs(@Query('customerId') customerId?: string, @Query('quotationId') quotationId?: string) {
-    return this.quotations.moveInJobs(customerId, quotationId);
+  // งานอื่นๆ ทุกแบบของลูกค้าที่เสร็จแล้ว (ยังไม่อยู่ในบิล / ใบเสนอราคาอื่น) + บรรทัดที่เสนอ ?customerId=&quotationId=<ร่างที่กำลังแก้> (ผู้ใช้ 2026-11-18)
+  @Get('customer-jobs')
+  customerJobs(@Query('customerId') customerId?: string, @Query('quotationId') quotationId?: string) {
+    return this.quotations.customerJobs(customerId, quotationId);
   }
 
   // เลขที่ใบเสนอราคา: เลขล่าสุดแต่ละปี · ตั้งเลขล่าสุด (series/set) = ADMIN เท่านั้น - ดู access-policy.ts

@@ -17,7 +17,7 @@ import {
   type QuotationItem,
   type QuotationKind,
   type QuotationRateInput,
-  type MoveInQuoteJob,
+  type QuoteJob,
   type YamahaCounts,
   type YamahaSize,
 } from "@/lib/quotation-api";
@@ -123,9 +123,9 @@ export function QuotationFormPage() {
   const [rows, setRows] = useState<ItemRow[]>([emptyItemRow()]);
   const [rateRows, setRateRows] = useState<RateRow[]>([emptyRateRow()]);
   const [yamahaPick, setYamahaPick] = useState(todayIso().slice(0, 7));
-  // งานโอนย้ายเข้าที่ดึงมาให้ติ๊ก (null = ยังไม่ได้ดึง / ปิดรายการแล้ว)
-  const [moveInJobs, setMoveInJobs] = useState<MoveInQuoteJob[] | null>(null);
-  const [moveInPicked, setMoveInPicked] = useState<Set<string>>(new Set());
+  // งานของลูกค้าที่ดึงมาให้ติ๊ก (null = ยังไม่ได้ดึง / ปิดรายการแล้ว) - key ของงาน = "ประเภท:id"
+  const [quoteJobs, setQuoteJobs] = useState<QuoteJob[] | null>(null);
+  const [quotePicked, setQuotePicked] = useState<Set<string>>(new Set());
   const [yamaha, setYamaha] = useState<{ month: string; size: YamahaSize | null; counts: YamahaCounts } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -261,38 +261,57 @@ export function QuotationFormPage() {
     }
   }
 
-  // งานโอนย้ายเข้าที่รับใบเสร็จแล้วของลูกค้า (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ) - ติ๊กงานแล้วเพิ่มเป็นบรรทัด แก้ต่อได้
-  async function loadMoveInJobs() {
-    if (!customerId || isNew) return setError("เลือกลูกค้าในระบบก่อนดึงงานโอนย้ายเข้า");
+  // งานอื่นๆ ทุกแบบของลูกค้าที่เสร็จแล้ว (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ "ควรมีงานทุกแบบของลูกค้านั้นๆ") - ติ๊กงานแล้วเพิ่มเป็นบรรทัด แก้ต่อได้
+  const jobKey = (j: Pick<QuoteJob, "type" | "id">) => `${j.type}:${j.id}`;
+
+  async function loadQuoteJobs() {
+    if (!customerId || isNew) return setError("เลือกลูกค้าในระบบก่อนดึงงาน");
     setError("");
     try {
-      const res = await quotationApi.moveInJobs(customerId, editing?.id);
+      const res = await quotationApi.customerJobs(customerId, editing?.id);
       // งานที่มีบรรทัดอยู่ในใบนี้แล้วไม่แสดงซ้ำ
-      const inRows = new Set(rows.map((r) => r.sourceId).filter(Boolean));
-      const jobs = res.jobs.filter((j) => !inRows.has(j.id));
-      setMoveInJobs(jobs);
-      setMoveInPicked(new Set(jobs.map((j) => j.id)));
+      const inRows = new Set(rows.filter((r) => r.sourceId).map((r) => `${r.sourceType}:${r.sourceId}`));
+      const jobs = res.jobs.filter((j) => !inRows.has(jobKey(j)));
+      setQuoteJobs(jobs);
+      setQuotePicked(new Set(jobs.map(jobKey)));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "ดึงงานโอนย้ายเข้าไม่สำเร็จ");
+      setError(err instanceof ApiError ? err.message : "ดึงงานของลูกค้าไม่สำเร็จ");
     }
   }
 
-  function addMoveInJobs() {
-    const picked = (moveInJobs ?? []).filter((j) => moveInPicked.has(j.id));
-    if (picked.length === 0) return setError("ติ๊กงานโอนย้ายเข้าอย่างน้อย 1 งาน");
+  // ติ๊ก/เอาติ๊กออก - งานโอนย้ายเข้ากับงานย้ายออกที่ผูกกัน (pairedWith) ไปด้วยกัน
+  function toggleQuoteJob(job: QuoteJob, checked: boolean) {
+    setQuotePicked((prev) => {
+      const next = new Set(prev);
+      const key = jobKey(job);
+      const partners = [job.pairedWith, ...(quoteJobs ?? []).filter((j) => j.pairedWith === key).map(jobKey)].filter((k): k is string => !!k);
+      for (const k of [key, ...partners]) {
+        if (checked) next.add(k);
+        else next.delete(k);
+      }
+      return next;
+    });
+  }
+
+  function addQuoteJobs() {
+    const picked = (quoteJobs ?? []).filter((j) => quotePicked.has(jobKey(j)));
+    if (picked.length === 0) return setError("ติ๊กงานอย่างน้อย 1 งาน");
     setError("");
     // แต่ละบรรทัดผูกกับงานของมัน (sourceType / sourceId) - ลบบรรทัด = เลิกผูก
     const added = picked.flatMap((j) =>
       j.items.map((it) => ({
         ...itemRowsFromItems([{ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: round2(it.quantity * it.unitPrice), cost: it.cost }])[0],
-        sourceType: "TRANSFER",
+        sourceType: j.type,
         sourceId: j.id,
       })),
     );
     // บรรทัดว่างที่ยังไม่ได้พิมพ์อะไรไม่เก็บไว้ - ที่พิมพ์ไว้แล้วอยู่ต่อ
     setRows((prev) => [...prev.filter((r) => r.description.trim() || r.unitPriceText.trim()), ...added]);
-    if (!title.trim()) setTitle(`งานโอนย้ายเข้า ${picked.length} คัน`);
-    setMoveInJobs(null);
+    if (!title.trim()) {
+      const labels = [...new Set(picked.map((j) => j.label))];
+      setTitle(`งาน${labels.join(" / ")} ${picked.length} รายการ`.slice(0, 200));
+    }
+    setQuoteJobs(null);
   }
 
   // รถเล็กกับรถใหญ่ส่งคนละแผนก ออกคนละใบ (ผู้ใช้ 2026-10-05) - ดึงทีละขนาด
@@ -477,44 +496,33 @@ export function QuotationFormPage() {
             </div>
             <div style={{ border: "1px dashed #c9d6f5", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span>งานโอนย้ายเข้า:</span>
-                <button type="button" onClick={loadMoveInJobs}>
-                  ดึงงานที่รับใบเสร็จแล้วของลูกค้านี้
+                <span>งานอื่นๆ ของลูกค้า (โอน / โอนย้ายเข้า / ย้ายออก / ยกเลิกการใช้รถ / คัดป้าย / ต่อภาษี):</span>
+                <button type="button" onClick={loadQuoteJobs}>
+                  ดึงงานที่เสร็จแล้วของลูกค้านี้
                 </button>
-                {moveInJobs && (
-                  <button type="button" className="text-button" onClick={() => setMoveInJobs(null)}>
+                {quoteJobs && (
+                  <button type="button" className="text-button" onClick={() => setQuoteJobs(null)}>
                     ปิดรายการ
                   </button>
                 )}
               </div>
-              {moveInJobs && moveInJobs.length === 0 && <span className="muted">ลูกค้านี้ไม่มีงานโอนย้ายเข้าที่รับใบเสร็จแล้วและยังไม่ได้วางบิล</span>}
-              {moveInJobs && moveInJobs.length > 0 && (
+              {quoteJobs && quoteJobs.length === 0 && <span className="muted">ลูกค้านี้ไม่มีงานที่เสร็จแล้วและยังไม่ได้วางบิล / เสนอราคา</span>}
+              {quoteJobs && quoteJobs.length > 0 && (
                 <>
-                  {moveInJobs.map((j) => (
-                    <label key={j.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                      <input
-                        type="checkbox"
-                        checked={moveInPicked.has(j.id)}
-                        onChange={(e) =>
-                          setMoveInPicked((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(j.id);
-                            else next.delete(j.id);
-                            return next;
-                          })
-                        }
-                        style={{ marginTop: 3 }}
-                      />
+                  {quoteJobs.map((j) => (
+                    <label key={jobKey(j)} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <input type="checkbox" checked={quotePicked.has(jobKey(j))} onChange={(e) => toggleQuoteJob(j, e.target.checked)} style={{ marginTop: 3 }} />
                       <span>
-                        {j.plate}
-                        {j.newPlate ? ` → ${j.newPlate}` : j.province ? ` ย้ายเข้า${j.province}` : ""} · {j.transfereeName} · ค่าธรรมเนียม {formatMoney(j.fee)}
-                        {j.feeSource === "ESTIMATE" ? " (ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด)" : " (ตามใบเสร็จ)"} · ค่าบริการ{" "}
+                        <strong>{j.label}</strong> · {j.target}
+                        {j.ownerName ? ` · ${j.ownerName}` : ""} · ค่าธรรมเนียม {formatMoney(j.fee)}
+                        {j.feeSource === "ESTIMATE" ? " (ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด)" : j.feeSource === "TAX" ? " (ภาษีที่ชำระ)" : " (ตามใบเสร็จ)"} · ค่าบริการ{" "}
                         {j.serviceFee !== null && j.serviceFee > 0 ? formatMoney(j.serviceFee) : "ยังไม่ตั้งราคา - เพิ่มบรรทัดเอง"}
+                        {j.pairedWith || quoteJobs.some((o) => o.pairedWith === jobKey(j)) ? " · คู่ย้ายออก + โอนย้ายเข้า (ติ๊กพร้อมกัน)" : ""}
                       </span>
                     </label>
                   ))}
                   <div>
-                    <button type="button" className="primary" onClick={addMoveInJobs}>
+                    <button type="button" className="primary" onClick={addQuoteJobs}>
                       เพิ่มงานที่ติ๊กลงรายการ
                     </button>
                   </div>

@@ -153,21 +153,21 @@ export interface YamahaMonthQuote {
   quotedBy: { id: string; quotationNo: string | null } | null;
 }
 
-// งานโอนย้ายเข้าที่รับใบเสร็จแล้วของลูกค้า + บรรทัดที่เสนอ (GET /move-in-jobs?customerId= ผู้ใช้ 2026-11-18)
-export interface MoveInQuoteJob {
+// งานอื่นๆ ทุกแบบของลูกค้าที่เสร็จแล้ว + บรรทัดที่เสนอ (GET /customer-jobs?customerId=&quotationId= ผู้ใช้ 2026-11-18)
+// งานโอนทุกแบบ / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก ที่รับใบเสร็จแล้ว และต่อภาษีที่ชำระแล้ว - ไม่รวมงานที่อยู่ในบิลหรือใบเสนอราคาอื่น
+export interface QuoteJob {
+  type: string; // TRANSFER | USE_CANCEL | PLATE_COPY | MOVE_OUT | TAX_RENEWAL
   id: string;
-  plate: string;
-  newPlate: string | null;
-  province: string | null;
-  transferorName: string;
-  transfereeName: string;
-  chassis: string;
-  returnedDate: string;
+  label: string; // ชื่องาน เช่น โอนย้ายเข้า / ย้ายออก
+  target: string; // ทะเบียน (โอนย้ายเข้า: เดิม → ใหม่ จังหวัด)
+  ownerName: string | null;
+  doneDate: string;
   delivered: boolean;
   receiptNo: string | null;
   fee: number;
   feeSource: "RECEIPT" | "ESTIMATE" | "TAX"; // ESTIMATE = ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด
-  serviceFee: number | null; // null = ลูกค้ายังไม่ตั้งราคาโอนย้ายเข้า
+  serviceFee: number | null; // null = ลูกค้ายังไม่ตั้งราคางานแบบนี้
+  pairedWith: string | null; // "MOVE_OUT:<id>" = งานย้ายออกที่ผูกกับงานโอนย้ายเข้านี้ - ติ๊กคู่กัน
   items: Array<Pick<QuotationItem, "kind" | "description" | "quantity" | "unitPrice" | "cost" | "sourceType" | "sourceId">>;
 }
 
@@ -192,8 +192,8 @@ export const quotationApi = {
   get: (id: string) => request<One>(at(id)),
   history: (id: string) => request<{ entries: QuotationHistoryEntry[] }>(at(id, "history")),
   ready: (customerId: string) => request<{ quotations: Quotation[] }>(`${base}/ready?customerId=${encodeURIComponent(customerId)}`),
-  moveInJobs: (customerId: string, quotationId?: string) =>
-    request<{ jobs: MoveInQuoteJob[] }>(`${base}/move-in-jobs?customerId=${encodeURIComponent(customerId)}${quotationId ? `&quotationId=${encodeURIComponent(quotationId)}` : ""}`),
+  customerJobs: (customerId: string, quotationId?: string) =>
+    request<{ jobs: QuoteJob[] }>(`${base}/customer-jobs?customerId=${encodeURIComponent(customerId)}${quotationId ? `&quotationId=${encodeURIComponent(quotationId)}` : ""}`),
   yamahaMonth: (month: string, size: YamahaSize) => request<YamahaMonthQuote>(`${base}/yamaha-month?month=${encodeURIComponent(month)}&size=${size}`),
   create: (data: QuotationInput) => request<One>(base, json("POST", data)),
   update: (id: string, data: QuotationInput) => request<One>(at(id), json("PATCH", data)),

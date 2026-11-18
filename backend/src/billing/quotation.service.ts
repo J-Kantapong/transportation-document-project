@@ -24,7 +24,8 @@ import {
   toTerms,
   withWht,
 } from './billing.service.js';
-import { feeOf, matchJobRate, suggestedJobServiceFee, type FeeSource } from './other-jobs.js';
+import { TRANSFER_TYPE_LABEL } from '../vehicle-transfer/transfer-type.js';
+import { feeOf, isJobType, JOB_LABEL, matchJobRate, suggestedJobServiceFee, type BillableJob, type FeeSource, type JobType } from './other-jobs.js';
 import {
   formatQuotationNo,
   isMonth,
@@ -77,6 +78,10 @@ const Q_INCLUDE = {
 } as const;
 type QRow = Prisma.QuotationGetPayload<{ include: typeof Q_INCLUDE }>;
 
+// ชื่องานบนบรรทัดใบเสนอราคา - งานโอนบอกแบบ (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ / โอนย้ายเข้า)
+const jobLabel = (j: Pick<BillableJob, 'type' | 'variant'>) => (j.type === 'TRANSFER' && j.variant ? (TRANSFER_TYPE_LABEL[j.variant] ?? JOB_LABEL.TRANSFER) : JOB_LABEL[j.type]);
+const jobName = (j: Pick<BillableJob, 'type' | 'variant' | 'plateText' | 'chassis'>) => `${jobLabel(j)} ${j.plateText || j.chassis}`;
+
 type Snapshot = { name: string; branch: string | null; address: string | null; taxId: string | null; payee?: { name: string; bank: string | null; accountNo: string } };
 
 type ItemData = {
@@ -94,7 +99,7 @@ type ItemData = {
   chassisPrefix?: string | null;
   vatInclusive?: boolean;
   includesReceipt?: boolean;
-  sourceType?: string | null; // งานที่บรรทัดนี้ดึงมา (TRANSFER = งานโอนย้ายเข้า)
+  sourceType?: string | null; // งานที่บรรทัดนี้ดึงมา (ประเภทงานอื่นๆ: TRANSFER / USE_CANCEL / PLATE_COPY / MOVE_OUT / TAX_RENEWAL)
   sourceId?: string | null;
 };
 
@@ -347,142 +352,151 @@ export class QuotationService {
     return { month: monthRaw, size: sizeRaw, counts, items: yamahaQuoteItems(monthRaw, counts, sizeRaw), quotedBy: quoted };
   }
 
-  // งานโอนย้ายเข้าของลูกค้าที่รับใบเสร็จแล้ว พร้อมบรรทัดที่เสนอให้ใส่ในใบเสนอราคา (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ เพราะไม่รู้ยอดที่แน่ชัดก่อน)
-  // ต่องาน: ค่าธรรมเนียม (FEE) = ยอดบนใบเสร็จจริง ไม่มีใช้ยอด Bill ที่ระบบคิด + ค่าบริการ (SERVICE) จากตารางราคางานอื่นๆ ของลูกค้า (JobFeeRate แบบ MOVE_IN)
-  // - ลูกค้ายังไม่ตั้งราคา = ไม่มีบรรทัดค่าบริการ ให้บัญชีเพิ่มเอง · ค่าอากรไม่ขึ้นเป็นบรรทัด (นับเป็นต้นทุนของค่าบริการ เหมือนวางบิลงานอื่นๆ)
-  // บรรทัดที่ดึงไปผูกกับงาน (sourceType TRANSFER / sourceId) - ไม่แสดงงานที่อยู่ในบิล / ปิดงานแล้ว / อยู่ในใบเสนอราคาอื่นที่ยังมีผล
-  // quotationId = ร่างที่กำลังแก้ งานของร่างนั้นเอง (และของฉบับเดิมที่ร่างนี้แก้ไขแทน) ยังดึงได้
-  // งานที่ถูกใช้ไปแล้ว -> เหตุผล: อยู่ในบิลที่ยังไม่ VOID / ปิดงานวางบิลนอกระบบ / อยู่ในใบเสนอราคาอื่นที่ยังมีผล (ร่าง, ออกเลขแล้ว, อนุมัติแล้ว)
+  // ---- งานอื่นๆ ของลูกค้าในใบเสนอราคา (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ "ควรมีงานทุกแบบของลูกค้านั้นๆ") ----
+  // งานที่ดึงได้ = งานโอนทุกแบบ / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก ที่รับใบเสร็จแล้ว และต่อภาษีที่ชำระแล้ว (BillingService.jobsForQuotation - ไม่ต้องส่งงานก่อน)
+  // ต่องาน: ค่าธรรมเนียม (FEE) = ยอดบนใบเสร็จจริง ไม่มีใช้ยอดที่ระบบคิด + ค่าบริการ (SERVICE) จากตารางราคางานอื่นๆ ของลูกค้า (JobFeeRate)
+  // - ยังไม่ตั้งราคา = ไม่มีบรรทัดค่าบริการ ให้บัญชีเพิ่มเอง · ค่าอากรไม่ขึ้นเป็นบรรทัด (นับเป็นต้นทุนของค่าบริการ เหมือนวางบิลงานอื่นๆ)
+  // บรรทัดที่ดึงไปผูกกับงาน (sourceType = ประเภทงาน / sourceId) - กันเสนอราคาซ้ำ และให้งานหลุดจากคิววางบิลเองเมื่อใบเสนอราคาออกเลข
+
+  // งานที่ถูกใช้ไปแล้ว ("TYPE:id" -> เหตุผล): อยู่ในบิลที่ยังไม่ VOID / ปิดงานวางบิลนอกระบบ / อยู่ในใบเสนอราคาอื่นที่ยังมีผล (ร่าง, ออกเลขแล้ว, อนุมัติแล้ว)
   // self = ใบที่กำลังแก้ (และฉบับเดิมที่ใบนั้นแก้ไขแทน) ไม่นับ
-  private async jobsTaken(ids: string[], self: string[]): Promise<Map<string, string>> {
+  private async jobsTaken(pairs: Array<{ type: string; id: string }>, self: string[]): Promise<Map<string, string>> {
     const taken = new Map<string, string>();
-    if (ids.length === 0) return taken;
+    if (pairs.length === 0) return taken;
+    const wanted = new Set(pairs.map((p) => `${p.type}:${p.id}`));
+    const ids = [...new Set(pairs.map((p) => p.id))];
     const [billed, closed, quoted] = await Promise.all([
-      this.prisma.invoiceItem.findMany({ where: { sourceType: 'TRANSFER', sourceId: { in: ids }, invoice: LIVE_INVOICE }, select: { sourceId: true, invoice: { select: { invoiceNo: true } } } }),
-      this.prisma.jobBillingClosure.findMany({ where: { jobType: 'TRANSFER', jobId: { in: ids } }, select: { jobId: true } }),
+      this.prisma.invoiceItem.findMany({ where: { sourceType: { not: null }, sourceId: { in: ids }, invoice: LIVE_INVOICE }, select: { sourceType: true, sourceId: true, invoice: { select: { invoiceNo: true } } } }),
+      this.prisma.jobBillingClosure.findMany({ where: { jobId: { in: ids } }, select: { jobType: true, jobId: true } }),
       this.prisma.quotationItem.findMany({
-        where: { sourceType: 'TRANSFER', sourceId: { in: ids }, quotation: { id: { notIn: self }, status: { in: ['DRAFT', 'ISSUED', 'APPROVED'] } } },
-        select: { sourceId: true, quotation: { select: { quotationNo: true } } },
+        where: { sourceType: { not: null }, sourceId: { in: ids }, quotation: { id: { notIn: self }, status: { in: ['DRAFT', 'ISSUED', 'APPROVED'] } } },
+        select: { sourceType: true, sourceId: true, quotation: { select: { quotationNo: true } } },
       }),
     ]);
-    for (const r of quoted) if (r.sourceId) taken.set(r.sourceId, `อยู่ในใบเสนอราคา ${r.quotation.quotationNo ?? '(ร่าง)'} แล้ว`);
-    for (const r of closed) taken.set(r.jobId, 'ปิดงาน - วางบิลนอกระบบแล้ว');
-    for (const r of billed) if (r.sourceId) taken.set(r.sourceId, `อยู่ในบิล ${r.invoice.invoiceNo} แล้ว`);
+    const put = (key: string, reason: string) => {
+      if (wanted.has(key)) taken.set(key, reason);
+    };
+    for (const r of quoted) put(`${r.sourceType}:${r.sourceId}`, `อยู่ในใบเสนอราคา ${r.quotation.quotationNo ?? '(ร่าง)'} แล้ว`);
+    for (const r of closed) put(`${r.jobType}:${r.jobId}`, 'ปิดงาน - วางบิลนอกระบบแล้ว');
+    for (const r of billed) put(`${r.sourceType}:${r.sourceId}`, `อยู่ในบิล ${r.invoice.invoiceNo} แล้ว`);
     return taken;
   }
 
-  // ผูกบรรทัดกับงานโอนย้ายเข้าที่หน้าจอส่งมา (sourceType / sourceId ตามลำดับบรรทัด) - งานต้องเป็นของลูกค้านี้ รับใบเสร็จแล้ว ไม่ถูกยกเลิก และยังไม่ถูกใช้
+  private static idsByType(pairs: Array<{ type: JobType; id: string }>): Map<JobType, string[]> {
+    const map = new Map<JobType, string[]>();
+    for (const p of pairs) map.set(p.type, [...(map.get(p.type) ?? []), p.id]);
+    return map;
+  }
+
+  // ผูกบรรทัดกับงานที่หน้าจอส่งมา (sourceType / sourceId ตามลำดับบรรทัด) - งานต้องเป็นของลูกค้านี้ เสร็จแล้ว ไม่ถูกยกเลิก และยังไม่ถูกใช้
   private async attachJobLinks(items: ItemData[], raw: unknown, customerId: string | null, self: string[]) {
     const rawItems = Array.isArray(raw) ? (raw as Array<Record<string, unknown> | null>) : [];
-    const ids = new Set<string>();
+    const pairs = new Map<string, { type: JobType; id: string }>();
     items.forEach((it, i) => {
       const r = rawItems[i];
       if (!r || r.sourceType === undefined || r.sourceType === null || r.sourceType === '') return;
-      if (r.sourceType !== 'TRANSFER' || typeof r.sourceId !== 'string' || !r.sourceId) throw bad(`บรรทัดที่ ${i + 1}: งานที่ผูกกับบรรทัดไม่ถูกต้อง`);
-      it.sourceType = 'TRANSFER';
+      if (!isJobType(r.sourceType) || typeof r.sourceId !== 'string' || !r.sourceId) throw bad(`บรรทัดที่ ${i + 1}: งานที่ผูกกับบรรทัดไม่ถูกต้อง`);
+      it.sourceType = r.sourceType;
       it.sourceId = r.sourceId;
-      ids.add(r.sourceId);
+      pairs.set(`${r.sourceType}:${r.sourceId}`, { type: r.sourceType, id: r.sourceId });
     });
-    if (ids.size === 0) return;
-    if (!customerId) throw bad('ใบเสนอราคาที่ดึงงานโอนย้ายเข้าต้องเลือกลูกค้าในระบบ');
-    const list = [...ids];
-    const jobs = await this.prisma.vehicleTransfer.findMany({
-      where: { id: { in: list } },
-      select: { id: true, customerId: true, transferType: true, cancelledAt: true, returnedDate: true, plateCategory: true, plateNumber: true },
-    });
-    const taken = await this.jobsTaken(list, self);
-    for (const id of list) {
-      const job = jobs.find((j) => j.id === id);
-      if (!job || job.transferType !== 'MOVE_IN') throw bad('ไม่พบงานโอนย้ายเข้าที่ผูกกับบรรทัด - ดึงงานใหม่');
-      const name = `งานโอนย้ายเข้า ${job.plateCategory} ${job.plateNumber}`;
-      if (job.customerId !== customerId) throw bad(`${name} ไม่ใช่งานของลูกค้านี้`);
-      if (job.cancelledAt) throw bad(`${name} ถูกยกเลิกแล้ว - ลบบรรทัดของงานนี้ออก`);
-      if (!job.returnedDate) throw bad(`${name} ยังไม่รับใบเสร็จ`);
-      const reason = taken.get(id);
-      if (reason) throw bad(`${name} ${reason} - ลบบรรทัดของงานนี้ออก`);
+    if (pairs.size === 0) return;
+    if (!customerId) throw bad('ใบเสนอราคาที่ดึงงานของลูกค้าต้องเลือกลูกค้าในระบบ');
+    const list = [...pairs.values()];
+    const [jobs, taken] = await Promise.all([this.billing.jobsForQuotation(customerId, { ids: QuotationService.idsByType(list) }), this.jobsTaken(list, self)]);
+    for (const p of list) {
+      const job = jobs.find((j) => j.type === p.type && j.id === p.id);
+      if (!job) throw bad(`${JOB_LABEL[p.type]}ที่ผูกกับบรรทัดดึงไม่ได้แล้ว (ไม่ใช่งานของลูกค้านี้ ถูกยกเลิก หรือยังไม่รับใบเสร็จ) - ลบบรรทัดของงานนั้นออก`);
+      const reason = taken.get(`${p.type}:${p.id}`);
+      if (reason) throw bad(`${jobName(job)} ${reason} - ลบบรรทัดของงานนี้ออก`);
     }
   }
 
   // ออกใบวางบิลจากใบเสนอราคา: งานที่ผูกไว้ต้องยังวางบิลได้ - ไม่ถูกยกเลิก ส่งงานลูกค้าแล้ว (ใบ DL - กติกาเดียวกับคิววางบิลงานอื่นๆ ผู้ใช้ 2026-10-08)
   // และยังไม่อยู่ในบิลอื่น / ไม่ถูกปิดงานวางบิลนอกระบบ
-  private async assertLinkedJobsBillable(ids: string[], quotationId: string) {
-    if (ids.length === 0) return;
-    const jobs = await this.prisma.vehicleTransfer.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, cancelledAt: true, deliveredDate: true, plateCategory: true, plateNumber: true },
-    });
-    const taken = await this.jobsTaken(ids, [quotationId]);
-    for (const id of ids) {
-      const job = jobs.find((j) => j.id === id);
-      if (!job) throw bad('ไม่พบงานโอนย้ายเข้าที่ผูกกับใบเสนอราคานี้');
-      const name = `งานโอนย้ายเข้า ${job.plateCategory} ${job.plateNumber}`;
-      if (job.cancelledAt) throw bad(`${name} ถูกยกเลิกแล้ว - ทำฉบับแก้ไขของใบเสนอราคาก่อนออกใบวางบิล`);
-      if (!job.deliveredDate) throw bad(`${name} ยังไม่ได้ส่งงานลูกค้า (ใบ DL) - ส่งงานที่หน้า Delivery ก่อนออกใบวางบิล`);
-      const reason = taken.get(id);
-      if (reason) throw bad(`${name} ${reason}`);
+  private async assertLinkedJobsBillable(pairs: Array<{ type: JobType; id: string }>, customerId: string, quotationId: string) {
+    if (pairs.length === 0) return;
+    const ids = QuotationService.idsByType(pairs);
+    const [done, deliverable, taken] = await Promise.all([
+      this.billing.jobsForQuotation(customerId, { ids }),
+      this.billing.jobsForQuotation(customerId, { ids, requireDelivered: true }),
+      this.jobsTaken(pairs, [quotationId]),
+    ]);
+    for (const p of pairs) {
+      const job = done.find((j) => j.type === p.type && j.id === p.id);
+      if (!job) throw bad(`${JOB_LABEL[p.type]}ที่ผูกกับใบเสนอราคานี้ถูกยกเลิกหรือย้อนสถานะแล้ว - ทำฉบับแก้ไขของใบเสนอราคาก่อนออกใบวางบิล`);
+      if (!deliverable.some((j) => j.type === p.type && j.id === p.id)) throw bad(`${jobName(job)} ยังไม่ได้ส่งงานลูกค้า (ใบ DL) - ส่งงานที่หน้า Delivery ก่อนออกใบวางบิล`);
+      const reason = taken.get(`${p.type}:${p.id}`);
+      if (reason) throw bad(`${jobName(job)} ${reason}`);
     }
   }
 
-  async moveInJobs(customerIdRaw: unknown, quotationIdRaw?: unknown) {
+  // รายการงานที่ดึงเข้าใบเสนอราคาได้ + บรรทัดที่เสนอ · quotationId = ร่างที่กำลังแก้ (งานของร่างนั้นเองและของฉบับเดิมที่ร่างนี้แก้ไขแทนยังดึงได้)
+  // pairedWith = งานย้ายออกที่ผูกกับงานโอนย้ายเข้านั้น (VehicleTransfer.moveOutId) - หน้าจอติ๊กให้พร้อมกัน
+  async customerJobs(customerIdRaw: unknown, quotationIdRaw?: unknown) {
     const customerId = typeof customerIdRaw === 'string' ? customerIdRaw.trim() : '';
-    if (!customerId) throw bad('กรุณาเลือกลูกค้าก่อนดึงงานโอนย้ายเข้า');
-    const rows = await this.prisma.vehicleTransfer.findMany({
-      where: { customerId, transferType: 'MOVE_IN', cancelledAt: null, returnedDate: { not: null } },
-      orderBy: [{ returnedDate: 'asc' }, { createdAt: 'asc' }],
-      take: 300,
-    });
-    if (rows.length === 0) return { jobs: [] };
+    if (!customerId) throw bad('กรุณาเลือกลูกค้าก่อนดึงงาน');
+    const all = await this.billing.jobsForQuotation(customerId);
+    if (all.length === 0) return { jobs: [] };
     const quotationId = typeof quotationIdRaw === 'string' && quotationIdRaw ? quotationIdRaw : null;
     const editing = quotationId ? await this.prisma.quotation.findUnique({ where: { id: quotationId }, select: { id: true, replacesId: true } }) : null;
     const self = editing ? [editing.id, ...(editing.replacesId ? [editing.replacesId] : [])] : [];
-    const [taken, rates] = await Promise.all([
-      this.jobsTaken(rows.map((r) => r.id), self),
+    const transferIds = all.filter((j) => j.type === 'TRANSFER').map((j) => j.id);
+    const [taken, rates, moveIns] = await Promise.all([
+      this.jobsTaken(all, self),
       this.prisma.jobFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' } }),
+      transferIds.length
+        ? this.prisma.vehicleTransfer.findMany({
+            where: { id: { in: transferIds }, transferType: 'MOVE_IN' },
+            select: { id: true, moveOutId: true, newPlateCategory: true, newPlateNumber: true, submitProvince: true },
+          })
+        : [],
     ]);
-    const billedIds = new Set(taken.keys());
-    const rate = matchJobRate(
-      rates.map((r) => ({ ...r, amount: Number(r.amount) })),
-      { jobType: 'TRANSFER', vehicleClass: 'MOTO', variant: 'MOVE_IN' },
-    );
+    const rateRows = rates.map((r) => ({ ...r, amount: Number(r.amount) }));
+    const free = all.filter((j) => !taken.has(`${j.type}:${j.id}`));
+    const freeKeys = new Set(free.map((j) => `${j.type}:${j.id}`));
     return {
-      jobs: rows
-        .filter((r) => !billedIds.has(r.id))
-        .map((r) => {
-          const fee: { amount: number; source: FeeSource } = feeOf({ type: 'TRANSFER', receiptAmount: num(r.receiptAmount), billTotal: Number(r.billTotal) });
+      jobs: free
+        .sort((a, b) => a.doneDate.localeCompare(b.doneDate))
+        .map((j) => {
+          const fee: { amount: number; source: FeeSource } = feeOf(j);
+          const rate = matchJobRate(rateRows, { jobType: j.type, vehicleClass: j.vehicleClass, variant: j.variant });
           const serviceFee = rate ? suggestedJobServiceFee(rate, fee.amount) : null;
-          const plate = `${r.plateCategory} ${r.plateNumber}`;
-          const newPlate = r.newPlateCategory && r.newPlateNumber ? `${r.newPlateCategory} ${r.newPlateNumber} ${r.submitProvince ?? ''}`.trim() : null;
-          const target = newPlate ? `${plate} → ${newPlate}` : `${plate}${r.submitProvince ? ` ย้ายเข้า${r.submitProvince}` : ''}`;
-          type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: number | null; sourceType: 'TRANSFER'; sourceId: string };
-          const link = { sourceType: 'TRANSFER' as const, sourceId: r.id };
+          const label = jobLabel(j);
+          const moveIn = j.type === 'TRANSFER' ? moveIns.find((m) => m.id === j.id) : undefined;
+          const newPlate = moveIn?.newPlateCategory && moveIn.newPlateNumber ? `${moveIn.newPlateCategory} ${moveIn.newPlateNumber} ${moveIn.submitProvince ?? ''}`.trim() : null;
+          const plate = j.plateText || j.chassis;
+          const target = newPlate ? `${plate} → ${newPlate}` : `${plate}${moveIn?.submitProvince ? ` ย้ายเข้า${moveIn.submitProvince}` : ''}`;
+          const link = { sourceType: j.type, sourceId: j.id };
+          type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: number | null; sourceType: JobType; sourceId: string };
           const items: Line[] = [];
           if (fee.amount > 0) {
-            items.push({ kind: 'FEE', description: `ค่าธรรมเนียมโอนย้ายเข้า ทะเบียน ${target}${r.receiptNo ? ` (ใบเสร็จ ${r.receiptNo})` : ''}`.slice(0, 300), quantity: 1, unitPrice: fee.amount, cost: null, ...link });
+            items.push({ kind: 'FEE', description: `ค่าธรรมเนียม${label} ทะเบียน ${target}${j.receiptNo ? ` (ใบเสร็จ ${j.receiptNo})` : ''}`.slice(0, 300), quantity: 1, unitPrice: fee.amount, cost: null, ...link });
           }
           if (serviceFee !== null && serviceFee > 0) {
             items.push({
               kind: 'SERVICE',
-              description: `ค่าบริการโอนย้ายเข้า ทะเบียน ${target}${rate?.label ? ` ${rate.label}` : ''}`.slice(0, 300),
+              description: `ค่าบริการ${label} ทะเบียน ${target}${rate?.label ? ` ${rate.label}` : ''}`.slice(0, 300),
               quantity: 1,
               unitPrice: serviceFee,
-              cost: Math.round((Number(r.noBillTotal) + Number(r.dutyAmount)) * 100) / 100,
+              cost: Math.round((j.noBillTotal + j.dutyAmount) * 100) / 100,
               ...link,
             });
           }
+          const pair = moveIn?.moveOutId ? `MOVE_OUT:${moveIn.moveOutId}` : null;
           return {
-            id: r.id,
-            plate,
-            newPlate,
-            province: r.submitProvince,
-            transferorName: r.transferorName,
-            transfereeName: r.transfereeName,
-            chassis: r.chassis,
-            returnedDate: iso(r.returnedDate)!,
-            delivered: !!r.deliveredDate,
-            receiptNo: r.receiptNo,
+            type: j.type,
+            id: j.id,
+            label,
+            target,
+            ownerName: j.ownerName,
+            doneDate: j.doneDate,
+            delivered: !!j.deliveredDate,
+            receiptNo: j.receiptNo,
             fee: fee.amount,
-            feeSource: fee.source, // RECEIPT = ยอดใบเสร็จจริง / ESTIMATE = ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด
-            serviceFee, // null = ลูกค้ายังไม่ตั้งราคาโอนย้ายเข้า
+            feeSource: fee.source, // RECEIPT = ยอดใบเสร็จจริง / ESTIMATE = ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด / TAX = ภาษีที่ชำระ
+            serviceFee, // null = ลูกค้ายังไม่ตั้งราคางานแบบนี้
+            pairedWith: pair && freeKeys.has(pair) ? pair : null,
             items,
           };
         }),
@@ -871,8 +885,10 @@ export class QuotationService {
     const issueDate = parseIsoDate(dto?.issueDate, 'วันที่ออกบิล');
     if (q.approvedDate && issueDate < q.approvedDate) throw bad('วันที่ออกบิลต้องไม่ก่อนวันที่ลูกค้าอนุมัติ');
 
-    // งานโอนย้ายเข้าที่ผูกกับใบนี้ต้องยังวางบิลได้ (ส่งงานลูกค้าแล้ว ไม่อยู่ในบิลอื่น) - ออกบิลแล้วคิววางบิลงานอื่นๆ ตัดงานเหล่านี้ออกเอง (BillingService.loadJobs)
-    await this.assertLinkedJobsBillable([...new Set(q.items.filter((it) => it.sourceType === 'TRANSFER' && it.sourceId).map((it) => it.sourceId!))], q.id);
+    // งานที่ผูกกับใบนี้ต้องยังวางบิลได้ (ส่งงานลูกค้าแล้ว ไม่อยู่ในบิลอื่น) - ออกบิลแล้วคิววางบิลงานอื่นๆ ตัดงานเหล่านี้ออกเอง (BillingService.loadJobs)
+    const linked = new Map<string, { type: JobType; id: string }>();
+    for (const it of q.items) if (isJobType(it.sourceType) && it.sourceId) linked.set(`${it.sourceType}:${it.sourceId}`, { type: it.sourceType, id: it.sourceId });
+    await this.assertLinkedJobsBillable([...linked.values()], q.customerId, q.id);
 
     const items = [...q.items]
       .sort((a, b) => a.sortOrder - b.sortOrder)
