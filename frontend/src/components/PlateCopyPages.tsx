@@ -910,18 +910,14 @@ export function PlateCopyReturnPage() {
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ยื่น</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                   <th scope="col">รถ</th>
-                  <th scope="col">ประเภทรถ</th>
-                  <th scope="col">ทะเบียน</th>
-                  <th scope="col">รูปใบเสร็จ</th>
-                  <th scope="col">ข้อมูลใบเสร็จ</th>
-                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
-                  {canWrite && <th />}
+                  <th scope="col">ทะเบียน / ประเภทรถ</th>
+                  <th scope="col">ใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "รับกลับ" : "วันที่รับกลับ"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1030,23 +1026,32 @@ function ReturnRow({
     }
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - 5 ช่อง ผลตรวจใบเสร็จอยู่แถวล่าง (แบบเดียวกับหน้าสลับเลข)
+  const top: React.CSSProperties = { verticalAlign: "top", borderBottom: 0, paddingBottom: 8 };
+  const missing = item.receipts.length === 0 ? ["รูปใบเสร็จ"] : [];
   return (
+    <>
     <tr>
-      <td>{isoToDisplayDate(item.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell item={item} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(item.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell item={item} />
+        </div>
       </td>
-      <td>
-        <div className="job">{item.ownerName}</div>
-        <div className="sub">{vehicleText(item)}</div>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div className="job">{item.chassis}</div>
+        <div className="sub">{item.ownerName}</div>
+        <div className="sub">{item.brand}</div>
+        <div className="sub">เครื่อง {item.engine}</div>
       </td>
-      <td>
-        {CLASS_LABEL[item.vehicleClass]}
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{plateText(item)}</div>
+        <div className="sub">{CLASS_LABEL[item.vehicleClass]}</div>
         {item.urgent && <div className="sub">งานด่วน</div>}
       </td>
-      <td>{plateText(item)}</td>
-      <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <td style={{ ...top, minWidth: 150 }}>
+        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           {item.receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
@@ -1114,29 +1119,30 @@ function ReturnRow({
           </>
         )}
       </td>
-      <td>
-        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
-        <ReceiptRecheckBox type="PLATE_COPY" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
-      </td>
-      <td>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 120 }}>
         {item.returnedDate ? (
           isoToDisplayDate(item.returnedDate)
         ) : canWrite ? (
-          <button
-            type="button"
-            className="primary"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || item.receipts.length === 0}
-            title={item.receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(item)}
-          >
-            ยืนยันรับกลับ
-          </button>
+          <>
+            <button
+              type="button"
+              className="primary"
+              style={{ padding: "8px 14px", fontSize: 13, whiteSpace: "nowrap" }}
+              disabled={busy || item.receipts.length === 0}
+              aria-describedby={missing.length > 0 ? `plate-copy-missing-${item.id}` : undefined}
+              onClick={() => onConfirm(item)}
+            >
+              ยืนยันรับกลับ
+            </button>
+            {missing.length > 0 && (
+              <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+                ยังขาด: {missing.join(" · ")}
+              </div>
+            )}
+          </>
         ) : null}
-      </td>
-      {showActions && (
-        <td>
-          {canWrite && (
+        {showActions && canWrite && (
+          <div style={{ marginTop: 10 }}>
             <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
               {returned && (
                 <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
@@ -1144,10 +1150,18 @@ function ReturnRow({
                 </button>
               )}
             </RowActions>
-          )}
-        </td>
-      )}
+          </div>
+        )}
+      </td>
     </tr>
+    <tr>
+      <td colSpan={5} style={{ paddingTop: 0, whiteSpace: "normal" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <ReceiptRecheckBox type="PLATE_COPY" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
+        </div>
+      </td>
+    </tr>
+    </>
   );
 }
 
@@ -1237,22 +1251,28 @@ function ReceivePlateRow({
     }
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - 5 ช่อง แบบเดียวกับหน้ารับใบเสร็จ (ตัวถังขึ้นก่อน, ทะเบียน + ประเภทรถช่องเดียว)
+  const top: React.CSSProperties = { verticalAlign: "top" };
   return (
     <tr>
-      <td>{isoToDisplayDate(item.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell item={item} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(item.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell item={item} />
+        </div>
       </td>
-      <td>
-        <div className="job">{item.ownerName}</div>
-        <div className="sub">{vehicleText(item)}</div>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div className="job">{item.chassis}</div>
+        <div className="sub">{item.ownerName}</div>
+        <div className="sub">{item.brand}</div>
+        <div className="sub">เครื่อง {item.engine}</div>
       </td>
-      <td>
-        {CLASS_LABEL[item.vehicleClass]}
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 100 }}>
+        <div>{plateText(item)}</div>
+        <div className="sub">{CLASS_LABEL[item.vehicleClass]}</div>
         {item.urgent && <div className="sub">งานด่วน</div>}
       </td>
-      <td>{plateText(item)}</td>
-      <td style={{ whiteSpace: "normal" }}>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 130 }}>
         {received ? (
           <span className="badge portal-badge-done">รับป้าย {isoToDisplayDate(item.plateReceivedDate!)}</span>
         ) : (
@@ -1297,12 +1317,13 @@ function ReceivePlateRow({
             )}
           </>
         ) : canWrite ? (
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+          // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - รูปตัวอย่างอยู่บน ปุ่ม/วันที่อยู่ล่าง (เดิมวางข้างกัน ช่องนี้กว้าง 320px)
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
             {previewUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- ตัวอย่างรูปจาก object URL ในเครื่อง ไม่ผ่าน next/image
               <img src={previewUrl} alt="ตัวอย่างรูปป้ายที่เลือก" style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 8, border: "1px solid #dfe5f0" }} />
             ) : (
-              <div className="muted" style={{ width: 120, height: 90, display: "grid", placeItems: "center", border: "1px dashed #b9c3d6", borderRadius: 8, fontSize: 13 }}>
+              <div className="muted" style={{ width: 120, height: 60, display: "grid", placeItems: "center", border: "1px dashed #b9c3d6", borderRadius: 8, fontSize: 13 }}>
                 ยังไม่มีรูปป้าย
               </div>
             )}
@@ -1310,7 +1331,7 @@ function ReceivePlateRow({
               {/* capture = เปิดกล้องหลังบนมือถือทันที / ปุ่มเลือกรูปใช้เลือกจากแกลเลอรีหรือไฟล์ในเครื่อง */}
               <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => pick(e.target.files)} />
               <input ref={galleryRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files)} />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
                 <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()}>
                   📷 ถ่ายรูปป้าย
                 </button>
@@ -1318,13 +1339,24 @@ function ReceivePlateRow({
                   🖼 เลือกรูป
                 </button>
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
                 วันที่รับป้าย
                 <DateTextInput value={dateText} onChange={setDateText} label="วันที่รับป้าย" />
               </label>
-              <button type="button" className="primary" disabled={busy || !file} title={!file ? "ถ่ายหรือเลือกรูปป้ายก่อน" : undefined} onClick={confirm}>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !file}
+                aria-describedby={!file ? `plate-copy-missing-${item.id}` : undefined}
+                onClick={confirm}
+              >
                 {busy ? "กำลังบันทึก…" : "ยืนยันรับป้าย"}
               </button>
+              {!file && (
+                <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "#a86200", marginTop: 0 }}>
+                  ยังขาด: รูปป้าย
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1434,14 +1466,12 @@ export function PlateCopyReceivePlatePage() {
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับป้าย" : "ยังไม่มีงานที่รับป้ายแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ยื่น</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                   <th scope="col">รถ</th>
-                  <th scope="col">ประเภทรถ</th>
-                  <th scope="col">ทะเบียน</th>
+                  <th scope="col">ทะเบียน / ประเภทรถ</th>
                   <th scope="col">กำหนดรับป้าย</th>
                   <th scope="col">ป้าย</th>
                 </tr>

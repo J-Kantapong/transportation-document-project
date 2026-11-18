@@ -825,17 +825,14 @@ export function VehicleMoveOutReturnPage({ vehicleClass = "CAR" }: { vehicleClas
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ยื่น</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                   <th scope="col">รถ</th>
                   <th scope="col">ทะเบียน</th>
-                  <th scope="col">รูปใบเสร็จ</th>
-                  <th scope="col">ข้อมูลใบเสร็จ</th>
-                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
-                  {canWrite && <th />}
+                  <th scope="col">ใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "รับกลับ" : "วันที่รับกลับ"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -939,19 +936,28 @@ function ReturnRow({
     }
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - 5 ช่อง ผลตรวจใบเสร็จอยู่แถวล่าง (แบบเดียวกับหน้าสลับเลข)
+  const top: React.CSSProperties = { verticalAlign: "top", borderBottom: 0, paddingBottom: 8 };
+  const missing = item.receipts.length === 0 ? ["รูปใบเสร็จ"] : [];
   return (
+    <>
     <tr>
-      <td>{isoToDisplayDate(item.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell item={item} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(item.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell item={item} />
+        </div>
       </td>
-      <td>
-        <div className="job">{item.ownerName}</div>
-        <div className="sub">{vehicleText(item)}</div>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div className="job">{item.chassis}</div>
+        <div className="sub">{item.ownerName}</div>
+        <div className="sub">{item.brand}</div>
+        <div className="sub">เครื่อง {item.engine}</div>
       </td>
-      <td>{plateText(item)}</td>
-      <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <td style={top}>{plateText(item)}</td>
+      <td style={{ ...top, minWidth: 150 }}>
+        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           {item.receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
@@ -1019,37 +1025,48 @@ function ReturnRow({
           </>
         )}
       </td>
-      <td>
-        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
-        <ReceiptRecheckBox type="MOVE_OUT" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
-      </td>
-      <td>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 120 }}>
         {item.returnedDate ? (
           isoToDisplayDate(item.returnedDate)
         ) : canWrite ? (
-          <button
-            type="button"
-            className="primary"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || item.receipts.length === 0}
-            title={item.receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(item)}
-          >
-            ยืนยันรับกลับ
-          </button>
-        ) : null}
-      </td>
-      {canWrite && (
-        <td>
-          <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
-            {returned && (
-              <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
-                ยกเลิกรับกลับ
-              </button>
+          <>
+            <button
+              type="button"
+              className="primary"
+              style={{ padding: "8px 14px", fontSize: 13, whiteSpace: "nowrap" }}
+              disabled={busy || item.receipts.length === 0}
+              aria-describedby={missing.length > 0 ? `moveout-missing-${item.id}` : undefined}
+              onClick={() => onConfirm(item)}
+            >
+              ยืนยันรับกลับ
+            </button>
+            {missing.length > 0 && (
+              <div id={`moveout-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+                ยังขาด: {missing.join(" · ")}
+              </div>
             )}
-          </RowActions>
-        </td>
-      )}
+          </>
+        ) : null}
+        {canWrite && (
+          <div style={{ marginTop: 10 }}>
+            <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
+              {returned && (
+                <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
+                  ยกเลิกรับกลับ
+                </button>
+              )}
+            </RowActions>
+          </div>
+        )}
+      </td>
     </tr>
+    <tr>
+      <td colSpan={5} style={{ paddingTop: 0, whiteSpace: "normal" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <ReceiptRecheckBox type="MOVE_OUT" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
+        </div>
+      </td>
+    </tr>
+    </>
   );
 }

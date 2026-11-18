@@ -106,6 +106,8 @@ export function DateTextInput({ value, onChange, label }: { value: string; onCha
     <DateInput
       aria-label={label}
       value={value}
+      // กว้างพอสำหรับ วว/ดด/ปปปป (ผู้ใช้ 2026-11-19: ให้ตารางไม่ต้องเลื่อน - ค่าเริ่มต้นกว้างเกิน)
+      style={{ width: 120 }}
       // พิมพ์ปี พ.ศ. ตามใบเสร็จได้ - ครบ 8 หลักแล้วแปลงเป็น ค.ศ. ให้ (เดิมขึ้น "กรุณากรอกวันที่ให้ถูกต้อง" - พบ 2026-09-27)
       onChange={(value) => onChange(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
     />
@@ -1540,18 +1542,14 @@ export function PlateSwapReturnPage({
           <>
             <WrongPlateBanner swaps={swaps} />
             <div className="table-wrap">
-              <table>
+              <table className="table-tight">
                 <thead>
                   <tr>
-                    <th scope="col">วันที่ยื่น</th>
-                    <th scope="col">เจ้าของงาน</th>
+                    <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                     <th scope="col">รถเก่า</th>
-                    <th scope="col">ทะเบียนเก่า / ใหม่</th>
-                    <th scope="col">รถใหม่ที่ลิงก์</th>
-                    <th scope="col">รูปใบเสร็จ</th>
-                    <th scope="col">ข้อมูลใบเสร็จ</th>
-                    <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
-                    {canWrite && <th />}
+                    <th scope="col">ทะเบียนเก่า / ใหม่ · รถใหม่ที่ลิงก์</th>
+                    <th scope="col">ใบเสร็จ</th>
+                    <th scope="col">{status === "pending" ? "รับกลับ" : "วันที่รับกลับ"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1660,17 +1658,29 @@ function ReturnRow({
     }
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ให้ตารางต้องเลื่อนซ้าย-ขวา - รวมคอลัมน์เหลือ 5 ช่อง และย้ายผลตรวจใบเสร็จ / คำเตือนลงแถวเต็มความกว้างใต้แถว
+  const top: React.CSSProperties = { verticalAlign: "top", borderBottom: 0, paddingBottom: 8 };
+  const missing = [
+    ...(swap.receipts.length === 0 ? ["รูปใบเสร็จ"] : []),
+    ...(!plateCategoryText.trim() || !plateNumberText.trim() ? ["ทะเบียนใหม่"] : []),
+  ];
   return (
+    <>
     <tr>
-      <td>{isoToDisplayDate(swap.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell swap={swap} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(swap.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell swap={swap} />
+        </div>
       </td>
-      <td>
-        <div className="job">{swap.oldOwnerName}</div>
-        <div className="sub">{oldVehicleText(swap)}</div>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        {/* ผู้ใช้ 2026-11-19: เลขตัวถังขึ้นก่อน */}
+        <div className="job">{swap.oldChassis}</div>
+        <div className="sub">{swap.oldOwnerName}</div>
+        <div className="sub">{swap.oldBrand}</div>
+        <div className="sub">เครื่อง {swap.oldEngine}</div>
       </td>
-      <td>
+      <td style={top}>
         <div>{oldPlateText(swap)}</div>
         {/* ผู้ใช้ 2026-09-23: ทะเบียนใหม่ได้มาตอนงานเรียบร้อย จึงกรอกที่หน้านี้ได้เลย (หมวด + เลข) */}
         {returned ? (
@@ -1698,13 +1708,14 @@ function ReturnRow({
         ) : (
           <div className="sub">{newPlateText(swap) ? `ใหม่: ${newPlateText(swap)}` : "ยังไม่ได้เลขใหม่"}</div>
         )}
+        <div style={{ marginTop: 10, whiteSpace: "normal" }}>
+          <div className="sub" style={{ marginTop: 0 }}>รถใหม่ที่ลิงก์</div>
+          {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">{swap.kind === "OLD_NEW" ? "ยังไม่ลิงก์" : "— (ไม่มีรถใหม่)"}</span>}
+        </div>
       </td>
-      <td style={{ whiteSpace: "normal" }}>
-        {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">{swap.kind === "OLD_NEW" ? "ยังไม่ลิงก์" : "— (ไม่มีรถใหม่)"}</span>}
-        <WrongPlateNote swap={swap} />
-      </td>
-      <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <td style={{ ...top, minWidth: 150 }}>
+        <ReceiptFieldsCell swap={swap} canWrite={canWrite} onChange={onChange} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           {swap.receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
           {swap.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
@@ -1772,44 +1783,51 @@ function ReturnRow({
           </>
         )}
       </td>
-      <td>
-        <ReceiptFieldsCell swap={swap} canWrite={canWrite} onChange={onChange} />
-        <ReceiptRecheckBox type="PLATE_SWAP" id={swap.id} refreshKey={`${swap.receiptAmount ?? ""}|${swap.receipts?.length ?? 0}|${swap.billTotal ?? ""}`} />
-      </td>
-      <td>
+      {/* critique 2026-11-19: ปุ่มแก้ / ยกเลิกงานรวมอยู่ช่องนี้ (เดิมเป็นคอลัมน์ที่ 6 ทำให้จอแคบต้องเลื่อน) และบอกสิ่งที่ยังขาดให้เห็นเลย ไม่ซ่อนใน tooltip */}
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 120 }}>
         {swap.returnedDate ? (
           isoToDisplayDate(swap.returnedDate)
         ) : canWrite ? (
-          <button
-            type="button"
-            className="primary"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || swap.receipts.length === 0 || !plateCategoryText.trim() || !plateNumberText.trim()}
-            title={
-              swap.receipts.length === 0
-                ? "แนบรูปใบเสร็จก่อน"
-                : !plateCategoryText.trim() || !plateNumberText.trim()
-                  ? "กรอกทะเบียนใหม่ (หมวดทะเบียนและเลขทะเบียน) ก่อน"
-                  : undefined
-            }
-            onClick={() => onConfirm(swap, plateCategoryText.trim(), plateNumberText.trim())}
-          >
-            ยืนยันรับกลับ
-          </button>
-        ) : null}
-      </td>
-      {canWrite && (
-        <td>
-          <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
-            {returned && (
-              <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
-                ยกเลิกรับกลับ
-              </button>
+          <>
+            <button
+              type="button"
+              className="primary"
+              style={{ padding: "8px 14px", fontSize: 13, whiteSpace: "nowrap" }}
+              disabled={busy || missing.length > 0}
+              aria-describedby={missing.length > 0 ? `swap-missing-${swap.id}` : undefined}
+              onClick={() => onConfirm(swap, plateCategoryText.trim(), plateNumberText.trim())}
+            >
+              ยืนยันรับกลับ
+            </button>
+            {missing.length > 0 && (
+              <div id={`swap-missing-${swap.id}`} className="sub" style={{ color: "#a86200" }}>
+                ยังขาด: {missing.join(" · ")}
+              </div>
             )}
-          </RowActions>
-        </td>
-      )}
+          </>
+        ) : null}
+        {canWrite && (
+          <div style={{ marginTop: 10 }}>
+            <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
+              {returned && (
+                <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
+                  ยกเลิกรับกลับ
+                </button>
+              )}
+            </RowActions>
+          </div>
+        )}
+      </td>
     </tr>
+    <tr>
+      <td colSpan={5} style={{ paddingTop: 0, whiteSpace: "normal" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <ReceiptRecheckBox type="PLATE_SWAP" id={swap.id} refreshKey={`${swap.receiptAmount ?? ""}|${swap.receipts?.length ?? 0}|${swap.billTotal ?? ""}`} />
+        </div>
+        <WrongPlateNote swap={swap} />
+      </td>
+    </tr>
+    </>
   );
 }
 
@@ -1887,19 +1905,30 @@ function ReceivePlateOrBookRow({
     setDialog("date");
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - 4 ช่อง แบบเดียวกับหน้ารับใบเสร็จ (ตัวถังขึ้นก่อน, ทะเบียน + รถใหม่ช่องเดียว)
+  const top: React.CSSProperties = { verticalAlign: "top" };
   return (
     <tr>
-      <td>{isoToDisplayDate(swap.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell swap={swap} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(swap.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell swap={swap} />
+        </div>
       </td>
-      <td>
-        <div className="job">{swap.oldOwnerName}</div>
-        <div className="sub">{oldVehicleText(swap)}</div>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div className="job">{swap.oldChassis}</div>
+        <div className="sub">{swap.oldOwnerName}</div>
+        <div className="sub">{swap.oldBrand}</div>
+        <div className="sub">เครื่อง {swap.oldEngine}</div>
       </td>
-      <td>{oldPlateText(swap)}</td>
-      <td style={{ whiteSpace: "normal" }}>{swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">{swap.kind === "OLD_NEW" ? "ยังไม่ลิงก์" : "— (ไม่มีรถใหม่)"}</span>}</td>
-      <td>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div>{oldPlateText(swap)}</div>
+        <div style={{ marginTop: 10 }}>
+          <div className="sub" style={{ marginTop: 0 }}>รถใหม่ที่ลิงก์</div>
+          {swap.newVehicle ? <LinkedVehicle vehicle={swap.newVehicle} /> : <span className="muted">{swap.kind === "OLD_NEW" ? "ยังไม่ลิงก์" : "— (ไม่มีรถใหม่)"}</span>}
+        </div>
+      </td>
+      <td style={top}>
         {receivedDate ? (
           <>
             <div>{isoToDisplayDate(receivedDate)}</div>
@@ -2049,14 +2078,12 @@ function PlateSwapReceivePlateOrBookPage({
           <div className="empty-customers">{status === "pending" ? `ไม่มีงานที่รอรับ${label}` : `ยังไม่มีงานที่รับ${label}แล้ว`}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ยื่น</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                   <th scope="col">รถเก่า</th>
-                  <th scope="col">ทะเบียนเก่า</th>
-                  <th scope="col">รถใหม่ที่ลิงก์</th>
+                  <th scope="col">ทะเบียนเก่า · รถใหม่ที่ลิงก์</th>
                   <th scope="col">{label}</th>
                 </tr>
               </thead>

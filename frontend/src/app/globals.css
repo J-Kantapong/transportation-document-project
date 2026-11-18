@@ -71,6 +71,7 @@ h2{font-size:18px;font-weight:600;margin:0}
 .text-button{background:none;border:none;font-size:13px;color:var(--brand);padding:4px;min-height:24px}
 .table-wrap{overflow:auto}
 table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}
+.table-tight th,.table-tight td{padding-left:14px;padding-right:14px}
 th{background:#fafbfd;color:var(--ink-muted);text-align:left;font-weight:400;font-size:12px;padding:13px 20px}
 td{padding:18px 20px;border-bottom:1px solid var(--surface-2)}
 tbody tr:last-child td{border:0}
