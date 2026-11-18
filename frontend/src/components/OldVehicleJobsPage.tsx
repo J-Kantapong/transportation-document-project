@@ -1143,6 +1143,47 @@ function AddJobDialog({
 }
 
 // รายละเอียดงาน 1 งาน: เลือกประเภทงาน / ไปขั้นถัดไป / ติดขัด / ยกเลิกการรับงาน
+const baht = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 });
+
+// ยอดเงินของงาน (ผู้ใช้ 2026-11-19: "รอรับเอกสาร / ยื่น กดไปทำไมไม่มีค่า Bill / No Bill") - ยื่นแล้วแสดง snapshot ของงานจริง
+// ยังไม่ยื่น = ยอดคิดตอนยื่น (ขึ้นกับตัวเลือกในฟอร์มยื่น เช่น ด่วน / ขอใช้ / จังหวัด) · บัญชีที่ไม่เห็นราคาไม่แสดงกล่องนี้
+function JobFeesBox({ job }: { job: HubJob }) {
+  if (!job.jobType || job.status === "CANCELLED") return null;
+  if (!job.jobId) {
+    return (
+      <p className="muted">
+        ค่าใช้จ่าย: ระบบคิดตอนกดยื่น (ขึ้นกับงานด่วน / ประเภทที่เลือกในฟอร์มยื่น)
+        {job.inspectionCost && Number(job.inspectionCost) > 0 ? ` · ค่าตรวจรถ ${baht(Number(job.inspectionCost))} บาท` : ""}
+      </p>
+    );
+  }
+  const f = job.fees;
+  if (!f) return null;
+  const total = (f.bill ?? 0) + (f.noBill ?? 0);
+  return (
+    <div className="customer-grid" style={{ margin: "8px 0 12px", padding: "10px 14px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
+      <div>
+        <strong>Bill</strong>
+        <div>{f.bill === null ? "ยังไม่คิด (ยังไม่ชำระ)" : `${baht(f.bill)} บาท`}</div>
+        {f.receiptAmount !== null && <div className="sub">ยอดบนใบเสร็จ {baht(f.receiptAmount)} บาท</div>}
+      </div>
+      <div>
+        <strong>No Bill</strong>
+        <div>{f.noBill === null ? "-" : `${baht(f.noBill)} บาท`}</div>
+        {f.inspectionCost > 0 && <div className="sub">+ ค่าตรวจรถ {baht(f.inspectionCost)} บาท</div>}
+      </div>
+      <div>
+        <strong>ค่าอากร</strong>
+        <div>{baht(f.duty)} บาท (แยกต่างหาก)</div>
+      </div>
+      <div>
+        <strong>รวม Bill + No Bill</strong>
+        <div>{baht(total)} บาท</div>
+      </div>
+    </div>
+  );
+}
+
 function JobDialog({
   vehicle,
   job,
@@ -1238,6 +1279,7 @@ function JobDialog({
         </p>
       )}
       {job.note && <p className="muted">หมายเหตุ: {job.note}</p>}
+      <JobFeesBox job={job} />
       {job.inspectionRequired && !submitted && (
         <p className="muted">
           ตรวจรถก่อนยื่น:{" "}

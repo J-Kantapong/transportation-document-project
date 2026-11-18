@@ -112,6 +112,14 @@ export interface HubCustomer {
   company: string | null;
 }
 
+export interface HubJobFees {
+  bill: number | null; // ต่อภาษีที่ยังไม่ชำระ = null
+  noBill: number | null; // ไม่รวมค่าอากร
+  duty: number;
+  inspectionCost: number; // ค่าตรวจรถ (งานโอนที่มีขั้นตรวจ) แยกจาก noBill
+  receiptAmount: number | null; // ยอดบนใบเสร็จจริง
+}
+
 export interface HubJob {
   id: string;
   jobType: OldJobType | null;
@@ -139,6 +147,8 @@ export interface HubJob {
   blockedReason: string | null;
   blockedReasonLabel: string | null;
   blockedNote: string | null;
+  // ยอดเงินของงานที่ยื่นแล้ว / null = ยังไม่ยื่น (ยอดคิดตอนยื่น) หรือบัญชีนี้ไม่เห็นราคา
+  fees: HubJobFees | null;
   updatedAt: string;
 }
 
