@@ -455,6 +455,84 @@ export class OldVehicleJobsService {
     return { vehicle: (await this.hubVehicles([row]))[0] };
   }
 
+  // บังคับรับงานก่อนยื่น (ผู้ใช้ 2026-11-18 เลือกแบบ ก: ทุกงานรถเก่าต้องเริ่มจากรับงาน) - เรียกจาก OldVehicleJobLinkInterceptor ก่อนสร้างงานจริง
+  // เงื่อนไข: ต้องมีแถวรับงานที่ยังไม่ยื่น ไม่ถูกยกเลิก ของรถคันนี้ (เทียบเลขตัวถัง) ในประเภทงานเดียวกัน
+  // และถ้างานนั้นต้องตรวจรถ ต้องตรวจผ่านแล้ว (ลำดับจริง: รับงาน -> ตรวจรถ -> ยื่น)
+  // path ที่ไม่ใช่การสร้างงานรถเก่า หรืออ่านเลขตัวถังจากคำขอไม่ได้ = ไม่ตรวจ ปล่อยให้ service ของงานนั้นตอบ error ของตัวเอง
+  async assertIntakeBeforeSubmit(path: string, body: unknown): Promise<void> {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const p = path.replace(/\/+$/, '').toLowerCase();
+    let types: OldJobType[];
+    let variant: string | null = null;
+    let chassisList: string[];
+    if (p === '/api/plate-swaps') {
+      types = ['PLATE_SWAP'];
+      variant = 'OLD_NEW';
+      chassisList = [text(b.oldChassis)];
+    } else if (p === '/api/plate-swaps/change') {
+      types = ['PLATE_SWAP'];
+      variant = 'CHANGE';
+      chassisList = [text(b.oldChassis)];
+    } else if (p === '/api/plate-swaps/pair') {
+      types = ['PLATE_SWAP'];
+      variant = 'OLD_OLD';
+      chassisList = [text((b.carA as Record<string, unknown> | undefined)?.oldChassis), text((b.carB as Record<string, unknown> | undefined)?.oldChassis)];
+    } else if (p === '/api/vehicle-transfers') {
+      types = [b.transferType === 'MOVE_IN' ? 'TRANSFER_MOVE_IN' : b.transferType === 'INSPECTION' ? 'TRANSFER_INSPECTION' : 'TRANSFER_OWNER'];
+      chassisList = [text(b.chassis)];
+    } else if (p === '/api/tax-renewals') {
+      types = ['TAX_RENEWAL'];
+      let chassis = text(b.chassis);
+      // รถจากฐานข้อมูลรถจดใหม่: คำขอส่ง vehicleId มา - อ่านเลขตัวถังจากรถคันนั้น
+      if (!chassis && text(b.vehicleId)) {
+        chassis = (await this.prisma.vehicle.findFirst({ where: { id: text(b.vehicleId), deletedAt: null }, select: { chassis: true } }))?.chassis ?? '';
+      }
+      chassisList = [chassis];
+    } else if (p === '/api/vehicle-use-cancellations') {
+      types = ['USE_CANCEL'];
+      chassisList = [text(b.chassis)];
+    } else if (p === '/api/vehicle-move-outs') {
+      types = ['MOVE_OUT'];
+      chassisList = [text(b.chassis)];
+    } else if (p === '/api/plate-copies') {
+      types = ['PLATE_COPY'];
+      chassisList = [text(b.chassis)];
+    } else {
+      return;
+    }
+    for (const chassis of chassisList) {
+      if (!chassis) continue; // ไม่มีเลขตัวถัง = service ของงานนั้นตอบ "กรุณากรอกเลขตัวถัง" เอง
+      const label = OLD_JOB_TYPE_LABEL[types[0]];
+      const rows = await this.prisma.oldVehicleJob.findMany({
+        where: { cancelledAt: null, jobId: null, jobType: { in: types }, vehicle: { chassisKey: chassisKeyOf(chassis) }, ...(variant ? { jobVariant: variant } : {}) },
+        select: { inspectionRequired: true, inspectionResult: true },
+      });
+      if (!rows.length) {
+        throw new BadRequestException({
+          error: `รถเลขตัวถัง ${chassis} ยังไม่ได้รับงาน "${label}" - รับงานที่เมนูงานรถเก่าก่อน แล้วกดยื่นจากหน้านั้น`,
+        });
+      }
+      if (!rows.some((r) => !r.inspectionRequired || r.inspectionResult === 'PASS')) {
+        throw new BadRequestException({ error: `รถเลขตัวถัง ${chassis} ต้องตรวจรถผ่านก่อนจึงยื่นได้ - บันทึกผลตรวจที่หน้าตรวจรถของงานรถเก่า` });
+      }
+    }
+  }
+
+  // แถวรับงาน 1 งาน + ข้อมูลรถ สำหรับเติมฟอร์มยื่นของหน้างานเดิม (รอบ 2 ผู้ใช้ 2026-11-18: กดยื่นจากหน้ารวมแล้วไม่ต้องกรอกข้อมูลรถซ้ำ)
+  // pairVehicle = อีกคันของคู่สลับเลข รถเก่า กับ รถเก่า (ฟอร์มยื่นกรอก 2 คัน)
+  async getJob(id: string): Promise<{ vehicle: HubVehicle; job: HubJob; pairVehicle: HubVehicle | null }> {
+    const row = await this.prisma.oldVehicleJob.findFirst({ where: { id, cancelledAt: null }, select: { vehicleId: true, vehicle: { select: { vehicleClass: true } } } });
+    if (!row) throw new NotFoundException({ error: 'ไม่พบการรับงานนี้ (อาจถูกยกเลิกไปแล้ว)' });
+    const scope = this.readScope();
+    if (scope !== 'ALL' && scope !== row.vehicle.vehicleClass) throw new ForbiddenException({ error: 'บัญชีของคุณไม่ได้ดูแลรถประเภทนี้' });
+    const { vehicle } = await this.reloadVehicle(row.vehicleId);
+    const job = vehicle.jobs.find((j) => j.id === id);
+    if (!job) throw new NotFoundException({ error: 'ไม่พบการรับงานนี้ (อาจถูกยกเลิกไปแล้ว)' });
+    const pairVehicle = job.pair ? (await this.reloadVehicle(job.pair.vehicleId)).vehicle : null;
+    return { vehicle, job, pairVehicle };
+  }
+
   // ---------------------------------------------------------------------------------------------
   // หน้ารวม: scope = open (ยังมีงานไม่เสร็จ - ค่าเริ่มต้น) | done (ทุกงานเสร็จ) | all · q = ทะเบียน / เลขตัวถัง / ชื่อเจ้าของรถ / ลูกค้า
   // ตัวกรองประเภทงานและสถานะทำที่หน้าเว็บ (ข้อมูลชุดเดียวกัน) - คืนไม่เกิน 500 คัน เรียงตามวันที่รับงานล่าสุด

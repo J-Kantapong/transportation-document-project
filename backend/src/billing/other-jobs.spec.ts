@@ -270,7 +270,6 @@ describe('BillingService.createInvoice with other jobs', () => {
       plateCopy: { findMany: vi.fn().mockResolvedValue([]) },
       vehicleMoveOut: { findMany: vi.fn().mockResolvedValue([]) },
       taxRenewal: { findMany: vi.fn().mockResolvedValue([]) },
-      plateSwap: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
       $queryRawUnsafe: queryRawUnsafe,
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),

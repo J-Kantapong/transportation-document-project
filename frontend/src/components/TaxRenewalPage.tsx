@@ -15,6 +15,8 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { FUEL_TYPES, TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES, isTransportType } from "@/lib/vehicle-reference-data";
 import { DateInput } from "@/components/DateInput";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 
 type Source = "VEHICLE" | "MANUAL";
 
@@ -223,6 +225,23 @@ export function useCustomerOptions() {
 export function TaxRenewalPage() {
   const customerOptions = useCustomerOptions();
   const [form, setForm] = useState<FormState>(freshForm);
+  // เปิดจากหน้ารวมงานรถเก่า (?intake=) = กรอกรถเอง (MANUAL) โดยเติมเจ้าของงาน ข้อมูลรถ วันจดทะเบียนครั้งแรก และวันครบกำหนดภาษีจากตอนรับงานให้
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
+    setForm((prev) => ({
+      ...prev,
+      source: "MANUAL",
+      vehicleId: "",
+      customerId: job.customer?.id ?? prev.customerId,
+      chassis: vehicle.chassis,
+      engine: vehicle.engine ?? "",
+      plateCategory: vehicle.plateCategory,
+      plateNumber: vehicle.plateNumber,
+      vehicleType: vehicle.vehicleType ?? "",
+      ownerName: vehicle.ownerName ?? "",
+      firstRegistrationDate: job.firstRegistrationDate ? isoToDisplayDate(job.firstRegistrationDate) : prev.firstRegistrationDate,
+      taxExpiryDate: job.taxExpiryDate ? isoToDisplayDate(job.taxExpiryDate) : prev.taxExpiryDate,
+    })),
+  );
   const [selectedVehicle, setSelectedVehicle] = useState<TaxRenewalVehicleHit | null>(null);
   const [rows, setRows] = useState<TaxRenewal[]>([]);
   const [preview, setPreview] = useState<TaxRenewalPreview | null>(null);
@@ -351,6 +370,7 @@ export function TaxRenewalPage() {
         <div className="panel">
           <div className="panel-head">
             <h2>เพิ่มงานต่อภาษี</h2>
+            <IntakeNotice state={intakePrefill} />
           </div>
           <form onSubmit={submit} style={{ padding: "0 23px 24px" }}>
             {/* วันที่ยื่นงาน - ข้อมูลของงาน ไม่ใช่ของรถ จึงอยู่เหนือแท็บเลือกรถ */}

@@ -36,6 +36,8 @@ import {
   type VehicleTransfer,
 } from "@/lib/vehicle-transfer-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { confirmDialog } from "@/lib/confirm-dialog";
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตาเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง รถยนต์ + มอเตอร์ไซค์รวมกันในหน้าเดียว (เลือกประเภทรถในฟอร์ม)
@@ -370,7 +372,7 @@ function FeeSection({
     );
   }
   // ทั้งรถยนต์และมอเตอร์ไซค์คิดจากอัตรา (รถยนต์ตั้งแต่ 2026-11-18: Bill 105 / 130, ค่าอากร 20 / 40) - ไม่มีช่องพิมพ์ Bill เองแล้ว
-  const fees = calculateTransferFees(form.vehicleClass, { useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0, contribution: Number(contributionText(form, rates)) || 0 });
+  const fees = calculateTransferFees(form.vehicleClass, { useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0, stampDuty: Number(form.stampDutyAmount) || 0, contribution: Number(contributionText(form, rates)) || 0 });
   return (
     <>
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
@@ -388,6 +390,11 @@ function FeeSection({
           งานด่วน (+{formatBaht((form.vehicleClass === "CAR" ? TRANSFER_CAR_URGENT_ITEM : TRANSFER_MOTO_URGENT_ITEM).amount)} ใน No Bill)
         </label>
         <ProvinceContributionFields form={form} onChange={onChange} rates={rates} />
+        {/* ค่าอากรโอน (ผู้ใช้ 2026-11-18): งานโอนทุกแบบมี ประเมินตามราคารถ - ไม่รู้ตอนยื่นเว้นว่างได้ ระบบเติมจากใบเสร็จตอนรับใบเสร็จ */}
+        <label className="field" style={{ minWidth: 200 }}>
+          ค่าอากรโอน (บาท)
+          <input value={form.stampDutyAmount} onChange={(e) => onChange({ stampDutyAmount: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="ยังไม่รู้เว้นว่าง" aria-label="ค่าอากรโอน" />
+        </label>
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
         ติ๊กค่าปรับเมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้ คงที่ 200 บาท) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
@@ -419,7 +426,7 @@ function feePayload(form: FormState, rates: TransferContributionRow[], moveIn = 
   const province = { submitProvince: form.submitProvince, contribution: contributionText(form, rates, moveIn) };
   // โอนย้ายเข้าไม่มีโอนขอใช้
   if (moveIn) return { urgent: form.urgent, fineAmount: form.fineAmount, stampDutyAmount: form.stampDutyAmount.trim(), ...province };
-  return { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount, ...province };
+  return { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount, stampDutyAmount: form.stampDutyAmount.trim(), ...province };
 }
 
 function VehicleFormFields({
@@ -591,7 +598,7 @@ function VehicleFormFields({
 function validateForm(form: FormState, requireCustomer: boolean, moveIn = false): string {
   if (!form.vehicleClass) return "กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)";
   if (moveIn && !form.submitProvince) return "กรุณาเลือกจังหวัดที่ย้ายเข้า";
-  if (moveIn && form.stampDutyAmount.trim() && Number.isNaN(Number(form.stampDutyAmount))) return "ค่าอากรโอนไม่ถูกต้อง";
+  if (form.stampDutyAmount.trim() && Number.isNaN(Number(form.stampDutyAmount))) return "ค่าอากรโอนไม่ถูกต้อง";
   if (moveIn && Boolean(form.newPlateCategory.trim()) !== Boolean(form.newPlateNumber.trim())) return "ทะเบียนใหม่ต้องกรอกทั้งหมวดและเลข (ยังไม่รู้เว้นว่างทั้งคู่)";
   if (requireCustomer && !form.customerId) return "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)";
   if (!form.transferorName.trim()) return "กรุณากรอกผู้โอน";
@@ -814,6 +821,21 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
   // โอนย้ายเข้า: จังหวัดที่ย้ายเข้าต้องเลือกเอง ไม่ตั้งต้นเป็นกรุงเทพฯ
   const emptyForm = useMemo<FormState>(() => (moveIn ? { ...EMPTY_FORM, submitProvince: "" } : EMPTY_FORM), [moveIn]);
   const [form, setForm] = useState<FormState>(emptyForm);
+  // เปิดจากหน้ารวมงานรถเก่า = เติมเจ้าของงาน + ข้อมูลรถ (ผู้โอน = เจ้าของรถตอนรับงาน) ให้เอง
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
+    setForm((prev) => ({
+      ...prev,
+      vehicleClass: vehicle.vehicleClass,
+      customerId: job.customer?.id ?? prev.customerId,
+      transferorName: vehicle.ownerName ?? "",
+      chassis: vehicle.chassis,
+      engine: vehicle.engine ?? "",
+      brand: vehicle.brand ?? "",
+      plateCategory: vehicle.plateCategory,
+      plateNumber: vehicle.plateNumber,
+      contribution: null,
+    })),
+  );
   // งานย้ายออก (มอเตอร์ไซค์ รับใบเสร็จแล้ว) ที่ยังไม่ถูกผูกกับงานโอนย้ายเข้า - เลือกแล้วเติมข้อมูลรถให้
   const [moveOuts, setMoveOuts] = useState<VehicleMoveOut[]>([]);
   const [moveOutId, setMoveOutId] = useState("");
@@ -940,6 +962,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
     <section className="content">
       <BackLink transferType={transferType} />
       <h1>ยื่นงานโอน ({TRANSFER_TYPE_LABEL[transferType]})</h1>
+      <IntakeNotice state={intakePrefill} />
 
       {showActions && (
         <div className="panel" style={{ marginBottom: 24 }}>
@@ -1405,7 +1428,6 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
   const [dateText, setDateText] = useState(() => (item.receiptDate ? isoToDisplayDate(item.receiptDate) : ""));
   const [amount, setAmount] = useState(item.receiptAmount ?? "");
   // ค่าอากรโอนตามราคารถ (เฉพาะโอนย้ายเข้า) - รู้เมื่อใบเสร็จออก บันทึกแล้วระบบบวกเข้า Bill
-  const moveIn = isMoveIn(item.transferType);
   const stampText = (value: string) => (Number(value) > 0 ? String(Number(value)) : "");
   const [stampDuty, setStampDuty] = useState(() => stampText(item.stampDutyAmount));
   const [remark, setRemark] = useState("");
@@ -1432,7 +1454,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
     try {
       const { transfer } = await vehicleTransferApi.updateReceiptFields(
         item.id,
-        { receiptNo: receiptNo.trim(), receiptDate, receiptAmount: amount.trim(), ...(moveIn ? { stampDutyAmount: stampDuty.trim() } : {}) },
+        { receiptNo: receiptNo.trim(), receiptDate, receiptAmount: amount.trim(), stampDutyAmount: stampDuty.trim() },
         needsRemark ? remark.trim() : undefined,
       );
       onChange(transfer);
@@ -1453,7 +1475,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
           {item.receiptDate ? `วันที่ ${isoToDisplayDate(item.receiptDate)}` : ""}
           {item.receiptAmount ? `${item.receiptDate ? " · " : ""}${formatBaht(Number(item.receiptAmount))} บาท` : ""}
         </div>
-        {moveIn && <div className="sub">ค่าอากรโอน {Number(item.stampDutyAmount) > 0 ? `${formatBaht(Number(item.stampDutyAmount))} บาท` : "ไม่มี"}</div>}
+        {<div className="sub">ค่าอากรโอน {Number(item.stampDutyAmount) > 0 ? `${formatBaht(Number(item.stampDutyAmount))} บาท` : "ไม่มี"}</div>}
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
             ✎ แก้
@@ -1475,7 +1497,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
         inputMode="decimal"
         className="inspect-input"
       />
-      {moveIn && (
+      {(
         <input
           value={stampDuty}
           onChange={(e) => setStampDuty(moneyOnly(e.target.value))}

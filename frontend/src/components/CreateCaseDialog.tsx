@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { REGISTRATION_CATEGORIES } from "@/lib/categories";
+import { MENU_CATEGORIES } from "@/lib/categories";
 import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
 import { Icon } from "./Icon";
 
@@ -16,7 +16,7 @@ export function CreateCaseDialog() {
   }, []);
 
   // แสดงเฉพาะประเภทงานที่บทบาทเข้าได้ (พบ 2026-09-27: เดิมกดแล้วถูกพากลับหน้าแรกเงียบๆ) - กฎอยู่ใน lib/auth.ts
-  const categories = REGISTRATION_CATEGORIES.filter((category) => roles === null || canAccessPage(category.href, roles));
+  const categories = MENU_CATEGORIES.filter((category) => roles === null || canAccessPage(category.href, roles));
 
   return (
     <>

@@ -241,7 +241,7 @@ export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInp
       stampDutyAmount: input.stampDuty ?? 0,
     };
   }
-  const fees = calculateTransferFees(vehicleClass, { useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
+  const fees = calculateTransferFees(vehicleClass, { useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution, stampDuty: input.stampDuty ?? 0 });
   return {
     billTotal: fees.billTotal,
     noBillTotal: fees.noBillTotal,
@@ -249,6 +249,8 @@ export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInp
     useRequest: input.useRequest,
     urgent: input.urgent,
     fineAmount: input.fineAmount,
+    // ค่าอากรโอน: งานโอนทุกแบบมี (ผู้ใช้ 2026-11-18) - เดิมเฉพาะโอนย้ายเข้า
+    stampDutyAmount: input.stampDuty ?? 0,
   };
 }
 
@@ -464,7 +466,7 @@ export class VehicleTransferService {
       billTotal: dto?.billTotal,
       moveIn,
       // ค่าอากรโอน (ผู้ใช้ 2026-11-18): กรอกตอนยื่นได้ ไม่บังคับ เพราะบางงานไม่มี - ว่าง = 0
-      stampDuty: moveIn ? (optionalAmount(dto?.stampDutyAmount, 'ค่าอากรโอน') ?? 0) : 0,
+      stampDuty: optionalAmount(dto?.stampDutyAmount, 'ค่าอากรโอน') ?? 0,
     });
 
     const row = await this.prisma.vehicleTransfer.create({
@@ -811,12 +813,11 @@ export class VehicleTransferService {
     // ค่าอากรโอน (เฉพาะโอนย้ายเข้า): แก้อย่างเดียว = ปรับ Bill ตามส่วนต่าง ไม่คิดใหม่ทั้งชุด (งานเก่าไม่โดนอัตราใหม่)
     const stampBefore = Number(existing.stampDutyAmount ?? 0);
     const stampDuty = has('stampDutyAmount') ? (optionalAmount(dto.stampDutyAmount, 'ค่าอากรโอน') ?? 0) : stampBefore;
-    if (!moveIn && stampDuty > 0) throw new BadRequestException({ error: 'ค่าอากรโอนกรอกได้เฉพาะงานโอนย้ายเข้า' });
     // ทั้งสองประเภทรถคิดจากอัตรา (รถยนต์ตั้งแต่ 2026-11-18) - ไม่แตะตัวเลือกค่าใช้จ่าย = คง snapshot เดิม
     // (งานรถยนต์เก่าที่พนักงานกรอก Bill เองจึงคงยอดนั้นไว้ จนกว่าจะแก้ ขอใช้ / ด่วน / ค่าปรับ / ลงขัน ซึ่งคิดใหม่ตามอัตรา)
     const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
     if (!classChanged && same) {
-      if (!moveIn || stampDuty === stampBefore) return snapshot;
+      if (stampDuty === stampBefore) return snapshot;
       return { ...snapshot, billTotal: Math.round((snapshot.billTotal - stampBefore + stampDuty) * 100) / 100, stampDutyAmount: stampDuty };
     }
     return feeSnapshotFor(vehicleClass, { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty });
@@ -937,10 +938,17 @@ export class VehicleTransferService {
           // AI อ่านปีผิดได้ - วันที่นอกช่วงวันที่ยื่นถึงวันนี้ไม่เติมให้ ปล่อยว่างให้พนักงานกรอกเอง
           const readDate = date && dateInRange(toUtcDate(date), existing.submitDate) ? toUtcDate(date) : undefined;
           if (receiptNo || readDate || total !== null) {
-            await tx.vehicleTransfer.updateMany({
+            const filled = await tx.vehicleTransfer.updateMany({
               where: { id, receiptNo: null, receiptDate: null, receiptAmount: null },
               data: { receiptNo: receiptNo || undefined, receiptDate: readDate, receiptAmount: total !== null ? total : undefined },
             });
+            // ค่าอากรโอน (ผู้ใช้ 2026-11-18: "ใช้ใบเสร็จกรอกย้อนกลับ"): ยอดบนใบเสร็จสูงกว่า Bill ที่คิดไว้ = ส่วนต่างคือค่าอากรโอน
+            // เติมให้เฉพาะตอน OCR อ่านใบเสร็จครั้งแรก งานที่ยังไม่รับกลับ และยังไม่มีค่าอากรโอน - พนักงานตรวจ/แก้ได้ที่ข้อมูลใบเสร็จ
+            const bill = Number(existing.billTotal);
+            if (filled.count === 1 && total !== null && !existing.returnedDate && Number(existing.stampDutyAmount ?? 0) === 0 && total > bill) {
+              const stamp = Math.round((total - bill) * 100) / 100;
+              await tx.vehicleTransfer.updateMany({ where: { id, stampDutyAmount: 0 }, data: { stampDutyAmount: stamp, billTotal: Math.round((bill + stamp) * 100) / 100 } });
+            }
           }
         }
         if (remark) {
@@ -975,7 +983,6 @@ export class VehicleTransferService {
     // ค่าอากรโอนตามราคารถ (โอนย้ายเข้า) - รู้เมื่อใบเสร็จออก จึงกรอกพร้อมข้อมูลใบเสร็จ / ว่าง = 0 / Bill ปรับตามส่วนต่าง ไม่คิดใหม่ทั้งชุด
     let stampDuty: { stampDutyAmount: number; billTotal: number } | undefined;
     if (dto?.stampDutyAmount !== undefined) {
-      if (existing.transferType !== 'MOVE_IN') throw new BadRequestException({ error: 'ค่าอากรโอนกรอกได้เฉพาะงานโอนย้ายเข้า' });
       const amount = optionalAmount(dto.stampDutyAmount, 'ค่าอากรโอน') ?? 0;
       const before = Number(existing.stampDutyAmount ?? 0);
       if (amount !== before) stampDuty = { stampDutyAmount: amount, billTotal: Math.round((Number(existing.billTotal) - before + amount) * 100) / 100 };

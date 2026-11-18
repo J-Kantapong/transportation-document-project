@@ -6,6 +6,9 @@ export interface RegistrationCategory {
   href: string;
   color: string;
   bg: string;
+  // ไม่แสดงในเมนู / หน้าเลือกประเภทงาน (ผู้ใช้ 2026-11-18 "ยุบเมนูเลย"): งานรถเก่าทั้ง 4 หมวดเข้าทางหน้ารวม "งานรถเก่า" ทางเดียว
+  // หน้าเดิมยังอยู่และเปิดจากปุ่มในหน้ารวมได้ (ขั้นยื่น / รับใบเสร็จ / รับป้าย / รับเล่ม) - รายการเต็มยังใช้ทำ breadcrumb
+  hidden?: boolean;
 }
 
 // Matches the `types` array in prototype/sites-reference/dist/index.html.
@@ -13,12 +16,15 @@ export const REGISTRATION_CATEGORIES: RegistrationCategory[] = [
   { title: "จดทะเบียนรถใหม่", icon: "car", href: "/registration/new-vehicle", color: "#2854d9", bg: "#edf2ff" },
   // งานรถเก่า (ผู้ใช้ 2026-11-18): หน้ารวม รับงาน -> ตรวจรถ -> ยื่น ของ สลับเลข / งานโอน / ต่อภาษี / อื่นๆ - เมนูเดิม 4 อันยังอยู่จนกว่าขั้นยื่นจะย้ายเข้าหน้านี้
   { title: "งานรถเก่า", icon: "stack", href: "/registration/old-vehicle", color: "#2f6f9f", bg: "#e9f3fa" },
-  { title: "การสลับเลข", icon: "swap", href: "/registration/plate-swap", color: "#7560c7", bg: "#f2eeff" },
-  { title: "งานโอน", icon: "transfer", href: "/registration/transfer", color: "#228d91", bg: "#eaf7f7" },
-  { title: "ต่อภาษี", icon: "card", href: "/registration/tax-renewal", color: "#2f8a5b", bg: "#eaf7f0" },
+  { title: "การสลับเลข", icon: "swap", href: "/registration/plate-swap", color: "#7560c7", bg: "#f2eeff", hidden: true },
+  { title: "งานโอน", icon: "transfer", href: "/registration/transfer", color: "#228d91", bg: "#eaf7f7", hidden: true },
+  { title: "ต่อภาษี", icon: "card", href: "/registration/tax-renewal", color: "#2f8a5b", bg: "#eaf7f0", hidden: true },
   { title: "งานแจ้งย้ายยามาฮ่า", icon: "move", href: "/registration/yamaha-relocation", color: "#bd8131", bg: "#fff5e8" },
-  { title: "อื่นๆ", icon: "more", href: "/registration/other", color: "#738197", bg: "#f0f3f7" },
+  { title: "อื่นๆ", icon: "more", href: "/registration/other", color: "#738197", bg: "#f0f3f7", hidden: true },
 ];
+
+// หมวดที่แสดงในเมนูข้าง / หน้าเลือกประเภทงาน
+export const MENU_CATEGORIES: RegistrationCategory[] = REGISTRATION_CATEGORIES.filter((c) => !c.hidden);
 
 export interface RegistrationSubtask {
   title: string;

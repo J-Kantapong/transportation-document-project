@@ -7,6 +7,8 @@ import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
 import { calculateMoveOutFees, moveOutRates } from "@/lib/vehicle-move-out-fee";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleMoveOutApi,
@@ -418,6 +420,9 @@ type RowDialog = { kind: "edit" | "cancel"; item: VehicleMoveOut } | null;
 export function VehicleMoveOutSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: MoveOutVehicleClass }) {
   const canWrite = useCanWrite(vehicleClass);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
+    setForm((prev) => ({ ...prev, customerId: job.customer?.id ?? prev.customerId, ownerName: vehicle.ownerName ?? "", chassis: vehicle.chassis, engine: vehicle.engine ?? "", brand: vehicle.brand ?? "", plateCategory: vehicle.plateCategory, plateNumber: vehicle.plateNumber })),
+  );
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
@@ -493,6 +498,7 @@ export function VehicleMoveOutSubmitPage({ vehicleClass = "CAR" }: { vehicleClas
         ← ย้ายออก · {CLASS_LABEL[vehicleClass]}
       </Link>
       <h1>ยื่นงานย้ายออก ({CLASS_LABEL[vehicleClass]})</h1>
+      <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>

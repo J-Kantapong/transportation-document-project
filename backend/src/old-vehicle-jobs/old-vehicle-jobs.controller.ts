@@ -24,6 +24,12 @@ export class OldVehicleJobsController {
   }
 
   // รับงาน { customerId, receivedDate, vehicles: [...] }
+  // แถวรับงาน 1 งาน + ข้อมูลรถ (+ รถคู่ของสลับเลข รถเก่า กับ รถเก่า) - ฟอร์มยื่นของหน้างานเดิมใช้เติมข้อมูลให้เอง
+  @Get('jobs/:id')
+  getJob(@Param('id') id: string) {
+    return this.service.getJob(id);
+  }
+
   @Post('intake')
   intake(@Body() body: IntakeDto) {
     return this.service.intake(body ?? {});

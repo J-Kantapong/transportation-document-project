@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CreateCaseDialog } from "@/components/CreateCaseDialog";
 import { Icon, type IconName } from "@/components/Icon";
-import { REGISTRATION_CATEGORIES } from "@/lib/categories";
+import { MENU_CATEGORIES } from "@/lib/categories";
 import type { CSSVarStyle } from "@/lib/css-vars";
 
 const STATS: Array<{ label: string; icon: IconName; color?: string; bg?: string; foot: string }> = [
@@ -51,7 +51,7 @@ export function RegistrationOverview() {
         <span>เลือกประเภทงานที่ต้องการดำเนินการ</span>
       </div>
       <section className="types">
-        {REGISTRATION_CATEGORIES.map((category) => (
+        {MENU_CATEGORIES.map((category) => (
           <Link href={category.href} className="type" key={category.href}>
             <span className="icon" style={{ "--c": category.color, "--bg": category.bg } as CSSVarStyle}>
               <Icon name={category.icon} />

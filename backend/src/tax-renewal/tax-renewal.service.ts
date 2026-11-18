@@ -12,7 +12,7 @@ import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storag
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { TaxService } from '../tax/tax.service.js';
-import { calculateTaxRenewalFees, vehicleClassOf } from './tax-renewal-fee.js';
+import { calculateTaxRenewalFees, TAX_FROM_RECEIPT_LABEL, vehicleClassOf } from './tax-renewal-fee.js';
 import {
   parseDate,
   parseDecimal,
@@ -219,7 +219,8 @@ export class TaxRenewalService {
       inspectionCertificateConfirmed: extras.inspectionConfirmed,
     };
     try {
-      return calculateVehicleTax(input, rules);
+      // รถ ขส. ที่ยังไม่มีตารางอัตรา: ไม่ตอบ error - Bill ใช้ยอดตามใบเสร็จแทน (ผู้ใช้ 2026-11-18)
+      return calculateVehicleTax(input, rules, { allowReceiptTax: true });
     } catch (error) {
       if (error instanceof VehicleTaxInputError) throw new BadRequestException({ error: error.message });
       throw error;
@@ -559,7 +560,8 @@ export class TaxRenewalService {
     let feeData: Prisma.TaxRenewalUpdateInput = {};
     if (paymentDate && feesChanged) {
       const tax = await this.computeTax(info, paymentDate, { inspectionConfirmed });
-      const fees = calculateTaxRenewalFees(tax, { skipContribution });
+      // รถ ขส. ที่ใช้ยอดตามใบเสร็จ: คิดใหม่แล้วยังใช้ยอดใบเสร็จที่มีอยู่เป็น Bill
+      const fees = calculateTaxRenewalFees(tax, { skipContribution, receiptAmount: existing.receiptAmount === null ? null : Number(existing.receiptAmount) });
       feeData = {
         inspectionRequired: tax.inspectionRequired,
         billItems: toJson(fees.billItems),
@@ -715,10 +717,15 @@ export class TaxRenewalService {
           const { receiptNo, date, total } = extraction.reading;
           const readDate = date && dateInRange(toUtcDate(date), existing.submitDate) ? toUtcDate(date) : undefined;
           if (receiptNo || readDate || total !== null) {
-            await tx.taxRenewal.updateMany({
+            const filled = await tx.taxRenewal.updateMany({
               where: { id, receiptNo: null, receiptDate: null, receiptAmount: null },
               data: { receiptNo: receiptNo || undefined, receiptDate: readDate, receiptAmount: total !== null ? total : undefined },
             });
+            // รถ ขส. ที่ยังไม่มีตารางอัตรา: ยอดบนใบเสร็จที่ OCR อ่านได้ = Bill ของงาน (ผู้ใช้ 2026-11-18) - พนักงานแก้ได้ที่ข้อมูลใบเสร็จ
+            if (filled.count === 1 && total !== null) {
+              const patch = receiptTaxPatch(existing, total);
+              if (patch) await tx.taxRenewal.update({ where: { id }, data: patch });
+            }
           }
         }
         if (remark) {
@@ -767,18 +774,31 @@ export class TaxRenewalService {
     const next = { receiptNo, receiptDate, receiptAmount };
     const changes = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) return this.reloadOne(id);
+    // รถ ขส. ที่ยังไม่มีตารางอัตรา: แก้ยอดใบเสร็จ = Bill ของงานเปลี่ยนตาม (ผู้ใช้ 2026-11-18)
+    const taxPatch = 'receiptAmount' in changes ? receiptTaxPatch(existing, receiptAmount ?? 0) : null;
+    if (taxPatch) changes.billTotal = { from: existing.billTotal === null ? null : Number(existing.billTotal), to: taxPatch.billTotal };
+    const data = { ...next, ...(taxPatch ?? {}) };
     const where = { id, cancelledAt: null, receivedDate: existing.receivedDate };
     if (!existing.receivedDate) {
-      await this.prisma.taxRenewal.update({ where, data: next }).catch(staleIfMissing);
+      await this.prisma.taxRenewal.update({ where, data }).catch(staleIfMissing);
       return this.reloadOne(id);
     }
     const remark = requireRemark(dto?.remark, 'งานนี้รับใบเสร็จแล้ว - แก้ข้อมูลใบเสร็จต้องระบุเหตุผล');
     await this.prisma.$transaction(async (tx) => {
-      await tx.taxRenewal.update({ where, data: next }).catch(staleIfMissing);
+      await tx.taxRenewal.update({ where, data }).catch(staleIfMissing);
       await writeAudit(tx, { entity: 'TaxRenewal', entityId: id, action: 'update-receipt-fields', remark, changes });
     });
     return this.reloadOne(id);
   }
+}
+
+// รถ ขส. ที่ยังไม่มีตารางอัตรา (taxBreakdown.taxFromReceipt) และชำระแล้ว: Bill ของงาน = ยอดบนใบเสร็จ (ผู้ใช้ 2026-11-18)
+// คืน null เมื่องานนี้ไม่ได้ใช้ยอดตามใบเสร็จ หรือยังไม่ชำระ (ยังไม่มี snapshot ยอดเงิน)
+function receiptTaxPatch(existing: { taxBreakdown: unknown; paymentDate: Date | null }, receiptAmount: number) {
+  const breakdown = existing.taxBreakdown as { taxFromReceipt?: boolean } | null;
+  if (!breakdown?.taxFromReceipt || !existing.paymentDate) return null;
+  const amount = Math.round(receiptAmount * 100) / 100;
+  return { billItems: toJson([{ label: TAX_FROM_RECEIPT_LABEL, amount }]), billTotal: amount };
 }
 
 // เงื่อนไขเดียวกับ vehicleTypeWhere() แต่อ่านจาก TaxRenewal.vehicleType แทน Vehicle.body
