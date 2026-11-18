@@ -445,18 +445,18 @@ describe('VehicleTransferService.update / cancel', () => {
 describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', () => {
   const moveInDto = { ...validDto, transferType: 'MOVE_IN', vehicleClass: 'MOTO', submitProvince: 'ชลบุรี', billTotal: undefined };
   const moveInRow = (overrides: Record<string, unknown> = {}) =>
-    row({ transferType: 'MOVE_IN', vehicleClass: 'MOTO', submitProvince: 'ชลบุรี', billTotal: 225, noBillTotal: 0, dutyAmount: 40, stampDutyAmount: 0, ...overrides });
+    row({ transferType: 'MOVE_IN', vehicleClass: 'MOTO', submitProvince: 'ชลบุรี', billTotal: 230, noBillTotal: 0, dutyAmount: 40, stampDutyAmount: 0, ...overrides });
 
-  it('คิด Bill 225 (คำขอ 5 + ใบแทนป้ายภาษี 20 + โอน 100 + แผ่นป้าย 100) ค่าอากร 40 ลงขัน 0 ไม่ว่าจังหวัดไหน', async () => {
+  it('คิด Bill 230 (คำขอ 10 + ใบแทนป้ายภาษี 20 + โอน 100 + แผ่นป้าย 100) ค่าอากร 40 ลงขัน 0 ไม่ว่าจังหวัดไหน', async () => {
     const { svc, create } = service(null);
     await asUser(['ADMIN'], () => svc.create(moveInDto));
-    expect(create.mock.calls[0][0].data).toMatchObject({ transferType: 'MOVE_IN', billTotal: 225, noBillTotal: 0, dutyAmount: 40, submitProvince: 'ชลบุรี', moveOutId: null });
+    expect(create.mock.calls[0][0].data).toMatchObject({ transferType: 'MOVE_IN', billTotal: 230, noBillTotal: 0, dutyAmount: 40, submitProvince: 'ชลบุรี', moveOutId: null });
   });
 
   it('ค่าปรับ + ด่วน + ลงขันที่กรอก รวมเข้ายอด', async () => {
     const { svc, create } = service(null);
     await asUser(['ADMIN'], () => svc.create({ ...moveInDto, fineAmount: '200', urgent: true, contribution: '150' }));
-    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 425, noBillTotal: 200, dutyAmount: 40, fineAmount: 200 });
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 430, noBillTotal: 200, dutyAmount: 40, fineAmount: 200 });
   });
 
   it('ทะเบียนใหม่กรอกตอนยื่นได้ (ครบคู่หรือว่างทั้งคู่) และแก้ก่อนรับกลับได้', async () => {
@@ -516,27 +516,27 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
   it('ค่าอากรโอนกรอกที่ข้อมูลใบเสร็จ - Bill เพิ่มตามส่วนต่าง / งานแบบอื่นกรอกไม่ได้', async () => {
     const { svc, update } = service(moveInRow());
     await asUser(['ADMIN'], () => svc.updateReceiptFields('t1', { stampDutyAmount: '350' }));
-    expect(update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 350, billTotal: 575 });
-    const again = service(moveInRow({ stampDutyAmount: 350, billTotal: 575 }));
+    expect(update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 350, billTotal: 580 });
+    const again = service(moveInRow({ stampDutyAmount: 350, billTotal: 580 }));
     await asUser(['ADMIN'], () => again.svc.updateReceiptFields('t1', { stampDutyAmount: '' }));
-    expect(again.update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 0, billTotal: 225 });
+    expect(again.update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 0, billTotal: 230 });
     const owner = service(row());
     await expect(asUser(['ADMIN'], () => owner.svc.updateReceiptFields('t1', { stampDutyAmount: '10' }))).rejects.toMatchObject({ status: 400 });
   });
 
   it('แก้ค่าปรับหลังมีค่าอากรโอน - คิด Bill ใหม่โดยยังรวมค่าอากรโอน', async () => {
-    const { svc, update } = service(moveInRow({ stampDutyAmount: 350, billTotal: 575 }));
+    const { svc, update } = service(moveInRow({ stampDutyAmount: 350, billTotal: 580 }));
     await asUser(['ADMIN'], () => svc.update('t1', { fineAmount: '200', remark: 'ลืมค่าปรับ' }));
-    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 775, fineAmount: 200, noBillTotal: 0, dutyAmount: 40 });
+    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 780, fineAmount: 200, noBillTotal: 0, dutyAmount: 40 });
   });
 
   it('ค่าปรับคงที่ 200 บาท - ยอดอื่น = 400 ยกเว้นส่งยอดเดิมของงานเก่ากลับมา', async () => {
     const { svc } = service(null);
     await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, fineAmount: '150' }))).rejects.toMatchObject({ status: 400 });
     // งานเก่าที่กรอกค่าปรับ 150 ไว้: แก้ติ๊กด่วนโดยส่ง 150 เดิมกลับมา = ยอดค่าปรับคงเดิม
-    const old = service(moveInRow({ fineAmount: 150, billTotal: 375 }));
+    const old = service(moveInRow({ fineAmount: 150, billTotal: 380 }));
     await asUser(['ADMIN'], () => old.svc.update('t1', { fineAmount: '150', urgent: true, remark: 'เป็นงานด่วน' }));
-    expect(old.update.mock.calls[0][0].data).toMatchObject({ fineAmount: 150, billTotal: 375, noBillTotal: 50 });
+    expect(old.update.mock.calls[0][0].data).toMatchObject({ fineAmount: 150, billTotal: 380, noBillTotal: 50 });
     await expect(asUser(['ADMIN'], () => old.svc.update('t1', { fineAmount: '300', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
   });
 
