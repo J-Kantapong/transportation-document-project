@@ -1085,10 +1085,17 @@ export class BillingService {
   // งานที่พร้อมวางบิล: งานโอน / ยกเลิกการใช้รถ / คัดแผ่นป้าย / ย้ายออก เมื่อรับใบเสร็จกลับแล้ว (returnedDate) และส่งงานลูกค้าแล้ว (deliveredDate -
   // ใบ DL จากหน้า Delivery ผู้ใช้ 2026-10-08: ทุกงานต้องส่งใบเสร็จให้ลูกค้าเซ็นรับก่อนวางบิล) และต่อภาษีเมื่อคืนเอกสารให้ลูกค้าแล้ว
   // (deliveredDate) - ต้องมีเจ้าของงาน (customerId) ไม่ถูกยกเลิก และไม่อยู่ในบิลที่ยังไม่ VOID (บิลที่ VOID แล้วงานกลับเข้าคิวเอง)
-  private async loadJobs(db: Prisma.TransactionClient, opts: { customerId?: string; ids?: Map<JobType, string[]> }) {
+  // ใบเสนอราคา (ผู้ใช้ 2026-11-18): งานอื่นๆ ทุกแบบของลูกค้าที่เสร็จแล้ว (รับใบเสร็จ / ต่อภาษีชำระแล้ว) - เสนอราคาได้ก่อนส่งงาน
+  // requireDelivered = ตอนออกใบวางบิลจากใบเสนอราคา ใช้กติกาเดียวกับคิววางบิล (ต้องมีใบ DL แล้ว)
+  jobsForQuotation(customerId: string, opts: { ids?: Map<JobType, string[]>; requireDelivered?: boolean } = {}) {
+    return this.loadJobs(this.prisma, { customerId, ids: opts.ids, allowUndelivered: !opts.requireDelivered });
+  }
+
+  private async loadJobs(db: Prisma.TransactionClient, opts: { customerId?: string; ids?: Map<JobType, string[]>; allowUndelivered?: boolean }) {
     const idsOf = (t: JobType) => (opts.ids ? { id: { in: opts.ids.get(t) ?? [] } } : {});
     const owner = opts.customerId ? { customerId: opts.customerId } : { customerId: { not: null } };
-    const done = { ...owner, cancelledAt: null, returnedDate: { not: null }, deliveredDate: { not: null } };
+    const delivered = opts.allowUndelivered ? {} : { deliveredDate: { not: null } };
+    const done = { ...owner, cancelledAt: null, returnedDate: { not: null }, ...delivered };
     const shape = {
       id: true,
       customerId: true,
@@ -1132,7 +1139,7 @@ export class BillingService {
       brand: r.brand,
       ownerName,
       doneDate: iso(r.returnedDate)!,
-      deliveredDate: iso(r.deliveredDate)!,
+      deliveredDate: iso(r.deliveredDate) ?? '', // ว่าง = ยังไม่ส่งงาน (มีได้เฉพาะตอนดึงเข้าใบเสนอราคา)
       receiptNo: r.receiptNo,
       receiptAmount: num(r.receiptAmount),
       billTotal: Number(r.billTotal),
@@ -1148,8 +1155,8 @@ export class BillingService {
       !opts.ids || opts.ids.has('MOVE_OUT') ? db.vehicleMoveOut.findMany({ where: { ...done, ...idsOf('MOVE_OUT') }, select: { ...shape, ownerName: true } }) : [],
       !opts.ids || opts.ids.has('TAX_RENEWAL')
         ? db.taxRenewal.findMany({
-            where: { ...owner, cancelledAt: null, deliveredDate: { not: null }, paymentDate: { not: null }, ...idsOf('TAX_RENEWAL') },
-            select: { id: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, ownerName: true, deliveredDate: true, billTotal: true, noBillTotal: true },
+            where: { ...owner, cancelledAt: null, ...delivered, paymentDate: { not: null }, ...idsOf('TAX_RENEWAL') },
+            select: { id: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, ownerName: true, deliveredDate: true, paymentDate: true, billTotal: true, noBillTotal: true },
           })
         : [],
     ]);
@@ -1170,8 +1177,8 @@ export class BillingService {
           // ต่อภาษีไม่มียี่ห้อ - ใช้ประเภทรถย่อ (รย.1 / รย.12) ให้พอดีช่องยี่ห้อในใบแนบ
           brand: r.vehicleType.split('-')[0].trim(),
           ownerName: r.ownerName,
-          doneDate: iso(r.deliveredDate)!,
-          deliveredDate: iso(r.deliveredDate)!,
+          doneDate: iso(r.deliveredDate ?? r.paymentDate)!,
+          deliveredDate: iso(r.deliveredDate) ?? '',
           receiptNo: null,
           receiptAmount: null,
           billTotal: Number(r.billTotal ?? 0),
