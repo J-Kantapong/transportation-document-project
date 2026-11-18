@@ -30,8 +30,8 @@ export class PlateCopyController {
   }
 
   @Patch(':id/return')
-  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown }) {
-    return this.service.markReturned(id, body?.returnedDate);
+  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; recheckReason?: unknown }) {
+    return this.service.markReturned(id, body?.returnedDate, body?.recheckReason);
   }
 
   // ยกเลิกการรับเอกสารกลับที่กดผิด { remark }

@@ -150,8 +150,8 @@ export const vehicleTransferApi = {
     request<One>(`/api/vehicle-transfers/${id}/receipts/${receiptId}`, { method: "DELETE", body: JSON.stringify({ remark }) }),
   updateReceiptFields: (id: string, data: { receiptNo?: string; receiptDate?: string; receiptAmount?: string; stampDutyAmount?: string }, remark?: string) =>
     request<One>(`/api/vehicle-transfers/${id}/receipt-fields`, { method: "PATCH", body: JSON.stringify({ ...data, remark }) }),
-  markReturned: (id: string, returnedDate: string, newPlate?: { newPlateCategory: string; newPlateNumber: string }) =>
-    request<One>(`/api/vehicle-transfers/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate, ...newPlate }) }),
+  markReturned: (id: string, returnedDate: string, newPlate?: { newPlateCategory: string; newPlateNumber: string }, recheckReason?: string) =>
+    request<One>(`/api/vehicle-transfers/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate, recheckReason, ...newPlate }) }),
   undoReturn: (id: string, remark: string) =>
     request<One>(`/api/vehicle-transfers/${id}/undo-return`, { method: "POST", body: JSON.stringify({ remark }) }),
   cancel: (id: string, remark: string) =>

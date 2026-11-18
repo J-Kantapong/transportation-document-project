@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recheckBeforeReturn } from '../receipts/receipt-recheck.js';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { type AuditChanges, diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
@@ -659,7 +660,7 @@ export class VehicleTransferService {
 
   // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูป / วันที่อยู่ระหว่างวันที่ยื่นถึงวันนี้ (เวลาไทย) / โอนตรวจรถต้องตรวจผ่านแล้ว
   // โอนย้ายเข้า: ต้องกรอกทะเบียนใหม่ (หมวด + เลข) ของจังหวัดที่ย้ายเข้ามาด้วย
-  async markReturned(id: string, returnedDateRaw: unknown, newPlate: { category?: unknown; number?: unknown } = {}): Promise<{ transfer: VehicleTransferRow }> {
+  async markReturned(id: string, returnedDateRaw: unknown, newPlate: { category?: unknown; number?: unknown } = {}, recheckReasonRaw?: unknown): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
     const plateData = existing.transferType === 'MOVE_IN' ? parseNewPlate(newPlate.category, newPlate.number, true) : {};
     const returnedDate = parseIsoDate(returnedDateRaw);
@@ -674,7 +675,10 @@ export class VehicleTransferService {
       existing.inspectionResultDate && existing.inspectionResultDate > existing.submitDate ? existing.inspectionResultDate : existing.submitDate;
     assertDateInRange('วันที่รับเอกสารกลับ', returnedDate, returnFloor);
     if (existing.receipts.length === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
+    // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ยอดตามใบเสร็จต้องมี และต้องตรงกับ Bill / เลขตัวถัง / ทะเบียนที่ AI อ่าน - ไม่ตรงต้องมีเหตุผล
+    const recheck = await recheckBeforeReturn(this.prisma, 'TRANSFER', id, recheckReasonRaw);
     await this.prisma.$transaction(async (tx) => {
+      if (recheck) await writeAudit(tx, { entity: 'VehicleTransfer', entityId: id, action: 'receipt-recheck-override', remark: recheck.reason, changes: { problems: recheck.problems } });
       // นับรูปหลังล็อกแถว - ลบรูปสุดท้ายที่บันทึกแทรกกลางต้องไม่หลุดเข้ามา
       const live = await this.lockRow(tx, id, null);
       if (live._count.receipts === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
@@ -942,11 +946,13 @@ export class VehicleTransferService {
               where: { id, receiptNo: null, receiptDate: null, receiptAmount: null },
               data: { receiptNo: receiptNo || undefined, receiptDate: readDate, receiptAmount: total !== null ? total : undefined },
             });
-            // ค่าอากรโอน (ผู้ใช้ 2026-11-18: "ใช้ใบเสร็จกรอกย้อนกลับ"): ยอดบนใบเสร็จสูงกว่า Bill ที่คิดไว้ = ส่วนต่างคือค่าอากรโอน
-            // เติมให้เฉพาะตอน OCR อ่านใบเสร็จครั้งแรก งานที่ยังไม่รับกลับ และยังไม่มีค่าอากรโอน - พนักงานตรวจ/แก้ได้ที่ข้อมูลใบเสร็จ
-            const bill = Number(existing.billTotal);
-            if (filled.count === 1 && total !== null && !existing.returnedDate && Number(existing.stampDutyAmount ?? 0) === 0 && total > bill) {
-              const stamp = Math.round((total - bill) * 100) / 100;
+            // ค่าอากรโอน (ผู้ใช้ 2026-11-18: "ใช้ใบเสร็จกรอกย้อนกลับ"): อ่านจากบรรทัดค่าอากรบนใบเสร็จที่ AI อ่านได้ (2026-11-19 เดิมใช้ "ยอดใบเสร็จ - Bill"
+            // ซึ่งกลบยอดที่ผิด เช่นยื่นเป็นโอนปกติแต่ใบเสร็จเป็นโอนขอใช้ - ส่วนต่าง 25 กลายเป็นค่าอากรโอนแล้วตัวตรวจใบเสร็จผ่าน)
+            // เติมเฉพาะตอน OCR อ่านใบเสร็จครั้งแรก งานที่ยังไม่รับกลับ และยังไม่มีค่าอากรโอน - ไม่มีบรรทัดอากร = ไม่เติม ส่วนต่างให้ตัวตรวจใบเสร็จฟ้อง
+            const stampLine = extraction.reading.items.find((it) => /อากร/.test(it.label) && it.amount > 0);
+            if (filled.count === 1 && stampLine && !existing.returnedDate && Number(existing.stampDutyAmount ?? 0) === 0) {
+              const bill = Number(existing.billTotal);
+              const stamp = Math.round(stampLine.amount * 100) / 100;
               await tx.vehicleTransfer.updateMany({ where: { id, stampDutyAmount: 0 }, data: { stampDutyAmount: stamp, billTotal: Math.round((bill + stamp) * 100) / 100 } });
             }
           }

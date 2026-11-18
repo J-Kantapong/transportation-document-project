@@ -71,8 +71,8 @@ export class PlateSwapController {
   }
 
   @Patch(':id/return')
-  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown }) {
-    return this.service.markReturned(id, body?.returnedDate, body?.newPlateCategory, body?.newPlateNumber);
+  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown; recheckReason?: unknown }) {
+    return this.service.markReturned(id, body?.returnedDate, body?.newPlateCategory, body?.newPlateNumber, body?.recheckReason);
   }
 
   // ยกเลิกการรับเอกสารกลับที่กดผิด { remark }

@@ -31,6 +31,8 @@ import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { DateInput } from "@/components/DateInput";
 import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
@@ -1462,6 +1464,8 @@ export function PlateSwapReturnPage({
   const replace = (updated: PlateSwap) => setSwaps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setSwaps((prev) => prev.filter((s) => s.id !== id));
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirmReturn(swap: PlateSwap, newPlateCategory: string, newPlateNumber: string) {
     if (!returnDate) {
       setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
@@ -1484,7 +1488,7 @@ export function PlateSwapReturnPage({
     );
     if (!ok) return;
     try {
-      await plateSwapApi.markReturned(swap.id, returnDate, newPlateCategory, newPlateNumber);
+      if (!(await recheckConfirm((reason) => plateSwapApi.markReturned(swap.id, returnDate, newPlateCategory, newPlateNumber, reason)))) return;
       drop(swap.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${oldPlateText(swap)})` });
     } catch (err) {
@@ -1770,6 +1774,7 @@ function ReturnRow({
       </td>
       <td>
         <ReceiptFieldsCell swap={swap} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="PLATE_SWAP" id={swap.id} refreshKey={`${swap.receiptAmount ?? ""}|${swap.receipts?.length ?? 0}|${swap.billTotal ?? ""}`} />
       </td>
       <td>
         {swap.returnedDate ? (

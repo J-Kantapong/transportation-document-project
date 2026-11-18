@@ -21,6 +21,8 @@ import {
 } from "@/lib/plate-copy-fee";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   plateCopyApi,
@@ -848,6 +850,8 @@ export function PlateCopyReturnPage() {
   const replace = (updated: PlateCopy) => setItems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirmReturn(item: PlateCopy, auto = false) {
     if (!returnDate) return setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
@@ -856,7 +860,7 @@ export function PlateCopyReturnPage() {
     const ok = auto || await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
-      await plateCopyApi.markReturned(item.id, returnDate);
+      if (!(await recheckConfirm((reason) => plateCopyApi.markReturned(item.id, returnDate, reason)))) return;
       drop(item.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${item.ownerName} (${plateText(item)})` });
     } catch (err) {
@@ -1112,6 +1116,7 @@ function ReturnRow({
       </td>
       <td>
         <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="PLATE_COPY" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
       </td>
       <td>
         {item.returnedDate ? (

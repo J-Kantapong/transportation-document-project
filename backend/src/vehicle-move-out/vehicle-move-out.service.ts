@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recheckBeforeReturn } from '../receipts/receipt-recheck.js';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { type AuditChanges, diffChanges, requireRemark, writeAudit } from '../audit/audit-log.js';
 import { currentUser } from '../auth/request-context.js';
@@ -307,14 +308,17 @@ export class VehicleMoveOutService {
   }
 
   // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูป / วันที่อยู่ระหว่างวันที่ยื่นถึงวันนี้ (เวลาไทย)
-  async markReturned(id: string, returnedDateRaw: unknown): Promise<{ moveOut: VehicleMoveOutRow }> {
+  async markReturned(id: string, returnedDateRaw: unknown, recheckReasonRaw?: unknown): Promise<{ moveOut: VehicleMoveOutRow }> {
     const existing = await this.findOrThrow(id);
     const returnedDate = parseIsoDate(returnedDateRaw);
     if (!returnedDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่รับเอกสารกลับให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (existing.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว' });
     assertDateInRange('วันที่รับเอกสารกลับ', returnedDate, existing.submitDate);
     if (existing.receipts.length === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
+    // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ยอดตามใบเสร็จต้องมี และต้องตรงกับ Bill / เลขตัวถัง / ทะเบียนที่ AI อ่าน - ไม่ตรงต้องมีเหตุผล
+    const recheck = await recheckBeforeReturn(this.prisma, 'MOVE_OUT', id, recheckReasonRaw);
     await this.prisma.$transaction(async (tx) => {
+      if (recheck) await writeAudit(tx, { entity: 'VehicleMoveOut', entityId: id, action: 'receipt-recheck-override', remark: recheck.reason, changes: { problems: recheck.problems } });
       // นับรูปหลังล็อกแถว - ลบรูปสุดท้ายที่บันทึกแทรกกลางต้องไม่หลุดเข้ามา
       const live = await this.lockRow(tx, id, null);
       if (live._count.receipts === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });

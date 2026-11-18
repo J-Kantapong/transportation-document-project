@@ -10,6 +10,8 @@ import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { useCustomerOptions } from "@/components/TaxRenewalPage";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { confirmDialog, promptDialog } from "@/lib/confirm-dialog";
 
 // หน้ารับใบเสร็จของงานต่อภาษี (ผู้ใช้ 2026-10-08, แบบเดียวกับหน้ารับใบเสร็จรถจดใหม่/ย้ายออก)
@@ -66,12 +68,14 @@ export function TaxRenewalReceiptPage() {
   const unpaid = rows.filter((r) => !r.paymentDate).length;
   const shown = tab === "pending" ? pending : received;
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirm(row: TaxRenewal) {
     if (!receivedDate) return setMessage({ text: "กรุณากรอกวันที่รับใบเสร็จให้ถูกต้อง", error: true });
     if (receivedDate > todayIso()) return setMessage({ text: "วันที่รับใบเสร็จต้องไม่เกินวันนี้", error: true });
     if (!await confirmDialog(`ยืนยันรับใบเสร็จ?\n\nวันที่รับ: ${isoToDisplayDate(receivedDate)}\nรถ: ทะเบียน ${plateText(row)}`)) return;
     try {
-      await api.updateTaxRenewal(row.id, { receivedDate });
+      if (!(await recheckConfirm((reason) => api.updateTaxRenewal(row.id, { receivedDate, recheckReason: reason })))) return;
       await load();
       setMessage({ text: `รับใบเสร็จแล้ว: ${plateText(row)}` });
     } catch (err) {
@@ -440,6 +444,7 @@ function ReceiptRow({
       </td>
       <td>
         <ReceiptFieldsCell row={row} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="TAX_RENEWAL" id={row.id} refreshKey={`${row.receiptAmount ?? ""}|${row.receipts?.length ?? 0}|${row.billTotal ?? ""}`} />
       </td>
       <td>
         {received ? (

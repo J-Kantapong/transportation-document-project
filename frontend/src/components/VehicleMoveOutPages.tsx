@@ -9,6 +9,8 @@ import { formatBaht } from "@/lib/plate-swap-fee";
 import { calculateMoveOutFees, moveOutRates } from "@/lib/vehicle-move-out-fee";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
+import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleMoveOutApi,
@@ -763,6 +765,8 @@ export function VehicleMoveOutReturnPage({ vehicleClass = "CAR" }: { vehicleClas
   const replace = (updated: VehicleMoveOut) => setItems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
 
+  // ตรวจใบเสร็จซ้ำ (ผู้ใช้ 2026-11-19): ไม่ผ่าน = ถามเหตุผลแล้วยืนยันใหม่
+  const recheckConfirm = useRecheckConfirm();
   async function confirmReturn(item: VehicleMoveOut) {
     if (!returnDate) return setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
@@ -771,7 +775,7 @@ export function VehicleMoveOutReturnPage({ vehicleClass = "CAR" }: { vehicleClas
     const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${item.ownerName} (ทะเบียน ${plateText(item)})`);
     if (!ok) return;
     try {
-      await vehicleMoveOutApi.markReturned(item.id, returnDate);
+      if (!(await recheckConfirm((reason) => vehicleMoveOutApi.markReturned(item.id, returnDate, reason)))) return;
       drop(item.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${item.ownerName} (${plateText(item)})` });
     } catch (err) {
@@ -1017,6 +1021,7 @@ function ReturnRow({
       </td>
       <td>
         <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <ReceiptRecheckBox type="MOVE_OUT" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
       </td>
       <td>
         {item.returnedDate ? (
