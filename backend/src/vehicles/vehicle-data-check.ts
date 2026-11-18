@@ -5,6 +5,15 @@
 // เป็นคำเตือน ไม่ใช่ข้อผิดพลาด: ระบบเดาผิดได้ (รถนำเข้าเก่า, รุ่นย่อยที่ใช้เลขขึ้นต้นเดียวกัน) พนักงานตรวจกับเอกสารแล้วยืนยันบันทึกได้
 // frontend/src/lib/vehicle-data-check.ts มีสำเนาของส่วนเลขตัวถัง (นับหลักให้เห็นตอนพิมพ์)
 
+import { isMotorcycleType } from './vehicle-reference-data.js';
+
+// รย.17 (จักรยานยนต์สาธารณะ) คือการจดแบบสาธารณะ ไม่ใช่รุ่นรถ - มอเตอร์ไซค์รุ่นไหนก็จดเป็น รย.17 ได้ (ผู้ใช้ 2026-11-18)
+// จึงไม่นับ รย.17 ตอนเรียนประเภทรถของรุ่น และไม่เตือนเมื่อรถรุ่นมอเตอร์ไซค์ถูกคีย์เป็น รย.17
+export const PUBLIC_MOTORCYCLE_PREFIX = 'รย.17-';
+const isPublicMotorcycle = (body: string | null | undefined) => !!body && body.startsWith(PUBLIC_MOTORCYCLE_PREFIX);
+export const bodyMatchesModel = (body: string, modelBody: string) =>
+  body === modelBody || (isPublicMotorcycle(body) && isMotorcycleType(modelBody));
+
 export const VIN_LENGTH = 17;
 export const MODEL_PREFIX_LENGTH = 8;
 // เชื่อค่าของรุ่นเมื่อมีรถอย่างน้อย 3 คันที่คีย์ค่าเดียวกัน และค่านั้นเป็นอย่างน้อย 80% ของรุ่น - กันคันแรกคีย์ผิดแล้วพาคันถัดไปผิดตาม
@@ -104,7 +113,7 @@ export function buildKnownModels(samples: ModelSample[]): Map<string, KnownModel
       (value) => String(value),
     );
     const body = trusted(
-      group.flatMap((s) => (s.body ? [s.body] : [])),
+      group.flatMap((s) => (s.body && !isPublicMotorcycle(s.body) ? [s.body] : [])),
       (value) => value,
     );
     if (brand || cc !== null || body) models.set(prefix, { prefix, count: group.length, brand, cc, body });
@@ -141,7 +150,7 @@ export function modelWarnings(vehicle: CheckedVehicle, model: KnownModel | undef
       key: `MODEL_CC:${chassis}:${cc}:${model.cc}`,
     });
   }
-  if (model.body && vehicle.body && vehicle.body !== model.body) {
+  if (model.body && vehicle.body && !bodyMatchesModel(vehicle.body, model.body)) {
     warnings.push({
       code: 'MODEL_BODY',
       message: `${chassis}: ประเภทรถ ${vehicle.body} ไม่ตรงกับ${same} ซึ่งเป็น ${model.body}`,
