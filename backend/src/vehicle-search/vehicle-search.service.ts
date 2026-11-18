@@ -3,6 +3,7 @@ import { currentUser } from '../auth/request-context.js';
 import { currentVehicleScope, vehicleKindOf, vehicleTypeWhere, type VehicleKind } from '../auth/vehicle-scope.js';
 import { bangkokToday, daysBetween } from '../overview/overview-calculator.js';
 import { STAGES, waitsFor, type Flag, type StageKey } from '../overview/overview-process.js';
+import { PLATE_OPTION_SELECT } from '../vehicles/plate-requirement.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
 import { searchJobs } from './job-search.js';
@@ -118,6 +119,7 @@ export class VehicleSearchService {
             receiptReceivedDate: true,
             failRemark: true,
             receiptCarriedAt: true,
+            ...PLATE_OPTION_SELECT,
             _count: { select: { receipts: true } },
           },
         },

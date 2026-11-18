@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { vehicleTypeWhere } from '../auth/vehicle-scope.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PLATE_OPTION_SELECT, plateNotRequired } from '../vehicles/plate-requirement.js';
 import { vehicleListWhere } from '../vehicles/vehicle-list-filter.js';
 
 export const RECEIVING_STEPS = ['plate', 'book', 'delivery'] as const;
@@ -60,7 +61,7 @@ const VEHICLE_INCLUDE = {
   documentSubmissions: {
     orderBy: { createdAt: 'desc' as const },
     take: 1,
-    select: { status: true, receiptNo: true, submitDate: true, receiptDate: true, urgent: true, createdAt: true },
+    select: { status: true, receiptNo: true, submitDate: true, receiptDate: true, urgent: true, createdAt: true, ...PLATE_OPTION_SELECT },
   },
 } as const;
 
@@ -162,7 +163,9 @@ export class ReceivingService {
     });
     // some(RECEIPT_RECEIVED) ยังนับรถที่เคยได้รับใบเสร็จแล้วยื่นใหม่ค้าง PENDING - กรองให้เหลือเฉพาะที่ล่าสุดรับแล้วจริง
     const eligible = step === 'delivery' ? vehicles : vehicles.filter((v) => v.documentSubmissions[0]?.status === 'RECEIPT_RECEIVED');
-    return eligible.map((v) => this.mapRow(step, v));
+    // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18) ไม่มีป้ายให้รับ - ไม่เข้าคิวรับป้าย
+    const needed = step === 'plate' ? eligible.filter((v) => !plateNotRequired(v.documentSubmissions[0])) : eligible;
+    return needed.map((v) => this.mapRow(step, v));
   }
 
   // q = ค้นเลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อลูกค้า (กฎเดียวกับหน้าค้นหารถ) หรือเลขที่ใบเสร็จ

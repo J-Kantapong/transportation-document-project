@@ -136,7 +136,9 @@ export const FIT_SCRIPT = `<script>
 function slipHtml(slip: DeliverySlip, blankRecipient = false): string {
   const c = countItems(slip.items);
   // ป้ายค้าง = คันที่ส่งเล่มแล้วป้ายยังไม่ออก - งานอื่น (ใบเสร็จอย่างเดียว) ไม่ใช่ป้ายค้าง (ผู้ใช้ 2026-10-08)
-  const platePending = slip.items.filter((i) => i.book && !i.plate).length;
+  // รถที่ไม่ซื้อป้าย (ผู้ใช้ 2026-11-18) ช่องป้ายว่างเหมือนกัน แต่ไม่มีป้ายตามมา - ไม่นับ
+  const platePending = slip.items.filter((i) => i.book && !i.plate && !i.plateNotRequired).length;
+  const noPlate = slip.items.filter((i) => i.plateNotRequired).length;
   const hidden = hiddenItemsOf(slip);
   const customer = slip.customer;
   const customerName = customer.displayName + (customer.branch ? ` (สาขา ${customer.branch})` : "");
@@ -177,6 +179,7 @@ ${slip.note ? `<div class="label sub">หมายเหตุ</div><div>${esc(s
 <div class="tail">
 <p class="ref">ใบส่งงานเลขที่ ${esc(slipNoText(slip.slipNo))} · ${esc(customer.displayName)} · รวม ${c.vehicles} คัน</p>
 ${platePending ? `<p class="note">ป้ายยังไม่ออก ${platePending} คัน (ช่องป้ายว่าง) จะส่งตามทีหลัง</p>` : ""}
+${noPlate ? `<p class="note">ไม่ซื้อแผ่นป้าย ${noPlate} คัน (ช่องป้ายว่าง) ไม่มีป้ายส่งตาม</p>` : ""}
 ${hidden ? `<p class="note">* ฉบับพิมพ์ซ้ำนี้แสดงเฉพาะ ${c.vehicles} คัน - ใบนี้มีรถอีกประเภทรวมอยู่ ${hidden} คัน (ใบเต็ม ${c.vehicles + hidden} คัน)</p>` : ""}
 <div class="sign">${signBox("ผู้ส่งงาน", slip.createdBy)}${signBox("ผู้รับงาน", blankRecipient ? null : slip.recipient)}</div>
 </div>

@@ -414,6 +414,11 @@ export function DeliveryReportPage() {
                                 <td>
                                   <Tick sent={i.plate} />
                                   {/* ใบนี้ส่งเล่มอย่างเดียว ป้ายไปในใบอื่นทีหลัง - บอกไว้ให้รู้ว่าทำไมช่องนี้ว่าง (ผู้ใช้ 2026-09-27) */}
+                                  {i.plateNotRequired && !later && (
+                                    <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
+                                      ไม่ซื้อป้าย
+                                    </span>
+                                  )}
                                   {later && (
                                     <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
                                       ป้ายส่งตามใน {slipNoText(later.slipNo)} {isoToDisplayDate(later.date)}
