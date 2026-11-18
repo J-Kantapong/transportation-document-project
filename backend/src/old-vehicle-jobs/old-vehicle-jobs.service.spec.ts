@@ -270,3 +270,17 @@ describe('OldVehicleJobsService.assertIntakeBeforeSubmit', () => {
     expect(none.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe('OldVehicleJobsService - คนรับงานอย่างเดียวจัดการงานที่รับแล้วไม่ได้ (ผู้ใช้ 2026-11-19)', () => {
+  const jobRow = { id: 'j1', vehicleId: 'v1', jobType: 'MOVE_OUT', jobId: null, cancelledAt: null, blockedAt: null, vehicle: { vehicleClass: 'CAR' } };
+  const svc = () =>
+    new OldVehicleJobsService({ oldVehicleJob: { findFirst: vi.fn().mockResolvedValue(jobRow), findUnique: vi.fn().mockResolvedValue(jobRow) } } as unknown as PrismaService);
+
+  it('STAFF_ENTRY / DELIVERY ติดขัด / ยกเลิก ไม่ได้ (403) · STAFF_ENTRY ที่ถือ STAFF_CAR ด้วยผ่านด่านสิทธิ์', async () => {
+    for (const roles of [['STAFF_ENTRY'], ['DELIVERY']] as UserRole[][]) {
+      await expect(asRole(roles, () => svc().block('j1', { reason: 'OTHER' }))).rejects.toMatchObject({ status: 403 });
+      await expect(asRole(roles, () => svc().cancel('j1', 'ลูกค้ายกเลิก'))).rejects.toMatchObject({ status: 403 });
+    }
+    await expect(asRole(['STAFF_ENTRY', 'STAFF_CAR'], () => svc().block('j1', { reason: 'OTHER' }))).rejects.not.toMatchObject({ status: 403 });
+  });
+});
