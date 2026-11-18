@@ -632,9 +632,9 @@ function NewVehiclePicker({
   );
 }
 
-function jobTypeChoices(vehicleType: string | null | undefined, vehicleClass: OldVehicleClass): OldJobType[] {
+function jobTypeChoices(vehicleType: string | null | undefined): OldJobType[] {
   if (isTransportType(vehicleType)) return ["TAX_RENEWAL"]; // รถ ขส. ทำได้เฉพาะต่อภาษี
-  return OLD_JOB_TYPES.filter((t) => t !== "TRANSFER_MOVE_IN" || vehicleClass === "MOTO"); // โอนย้ายเข้ายังเปิดเฉพาะมอเตอร์ไซค์
+  return [...OLD_JOB_TYPES]; // โอนย้ายเข้าเปิดรถยนต์แล้ว (ผู้ใช้ 2026-11-18: Bill 330)
 }
 
 function JobTypeFields({
@@ -661,7 +661,7 @@ function JobTypeFields({
         ประเภทงาน{allowEmpty ? "" : " *"}
         <select value={value.jobType} disabled={locked} onChange={(e) => onChange({ ...value, jobType: e.target.value as "" | OldJobType, swapKind: "", newVehicle: null })}>
           <option value="">{allowEmpty ? "ยังไม่เลือก (รอทำ)" : "เลือกประเภทงาน"}</option>
-          {jobTypeChoices(vehicleType, vehicleClass).map((t) => (
+          {jobTypeChoices(vehicleType).map((t) => (
             <option key={t} value={t}>
               {OLD_JOB_TYPE_LABEL[t]}
             </option>
