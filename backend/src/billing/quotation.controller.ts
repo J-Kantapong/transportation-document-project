@@ -20,6 +20,12 @@ export class QuotationController {
     return this.quotations.yamahaMonth(month, size);
   }
 
+  // งานโอนย้ายเข้าของลูกค้าที่รับใบเสร็จแล้ว (ยังไม่อยู่ในบิล) + บรรทัดที่เสนอ ?customerId= (ผู้ใช้ 2026-11-18)
+  @Get('move-in-jobs')
+  moveInJobs(@Query('customerId') customerId?: string) {
+    return this.quotations.moveInJobs(customerId);
+  }
+
   // เลขที่ใบเสนอราคา: เลขล่าสุดแต่ละปี · ตั้งเลขล่าสุด (series/set) = ADMIN เท่านั้น - ดู access-policy.ts
   @Get('series')
   series() {

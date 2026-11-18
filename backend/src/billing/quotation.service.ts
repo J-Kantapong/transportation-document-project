@@ -24,6 +24,7 @@ import {
   toTerms,
   withWht,
 } from './billing.service.js';
+import { feeOf, matchJobRate, suggestedJobServiceFee, type FeeSource } from './other-jobs.js';
 import {
   formatQuotationNo,
   isMonth,
@@ -340,6 +341,74 @@ export class QuotationService {
     if (!isYamahaSize(sizeRaw)) throw bad('ขนาดรถต้องเป็นรถเล็ก (SMALL) หรือรถใหญ่ (LARGE)');
     const [counts, quoted] = await Promise.all([this.countYamaha(monthRaw), this.liveForMonth(this.prisma, monthRaw, sizeRaw, [])]);
     return { month: monthRaw, size: sizeRaw, counts, items: yamahaQuoteItems(monthRaw, counts, sizeRaw), quotedBy: quoted };
+  }
+
+  // งานโอนย้ายเข้าของลูกค้าที่รับใบเสร็จแล้ว พร้อมบรรทัดที่เสนอให้ใส่ในใบเสนอราคา (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ เพราะไม่รู้ยอดที่แน่ชัดก่อน)
+  // ต่องาน: ค่าธรรมเนียม (FEE) = ยอดบนใบเสร็จจริง ไม่มีใช้ยอด Bill ที่ระบบคิด + ค่าบริการ (SERVICE) จากตารางราคางานอื่นๆ ของลูกค้า (JobFeeRate แบบ MOVE_IN)
+  // - ลูกค้ายังไม่ตั้งราคา = ไม่มีบรรทัดค่าบริการ ให้บัญชีเพิ่มเอง · ค่าอากรไม่ขึ้นเป็นบรรทัด (นับเป็นต้นทุนของค่าบริการ เหมือนวางบิลงานอื่นๆ)
+  // ไม่แสดงงานที่อยู่ในบิลที่ยังไม่ VOID · บรรทัดที่ดึงไปเป็นข้อความธรรมดา ไม่ผูกกับงาน: ออกบิลจากใบเสนอราคาแล้วงานยังอยู่ในคิววางบิลงานอื่นๆ ต้องปิดงานที่นั่นเอง
+  async moveInJobs(customerIdRaw: unknown) {
+    const customerId = typeof customerIdRaw === 'string' ? customerIdRaw.trim() : '';
+    if (!customerId) throw bad('กรุณาเลือกลูกค้าก่อนดึงงานโอนย้ายเข้า');
+    const rows = await this.prisma.vehicleTransfer.findMany({
+      where: { customerId, transferType: 'MOVE_IN', cancelledAt: null, returnedDate: { not: null } },
+      orderBy: [{ returnedDate: 'asc' }, { createdAt: 'asc' }],
+      take: 300,
+    });
+    if (rows.length === 0) return { jobs: [] };
+    const [billed, rates] = await Promise.all([
+      this.prisma.invoiceItem.findMany({
+        where: { sourceType: 'TRANSFER', sourceId: { in: rows.map((r) => r.id) }, invoice: { status: { not: 'VOID' } } },
+        select: { sourceId: true },
+      }),
+      this.prisma.jobFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' } }),
+    ]);
+    const billedIds = new Set(billed.map((b) => b.sourceId));
+    const rate = matchJobRate(
+      rates.map((r) => ({ ...r, amount: Number(r.amount) })),
+      { jobType: 'TRANSFER', vehicleClass: 'MOTO', variant: 'MOVE_IN' },
+    );
+    return {
+      jobs: rows
+        .filter((r) => !billedIds.has(r.id))
+        .map((r) => {
+          const fee: { amount: number; source: FeeSource } = feeOf({ type: 'TRANSFER', receiptAmount: num(r.receiptAmount), billTotal: Number(r.billTotal) });
+          const serviceFee = rate ? suggestedJobServiceFee(rate, fee.amount) : null;
+          const plate = `${r.plateCategory} ${r.plateNumber}`;
+          const newPlate = r.newPlateCategory && r.newPlateNumber ? `${r.newPlateCategory} ${r.newPlateNumber} ${r.submitProvince ?? ''}`.trim() : null;
+          const target = newPlate ? `${plate} → ${newPlate}` : `${plate}${r.submitProvince ? ` ย้ายเข้า${r.submitProvince}` : ''}`;
+          type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: number | null };
+          const items: Line[] = [];
+          if (fee.amount > 0) {
+            items.push({ kind: 'FEE', description: `ค่าธรรมเนียมโอนย้ายเข้า ทะเบียน ${target}${r.receiptNo ? ` (ใบเสร็จ ${r.receiptNo})` : ''}`.slice(0, 300), quantity: 1, unitPrice: fee.amount, cost: null });
+          }
+          if (serviceFee !== null && serviceFee > 0) {
+            items.push({
+              kind: 'SERVICE',
+              description: `ค่าบริการโอนย้ายเข้า ทะเบียน ${target}${rate?.label ? ` ${rate.label}` : ''}`.slice(0, 300),
+              quantity: 1,
+              unitPrice: serviceFee,
+              cost: Math.round((Number(r.noBillTotal) + Number(r.dutyAmount)) * 100) / 100,
+            });
+          }
+          return {
+            id: r.id,
+            plate,
+            newPlate,
+            province: r.submitProvince,
+            transferorName: r.transferorName,
+            transfereeName: r.transfereeName,
+            chassis: r.chassis,
+            returnedDate: iso(r.returnedDate)!,
+            delivered: !!r.deliveredDate,
+            receiptNo: r.receiptNo,
+            fee: fee.amount,
+            feeSource: fee.source, // RECEIPT = ยอดใบเสร็จจริง / ESTIMATE = ยังไม่มียอดใบเสร็จ ใช้ยอดที่ระบบคิด
+            serviceFee, // null = ลูกค้ายังไม่ตั้งราคาโอนย้ายเข้า
+            items,
+          };
+        }),
+    };
   }
 
   // ---------- ร่าง ----------

@@ -38,3 +38,13 @@ Project documentation for Claude Code and Codex. Moved here unchanged from `CLAU
   need `remark`), `/revise`, `/link-customer`, `/invoice` { invoiceNo, issueDate }, `/apply-rates`, `GET /:id/po-file`,
   `GET /:id/history` (AuditLog entity `Quotation`). Print: `frontend/src/lib/quotation-print.ts` (same CSS as the
   invoice; total before WHT, WHT as a note; draft / cancelled watermark).
+
+- Move-in transfers on a quotation (user 2026-11-18: quote after the job is done, "เพราะผมไม่รู้ราคาที่แน่ชัดว่าเท่าไหร่"): the JOB form has
+  "งานโอนย้ายเข้า: ดึงงานที่รับใบเสร็จแล้วของลูกค้านี้" (`GET /api/billing/quotations/move-in-jobs?customerId=`, `QuotationService.moveInJobs`).
+  It lists the customer's `VehicleTransfer` rows with `transferType` MOVE_IN that are returned (receipt received), not cancelled and not on a
+  non-VOID invoice; delivery (DL) is not required for quoting. Each job offers a FEE line = the real receipt amount (`receiptAmount`, else
+  the system's `billTotal`, shown as an estimate) and a SERVICE line from the customer's `JobFeeRate` (TRANSFER / MOTO / variant MOVE_IN,
+  cost = No Bill + ค่าอากร) - no rate set = no service line, the accountant adds it. ค่าอากร is not a line (same rule as other-jobs billing).
+  Ticked jobs are appended to the editable rows as plain lines. **They are not linked to the jobs**: after "ออกใบวางบิลจากใบนี้" the jobs still sit
+  in the other-jobs billing queue and must be closed there (วางบิลนอกระบบ) to avoid billing twice, and the same job can be pulled into two
+  quotations. Linking quotation lines to jobs (so the queue clears itself) is not built.
