@@ -30,8 +30,8 @@ export const JOB_TABLE: Record<JobType, AuditEntity> = {
 };
 
 export const JOB_RATE_VEHICLE_CLASSES = ['CAR', 'MOTO', 'ANY'] as const;
-// งานโอน: ราคาแยกตามแบบได้ (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ) ว่าง = ทุกแบบ
-export const TRANSFER_VARIANTS = ['OWNER', 'INSPECTION'] as const;
+// งานโอน: ราคาแยกตามแบบได้ (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ / โอนย้ายเข้า) ว่าง = ทุกแบบ
+export const TRANSFER_VARIANTS = ['OWNER', 'INSPECTION', 'MOVE_IN'] as const;
 
 export interface JobRateRow {
   id: string;

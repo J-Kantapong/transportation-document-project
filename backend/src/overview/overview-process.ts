@@ -9,6 +9,7 @@ import { vehicleKindOf, type VehicleKind } from '../auth/vehicle-scope.js';
 import { INSPECTION_VALID_DAYS } from '../document-submission/submission-eligibility.js';
 import { isSupplierProvince } from '../document-submission/supplier-route.js';
 import { PLATE_COPY_EXPECTED_CALENDAR_DAYS } from '../plate-copy/plate-copy-fee.js';
+import { transferHasInspection } from '../vehicle-transfer/transfer-type.js';
 import { addDays, daysBetween, isoOf } from './overview-calculator.js';
 
 export type { VehicleKind };
@@ -120,7 +121,7 @@ export function plateCopyWaits(j: { submitDate: Date; returnedDate: Date | null;
   return waits;
 }
 
-// งานโอน: OWNER = ยื่น -> รับใบเสร็จ · INSPECTION = ยื่น -> ส่งตรวจ -> ผลตรวจ -> (ผ่านเท่านั้น) รับใบเสร็จ
+// งานโอน: OWNER = ยื่น -> รับใบเสร็จ · INSPECTION / MOVE_IN (โอนย้ายเข้า) = ยื่น -> ส่งตรวจ -> ผลตรวจ -> (ผ่านเท่านั้น) รับใบเสร็จ
 // ตรวจไม่ผ่านต้องส่งตรวจใหม่ (ใช้ธง INSPECTION_FAILED เหมือนรถจดใหม่ จึงนับเป็น "ด่วน")
 export function transferWaits(t: {
   transferType: string;
@@ -131,7 +132,7 @@ export function transferWaits(t: {
   inspectionResultDate: Date | null;
 }): Wait[] {
   if (t.returnedDate) return [];
-  if (t.transferType !== 'INSPECTION') return [wait('transferJob', iso(t.submitDate))];
+  if (!transferHasInspection(t.transferType)) return [wait('transferJob', iso(t.submitDate))];
   if (!t.inspectionSentDate) return [wait('transferInspectSend', iso(t.submitDate))];
   if (!t.inspectionResultDate) return [wait('transferInspectResult', iso(t.inspectionSentDate))];
   if (t.inspectionResult === 'FAIL') {

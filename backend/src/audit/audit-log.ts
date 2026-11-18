@@ -28,7 +28,8 @@ export type AuditEntity =
   | 'IssuedWhtCertificate'
   | 'IssuedWhtSeries'
   | 'Supplier'
-  | 'SupplierProvinceRate';
+  | 'SupplierProvinceRate'
+  | 'TransferContributionRate';
 
 export interface AuditEntry {
   entity: AuditEntity;

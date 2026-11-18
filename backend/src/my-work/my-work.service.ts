@@ -23,6 +23,7 @@ import {
 } from '../overview/overview-process.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
+import { transferPage } from '../vehicle-transfer/transfer-type.js';
 import { bangkokDateOf, canOpenDeliveryPage, focusUrl, hasCheckOwner, isMine, kindsFor, stagesFor, workHrefFor, type CheckOwner } from './my-work-roles.js';
 
 // งานของฉัน (ผู้ใช้ 2026-10-13): หน้าภาพรวมของพนักงานแต่ละบทบาท - อ่านอย่างเดียว ไม่มีราคาของออฟฟิศ
@@ -305,7 +306,7 @@ export class MyWorkService {
         continue;
       }
       const waits = transferWaits({ ...t, returnedDate: null });
-      const href = waits[0]?.stage === 'transferJob' ? `/registration/transfer/${t.transferType === 'INSPECTION' ? 'inspection' : 'owner'}/return` : '/registration/transfer/inspection/inspect';
+      const href = transferPage(t.transferType, waits[0]?.stage === 'transferJob' ? 'return' : 'inspect');
       addJob(t, t.transfereeName, waits, href);
     }
     return { backlog, problems };

@@ -63,7 +63,7 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const plateOf = (category: string | null, number: string | null) => (category && number ? `${category} ${number}` : '');
 const CUSTOMER_SELECT = { select: { id: true, name: true, company: true, branch: true } } as const;
 
-const TRANSFER_LABEL: Record<string, string> = { OWNER: 'โอนตามผู้ถือกรรมสิทธิ์', INSPECTION: 'โอนตรวจรถ' };
+import { TRANSFER_TYPE_LABEL as TRANSFER_LABEL } from '../vehicle-transfer/transfer-type.js';
 const YAMAHA_SIZE_LABEL: Record<string, string> = { SMALL: 'รถเล็ก', LARGE: 'รถใหญ่' };
 
 @Injectable()

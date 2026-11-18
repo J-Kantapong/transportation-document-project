@@ -49,6 +49,9 @@ const RULES: Rule[] = [
   // ราคาซับจดต่างจังหวัด (ผู้ใช้ 2026-10-08): พนักงานทุกฝ่ายอ่านได้ แก้ราคา = ADMIN เท่านั้น
   { pattern: /^\/api\/supplier-rates(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
   { pattern: /^\/api\/supplier-rates(\/|$)/, access: ['ADMIN'] },
+  // ลงขันงานโอนรายจังหวัด (ผู้ใช้ 2026-11-18): กลุ่มยื่นเอกสาร + บัญชีอ่านได้ (ฟอร์มงานโอนใช้เติมค่าตั้งต้น) แก้อัตรา = ADMIN เท่านั้น
+  { pattern: /^\/api\/transfer-contribution-rates(\/|$)/, method: 'GET', access: SUBMIT_READ },
+  { pattern: /^\/api\/transfer-contribution-rates(\/|$)/, access: ['ADMIN'] },
   // วางบิล: ADMIN + ACCOUNTANT (รวมแก้บิล / ยกเลิกการรับเงิน / ปิดงาน - วางบิลนอกระบบ) แต่เปิดงานที่ปิดไว้กลับ = ADMIN เท่านั้น (ผู้ใช้ 2026-09-27)
   { pattern: /^\/api\/billing\/vehicles\/[^/]+\/reopen$/, access: ['ADMIN'] },
   { pattern: /^\/api\/billing\/other-jobs\/reopen$/, access: ['ADMIN'] },

@@ -8,7 +8,7 @@ import { type CreateVehicleTransferDto, type UpdateVehicleTransferDto, VehicleTr
 export class VehicleTransferController {
   constructor(private readonly service: VehicleTransferService) {}
 
-  // GET /api/vehicle-transfers?status=all|pending|returned|to-send|to-result|inspected&month=YYYY-MM&transferType=OWNER|INSPECTION&vehicleClass=CAR|MOTO
+  // GET /api/vehicle-transfers?status=all|pending|returned|to-send|to-result|inspected&month=YYYY-MM&transferType=OWNER|INSPECTION|MOVE_IN&vehicleClass=CAR|MOTO
   @Get()
   list(
     @Query('status') status = 'all',
@@ -48,9 +48,10 @@ export class VehicleTransferController {
     return this.service.undoInspection(id, body?.remark);
   }
 
+  // { returnedDate } - โอนย้ายเข้าต้องส่งทะเบียนใหม่ { newPlateCategory, newPlateNumber } มาด้วย
   @Patch(':id/return')
-  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown }) {
-    return this.service.markReturned(id, body?.returnedDate);
+  markReturned(@Param('id') id: string, @Body() body: { returnedDate?: unknown; newPlateCategory?: unknown; newPlateNumber?: unknown }) {
+    return this.service.markReturned(id, body?.returnedDate, { category: body?.newPlateCategory, number: body?.newPlateNumber });
   }
 
   // ยกเลิกการรับเอกสารกลับที่กดผิด { remark }
@@ -79,10 +80,11 @@ export class VehicleTransferController {
   }
 
   // แก้/กรอกเองเลขที่ใบเสร็จ/วันที่/ยอดเงิน { receiptNo?, receiptDate?, receiptAmount?, remark? } - remark บังคับหลังรับเอกสารกลับ
+  // โอนย้ายเข้า: stampDutyAmount? = ค่าอากรโอนตามราคารถ (รวมเข้า Bill)
   @Patch(':id/receipt-fields')
   updateReceiptFields(
     @Param('id') id: string,
-    @Body() body: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; remark?: unknown },
+    @Body() body: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; stampDutyAmount?: unknown; remark?: unknown },
   ) {
     return this.service.updateReceiptFields(id, body ?? {});
   }

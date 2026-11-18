@@ -9,16 +9,22 @@ import { formatBaht, type FeeItem } from "@/lib/plate-swap-fee";
 import {
   calculateTransferCarNoBill,
   calculateTransferMotoFees,
+  calculateTransferMoveInFees,
   defaultTransferContribution,
   TRANSFER_CAR_URGENT_ITEM,
   TRANSFER_DEFAULT_PROVINCE,
   TRANSFER_MOTO_URGENT_ITEM,
+  TRANSFER_MOVE_IN_CONTRIBUTION,
   transferUrgentAmount,
+  type TransferContributionRow,
 } from "@/lib/vehicle-transfer-fee";
+import { transferContributionRatesApi } from "@/lib/transfer-contribution-rates-api";
+import { vehicleMoveOutApi, type VehicleMoveOut } from "@/lib/vehicle-move-out-api";
 import { PROVINCES } from "@/lib/vehicle-reference-data";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   TRANSFER_TYPE_LABEL,
+  transferHasInspection,
   transferHome,
   vehicleTransferApi,
   type InspectionResult,
@@ -35,6 +41,9 @@ import { confirmDialog } from "@/lib/confirm-dialog";
 // ทุกงานมีผู้โอน + ผู้รับโอน และ Bill / No Bill: มอเตอร์ไซค์คิดตามอัตราของผู้ใช้ (เลือก โอนปกติ/โอนขอใช้ + ด่วน + ค่าปรับ)
 // รถยนต์: No Bill คิดเอง (ลงขัน 100 + ด่วน 100) / Bill ยังไม่มีอัตรา กรอกเอง
 // แก้/ยกเลิก: ต้องระบุเหตุผลเสมอ (เก็บประวัติ) - ไม่มีการลบงาน งานที่ยกเลิกหายจากรายการแต่ยังอยู่ในฐานข้อมูล
+// แบบที่ 3 โอนย้ายเข้า (MOVE_IN ผู้ใช้ 2026-11-18): เฉพาะมอเตอร์ไซค์ ขั้นตอนเหมือนโอนตรวจรถ - ดึงข้อมูลรถจากงานย้ายออกที่รับใบเสร็จแล้วได้
+//   จังหวัดที่ยื่น = จังหวัดที่ย้ายเข้า (ต้องเลือกเอง) · Bill 225 + ค่าปรับ + ค่าอากรโอนตามราคารถ (กรอกที่ข้อมูลใบเสร็จ) · ค่าอากร 40 · ลงขันตั้งต้น 0
+//   ยืนยันรับกลับต้องกรอกทะเบียนใหม่ของจังหวัดที่ย้ายเข้า
 
 const CLASS_LABEL: Record<TransferVehicleClass, string> = { CAR: "รถยนต์", MOTO: "รถจักรยานยนต์" };
 
@@ -56,6 +65,21 @@ const moneyOnly = (text: string) => text.replace(/[^0-9.]/g, "");
 // รวม = Bill + No Bill - ค่าอากรแยกต่างหาก ไม่รวมใน No Bill และไม่นับในยอดรวม แสดงอีกคอลัมน์ (ผู้ใช้ 2026-10-02)
 const totalOf = (c: VehicleTransfer) => Number(c.billTotal) + Number(c.noBillTotal);
 const plateText = (c: VehicleTransfer) => `${c.plateCategory} ${c.plateNumber}`;
+const isMoveIn = (transferType: TransferType) => transferType === "MOVE_IN";
+
+// ทะเบียนเดิม + ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า (โอนย้ายเข้าที่รับใบเสร็จแล้ว)
+function PlateCell({ item }: { item: VehicleTransfer }) {
+  return (
+    <>
+      {plateText(item)}
+      {item.newPlateCategory && item.newPlateNumber && (
+        <div className="sub">
+          ใหม่ {item.newPlateCategory} {item.newPlateNumber} {item.submitProvince ?? ""}
+        </div>
+      )}
+    </>
+  );
+}
 const vehicleText = (c: VehicleTransfer) => `${c.brand} · ตัวถัง ${c.chassis} · เครื่อง ${c.engine}`;
 
 // เจ้าของงาน = ลูกค้าที่ส่งงานมา (คนละคนกับผู้ถือกรรมสิทธิ์/ผู้รับโอน)
@@ -95,7 +119,7 @@ function Summary({ item }: { item: VehicleTransfer }) {
 // สถานะของงานตามแบบงาน - โอนตรวจรถบอกขั้นตรวจรถด้วย
 function StatusBadge({ item }: { item: VehicleTransfer }) {
   if (item.returnedDate) return <span className="badge portal-badge-done">รับกลับ {isoToDisplayDate(item.returnedDate)}</span>;
-  if (item.transferType === "INSPECTION") {
+  if (transferHasInspection(item.transferType)) {
     if (!item.inspectionSentDate) return <span className="badge">รอส่งตรวจ</span>;
     if (!item.inspectionResult) return <span className="badge">ส่งตรวจ {isoToDisplayDate(item.inspectionSentDate)} · รอผล</span>;
     if (item.inspectionResult === "FAIL") return <span className="badge" style={{ color: "#b43434" }}>ตรวจไม่ผ่าน</span>;
@@ -197,22 +221,48 @@ function FeeLines({ title, items, total }: { title: string; items: FeeItem[]; to
   );
 }
 
-// ลงขันที่แสดง/ส่ง: ที่พนักงานแก้ไว้ หรืออัตราตั้งต้นของจังหวัด - จังหวัดที่ยังไม่มีอัตรา = ว่าง ต้องกรอกเอง (0 ได้)
-function contributionText(form: FormState): string {
+// ตารางลงขันรายจังหวัด (ผู้ใช้ 2026-11-18) - โหลดครั้งเดียวต่อหน้า ระหว่างโหลด/โหลดไม่ได้ = [] (ช่องลงขันว่าง backend เติมอัตราของตารางให้เอง)
+function useContributionRates(): TransferContributionRow[] {
+  const [rates, setRates] = useState<TransferContributionRow[]>([]);
+  useEffect(() => {
+    transferContributionRatesApi
+      .list()
+      .then((data) => setRates(data.rates))
+      .catch(() => undefined);
+  }, []);
+  return rates;
+}
+
+// ลงขันที่แสดง/ส่ง: ที่พนักงานแก้ไว้ หรืออัตราตั้งต้นของจังหวัดจากตาราง - จังหวัดที่ยังไม่ได้ตั้งอัตรา = ว่าง ต้องกรอกเอง (0 ได้)
+// โอนย้ายเข้า: จังหวัดที่ยังไม่ได้ตั้ง = 0 (ผู้ใช้ไปทำเอง ยังไม่มีอัตรา) แก้ได้
+function contributionText(form: FormState, rates: TransferContributionRow[], moveIn = false): string {
   if (form.contribution !== null) return form.contribution;
-  if (!form.vehicleClass) return "";
-  const fallback = defaultTransferContribution(form.vehicleClass, form.submitProvince);
-  return fallback === null ? "" : String(fallback);
+  if (!form.vehicleClass) return moveIn ? String(TRANSFER_MOVE_IN_CONTRIBUTION) : "";
+  const fallback = defaultTransferContribution(rates, form.vehicleClass, form.submitProvince, moveIn);
+  if (fallback === null) return moveIn ? String(TRANSFER_MOVE_IN_CONTRIBUTION) : "";
+  return String(fallback);
 }
 
 // จังหวัดที่ยื่น + ลงขัน (ผู้ใช้ 2026-11-18: แต่ละจังหวัดราคาไม่เท่ากัน บางทีไม่เสีย) - เปลี่ยนจังหวัด = เติมอัตราตั้งต้นใหม่
-function ProvinceContributionFields({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
-  const noRate = !!form.vehicleClass && defaultTransferContribution(form.vehicleClass, form.submitProvince) === null;
+function ProvinceContributionFields({
+  form,
+  onChange,
+  rates,
+  moveIn = false,
+}: {
+  form: FormState;
+  onChange: (patch: Partial<FormState>) => void;
+  rates: TransferContributionRow[];
+  moveIn?: boolean;
+}) {
+  const noRate = !moveIn && !!form.vehicleClass && defaultTransferContribution(rates, form.vehicleClass, form.submitProvince) === null;
   return (
     <>
       <label className="field" style={{ minWidth: 200 }}>
-        จังหวัดที่ยื่น *
+        {moveIn ? "จังหวัดที่ย้ายเข้า *" : "จังหวัดที่ยื่น *"}
+        {/* เปลี่ยนจังหวัด = เติมอัตราตั้งต้นของจังหวัดใหม่จากตาราง */}
         <select value={form.submitProvince} onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}>
+          {moveIn && <option value="">เลือกจังหวัด</option>}
           {PROVINCES.map((province) => (
             <option key={province} value={province}>
               {province}
@@ -223,7 +273,7 @@ function ProvinceContributionFields({ form, onChange }: { form: FormState; onCha
       <label className="field" style={{ minWidth: 200 }}>
         ลงขัน (บาท) *
         <input
-          value={contributionText(form)}
+          value={contributionText(form, rates, moveIn)}
           onChange={(e) => onChange({ contribution: moneyOnly(e.target.value) })}
           inputMode="decimal"
           placeholder={noRate ? "กรอกเอง - ไม่เสียใส่ 0" : "0"}
@@ -233,7 +283,72 @@ function ProvinceContributionFields({ form, onChange }: { form: FormState; onCha
   );
 }
 
-function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
+// โอนย้ายเข้า: Bill ตายตัว 225 + ค่าปรับ + ค่าอากรโอน (stampDuty - กรอกที่ข้อมูลใบเสร็จ แสดงที่นี่เมื่อมีแล้ว) / ค่าอากรแยก 40 / ลงขันตั้งต้น 0
+function MoveInFeeSection({
+  form,
+  onChange,
+  stampDuty,
+  rates,
+}: {
+  form: FormState;
+  onChange: (patch: Partial<FormState>) => void;
+  stampDuty: number;
+  rates: TransferContributionRow[];
+}) {
+  const fees = calculateTransferMoveInFees({ urgent: form.urgent, fine: Number(form.fineAmount) || 0, stampDuty, contribution: Number(contributionText(form, rates, true)) || 0 });
+  return (
+    <>
+      <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <ProvinceContributionFields form={form} onChange={onChange} rates={rates} moveIn />
+        <label className="field" style={{ minWidth: 200 }}>
+          ค่าปรับ (บาท)
+          <input value={form.fineAmount} onChange={(e) => onChange({ fineAmount: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="ไม่มีเว้นว่าง" />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
+          <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
+          งานด่วน (+{formatBaht(TRANSFER_MOTO_URGENT_ITEM.amount)} ใน No Bill)
+        </label>
+      </div>
+      <p className="muted" style={{ margin: "6px 0 12px" }}>
+        ค่าปรับใส่เมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถรู้เมื่อใบเสร็จออก - กรอกที่หน้ารับใบเสร็จ ระบบบวกเข้า Bill ให้
+      </p>
+      <div className="customer-grid">
+        <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
+        <FeeLines title="No Bill" items={fees.noBillItems} total={fees.noBillTotal} />
+        <div style={{ padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
+          <strong>{fees.dutyItem.label}</strong>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14, marginTop: 4 }}>
+            <span>โอนย้ายเข้า (แยกต่างหาก ไม่รวมใน No Bill)</span>
+            <strong>{formatBaht(fees.dutyItem.amount)} บาท</strong>
+          </div>
+        </div>
+        <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
+          <strong>รวม (Bill + No Bill)</strong>
+          <span style={{ textAlign: "right" }}>
+            <strong>{formatBaht(fees.total)} บาท</strong>
+            <div className="muted">แยกค่าอากร {formatBaht(fees.dutyTotal)} บาท (ไม่รวมใน No Bill)</div>
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FeeSection({
+  form,
+  onChange,
+  rates,
+  moveIn = false,
+  stampDuty = 0,
+}: {
+  form: FormState;
+  onChange: (patch: Partial<FormState>) => void;
+  rates: TransferContributionRow[];
+  moveIn?: boolean;
+  stampDuty?: number;
+}) {
+  if (moveIn) return <MoveInFeeSection form={form} onChange={onChange} stampDuty={stampDuty} rates={rates} />;
   if (!form.vehicleClass) {
     return (
       <>
@@ -243,7 +358,7 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
     );
   }
   if (form.vehicleClass === "CAR") {
-    const carNoBill = calculateTransferCarNoBill({ urgent: form.urgent, contribution: Number(contributionText(form)) || 0 });
+    const carNoBill = calculateTransferCarNoBill({ urgent: form.urgent, contribution: Number(contributionText(form, rates)) || 0 });
     const bill = Number(form.billTotal) || 0;
     return (
       <>
@@ -254,7 +369,7 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
             Bill (บาท) *
             <input value={form.billTotal} onChange={(e) => onChange({ billTotal: moneyOnly(e.target.value) })} inputMode="decimal" placeholder="0" />
           </label>
-          <ProvinceContributionFields form={form} onChange={onChange} />
+          <ProvinceContributionFields form={form} onChange={onChange} rates={rates} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10 }}>
             <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
             งานด่วน (+{formatBaht(TRANSFER_CAR_URGENT_ITEM.amount)} ใน No Bill)
@@ -273,7 +388,7 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
       </>
     );
   }
-  const fees = calculateTransferMotoFees({ useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0, contribution: Number(contributionText(form)) || 0 });
+  const fees = calculateTransferMotoFees({ useRequest: form.useRequest, urgent: form.urgent, fine: Number(form.fineAmount) || 0, contribution: Number(contributionText(form, rates)) || 0 });
   return (
     <>
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
@@ -293,7 +408,7 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
           <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
           งานด่วน (+{formatBaht(TRANSFER_MOTO_URGENT_ITEM.amount)} ใน No Bill)
         </label>
-        <ProvinceContributionFields form={form} onChange={onChange} />
+        <ProvinceContributionFields form={form} onChange={onChange} rates={rates} />
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
         ค่าปรับใส่เมื่อเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี (ทั้งโอนปกติและโอนขอใช้) - ค่าอากรแยกต่างหากและออโต้ตามประเภทที่เลือก · ลงขันระบบเติมให้ตามจังหวัดที่ยื่น แก้ได้ จังหวัดที่ยังไม่มีอัตราให้กรอกเอง (ไม่เสียใส่ 0)
@@ -321,8 +436,10 @@ function FeeSection({ form, onChange }: { form: FormState; onChange: (patch: Par
 }
 
 // ค่าใช้จ่ายที่ส่ง backend: มอเตอร์ไซค์ส่งตัวเลือก (backend คิดยอด) / รถยนต์ส่ง Bill ที่กรอก + ติ๊กด่วน / ทั้งคู่ส่งจังหวัดที่ยื่น + ลงขัน (backend รวม No Bill)
-function feePayload(form: FormState) {
-  const province = { submitProvince: form.submitProvince, contribution: contributionText(form) };
+function feePayload(form: FormState, rates: TransferContributionRow[], moveIn = false) {
+  const province = { submitProvince: form.submitProvince, contribution: contributionText(form, rates, moveIn) };
+  // โอนย้ายเข้าไม่มีโอนขอใช้
+  if (moveIn) return { urgent: form.urgent, fineAmount: form.fineAmount, ...province };
   return form.vehicleClass === "MOTO"
     ? { useRequest: form.useRequest, urgent: form.urgent, fineAmount: form.fineAmount, ...province }
     : { billTotal: form.billTotal, urgent: form.urgent, ...province };
@@ -339,7 +456,15 @@ function VehicleFormFields({
   brandNames,
   customerOptions,
   customerPlaceholder = "เลือกลูกค้า",
+  moveIn = false,
+  stampDuty = 0,
+  rates,
+  children,
 }: {
+  rates: TransferContributionRow[]; // ตารางลงขันรายจังหวัด
+  moveIn?: boolean;
+  stampDuty?: number;
+  children?: React.ReactNode; // ช่องเพิ่มท้ายข้อมูลรถ (ทะเบียนใหม่ของโอนย้ายเข้าในป๊อปอัปแก้)
   form: FormState;
   onChange: (patch: Partial<FormState>) => void;
   classOptions: TransferVehicleClass[];
@@ -439,16 +564,19 @@ function VehicleFormFields({
             />
           </div>
         </div>
+        {children}
       </div>
 
-      <FeeSection form={form} onChange={onChange} />
+      <FeeSection form={form} onChange={onChange} rates={rates} moveIn={moveIn} stampDuty={stampDuty} />
     </>
   );
 }
 
 // ตรวจฟอร์มฝั่งหน้าเว็บ (backend ตรวจซ้ำ) - คืนข้อความผิดพลาดข้อแรก หรือ "" ถ้าผ่าน
-function validateForm(form: FormState, requireCustomer: boolean): string {
+function validateForm(form: FormState, requireCustomer: boolean, moveIn = false): string {
   if (!form.vehicleClass) return "กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)";
+  if (moveIn && form.vehicleClass !== "MOTO") return "โอนย้ายเข้ามีอัตราเฉพาะรถจักรยานยนต์";
+  if (moveIn && !form.submitProvince) return "กรุณาเลือกจังหวัดที่ย้ายเข้า";
   if (requireCustomer && !form.customerId) return "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)";
   if (!form.transferorName.trim()) return "กรุณากรอกผู้โอน";
   if (!form.transfereeName.trim()) return "กรุณากรอกผู้รับโอน";
@@ -498,12 +626,18 @@ function EditDialog({
     contribution: String(Math.max(0, Number(item.noBillTotal) - transferUrgentAmount(item.vehicleClass, item.urgent))),
     fineAmount: Number(item.fineAmount) > 0 ? String(Number(item.fineAmount)) : "",
   });
+  const moveIn = isMoveIn(item.transferType);
+  // ทะเบียนใหม่ของโอนย้ายเข้า - แก้ได้เมื่อรับกลับแล้ว (ก่อนนั้นกรอกตอนยืนยันรับกลับ)
+  const editNewPlate = moveIn && Boolean(item.returnedDate);
+  const [newPlateCategory, setNewPlateCategory] = useState(item.newPlateCategory ?? "");
+  const [newPlateNumber, setNewPlateNumber] = useState(item.newPlateNumber ?? "");
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
   const [returnedDateText, setReturnedDateText] = useState(() => (item.returnedDate ? isoToDisplayDate(item.returnedDate) : ""));
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const { brandNames, customerOptions } = useChoices(item.brand);
+  const rates = useContributionRates();
 
   useEffect(() => {
     if (!dialogRef.current?.open) dialogRef.current?.showModal();
@@ -517,8 +651,9 @@ function EditDialog({
     if (item.returnedDate && !returnedDate) return setError("วันที่รับเอกสารกลับไม่ถูกต้อง - ใส่เป็น วว/ดด/ปปปป");
     if (returnedDate && returnedDate > todayIso()) return setError("วันที่รับเอกสารกลับต้องไม่เกินวันนี้");
     if (returnedDate && returnedDate < submitDate) return setError("วันที่รับเอกสารกลับต้องไม่ก่อนวันที่ยื่น");
-    const invalid = validateForm(form, false);
+    const invalid = validateForm(form, false, moveIn);
     if (invalid) return setError(invalid);
+    if (editNewPlate && (!newPlateCategory.trim() || !newPlateNumber.trim())) return setError("กรุณากรอกทะเบียนใหม่ (หมวดและเลข)");
     if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้");
     setSaving(true);
     try {
@@ -531,7 +666,8 @@ function EditDialog({
         brand: form.brand,
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
-        ...feePayload(form),
+        ...feePayload(form, rates, moveIn),
+        ...(editNewPlate ? { newPlateCategory: newPlateCategory.trim(), newPlateNumber: newPlateNumber.trim() } : {}),
         // ส่งเฉพาะตอนเลือกไว้จริง - งานที่ไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
         ...(form.customerId ? { customerId: form.customerId } : {}),
         submitDate,
@@ -560,7 +696,7 @@ function EditDialog({
         <VehicleFormFields
           form={form}
           onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
-          classOptions={classOptions.includes(item.vehicleClass) ? classOptions : [item.vehicleClass, ...classOptions]}
+          classOptions={moveIn ? ["MOTO"] : classOptions.includes(item.vehicleClass) ? classOptions : [item.vehicleClass, ...classOptions]}
           submitDateText={submitDateText}
           onSubmitDateChange={setSubmitDateText}
           returnedDateText={item.returnedDate ? returnedDateText : undefined}
@@ -568,7 +704,17 @@ function EditDialog({
           brandNames={brandNames}
           customerOptions={customerOptions}
           customerPlaceholder={item.customer ? "เลือกลูกค้า" : "ยังไม่ระบุ"}
-        />
+          moveIn={moveIn}
+          stampDuty={Number(item.stampDutyAmount) || 0}
+          rates={rates}
+        >
+          {editNewPlate && (
+            <div className="field">
+              ทะเบียนใหม่ ({form.submitProvince}) *
+              <NewPlateInputs category={newPlateCategory} number={newPlateNumber} onCategory={setNewPlateCategory} onNumber={setNewPlateNumber} />
+            </div>
+          )}
+        </VehicleFormFields>
       </div>
       <label className="field" style={{ marginTop: 12 }}>
         เหตุผลที่แก้ *
@@ -588,6 +734,38 @@ function EditDialog({
         </button>
       </div>
     </dialog>
+  );
+}
+
+// ช่องทะเบียนใหม่ (หมวด + เลข) ของโอนย้ายเข้า - ใช้ทั้งหน้ารับใบเสร็จและป๊อปอัปแก้
+function NewPlateInputs({
+  category,
+  number,
+  onCategory,
+  onNumber,
+  compact = false,
+}: {
+  category: string;
+  number: string;
+  onCategory: (value: string) => void;
+  onNumber: (value: string) => void;
+  compact?: boolean;
+}) {
+  const className = compact ? "inspect-input" : undefined;
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <input value={category} onChange={(e) => onCategory(e.target.value)} maxLength={3} placeholder="หมวด" aria-label="หมวดทะเบียนใหม่" className={className} style={compact ? { width: 70 } : undefined} />
+      <input
+        value={number}
+        onChange={(e) => onNumber(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        maxLength={4}
+        inputMode="numeric"
+        placeholder="เลข"
+        aria-label="เลขทะเบียนใหม่"
+        className={className}
+        style={compact ? { width: 70 } : undefined}
+      />
+    </div>
   );
 }
 
@@ -625,19 +803,60 @@ const BackLink = ({ transferType }: { transferType: TransferType }) => (
 type RowDialog = { kind: "edit" | "cancel"; item: VehicleTransfer } | null;
 
 export function VehicleTransferSubmitPage({ transferType }: { transferType: TransferType }) {
-  const writable = useWritableClasses();
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const allWritable = useWritableClasses();
+  const moveIn = isMoveIn(transferType);
+  // โอนย้ายเข้ามีอัตราเฉพาะมอเตอร์ไซค์ - ผู้ที่บันทึกได้แต่รถยนต์จึงไม่เห็นฟอร์ม
+  const writable = useMemo(() => (moveIn && allWritable ? allWritable.filter((c) => c === "MOTO") : allWritable), [allWritable, moveIn]);
+  // โอนย้ายเข้า: จังหวัดที่ย้ายเข้าต้องเลือกเอง ไม่ตั้งต้นเป็นกรุงเทพฯ
+  const emptyForm = useMemo<FormState>(() => (moveIn ? { ...EMPTY_FORM, submitProvince: "" } : EMPTY_FORM), [moveIn]);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  // งานย้ายออก (มอเตอร์ไซค์ รับใบเสร็จแล้ว) ที่ยังไม่ถูกผูกกับงานโอนย้ายเข้า - เลือกแล้วเติมข้อมูลรถให้
+  const [moveOuts, setMoveOuts] = useState<VehicleMoveOut[]>([]);
+  const [moveOutId, setMoveOutId] = useState("");
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
   const { brandNames, customerOptions } = useChoices();
+  const rates = useContributionRates();
 
   const [month, setMonth] = useState(() => todayIso().slice(0, 7));
   const [items, setItems] = useState<VehicleTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
   const [dialog, setDialog] = useState<RowDialog>(null);
+
+  async function loadMoveOuts() {
+    try {
+      const [outs, used] = await Promise.all([vehicleMoveOutApi.list("returned", "MOTO"), vehicleTransferApi.list("all", "MOVE_IN")]);
+      const taken = new Set(used.transfers.map((t) => t.moveOutId).filter(Boolean));
+      setMoveOuts(outs.moveOuts.filter((m) => !taken.has(m.id)));
+    } catch {
+      setMoveOuts([]); // ดึงรายการไม่ได้ก็ยังกรอกเองได้
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดตัวเลือกงานย้ายออกครั้งแรก
+    if (moveIn && writable && writable.length > 0) void loadMoveOuts();
+  }, [moveIn, writable]);
+
+  function pickMoveOut(id: string) {
+    setMoveOutId(id);
+    const picked = moveOuts.find((m) => m.id === id);
+    if (!picked) return;
+    // ผู้โอน = เจ้าของรถตามงานย้ายออก · ผู้รับโอน/จังหวัดกรอกเอง
+    setForm((prev) => ({
+      ...prev,
+      customerId: picked.customer?.id ?? prev.customerId,
+      transferorName: picked.ownerName,
+      chassis: picked.chassis,
+      engine: picked.engine,
+      brand: picked.brand,
+      plateCategory: picked.plateCategory,
+      plateNumber: picked.plateNumber,
+    }));
+  }
 
   // ผู้ใช้ที่บันทึกได้ประเภทรถเดียวเลือกให้เลย
   const onlyClass = writable && writable.length === 1 ? writable[0] : "";
@@ -666,7 +885,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!submitDate) return setMessage({ text: "กรุณากรอกวันที่ยื่นให้ถูกต้อง", error: true });
-    const invalid = validateForm({ ...form, vehicleClass: classValue }, true);
+    const invalid = validateForm({ ...form, vehicleClass: classValue }, true, moveIn);
     if (invalid) return setMessage({ text: invalid, error: true });
     setSaving(true);
     setMessage({ text: "กำลังบันทึก…" });
@@ -683,11 +902,16 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
         submitDate,
-        ...feePayload({ ...form, vehicleClass: classValue }),
+        ...feePayload({ ...form, vehicleClass: classValue }, rates, moveIn),
+        ...(moveIn && moveOutId ? { moveOutId } : {}),
       });
       setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
-      // เจ้าของงานคนเดิมและประเภทรถเดิมมักส่งมาหลายคัน - คงไว้ให้
-      setForm((prev) => ({ ...EMPTY_FORM, customerId: prev.customerId, vehicleClass: prev.vehicleClass }));
+      // เจ้าของงานคนเดิมและประเภทรถเดิมมักส่งมาหลายคัน - คงไว้ให้ (โอนย้ายเข้าคงจังหวัดที่ย้ายเข้าไว้ด้วย)
+      setForm((prev) => ({ ...emptyForm, customerId: prev.customerId, vehicleClass: prev.vehicleClass, ...(moveIn ? { submitProvince: prev.submitProvince } : {}) }));
+      if (moveIn) {
+        setMoveOutId("");
+        void loadMoveOuts();
+      }
       if (submitDate.slice(0, 7) === month) await load(month);
       else setMonth(submitDate.slice(0, 7));
     } catch (err) {
@@ -707,7 +931,22 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
       {showActions && (
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
+            {moveIn && (
+              <label className="field" style={{ maxWidth: 620, marginBottom: 16 }}>
+                ดึงข้อมูลจากงานย้ายออก (รับใบเสร็จแล้ว)
+                <select value={moveOutId} onChange={(e) => pickMoveOut(e.target.value)}>
+                  <option value="">{moveOuts.length === 0 ? "ไม่มีงานย้ายออกที่รอโอนย้ายเข้า - กรอกเอง" : "ไม่เลือก - กรอกเอง"}</option>
+                  {moveOuts.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.plateCategory} {m.plateNumber} · {m.ownerName} · {m.brand} · ตัวถัง {m.chassis}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <VehicleFormFields
+              moveIn={moveIn}
+              rates={rates}
               form={{ ...form, vehicleClass: classValue }}
               onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
               classOptions={writable ?? []}
@@ -777,12 +1016,20 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
                         {CLASS_LABEL[item.vehicleClass]}
                         {item.useRequest && <div className="sub">โอนขอใช้</div>}
                         {item.urgent && <div className="sub">งานด่วน</div>}
-                        {item.submitProvince && item.submitProvince !== TRANSFER_DEFAULT_PROVINCE && <div className="sub">ยื่นที่{item.submitProvince}</div>}
+                        {item.submitProvince && (moveIn || item.submitProvince !== TRANSFER_DEFAULT_PROVINCE) && (
+                          <div className="sub">
+                            {moveIn ? "ย้ายเข้า" : "ยื่นที่"}
+                            {item.submitProvince}
+                          </div>
+                        )}
                       </td>
-                      <td>{plateText(item)}</td>
+                      <td>
+                        <PlateCell item={item} />
+                      </td>
                       <td>
                         {formatBaht(Number(item.billTotal))}
                         {Number(item.fineAmount) > 0 && <div className="sub">รวมค่าปรับ {formatBaht(Number(item.fineAmount))}</div>}
+                        {Number(item.stampDutyAmount) > 0 && <div className="sub">รวมค่าอากรโอน {formatBaht(Number(item.stampDutyAmount))}</div>}
                       </td>
                       <td>{formatBaht(Number(item.noBillTotal))}</td>
                       <td>{formatBaht(Number(item.dutyAmount))}</td>
@@ -847,7 +1094,7 @@ const INSPECTION_TABS: { key: InspectionTab; label: string; empty: string }[] = 
 
 type InspectionDialog = { kind: "edit" | "cancel" | "undo"; item: VehicleTransfer } | null;
 
-export function VehicleTransferInspectionPage() {
+export function VehicleTransferInspectionPage({ transferType = "INSPECTION" }: { transferType?: TransferType }) {
   const writable = useWritableClasses();
   const [tab, setTab] = useState<InspectionTab>("to-send");
   const [items, setItems] = useState<VehicleTransfer[]>([]);
@@ -862,7 +1109,7 @@ export function VehicleTransferInspectionPage() {
     setLoading(true);
     setListError("");
     try {
-      setItems((await vehicleTransferApi.list(forTab, "INSPECTION")).transfers);
+      setItems((await vehicleTransferApi.list(forTab, transferType)).transfers);
     } catch (err) {
       setListError(errorText(err, "โหลดรายการไม่สำเร็จ"));
       setItems([]);
@@ -874,7 +1121,8 @@ export function VehicleTransferInspectionPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- โหลดรายการใหม่เมื่อเปลี่ยนแท็บ
     load(tab);
-  }, [tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load อ่าน transferType ที่อยู่ใน deps แล้ว
+  }, [tab, transferType]);
 
   const replace = (updated: VehicleTransfer) => setItems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
@@ -923,8 +1171,8 @@ export function VehicleTransferInspectionPage() {
 
   return (
     <section className="content">
-      <BackLink transferType="INSPECTION" />
-      <h1>ตรวจรถ (โอนตรวจรถ)</h1>
+      <BackLink transferType={transferType} />
+      <h1>ตรวจรถ ({TRANSFER_TYPE_LABEL[transferType]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         บันทึกวันที่ส่งตรวจ แล้วบันทึกผลตรวจ - ตรวจผ่านแล้วถึงจะรับใบเสร็จได้ (การตรวจรถนี้แยกจากคิวตรวจรถของรถจดใหม่)
       </p>
@@ -1085,6 +1333,10 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
   const [receiptNo, setReceiptNo] = useState(item.receiptNo ?? "");
   const [dateText, setDateText] = useState(() => (item.receiptDate ? isoToDisplayDate(item.receiptDate) : ""));
   const [amount, setAmount] = useState(item.receiptAmount ?? "");
+  // ค่าอากรโอนตามราคารถ (เฉพาะโอนย้ายเข้า) - รู้เมื่อใบเสร็จออก บันทึกแล้วระบบบวกเข้า Bill
+  const moveIn = isMoveIn(item.transferType);
+  const stampText = (value: string) => (Number(value) > 0 ? String(Number(value)) : "");
+  const [stampDuty, setStampDuty] = useState(() => stampText(item.stampDutyAmount));
   const [remark, setRemark] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1097,7 +1349,8 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
     setReceiptNo(item.receiptNo ?? "");
     setDateText(item.receiptDate ? isoToDisplayDate(item.receiptDate) : "");
     setAmount(item.receiptAmount ?? "");
-  }, [editing, item.receiptNo, item.receiptDate, item.receiptAmount]);
+    setStampDuty(Number(item.stampDutyAmount) > 0 ? String(Number(item.stampDutyAmount)) : "");
+  }, [editing, item.receiptNo, item.receiptDate, item.receiptAmount, item.stampDutyAmount]);
 
   async function save() {
     setError("");
@@ -1108,7 +1361,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
     try {
       const { transfer } = await vehicleTransferApi.updateReceiptFields(
         item.id,
-        { receiptNo: receiptNo.trim(), receiptDate, receiptAmount: amount.trim() },
+        { receiptNo: receiptNo.trim(), receiptDate, receiptAmount: amount.trim(), ...(moveIn ? { stampDutyAmount: stampDuty.trim() } : {}) },
         needsRemark ? remark.trim() : undefined,
       );
       onChange(transfer);
@@ -1129,6 +1382,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
           {item.receiptDate ? `วันที่ ${isoToDisplayDate(item.receiptDate)}` : ""}
           {item.receiptAmount ? `${item.receiptDate ? " · " : ""}${formatBaht(Number(item.receiptAmount))} บาท` : ""}
         </div>
+        {moveIn && <div className="sub">ค่าอากรโอน {Number(item.stampDutyAmount) > 0 ? `${formatBaht(Number(item.stampDutyAmount))} บาท` : "ไม่มี"}</div>}
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
             ✎ แก้
@@ -1150,6 +1404,16 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
         inputMode="decimal"
         className="inspect-input"
       />
+      {moveIn && (
+        <input
+          value={stampDuty}
+          onChange={(e) => setStampDuty(moneyOnly(e.target.value))}
+          placeholder="ค่าอากรโอน (ไม่มีเว้นว่าง)"
+          aria-label="ค่าอากรโอนตามราคารถ"
+          inputMode="decimal"
+          className="inspect-input"
+        />
+      )}
       {needsRemark && (
         <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เหตุผลที่แก้ *" aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ" className="inspect-input" />
       )}
@@ -1215,15 +1479,20 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
   const drop = (id: string) => setItems((prev) => prev.filter((s) => s.id !== id));
   const label = (item: VehicleTransfer) => `${item.transferorName} → ${item.transfereeName} (${plateText(item)})`;
 
-  async function confirmReturn(item: VehicleTransfer) {
+  async function confirmReturn(item: VehicleTransfer, newPlate?: { newPlateCategory: string; newPlateNumber: string }) {
+    // โอนย้ายเข้า: ป้ายเปลี่ยนเป็นของจังหวัดที่ย้ายเข้า ต้องกรอกทะเบียนใหม่ก่อนยืนยัน
+    if (isMoveIn(item.transferType) && (!newPlate?.newPlateCategory || !newPlate.newPlateNumber)) {
+      return setMessage({ text: "กรุณากรอกทะเบียนใหม่ (หมวดและเลข) ก่อนยืนยันรับกลับ", error: true });
+    }
     if (!returnDate) return setMessage({ text: "กรุณากรอกวันที่รับเอกสารกลับให้ถูกต้อง", error: true });
     // พิมพ์ปีผิดเป็นอนาคตไม่ได้ (backend กันอีกชั้น)
     if (returnDate > todayIso()) return setMessage({ text: "วันที่รับเอกสารกลับต้องไม่เกินวันนี้", error: true });
     // ยืนยันก่อนเสมอ - กดผิดงาน/ผิดวันแล้วต้องยกเลิกรับกลับพร้อมเหตุผล
-    const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${label(item)}`);
+    const plateLine = newPlate ? `\nทะเบียนใหม่: ${newPlate.newPlateCategory} ${newPlate.newPlateNumber} ${item.submitProvince ?? ""}` : "";
+    const ok = await confirmDialog(`ยืนยันรับเอกสารกลับ?\n\nวันที่รับกลับ: ${isoToDisplayDate(returnDate)}\nรถ: ${label(item)}${plateLine}`);
     if (!ok) return;
     try {
-      await vehicleTransferApi.markReturned(item.id, returnDate);
+      await vehicleTransferApi.markReturned(item.id, returnDate, newPlate);
       drop(item.id);
       setMessage({ text: `รับเอกสารกลับแล้ว: ${label(item)}` });
     } catch (err) {
@@ -1236,8 +1505,9 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
       <BackLink transferType={transferType} />
       <h1>รับใบเสร็จ ({TRANSFER_TYPE_LABEL[transferType]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
-        {transferType === "INSPECTION" ? "แสดงเฉพาะงานที่ตรวจรถผ่านแล้ว - " : ""}
+        {transferHasInspection(transferType) ? "แสดงเฉพาะงานที่ตรวจรถผ่านแล้ว - " : ""}
         ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
+        {isMoveIn(transferType) ? " - โอนย้ายเข้าต้องกรอกทะเบียนใหม่ของจังหวัดที่ย้ายเข้า และใส่ค่าอากรโอน (ถ้าใบเสร็จมี) ที่ ✎ แก้ ของข้อมูลใบเสร็จ" : ""}
       </p>
 
       <div className="panel">
@@ -1351,10 +1621,14 @@ function ReturnRow({
   canWrite: boolean;
   showActions: boolean;
   onChange: (item: VehicleTransfer) => void;
-  onConfirm: (item: VehicleTransfer) => void;
+  onConfirm: (item: VehicleTransfer, newPlate?: { newPlateCategory: string; newPlateNumber: string }) => void;
   onMessage: (text: string, error?: boolean) => void;
   onDialog: (kind: "edit" | "cancel" | "undo") => void;
 }) {
+  const moveIn = isMoveIn(item.transferType);
+  // ทะเบียนใหม่ของโอนย้ายเข้า - เติมค่าที่เคยกรอกไว้ (งานที่ยกเลิกรับกลับแล้วรับใหม่)
+  const [newPlateCategory, setNewPlateCategory] = useState(item.newPlateCategory ?? "");
+  const [newPlateNumber, setNewPlateNumber] = useState(item.newPlateNumber ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const returned = Boolean(item.returnedDate);
@@ -1400,7 +1674,15 @@ function ReturnRow({
         <PartiesCell item={item} />
       </td>
       <td>{CLASS_LABEL[item.vehicleClass]}</td>
-      <td>{plateText(item)}</td>
+      <td>
+        <PlateCell item={item} />
+        {moveIn && !returned && canWrite && (
+          <div style={{ marginTop: 4 }}>
+            <div className="sub">ทะเบียนใหม่ {item.submitProvince ?? ""} *</div>
+            <NewPlateInputs category={newPlateCategory} number={newPlateNumber} onCategory={setNewPlateCategory} onNumber={setNewPlateNumber} compact />
+          </div>
+        )}
+      </td>
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {item.receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
@@ -1483,7 +1765,7 @@ function ReturnRow({
             style={{ padding: "8px 14px", fontSize: 13 }}
             disabled={busy || item.receipts.length === 0}
             title={item.receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(item)}
+            onClick={() => onConfirm(item, moveIn ? { newPlateCategory: newPlateCategory.trim(), newPlateNumber: newPlateNumber.trim() } : undefined)}
           >
             ยืนยันรับกลับ
           </button>

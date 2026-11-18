@@ -17,17 +17,28 @@ export const TRANSFER_FINE_LABEL = "ค่าปรับ";
 
 export const TRANSFER_MOTO_NO_BILL_SHARE: FeeItem = { label: "ลงขัน", amount: 60 };
 
-// ลงขันตามจังหวัดที่ยื่น (ผู้ใช้ 2026-11-18) - ค่าตั้งต้นที่ระบบเติมให้ พนักงานแก้ได้ / สำเนาจาก backend ต้องตรงกัน
-// กรุงเทพฯ: มอเตอร์ไซค์ 60 / รถยนต์ 100 · สมุทรปราการ: มอเตอร์ไซค์ 100 / รถยนต์ 100 · จังหวัดอื่น = null (กรอกเอง 0 ได้)
+// ลงขันตามจังหวัดที่ยื่น (ผู้ใช้ 2026-11-18) - ค่าตั้งต้นที่ระบบเติมให้ พนักงานแก้ได้
+// อัตราอยู่ในตาราง TransferContributionRate ครบ 77 จังหวัด (GET /api/transfer-contribution-rates) ADMIN กรอก/แก้ที่ /registration/transfer/contribution-rates
+// null = จังหวัดนั้นยังไม่ได้ตั้งอัตรา (หรือยังโหลดตารางไม่เสร็จ) -> พนักงานกรอกเอง 0 ได้ / ปล่อยว่างส่งไป backend จะเติมอัตราของตารางให้เอง
 export const TRANSFER_DEFAULT_PROVINCE = "กรุงเทพมหานคร";
-const TRANSFER_SAMUT_PRAKAN = "สมุทรปราการ";
 export const TRANSFER_SHARE_LABEL = "ลงขัน";
 
-export function defaultTransferContribution(vehicleClass: "CAR" | "MOTO", province: string | null | undefined): number | null {
-  const where = province || TRANSFER_DEFAULT_PROVINCE;
-  if (where !== TRANSFER_DEFAULT_PROVINCE && where !== TRANSFER_SAMUT_PRAKAN) return null;
-  if (vehicleClass === "CAR") return 100;
-  return where === TRANSFER_SAMUT_PRAKAN ? 100 : 60;
+export interface TransferContributionRow {
+  province: string;
+  transferMoto: number | null;
+  transferCar: number | null;
+  moveInMoto: number | null;
+}
+
+export function defaultTransferContribution(
+  rates: TransferContributionRow[],
+  vehicleClass: "CAR" | "MOTO",
+  province: string | null | undefined,
+  moveIn = false,
+): number | null {
+  const row = rates.find((r) => r.province === (province || TRANSFER_DEFAULT_PROVINCE));
+  if (!row) return null;
+  return moveIn ? row.moveInMoto : vehicleClass === "CAR" ? row.transferCar : row.transferMoto;
 }
 
 export function transferUrgentAmount(vehicleClass: "CAR" | "MOTO", urgent: boolean): number {
@@ -69,4 +80,29 @@ export function calculateTransferCarNoBill(options: { urgent: boolean; contribut
   const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_CAR_NO_BILL_SHARE.amount }];
   if (options.urgent) noBillItems.push(TRANSFER_CAR_URGENT_ITEM);
   return { noBillItems, noBillTotal: sum(noBillItems) };
+}
+
+// ---- โอนย้ายเข้า (MOVE_IN ผู้ใช้ 2026-11-18) - เฉพาะมอเตอร์ไซค์ / สำเนาจาก backend ต้องตรงกัน
+// Bill ตามใบเสร็จ: คำขอ 5 + ใบแทนเครื่องหมายภาษีประจำปี 20 + โอนทะเบียนรถ 100 + ค่าแผ่นป้ายทะเบียน 100 = 225 (+ ค่าปรับ + ค่าอากรโอนตามราคารถที่กรอกตอนรับใบเสร็จ)
+// ค่าอากรแยก 40 · ลงขันยังไม่มีอัตรา ตั้งต้น 0 ทุกจังหวัด แก้ได้ · ด่วนเพิ่ม 50
+export const TRANSFER_MOVE_IN_BILL: FeeItem[] = [
+  { label: "คำขอ", amount: 5 },
+  { label: "ใบแทนเครื่องหมายภาษีประจำปี", amount: 20 },
+  { label: "โอนทะเบียนรถ", amount: 100 },
+  { label: "ค่าแผ่นป้ายทะเบียน", amount: 100 },
+];
+export const TRANSFER_MOVE_IN_DUTY = 40;
+export const TRANSFER_MOVE_IN_CONTRIBUTION = 0;
+export const TRANSFER_STAMP_DUTY_LABEL = "ค่าอากรโอน (ตามราคารถ)";
+
+export function calculateTransferMoveInFees(options: { urgent: boolean; fine: number; stampDuty: number; contribution?: number }): TransferFees {
+  const billItems: FeeItem[] = [...TRANSFER_MOVE_IN_BILL];
+  if (options.stampDuty > 0) billItems.push({ label: TRANSFER_STAMP_DUTY_LABEL, amount: options.stampDuty });
+  if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
+  const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_MOVE_IN_CONTRIBUTION }];
+  if (options.urgent) noBillItems.push(TRANSFER_MOTO_URGENT_ITEM);
+  const dutyItem: FeeItem = { label: DUTY_LABEL, amount: TRANSFER_MOVE_IN_DUTY };
+  const billTotal = sum(billItems);
+  const noBillTotal = sum(noBillItems);
+  return { billItems, noBillItems, dutyItem, billTotal, noBillTotal, dutyTotal: dutyItem.amount, total: billTotal + noBillTotal };
 }

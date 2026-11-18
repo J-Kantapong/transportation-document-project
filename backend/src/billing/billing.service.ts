@@ -1275,7 +1275,7 @@ export class BillingService {
       if (!vehicleClass) throw bad(`${row}ชนิดรถต้องเป็น CAR, MOTO หรือ ANY`);
       const variant = r.variant === null || r.variant === undefined || r.variant === '' ? null : r.variant;
       if (variant !== null && (r.jobType !== 'TRANSFER' || !(TRANSFER_VARIANTS as readonly unknown[]).includes(variant))) {
-        throw bad(`${row}แบบงานระบุได้เฉพาะงานโอน (OWNER หรือ INSPECTION)`);
+        throw bad(`${row}แบบงานระบุได้เฉพาะงานโอน (OWNER, INSPECTION หรือ MOVE_IN)`);
       }
       const amount = parseMoney(r.amount, `${row}ราคา`);
       if (amount <= 0) throw bad(`${row}ราคาต้องมากกว่า 0`);

@@ -2,6 +2,8 @@ import { request } from "@/lib/api";
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - ดู backend/src/vehicle-transfer/
 // แบบงาน: OWNER = โอนตามผู้ถือกรรมสิทธิ์ (ไม่มีตรวจรถ) / INSPECTION = โอนตรวจรถ (ตรวจรถแยกจากคิวตรวจรถของรถจดใหม่)
+//   MOVE_IN = โอนย้ายเข้า (ผู้ใช้ 2026-11-18) - เฉพาะมอเตอร์ไซค์ ขั้นตอนเหมือนโอนตรวจรถ + เลือกงานย้ายออก (moveOutId) + submitProvince = จังหวัดที่ย้ายเข้า (บังคับ)
+//   รับใบเสร็จต้องส่งทะเบียนใหม่ (newPlateCategory / newPlateNumber) · ค่าอากรโอนตามราคารถส่งทาง receipt-fields (stampDutyAmount รวมเข้า Bill)
 // GET    /api/vehicle-transfers?status=all|pending|returned|to-send|to-result|inspected&month=YYYY-MM&transferType=&vehicleClass=
 //        pending = รอรับเอกสารกลับ (โอนตรวจรถนับเมื่อตรวจผ่านแล้ว) / to-send, to-result, inspected = ขั้นตรวจรถ / งานที่ยกเลิกแล้วไม่แสดง
 // POST   /api/vehicle-transfers   ยื่นงาน (transferType, vehicleClass, customerId = เจ้าของงาน, transferorName, transfereeName, ข้อมูลรถ, submitDate)
@@ -20,7 +22,7 @@ import { request } from "@/lib/api";
 // POST   /api/vehicle-transfers/:id/cancel {remark}        ยกเลิกงาน (ไม่ลบแถว)
 // ตัวรูปใบเสร็จโหลดผ่าน GET /api/receipts/:id/image (ต้องแนบ Authorization)
 
-export type TransferType = "OWNER" | "INSPECTION";
+export type TransferType = "OWNER" | "INSPECTION" | "MOVE_IN";
 export type TransferVehicleClass = "CAR" | "MOTO";
 export type InspectionResult = "PASS" | "FAIL";
 
@@ -50,6 +52,11 @@ export interface VehicleTransfer {
   urgent: boolean; // งานด่วน (มอเตอร์ไซค์)
   submitProvince: string | null; // จังหวัดที่ยื่น - null = งานก่อนมีช่องนี้
   fineAmount: string; // ค่าปรับ (อยู่ใน billTotal แล้ว)
+  // โอนย้ายเข้า (MOVE_IN)
+  moveOutId: string | null; // งานย้ายออกที่ผูกไว้
+  newPlateCategory: string | null; // ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า - กรอกตอนรับใบเสร็จ
+  newPlateNumber: string | null;
+  stampDutyAmount: string; // ค่าอากรโอนตามราคารถ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
   inspectionResult: InspectionResult | null;
   inspectionResultDate: string | null;
@@ -81,6 +88,7 @@ export interface CreateVehicleTransferInput {
   contribution?: string; // ลงขัน - ว่าง = อัตราตั้งต้นของจังหวัด / จังหวัดที่ยังไม่มีอัตราต้องกรอก (0 ได้)
   fineAmount?: string;
   billTotal?: string;
+  moveOutId?: string; // โอนย้ายเข้า - งานย้ายออกที่รับใบเสร็จแล้ว (ไม่บังคับ)
 }
 
 export interface UpdateVehicleTransferInput {
@@ -101,6 +109,8 @@ export interface UpdateVehicleTransferInput {
   fineAmount?: string;
   billTotal?: string;
   returnedDate?: string;
+  newPlateCategory?: string; // โอนย้ายเข้าที่รับกลับแล้ว
+  newPlateNumber?: string;
   remark: string;
   expectedUpdatedAt: string;
 }
@@ -129,10 +139,10 @@ export const vehicleTransferApi = {
   },
   removeReceipt: (id: string, receiptId: string, remark?: string) =>
     request<One>(`/api/vehicle-transfers/${id}/receipts/${receiptId}`, { method: "DELETE", body: JSON.stringify({ remark }) }),
-  updateReceiptFields: (id: string, data: { receiptNo?: string; receiptDate?: string; receiptAmount?: string }, remark?: string) =>
+  updateReceiptFields: (id: string, data: { receiptNo?: string; receiptDate?: string; receiptAmount?: string; stampDutyAmount?: string }, remark?: string) =>
     request<One>(`/api/vehicle-transfers/${id}/receipt-fields`, { method: "PATCH", body: JSON.stringify({ ...data, remark }) }),
-  markReturned: (id: string, returnedDate: string) =>
-    request<One>(`/api/vehicle-transfers/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate }) }),
+  markReturned: (id: string, returnedDate: string, newPlate?: { newPlateCategory: string; newPlateNumber: string }) =>
+    request<One>(`/api/vehicle-transfers/${id}/return`, { method: "PATCH", body: JSON.stringify({ returnedDate, ...newPlate }) }),
   undoReturn: (id: string, remark: string) =>
     request<One>(`/api/vehicle-transfers/${id}/undo-return`, { method: "POST", body: JSON.stringify({ remark }) }),
   cancel: (id: string, remark: string) =>
@@ -140,6 +150,8 @@ export const vehicleTransferApi = {
 };
 
 // ใช้ได้ทั้งฝั่ง server component (เมนู) และ client component (หน้างาน)
-export const TRANSFER_TYPE_LABEL: Record<TransferType, string> = { OWNER: "โอนตามผู้ถือกรรมสิทธิ์", INSPECTION: "โอนตรวจรถ" };
-const TRANSFER_TYPE_SEGMENT: Record<TransferType, string> = { OWNER: "owner", INSPECTION: "inspection" };
+export const TRANSFER_TYPE_LABEL: Record<TransferType, string> = { OWNER: "โอนตามผู้ถือกรรมสิทธิ์", INSPECTION: "โอนตรวจรถ", MOVE_IN: "โอนย้ายเข้า" };
+const TRANSFER_TYPE_SEGMENT: Record<TransferType, string> = { OWNER: "owner", INSPECTION: "inspection", MOVE_IN: "move-in" };
+// โอนตรวจรถ + โอนย้ายเข้า มีขั้นตรวจรถคั่นก่อนรับใบเสร็จ
+export const transferHasInspection = (transferType: TransferType) => transferType !== "OWNER";
 export const transferHome = (transferType: TransferType) => `/registration/transfer/${TRANSFER_TYPE_SEGMENT[transferType]}`;
