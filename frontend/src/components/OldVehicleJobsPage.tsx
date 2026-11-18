@@ -926,6 +926,10 @@ function IntakePanel({
                       onBlur={() => check(row)}
                     />
                   </label>
+                  <label className="field">
+                    เลขเครื่อง
+                    <input value={row.engine} onChange={(e) => patch(row.key, { engine: e.target.value })} placeholder="ใส่ทีหลังได้" />
+                  </label>
                   <div className="field">
                     ทะเบียน *
                     <div style={{ display: "flex", gap: 8 }}>
@@ -970,10 +974,6 @@ function IntakePanel({
                   <label className="field">
                     ชื่อเจ้าของรถ *
                     <input value={row.ownerName} onChange={(e) => patch(row.key, { ownerName: e.target.value })} />
-                  </label>
-                  <label className="field">
-                    เลขเครื่อง
-                    <input value={row.engine} onChange={(e) => patch(row.key, { engine: e.target.value })} placeholder="ใส่ทีหลังได้" />
                   </label>
                 </div>
               )}
@@ -1424,6 +1424,21 @@ function VehicleDialog({
         <>
           <div className="customer-grid">
             <label className="field">
+              เลขตัวถัง *
+              <input value={form.chassis} onChange={(e) => setForm((prev) => ({ ...prev, chassis: e.target.value.toUpperCase().replace(/\s+/g, "") }))} />
+            </label>
+            <label className="field">
+              เลขเครื่อง
+              <input value={form.engine} onChange={set("engine")} />
+            </label>
+            <div className="field">
+              ทะเบียน *
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={form.plateCategory} onChange={set("plateCategory")} maxLength={3} aria-label="หมวดทะเบียน" />
+                <input value={form.plateNumber} onChange={(e) => setForm((prev) => ({ ...prev, plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))} maxLength={4} inputMode="numeric" aria-label="เลขทะเบียน" />
+              </div>
+            </div>
+            <label className="field">
               ประเภทรถ (รย. / ขส.) *
               <select value={form.vehicleType} onChange={set("vehicleType")}>
                 <option value="">เลือกประเภทรถ</option>
@@ -1439,17 +1454,6 @@ function VehicleDialog({
               </select>
             </label>
             <label className="field">
-              เลขตัวถัง *
-              <input value={form.chassis} onChange={(e) => setForm((prev) => ({ ...prev, chassis: e.target.value.toUpperCase().replace(/\s+/g, "") }))} />
-            </label>
-            <div className="field">
-              ทะเบียน *
-              <div style={{ display: "flex", gap: 8 }}>
-                <input value={form.plateCategory} onChange={set("plateCategory")} maxLength={3} aria-label="หมวดทะเบียน" />
-                <input value={form.plateNumber} onChange={(e) => setForm((prev) => ({ ...prev, plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))} maxLength={4} inputMode="numeric" aria-label="เลขทะเบียน" />
-              </div>
-            </div>
-            <label className="field">
               ยี่ห้อ *
               <select value={form.brand} onChange={set("brand")}>
                 <option value="">เลือกยี่ห้อ</option>
@@ -1463,10 +1467,6 @@ function VehicleDialog({
             <label className="field">
               ชื่อเจ้าของรถ *
               <input value={form.ownerName} onChange={set("ownerName")} />
-            </label>
-            <label className="field">
-              เลขเครื่อง
-              <input value={form.engine} onChange={set("engine")} />
             </label>
             <label className="field wide">
               เหตุผลที่แก้ *
