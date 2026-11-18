@@ -6,14 +6,7 @@ import { api } from "@/lib/api";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
-import {
-  calculateMoveOutFees,
-  MOVE_OUT_MOTO_BILL_FEE,
-  MOVE_OUT_MOTO_DUTY_FEE,
-  MOVE_OUT_MOTO_LUNGKAN_FEE,
-  MOVE_OUT_MOTO_URGENT_EXTRA,
-  moveOutPricedFor,
-} from "@/lib/vehicle-move-out-fee";
+import { calculateMoveOutFees, moveOutRates } from "@/lib/vehicle-move-out-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleMoveOutApi,
@@ -231,33 +224,31 @@ function VehicleFormFields({
   );
 }
 
-// ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-06) - มอเตอร์ไซค์เท่านั้น ติ๊กงานด่วนได้ / รถยนต์ยังไม่มีอัตรา backend เป็นคนคิดยอดจริงตอนบันทึก
+// ค่าใช้จ่ายตายตัว (มอเตอร์ไซค์ ผู้ใช้ 2026-10-06 / รถยนต์ ผู้ใช้ 2026-11-18) ติ๊กงานด่วนได้ทั้งสองประเภท - backend เป็นคนคิดยอดจริงตอนบันทึก
 function FeeSummary({ vehicleClass, urgent, onUrgentChange }: { vehicleClass: MoveOutVehicleClass; urgent: boolean; onUrgentChange: (urgent: boolean) => void }) {
-  if (!moveOutPricedFor(vehicleClass)) {
-    return <p className="muted">รถยนต์ยังไม่มีอัตราค่าใช้จ่ายของงานย้ายออก (ยังไม่มีข้อมูล) - บันทึกยอดเป็น 0 ไว้ก่อน</p>;
-  }
+  const rates = moveOutRates(vehicleClass);
   const fees = calculateMoveOutFees(vehicleClass, urgent);
   return (
     <>
       <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
         <input type="checkbox" checked={urgent} onChange={(e) => onUrgentChange(e.target.checked)} />
-        งานด่วน (ลงขันด่วนเพิ่ม {formatBaht(MOVE_OUT_MOTO_URGENT_EXTRA)} ใน No Bill)
+        งานด่วน (ลงขันด่วนเพิ่ม {formatBaht(rates.urgentExtra)} ใน No Bill)
       </label>
       <div className="customer-grid">
         <div>
           <strong>Bill (ใบเสร็จ)</strong>
-          <div>{formatBaht(MOVE_OUT_MOTO_BILL_FEE)} บาท</div>
+          <div>{formatBaht(rates.bill)} บาท</div>
         </div>
         <div>
           <strong>No Bill</strong>
           <div>
-            ลงขัน {formatBaht(MOVE_OUT_MOTO_LUNGKAN_FEE)}
-            {urgent ? ` + ด่วนเพิ่ม ${formatBaht(MOVE_OUT_MOTO_URGENT_EXTRA)}` : ""} = {formatBaht(fees.noBillTotal)} บาท
+            ลงขัน {formatBaht(rates.share)}
+            {urgent ? ` + ด่วนเพิ่ม ${formatBaht(rates.urgentExtra)}` : ""} = {formatBaht(fees.noBillTotal)} บาท
           </div>
         </div>
         <div>
           <strong>ค่าอากร</strong>
-          <div>{formatBaht(MOVE_OUT_MOTO_DUTY_FEE)} บาท (แยกต่างหาก ไม่รวมใน No Bill)</div>
+          <div>{formatBaht(rates.duty)} บาท (แยกต่างหาก ไม่รวมใน No Bill)</div>
         </div>
         <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
           <strong>รวม (Bill + No Bill)</strong>

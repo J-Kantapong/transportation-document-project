@@ -6,11 +6,15 @@
 import type { AuditEntity } from '../audit/audit-log.js';
 import type { VehicleScope } from '../auth/vehicle-scope.js';
 import { vehicleKindOf } from '../auth/vehicle-scope.js';
-import { isJobType, JOB_LABEL, JOB_TYPES, type JobType } from '../billing/other-jobs.js';
+import { JOB_LABEL, JOB_TYPES as BILLING_JOB_TYPES, type JobType as BillingJobType } from '../billing/other-jobs.js';
 import type { Prisma } from '../generated/prisma/client.js';
 
-export { isJobType, JOB_LABEL, JOB_TYPES };
-export type { JobType };
+// งานเปลี่ยนเลขทะเบียน (PLATE_CHANGE ในฝั่งวางบิล) เป็นแถว PlateSwap - ส่งงานผ่านคิวของงานสลับเลข (source PLATE_SWAP) อยู่แล้ว
+// จึงไม่อยู่ในรายการ "งานอื่นๆ" ของขั้นส่งงาน
+export type JobType = Exclude<BillingJobType, 'PLATE_CHANGE'>;
+export const JOB_TYPES: readonly JobType[] = BILLING_JOB_TYPES.filter((t): t is JobType => t !== 'PLATE_CHANGE');
+export const isJobType = (v: unknown): v is JobType => (JOB_TYPES as readonly unknown[]).includes(v);
+export { JOB_LABEL };
 
 // ชื่อ entity ใน AuditLog ของแต่ละงาน (ตรงกับที่ service ของงานนั้นใช้)
 export const JOB_AUDIT_ENTITY: Record<JobType, AuditEntity> = {

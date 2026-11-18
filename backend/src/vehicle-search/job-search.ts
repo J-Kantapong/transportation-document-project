@@ -161,10 +161,11 @@ export async function searchJobs(
 
   for (const j of cut(swaps)) {
     const cls = classKind(j.vehicleClass);
-    const pair = j.kind === 'OLD_OLD' ? 'old-old' : 'old-new';
+    const pair = j.kind === 'CHANGE' ? 'change' : j.kind === 'OLD_OLD' ? 'old-old' : 'old-new';
     const newPlate = plateText(j.newPlateCategory, j.newPlateNumber);
     jobs.push({
       ...base('PLATE_SWAP'),
+      ...(j.kind === 'CHANGE' ? { typeLabel: 'เปลี่ยนเลขทะเบียน' } : {}),
       key: `PLATE_SWAP:${j.id}`,
       id: j.id,
       date: isoOf(j.submitDate),

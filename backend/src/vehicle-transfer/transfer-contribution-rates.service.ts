@@ -13,6 +13,7 @@ const FIELD_LABEL = {
   transferMoto: 'ลงขันโอน (มอเตอร์ไซค์)',
   transferCar: 'ลงขันโอน (รถยนต์)',
   moveInMoto: 'ลงขันโอนย้ายเข้า (มอเตอร์ไซค์)',
+  moveInCar: 'ลงขันโอนย้ายเข้า (รถยนต์)', // ผู้ใช้ 2026-11-18
 } as const;
 type RateField = keyof typeof FIELD_LABEL;
 const RATE_FIELDS = Object.keys(FIELD_LABEL) as RateField[];
@@ -22,6 +23,7 @@ export interface ContributionRateInput {
   transferMoto?: unknown;
   transferCar?: unknown;
   moveInMoto?: unknown;
+  moveInCar?: unknown;
   note?: unknown;
   remark?: unknown;
   expectedUpdatedAt?: unknown;
@@ -47,7 +49,8 @@ export async function transferContributionRate(
 ): Promise<number | null> {
   const row = await db.transferContributionRate.findUnique({ where: { province } });
   if (!row) return null;
-  return num(moveIn ? row.moveInMoto : vehicleClass === 'CAR' ? row.transferCar : row.transferMoto);
+  if (moveIn) return num(vehicleClass === 'CAR' ? row.moveInCar : row.moveInMoto);
+  return num(vehicleClass === 'CAR' ? row.transferCar : row.transferMoto);
 }
 
 @Injectable()
@@ -71,6 +74,7 @@ export class TransferContributionRatesService {
           transferMoto: num(r?.transferMoto),
           transferCar: num(r?.transferCar),
           moveInMoto: num(r?.moveInMoto),
+          moveInCar: num(r?.moveInCar),
           note: r?.note ?? null,
           updatedAt: r?.updatedAt.toISOString() ?? null,
           updatedBy: r?.updatedById ? (userName.get(r.updatedById) ?? null) : null,
@@ -90,6 +94,7 @@ export class TransferContributionRatesService {
       transferMoto: parseMoney(input.transferMoto, FIELD_LABEL.transferMoto),
       transferCar: parseMoney(input.transferCar, FIELD_LABEL.transferCar),
       moveInMoto: parseMoney(input.moveInMoto, FIELD_LABEL.moveInMoto),
+      moveInCar: parseMoney(input.moveInCar, FIELD_LABEL.moveInCar),
       note: noteRaw || null,
     };
     const expected = input.expectedUpdatedAt === undefined ? undefined : input.expectedUpdatedAt === null ? null : String(input.expectedUpdatedAt);

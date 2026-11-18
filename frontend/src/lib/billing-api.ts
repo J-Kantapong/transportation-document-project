@@ -428,14 +428,16 @@ export const editableItems = (items: InvoiceItem[]): InvoiceItem[] => items.filt
 export const sourceItems = (items: InvoiceItem[]): InvoiceItem[] => items.filter(isSourceItem);
 
 // ---------- งานอื่นๆ ในใบวางบิล (ผู้ใช้ 2026-10-07) ----------
-export type JobType = "TRANSFER" | "USE_CANCEL" | "PLATE_COPY" | "MOVE_OUT" | "TAX_RENEWAL";
-export const JOB_TYPES: JobType[] = ["TRANSFER", "USE_CANCEL", "PLATE_COPY", "MOVE_OUT", "TAX_RENEWAL"];
+// PLATE_CHANGE = เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): วางบิลเดี่ยวตามเจ้าของงาน เพราะไม่มีรถใหม่ให้พ่วงบิลเหมือนสลับเลข
+export type JobType = "TRANSFER" | "USE_CANCEL" | "PLATE_COPY" | "MOVE_OUT" | "TAX_RENEWAL" | "PLATE_CHANGE";
+export const JOB_TYPES: JobType[] = ["TRANSFER", "USE_CANCEL", "PLATE_COPY", "MOVE_OUT", "TAX_RENEWAL", "PLATE_CHANGE"];
 export const JOB_LABEL: Record<JobType, string> = {
   TRANSFER: "งานโอน",
   USE_CANCEL: "ยกเลิกการใช้รถ",
   PLATE_COPY: "คัดแผ่นป้ายทะเบียน",
   MOVE_OUT: "ย้ายออก",
   TAX_RENEWAL: "ต่อภาษี",
+  PLATE_CHANGE: "เปลี่ยนเลขทะเบียน",
 };
 
 // ตารางราคาค่าบริการต่อลูกค้า ต่อประเภทงาน (ก่อน VAT) - แถวแรกที่ตรงชนิดรถ/แบบงานชนะ

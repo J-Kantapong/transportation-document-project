@@ -9,6 +9,7 @@ export interface TransferContributionRate {
   transferMoto: number | null; // ลงขันโอน (มอเตอร์ไซค์)
   transferCar: number | null; // ลงขันโอน (รถยนต์)
   moveInMoto: number | null; // ลงขันโอนย้ายเข้า (มอเตอร์ไซค์)
+  moveInCar: number | null; // ลงขันโอนย้ายเข้า (รถยนต์) - ผู้ใช้ 2026-11-18
   note: string | null;
   updatedAt: string | null; // null = ยังไม่เคยตั้ง
   updatedBy: string | null;
@@ -19,6 +20,7 @@ export interface TransferContributionRateSave {
   transferMoto: string;
   transferCar: string;
   moveInMoto: string;
+  moveInCar: string;
   note: string;
   remark: string;
   expectedUpdatedAt: string | null;

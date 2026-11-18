@@ -191,6 +191,8 @@ const PAGE_RULES: PageRule[] = [
   { prefix: '/registration/plate-swap/car/old-new', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   // รถเก่า กับ รถเก่า (ผู้ใช้ให้กฎ 2026-09-28) - สิทธิ์ชุดเดียวกับเคสข้างบน ไม่ใช่ fallback /registration ที่กว้างเกินไป
   { prefix: '/registration/plate-swap/car/old-old', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
+  // เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18) - งานแบบเดียวกับสลับเลขแต่คันเดียว สิทธิ์ชุดเดียวกัน (มอเตอร์ไซค์อยู่ใต้ /plate-swap/moto)
+  { prefix: '/registration/plate-swap/car/change', roles: ['ADMIN', 'STAFF_CAR', 'ACCOUNTANT'] },
   // มอเตอร์ไซค์ = งานของ STAFF_MOTO (ผู้ใช้ให้อัตรา 2026-09-28) ล้อกับฝั่งรถยนต์ที่เป็น STAFF_CAR
   // backend เช็คซ้ำตามประเภทรถของงานจริง (PlateSwapService.assertClassScope) ไม่ได้เชื่อ path อย่างเดียว
   { prefix: '/registration/plate-swap/moto', roles: ['ADMIN', 'STAFF_MOTO', 'ACCOUNTANT'] },
@@ -209,6 +211,9 @@ const PAGE_RULES: PageRule[] = [
   // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02): กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO, รวมในหน้าเดียวกัน) + ACCOUNTANT อ่าน
   // backend เช็คสิทธิ์ตามประเภทรถของงานจริง (VehicleTransferService.assertClassScope) - backend: /api/vehicle-transfers
   { prefix: '/registration/transfer', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
+  // งานรถเก่า (หน้ารวม รับงาน + ตรวจรถก่อนยื่น, ผู้ใช้ 2026-11-18): กลุ่มยื่นเอกสาร + ACCOUNTANT อ่าน - backend: /api/old-vehicle-jobs (เช็คสิทธิ์ตามประเภทรถของคันนั้น)
+  // คนคีย์รับงาน = ADMIN / STAFF_ENTRY / DELIVERY (ผู้ใช้ 2026-11-18) - ดู canIntakeOldJobs ด้านล่าง
+  { prefix: '/registration/old-vehicle', roles: [...SUBMIT_STAFF, 'ACCOUNTANT', 'STAFF_ENTRY', 'DELIVERY'] },
   // ต่อภาษี: กลุ่มยื่นเอกสาร (รถยนต์/จักรยานยนต์ตามขอบเขตของตัวเอง) + ACCOUNTANT อ่าน - backend: /api/tax-renewals
   { prefix: '/registration/tax-renewal', roles: [...SUBMIT_STAFF, 'ACCOUNTANT'] },
   { prefix: '/customers', roles: ALL_STAFF },
@@ -229,6 +234,13 @@ export function canEditEntrySteps(roles: UserRole[]): boolean {
 }
 
 // หน้าขั้น 4-8 (ยื่นเอกสาร/ใบเสร็จ/ป้าย/เล่ม/ต่อภาษี) บันทึกได้เฉพาะ ADMIN / STAFF_CAR / STAFF_MOTO - ACCOUNTANT อ่านอย่างเดียว
+// งานรถเก่า: คนคีย์รับงาน (ผู้ใช้ 2026-11-18) - รับงาน แก้ข้อมูลรถ เลือกประเภทงาน ติดขัด ยกเลิกการรับงาน ได้ทุกประเภทรถ
+// กลุ่มยื่นเอกสาร (STAFF_CAR / STAFF_MOTO) ทำขั้นถัดไปของประเภทรถตัวเอง แต่รับงานใหม่ไม่ได้ - สำเนาของ OldVehicleJobsService.isIntakeRole
+const OLD_JOB_INTAKE_ROLES: UserRole[] = ['ADMIN', 'STAFF_ENTRY', 'DELIVERY'];
+export function canIntakeOldJobs(roles: UserRole[]): boolean {
+  return roles.some((r) => OLD_JOB_INTAKE_ROLES.includes(r));
+}
+
 export function canEditSubmitSteps(roles: UserRole[]): boolean {
   return roles.some((r) => SUBMIT_STAFF.includes(r));
 }

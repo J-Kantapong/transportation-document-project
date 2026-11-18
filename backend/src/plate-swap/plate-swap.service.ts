@@ -13,7 +13,7 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-ex
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { DUPLICATE_UPLOAD_ERROR, contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
-import { calculatePlateSwapCarFees, calculatePlateSwapMotoFees, type FeeItem } from './plate-swap-fee.js';
+import { calculatePlateChangeFees, calculatePlateSwapCarFees, calculatePlateSwapMotoFees, type FeeItem } from './plate-swap-fee.js';
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // ขั้นตอน: บันทึก/ยื่น (POST) -> ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) -> รับเอกสารกลับ (วันที่ + รูปใบเสร็จอย่างน้อย 1 รูป)
@@ -56,7 +56,7 @@ export interface PlateSwapRow {
   id: string;
   kind: PlateSwapKind;
   vehicleClass: PlateSwapVehicleClass; // CAR | MOTO (ผู้ใช้ 2026-09-28)
-  urgent: boolean; // งานด่วน - มีเฉพาะมอเตอร์ไซค์
+  urgent: boolean; // งานด่วน - มอเตอร์ไซค์ +50 / รถยนต์ +100 (รถยนต์ตั้งแต่ 2026-11-18)
   // งานคู่ของเคสรถเก่า-รถเก่า (ผู้ใช้ 2026-09-28) - null = งาน OLD_NEW ซึ่งไม่มีคู่
   pairId: string | null;
   // เจ้าของงาน - null = งานที่บันทึกไว้ก่อน 2026-09-28 (ยังไม่มีลูกค้า) งานใหม่บังคับกรอกเสมอ
@@ -115,6 +115,22 @@ export interface CreatePlateSwapDto {
   numberSource?: unknown;
   buyNormalPlate?: unknown;
   buyAuctionPlate?: unknown;
+}
+
+// เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): รถคันเดียวรับเลขที่ลูกค้าจองไว้ - ไม่มีรถคู่ / ไม่มีตัวเลือกที่มาของเลขและป้าย (บังคับซื้อป้าย)
+export interface CreatePlateChangeDto {
+  vehicleClass?: unknown;
+  urgent?: unknown;
+  customerId?: unknown;
+  oldOwnerName?: unknown;
+  oldEngine?: unknown;
+  oldChassis?: unknown;
+  oldBrand?: unknown;
+  oldPlateCategory?: unknown;
+  oldPlateNumber?: unknown;
+  newPlateCategory?: unknown; // เลขที่จองไว้ - ยังไม่รู้ตอนยื่นได้ บังคับตอนรับใบเสร็จ
+  newPlateNumber?: unknown;
+  submitDate?: unknown;
 }
 
 // รถเก่า 1 คันในเคส "รถเก่า กับ รถเก่า" - ไม่มี newPlate เพราะระบบเติมให้เองจากทะเบียนของอีกคัน
@@ -247,7 +263,10 @@ function parseVehicleClass(value: unknown): PlateSwapVehicleClass {
 function feesFor(
   vehicleClass: PlateSwapVehicleClass,
   options: { numberSource: PlateSwapNumberSource; buyNormalPlate: boolean; buyAuctionPlate: boolean; urgent: boolean },
+  kind: PlateSwapKind = PlateSwapKind.OLD_NEW,
 ) {
+  // เปลี่ยนเลขทะเบียน: บังคับซื้อป้าย ไม่มีเลขประมูล - ตัวเลือกอื่นไม่มีผล
+  if (kind === PlateSwapKind.CHANGE) return calculatePlateChangeFees(vehicleClass, options.urgent);
   return vehicleClass === 'MOTO'
     ? calculatePlateSwapMotoFees({ buyNormalPlate: options.buyNormalPlate, urgent: options.urgent })
     : calculatePlateSwapCarFees(options);
@@ -256,8 +275,8 @@ function feesFor(
 // เคสของงานที่จะแสดงในรายการ - ไม่ส่งมา = OLD_NEW เหมือนเดิม (หน้าเดิมไม่ต้องแก้ และงานคนละเคสไม่ปนกันในคิว)
 function parseKind(value: unknown): PlateSwapKind {
   if (value === undefined || value === null || value === '') return PlateSwapKind.OLD_NEW;
-  if (value === PlateSwapKind.OLD_NEW || value === PlateSwapKind.OLD_OLD) return value;
-  throw new BadRequestException({ error: 'พารามิเตอร์ kind ต้องเป็น OLD_NEW หรือ OLD_OLD' });
+  if (value === PlateSwapKind.OLD_NEW || value === PlateSwapKind.OLD_OLD || value === PlateSwapKind.CHANGE) return value;
+  throw new BadRequestException({ error: 'พารามิเตอร์ kind ต้องเป็น OLD_NEW, OLD_OLD หรือ CHANGE' });
 }
 
 // ทะเบียนแบบเทียบกันได้ (ไม่สนช่องว่าง/ตัวพิมพ์) - ใช้เช็คว่า 2 คันในเคสคู่ไม่ได้กรอกทะเบียนเดียวกัน
@@ -618,6 +637,56 @@ export class PlateSwapService {
     return { swap: serializePlateSwap(swap) };
   }
 
+  // ยื่นงานเปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): ลูกค้าจองเลขในระบบกรมขนส่งแล้วเอามาลงกับรถ 1 คัน - ทำงานเหมือนสลับเลขแต่ไม่มีรถคู่
+  // เก็บในตาราง PlateSwap ด้วย kind = CHANGE จึงได้ขั้นรับใบเสร็จ / รับป้าย / รับเล่ม / ส่งงาน / วางบิล ชุดเดียวกับสลับเลข
+  // ค่าใช้จ่าย: บังคับซื้อป้ายเสมอ (buyNormalPlate = true) ไม่มีเลขประมูล/ชุดสงวน - ดู calculatePlateChangeFees
+  async createChange(dto: CreatePlateChangeDto): Promise<{ swap: PlateSwapRow }> {
+    const vehicleClass = parseVehicleClass(dto?.vehicleClass);
+    this.assertClassScope(vehicleClass);
+    const customerId = await this.resolveCustomerId(dto?.customerId);
+    const oldOwnerName = requiredText(dto?.oldOwnerName, 'ชื่อเจ้าของรถ');
+    const oldEngine = requiredText(dto?.oldEngine, 'เลขเครื่อง', 100);
+    const oldChassis = requiredText(dto?.oldChassis, 'เลขตัวถัง', 100);
+    const oldBrand = await this.resolveBrandName(dto?.oldBrand);
+    const oldPlateCategory = requiredText(dto?.oldPlateCategory, 'หมวดทะเบียนเดิม', 10);
+    const oldPlateNumber = requiredText(dto?.oldPlateNumber, 'เลขทะเบียนเดิม', 10);
+    const { category: newPlateCategory, number: newPlateNumber } = newPlateParts(dto?.newPlateCategory, dto?.newPlateNumber);
+    if (newPlateCategory && newPlateNumber && plateKey({ oldPlateCategory: newPlateCategory, oldPlateNumber: newPlateNumber }) === plateKey({ oldPlateCategory, oldPlateNumber })) {
+      throw new BadRequestException({ error: 'ทะเบียนใหม่ซ้ำกับทะเบียนเดิม - กรุณาตรวจสอบ' });
+    }
+    const submitDate = parseIsoDate(dto?.submitDate);
+    if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
+    const urgent = dto?.urgent === true;
+    const fees = calculatePlateChangeFees(vehicleClass, urgent);
+    const swap = await this.prisma.plateSwap.create({
+      data: {
+        createdById: currentUser()?.id ?? null,
+        kind: PlateSwapKind.CHANGE,
+        vehicleClass,
+        customerId,
+        oldOwnerName,
+        oldEngine,
+        oldChassis,
+        oldBrand,
+        oldPlateCategory,
+        oldPlateNumber,
+        newPlateCategory,
+        newPlateNumber,
+        submitDate,
+        numberSource: PlateSwapNumberSource.NEW_UNUSED,
+        buyNormalPlate: true,
+        buyAuctionPlate: false,
+        urgent,
+        billItems: JSON.parse(JSON.stringify(fees.billItems)),
+        noBillItems: JSON.parse(JSON.stringify(fees.noBillItems)),
+        billTotal: fees.billTotal,
+        noBillTotal: fees.noBillTotal,
+      },
+      include: swapInclude,
+    });
+    return { swap: serializePlateSwap(swap) };
+  }
+
   // ยื่นงาน "รถเก่า กับ รถเก่า" (ผู้ใช้ 2026-09-28): กรอก 2 คันในหน้าเดียว แต่เก็บ "แยกเป็น 2 งานในระบบ" คันละแถว
   // ผูกกันด้วย pairId เดียวกัน - ทะเบียนไขว้กันตั้งแต่ตอนยื่น (A ได้ทะเบียนของ B, B ได้ทะเบียนของ A) ต่างจากเคส
   // รถเก่า-รถใหม่ ที่ยังไม่รู้เลขใหม่ตอนยื่น และไม่มีการลิงก์ฐานข้อมูลรถจดใหม่เพราะทั้งคู่เป็นรถเก่า
@@ -754,6 +823,7 @@ export class PlateSwapService {
   // งานที่รับเอกสารกลับแล้ว = แก้ข้อมูลงานที่ปิดแล้ว ต้องมีเหตุผลและบันทึกประวัติ (ผู้ใช้ 2026-09-27)
   async linkNewVehicle(id: string, newVehicleIdRaw: unknown, remarkRaw?: unknown): Promise<{ swap: PlateSwapRow }> {
     const existing = await this.findOrThrow(id);
+    if (existing.kind === PlateSwapKind.CHANGE) throw new BadRequestException({ error: 'งานเปลี่ยนเลขทะเบียนไม่มีรถใหม่ให้ผูก' });
     const vehicleId = requireVehicleId(newVehicleIdRaw);
     const currentId = existing.newVehicleId ?? existing.newVehicle?.id ?? null;
     if (vehicleId === currentId) return this.reload(id);
@@ -847,10 +917,12 @@ export class PlateSwapService {
 
     const submitDate = has('submitDate') ? parseIsoDate(dto.submitDate) : existing.submitDate;
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
-    if (has('numberSource') && !isNumberSource(dto.numberSource)) throw new BadRequestException({ error: NUMBER_SOURCE_ERROR });
-    const numberSource = has('numberSource') ? (dto.numberSource as PlateSwapNumberSource) : existing.numberSource;
-    const buyNormalPlate = has('buyNormalPlate') ? dto.buyNormalPlate === true : existing.buyNormalPlate;
-    const buyAuctionPlate = has('buyAuctionPlate') ? dto.buyAuctionPlate === true : existing.buyAuctionPlate;
+    // เปลี่ยนเลขทะเบียน: ที่มาของเลขและป้ายตายตัว (บังคับซื้อป้าย ไม่มีเลขประมูล) - ส่งมาก็ไม่เปลี่ยน
+    const fixedOptions = existing.kind === PlateSwapKind.CHANGE;
+    if (!fixedOptions && has('numberSource') && !isNumberSource(dto.numberSource)) throw new BadRequestException({ error: NUMBER_SOURCE_ERROR });
+    const numberSource = !fixedOptions && has('numberSource') ? (dto.numberSource as PlateSwapNumberSource) : existing.numberSource;
+    const buyNormalPlate = !fixedOptions && has('buyNormalPlate') ? dto.buyNormalPlate === true : existing.buyNormalPlate;
+    const buyAuctionPlate = !fixedOptions && has('buyAuctionPlate') ? dto.buyAuctionPlate === true : existing.buyAuctionPlate;
     const vehicleClass = parseVehicleClass(existing.vehicleClass);
     // งานเก่าที่บันทึกก่อนมีคอลัมน์นี้อ่านได้เป็น undefined - นับเป็นไม่ด่วน
     const urgent = has('urgent') ? dto.urgent === true : (existing.urgent ?? false);
@@ -897,7 +969,7 @@ export class PlateSwapService {
       buyNormalPlate !== existing.buyNormalPlate ||
       buyAuctionPlate !== existing.buyAuctionPlate ||
       urgent !== (existing.urgent ?? false);
-    const fees = feesChanged ? feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent }) : null;
+    const fees = feesChanged ? feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent }, existing.kind) : null;
     const feeData = fees
       ? {
           billItems: JSON.parse(JSON.stringify(fees.billItems)) as Prisma.InputJsonValue,

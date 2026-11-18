@@ -7,6 +7,7 @@ import { PLATE_OPTION_SELECT } from '../vehicles/plate-requirement.js';
 import { findSuspectVehicles } from '../vehicles/vehicle-data-check.js';
 import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
 import { transferPage } from '../vehicle-transfer/transfer-type.js';
+import { BLOCKED_ALERT_DAYS, workingDaysBetween } from '../old-vehicle-jobs/old-vehicle-job-rules.js';
 import {
   addDays,
   agingBuckets,
@@ -1103,6 +1104,15 @@ export class OverviewService {
     const late = (key: StageKey) => lateAt(key).length;
     const withItems = (list: StuckItem[]) => ({ items: list.slice(0, ALERT_ITEM_LIMIT), itemTotal: list.length });
     const suspects = await this.suspectVehicles();
+    // งานรถเก่าที่ติดธงติดขัดเกิน 3 วันทำการ จันทร์-ศุกร์ (ผู้ใช้ 2026-11-18) - นับจากวันที่ติดธงตามเวลาไทย งานที่ยกเลิกการรับงานแล้วไม่นับ
+    const blockedOldJobs = (
+      await this.prisma.oldVehicleJob.findMany({
+        where: { blockedAt: { not: null }, cancelledAt: null },
+        select: { blockedAt: true },
+      })
+    )
+      .map((j) => workingDaysBetween(bangkokToday(j.blockedAt!), today))
+      .filter((days) => days > BLOCKED_ALERT_DAYS);
 
     const alerts = [
       overdueAr.length && {
@@ -1300,6 +1310,13 @@ export class OverviewService {
           note: 'ระบบยังคำนวณภาษีไม่ได้',
           href: focusUrl('/registration/new-vehicle/submit-documents/records', r.vehicle.chassis, { date: isoOf(r.submitDate), tab: recordsTab(r.vehicle.body) }),
         })),
+      },
+      blockedOldJobs.length && {
+        key: 'old-job-blocked',
+        severity: 'medium',
+        title: `งานรถเก่าติดขัดเกิน ${BLOCKED_ALERT_DAYS} วันทำการ`,
+        detail: `${blockedOldJobs.length} งาน - นานสุด ${Math.max(...blockedOldJobs)} วัน · เปิดหน้างานรถเก่าแล้วกดช่อง "ติดขัด"`,
+        href: '/registration/old-vehicle',
       },
       pendingUsers && {
         key: 'pending-users',

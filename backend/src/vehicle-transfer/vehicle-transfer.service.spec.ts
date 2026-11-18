@@ -56,6 +56,7 @@ function service(found: unknown) {
   const findMany = vi.fn().mockResolvedValue([]);
   const prisma = {
     $queryRaw: vi.fn().mockResolvedValue([]),
+    oldVehicleJob: { findFirst: vi.fn().mockResolvedValue(null) }, // ไม่มีแถวรับงานผูกอยู่ = งานลำดับเดิม
     $transaction: vi.fn(),
     vehicleTransfer: {
       create,
@@ -121,7 +122,7 @@ const validDto = {
 const auditOf = (prisma: ReturnType<typeof service>['prisma']) => prisma.auditLog.create.mock.calls.map((c) => c[0].data);
 
 describe('VehicleTransferService.create', () => {
-  it('บันทึกผู้โอน/ผู้รับโอน/ข้อมูลรถ ตัดช่องว่าง และเก็บ Bill / No Bill ที่พนักงานกรอก', async () => {
+  it('บันทึกผู้โอน/ผู้รับโอน/ข้อมูลรถ ตัดช่องว่าง และคิด Bill / No Bill ตามอัตรา (Bill ที่ส่งมาถูกเมิน)', async () => {
     const { svc, create } = service(null);
     const { transfer } = await svc.create(validDto);
     const data = create.mock.calls[0][0].data;
@@ -133,7 +134,7 @@ describe('VehicleTransferService.create', () => {
       transfereeName: 'สมหญิง',
       engine: '2AZ1234567',
       brand: 'Toyota',
-      billTotal: 500,
+      billTotal: 105,
       noBillTotal: 100,
     });
     expect(transfer.submitDate).toBe('2026-09-20');
@@ -153,13 +154,12 @@ describe('VehicleTransferService.create', () => {
     await expect(svc.create({ ...validDto, brand: 'Unknown' })).rejects.toMatchObject({ response: { error: 'กรุณาเลือกยี่ห้อจากรายการ' } });
   });
 
-  it('ต้องกรอก Bill ของรถยนต์ (0 ได้ ติดลบ/ไม่ใช่ตัวเลขไม่ได้)', async () => {
+  it('รถยนต์ไม่ต้องกรอก Bill แล้ว (ผู้ใช้ 2026-11-18) - ไม่ส่งหรือส่งค่าอะไรมาก็คิดตามอัตรา', async () => {
     const { svc, create } = service(null);
-    await expect(svc.create({ ...validDto, billTotal: '' })).rejects.toMatchObject({ response: { error: 'กรุณากรอก Bill' } });
-    await expect(svc.create({ ...validDto, billTotal: '-1' })).rejects.toMatchObject({ response: { error: 'Bill ไม่ถูกต้อง' } });
-    await expect(svc.create({ ...validDto, billTotal: 'abc' })).rejects.toMatchObject({ status: 400 });
-    await svc.create({ ...validDto, billTotal: 0 });
-    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 0, noBillTotal: 100 });
+    await svc.create({ ...validDto, billTotal: '' });
+    await svc.create({ ...validDto, billTotal: 'abc' });
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 105, noBillTotal: 100 });
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 105, noBillTotal: 100 });
   });
 
   it('STAFF_CAR ยื่นรถจักรยานยนต์ไม่ได้ และ STAFF_MOTO ยื่นรถยนต์ไม่ได้ (403) แต่ถือทั้งคู่ยื่นได้ทั้งสอง', async () => {
@@ -226,21 +226,24 @@ describe('VehicleTransferService.create - ค่าใช้จ่ายมอ�
     expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 105, noBillTotal: 60, dutyAmount: 20 });
   });
 
-  it('รถยนต์: No Bill ลงขัน 100 (ผู้ใช้ 2026-10-02) ไม่มีค่าอากร / Bill พนักงานกรอกเอง / ยอด No Bill จากหน้าเว็บถูกเมิน', async () => {
+  it('รถยนต์โอนปกติ (ผู้ใช้ 2026-11-18): Bill 105 / ลงขัน 100 / ค่าอากร 20 - ยอดจากหน้าเว็บถูกเมิน', async () => {
     const { svc, create } = service(null);
     await svc.create({ ...validDto, noBillTotal: 1 } as never);
-    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 500, noBillTotal: 100, dutyAmount: 0, useRequest: false, urgent: false, fineAmount: 0 });
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 105, noBillTotal: 100, dutyAmount: 20, useRequest: false, urgent: false, fineAmount: 0 });
   });
 
   it('รถยนต์งานด่วน: No Bill 100 + ด่วน 100 = 200', async () => {
     const { svc, create } = service(null);
     await svc.create({ ...validDto, urgent: true });
-    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 500, noBillTotal: 200, urgent: true });
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 105, noBillTotal: 200, urgent: true });
   });
 
-  it('รถยนต์ยังไม่มีอัตราโอนขอใช้/ค่าปรับ - ใช้ไม่ได้', async () => {
-    const { svc } = service(null);
-    await expect(svc.create({ ...validDto, useRequest: true })).rejects.toMatchObject({ response: { error: 'รถยนต์ยังไม่มีอัตราโอนขอใช้/ค่าปรับ - กรอก Bill เอง' } });
+  it('รถยนต์โอนขอใช้ (ผู้ใช้ 2026-11-18): Bill 130 / ค่าอากร 40 · ค่าปรับ 200 บวกใน Bill · ค่าปรับยอดอื่น = 400', async () => {
+    const { svc, create } = service(null);
+    await svc.create({ ...validDto, useRequest: true });
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 130, noBillTotal: 100, dutyAmount: 40, useRequest: true });
+    await svc.create({ ...validDto, fineAmount: 200 });
+    expect(create.mock.calls[1][0].data).toMatchObject({ billTotal: 305, fineAmount: 200 });
     await expect(svc.create({ ...validDto, fineAmount: 100 })).rejects.toMatchObject({ status: 400 });
   });
 
@@ -268,29 +271,29 @@ describe('VehicleTransferService.update - ค่าใช้จ่ายมอ�
     expect(Object.keys(changes).sort()).toEqual(['billTotal', 'dutyAmount', 'noBillTotal', 'urgent', 'useRequest']);
   });
 
-  it('ย้ายจากมอเตอร์ไซค์ไปรถยนต์ต้องกรอก Bill / No Bill เอง', async () => {
-    const { svc } = service(motoRow());
-    await expect(svc.update('t1', { vehicleClass: 'CAR', remark: 'ประเภทรถผิด' })).rejects.toMatchObject({ response: { error: 'กรุณากรอก Bill' } });
+  it('ย้ายจากมอเตอร์ไซค์ไปรถยนต์คิดยอดใหม่ตามอัตรารถยนต์', async () => {
     const ok = service(motoRow());
-    await ok.svc.update('t1', { vehicleClass: 'CAR', billTotal: '400', remark: 'ประเภทรถผิด' });
-    expect(ok.update.mock.calls[0][0].data).toMatchObject({ vehicleClass: 'CAR', billTotal: 400, noBillTotal: 100, dutyAmount: 0, useRequest: false, urgent: false, fineAmount: 0 });
+    await ok.svc.update('t1', { vehicleClass: 'CAR', remark: 'ประเภทรถผิด' });
+    expect(ok.update.mock.calls[0][0].data).toMatchObject({ vehicleClass: 'CAR', billTotal: 105, noBillTotal: 100, dutyAmount: 20, urgent: false });
   });
 });
 
 describe('VehicleTransferService.update - ค่าใช้จ่ายรถยนต์', () => {
-  it('ติ๊กด่วนเพิ่มคิด No Bill ใหม่ (ลงขัน 100 + ด่วน 100) / เอาออกกลับเป็น 100', async () => {
+  it('ติ๊กด่วนเพิ่มคิดใหม่ตามอัตรา (Bill 105 / ลงขัน 100 + ด่วน 100) / เอาออกกลับเป็น 100', async () => {
     const { svc, update } = service(row({ billTotal: 500, noBillTotal: 100 }));
     await svc.update('t1', { urgent: true, remark: 'ลูกค้าขอด่วน' });
-    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 500, noBillTotal: 200, urgent: true });
+    // งานเก่าที่พนักงานกรอก Bill 500 เอง: แก้ตัวเลือกค่าใช้จ่าย = คิดใหม่ตามอัตรา
+    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 105, noBillTotal: 200, dutyAmount: 20, urgent: true });
     const back = service(row({ billTotal: 500, noBillTotal: 200, urgent: true }));
     await back.svc.update('t1', { urgent: false, remark: 'ยกเลิกด่วน' });
     expect(back.update.mock.calls[0][0].data).toMatchObject({ noBillTotal: 100, urgent: false });
   });
 
-  it('ขอใช้/ค่าปรับของรถยนต์ใช้ไม่ได้ตอนแก้ด้วย', async () => {
-    const { svc } = service(row());
-    await expect(svc.update('t1', { useRequest: true, remark: 'x' })).rejects.toMatchObject({ status: 400 });
-    await expect(svc.update('t1', { fineAmount: '50', remark: 'x' })).rejects.toMatchObject({ status: 400 });
+  it('รถยนต์เปลี่ยนเป็นโอนขอใช้ได้ตอนแก้ (Bill 130 / ค่าอากร 40) · ค่าปรับยอดอื่นนอกจาก 200 = 400', async () => {
+    const { svc, update } = service(row());
+    await svc.update('t1', { useRequest: true, remark: 'x' });
+    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 130, dutyAmount: 40, useRequest: true });
+    await expect(service(row()).svc.update('t1', { fineAmount: '50', remark: 'x' })).rejects.toMatchObject({ status: 400 });
   });
 });
 
@@ -333,15 +336,28 @@ describe('VehicleTransferService - ขั้นตรวจรถ', () => {
 
   it('งานโอนตามผู้ถือกรรมสิทธิ์ไม่มีขั้นตรวจรถ', async () => {
     const { svc } = service(row());
-    await expect(svc.markInspectionSent('t1', '2026-09-21')).rejects.toMatchObject({ response: { error: 'งานโอนตามผู้ถือกรรมสิทธิ์ไม่มีขั้นตรวจรถ' } });
+    await expect(svc.markInspectionSent('t1', '2026-09-21', 'BRING_IN', undefined)).rejects.toMatchObject({ response: { error: 'งานโอนตามผู้ถือกรรมสิทธิ์ไม่มีขั้นตรวจรถ' } });
   });
 
   it('ส่งตรวจได้ครั้งเดียว วันที่ต้องไม่ก่อนวันที่ยื่น', async () => {
     const { svc, update } = service(inspection());
-    await expect(svc.markInspectionSent('t1', '2026-09-19')).rejects.toMatchObject({ response: { error: 'วันที่ส่งตรวจต้องไม่ก่อนวันที่ยื่น' } });
-    await svc.markInspectionSent('t1', '2026-09-21');
-    expect(update.mock.calls[0][0].data).toEqual({ inspectionSentDate: new Date('2026-09-21T00:00:00.000Z') });
+    await expect(svc.markInspectionSent('t1', '2026-09-19', 'BRING_IN', undefined)).rejects.toMatchObject({ response: { error: 'วันที่ส่งตรวจต้องไม่ก่อนวันที่ยื่น' } });
+    await svc.markInspectionSent('t1', '2026-09-21', 'BRING_IN', '500');
+    // นำรถมาตรวจ = ไม่มีค่าตรวจ ยอดที่ส่งมาไม่ใช้
+    expect(update.mock.calls[0][0].data).toEqual({ inspectionSentDate: new Date('2026-09-21T00:00:00.000Z'), inspectionSentType: 'BRING_IN', inspectionCost: 0 });
     expect(update.mock.calls[0][0].where).toMatchObject({ inspectionSentDate: null, returnedDate: null });
+  });
+
+  it('ส่งตรวจต้องเลือกแบบการตรวจ - ส่งตรวจนอกต้องกรอกค่าตรวจ (0 ได้)', async () => {
+    const { svc, update } = service(inspection());
+    await expect(svc.markInspectionSent('t1', '2026-09-21', undefined, undefined)).rejects.toMatchObject({ status: 400 });
+    await expect(svc.markInspectionSent('t1', '2026-09-21', 'OUTSIDE', '')).rejects.toMatchObject({ response: { error: 'กรุณากรอก ค่าตรวจรถ' } });
+    await expect(svc.markInspectionSent('t1', '2026-09-21', 'OUTSIDE', '-1')).rejects.toMatchObject({ status: 400 });
+    await svc.markInspectionSent('t1', '2026-09-21', 'OUTSIDE', '200');
+    expect(update.mock.calls[0][0].data).toMatchObject({ inspectionSentType: 'OUTSIDE', inspectionCost: 200 });
+    const free = service(inspection());
+    await free.svc.markInspectionSent('t1', '2026-09-21', 'OUTSIDE', 0);
+    expect(free.update.mock.calls[0][0].data).toMatchObject({ inspectionSentType: 'OUTSIDE', inspectionCost: 0 });
   });
 
   it('บันทึกผลตรวจต้องส่งตรวจก่อน และต้องเป็น ผ่าน/ไม่ผ่าน', async () => {
@@ -391,9 +407,9 @@ describe('VehicleTransferService - ขั้นตรวจรถ', () => {
     expect(withResult.update.mock.calls[0][0].data).toEqual({ inspectionResult: null, inspectionResultDate: null });
     expect(auditOf(withResult.prisma)[0]).toMatchObject({ entity: 'VehicleTransfer', action: 'undo-inspection-result', remark: 'บันทึกผลผิด' });
 
-    const sentOnly = service(inspection({ inspectionSentDate: new Date('2026-09-21T00:00:00.000Z') }));
+    const sentOnly = service(inspection({ inspectionSentDate: new Date('2026-09-21T00:00:00.000Z'), inspectionSentType: 'OUTSIDE', inspectionCost: 200 }));
     await sentOnly.svc.undoInspection('t1', 'กดส่งตรวจผิดงาน');
-    expect(sentOnly.update.mock.calls[0][0].data).toEqual({ inspectionSentDate: null });
+    expect(sentOnly.update.mock.calls[0][0].data).toEqual({ inspectionSentDate: null, inspectionSentType: null, inspectionCost: 0 });
     expect(auditOf(sentOnly.prisma)[0]).toMatchObject({ action: 'undo-inspection-sent' });
 
     const untouched = service(inspection());
@@ -412,12 +428,9 @@ describe('VehicleTransferService.update / cancel', () => {
     expect(Object.keys(audit.changes)).toEqual(['transfereeName']);
   });
 
-  it('แก้ Bill / No Bill ได้ด้วยเหตุผล และลงประวัติเฉพาะช่องที่เปลี่ยน', async () => {
-    const { svc, update, prisma } = service(row());
-    await svc.update('t1', { billTotal: '650', remark: 'คีย์ราคาผิด' });
-    // แก้เฉพาะ Bill ที่กรอก - No Bill เดิมคงไว้ (ไม่คิดใหม่)
-    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 650, noBillTotal: 300 });
-    expect(Object.keys(auditOf(prisma)[0].changes)).toEqual(['billTotal']);
+  it('Bill พิมพ์เองไม่ได้แล้ว (ผู้ใช้ 2026-11-18) - ส่ง billTotal มาอย่างเดียว = ไม่มีข้อมูลที่เปลี่ยน', async () => {
+    const { svc } = service(row());
+    await expect(svc.update('t1', { billTotal: '650', remark: 'คีย์ราคาผิด' })).rejects.toMatchObject({ status: 400 });
   });
 
   it('วันที่ยื่นแก้ให้หลังวันที่ส่งตรวจไม่ได้', async () => {
@@ -475,9 +488,10 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
     await expect(asUser(['ADMIN'], () => owner.svc.update('t1', { newPlateCategory: '1กต', newPlateNumber: '5', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
   });
 
-  it('รถยนต์ / ไม่เลือกจังหวัด / โอนขอใช้ = 400', async () => {
-    const { svc } = service(null);
-    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, vehicleClass: 'CAR', billTotal: '0' }))).rejects.toMatchObject({ status: 400 });
+  it('รถยนต์ (ผู้ใช้ 2026-11-18): Bill 330 / ค่าอากร 40 / ด่วนเพิ่ม 100 · ไม่เลือกจังหวัด / โอนขอใช้ = 400', async () => {
+    const { svc, create } = service(null);
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, vehicleClass: 'CAR', urgent: true, contribution: '100' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ vehicleClass: 'CAR', billTotal: 330, noBillTotal: 200, dutyAmount: 40 });
     await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, submitProvince: undefined }))).rejects.toMatchObject({ status: 400 });
     await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, useRequest: true }))).rejects.toMatchObject({ status: 400 });
   });

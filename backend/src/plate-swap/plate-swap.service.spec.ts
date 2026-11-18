@@ -169,12 +169,12 @@ const auditOf = (prisma: ReturnType<typeof service>['prisma']) => prisma.auditLo
 describe('PlateSwapService.create', () => {
   it('บันทึกรถเก่าพร้อม snapshot ค่าใช้จ่าย (เลขไม่เคยออก + ซื้อป้าย 200)', async () => {
     const { svc, create, prisma } = service(null);
-    const { swap } = await svc.create(validDto);
+    const { swap } = await svc.create({ ...validDto, urgent: true });
     const data = create.mock.calls[0][0].data;
     expect(data.oldOwnerName).toBe('สมชาย');
     expect(data.submitDate).toEqual(new Date('2026-09-20T00:00:00.000Z'));
     expect(data.billTotal).toBe(775);
-    expect(data.noBillTotal).toBe(210); // ลงขัน 200 + ค่าอากร 10
+    expect(data.noBillTotal).toBe(210); // ลงขัน 100 + ค่าอากร 10 + ด่วนเพิ่ม 100 (ผู้ใช้ 2026-11-18)
     expect(data.newVehicleId).toBe('v-new');
     expect(data.oldBrand).toBe('Toyota');
     expect(data.oldEngine).toBe('2AZ1234567');
@@ -1114,5 +1114,34 @@ describe('PlateSwapService - รถจักรยานยนต์', () => {
   it('แก้งานมอเตอร์ไซค์ด้วยบัญชีรถยนต์ไม่ได้ (เช็คจากประเภทของงานจริง)', async () => {
     const { svc } = service(swapRow({ vehicleClass: 'MOTO' }));
     await expect(asUser(['STAFF_CAR'], () => svc.update('s1', { oldOwnerName: 'x', remark: 'y' }))).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18) - รถคันเดียว ไม่มีรถคู่ บังคับซื้อป้าย
+describe('PlateSwapService.createChange / งาน CHANGE', () => {
+  const changeDto = { ...validDto, newVehicleId: undefined, numberSource: undefined, buyNormalPlate: false };
+
+  it('รถยนต์ด่วน: kind CHANGE ไม่ผูกรถใหม่ ซื้อป้ายเสมอ Bill 775 / No Bill 210', async () => {
+    const { svc, create, prisma } = service(null);
+    await svc.createChange({ ...changeDto, urgent: true });
+    const data = create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ kind: 'CHANGE', vehicleClass: 'CAR', buyNormalPlate: true, buyAuctionPlate: false, numberSource: 'NEW_UNUSED', urgent: true, billTotal: 775, noBillTotal: 210 });
+    expect(data.newVehicleId).toBeUndefined();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled(); // ไม่มีรถใหม่ให้ล็อก
+  });
+
+  it('มอเตอร์ไซค์ไม่ด่วน: Bill 635 / No Bill 110 · ทะเบียนใหม่ซ้ำทะเบียนเดิม = 400', async () => {
+    const { svc, create } = service(null);
+    await asUser(['STAFF_MOTO'], () => svc.createChange({ ...changeDto, vehicleClass: 'MOTO' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ kind: 'CHANGE', vehicleClass: 'MOTO', billTotal: 635, noBillTotal: 110 });
+    await expect(svc.createChange({ ...changeDto, newPlateCategory: 'กข', newPlateNumber: '1234' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('แก้งาน CHANGE: ตัวเลือกป้าย/ที่มาของเลขไม่เปลี่ยน คิดใหม่เฉพาะงานด่วน · ผูกรถใหม่ไม่ได้', async () => {
+    const rowChange = swapRow({ kind: 'CHANGE', urgent: true, buyNormalPlate: true, billTotal: 775, noBillTotal: 210, newVehicleId: null, newVehicle: null });
+    const { svc, update } = service(rowChange);
+    await svc.update('s1', { urgent: false, buyNormalPlate: false, numberSource: 'AUCTION_RESERVED', remark: 'ไม่ด่วนแล้ว' });
+    expect(update.mock.calls[0][0].data).toMatchObject({ buyNormalPlate: true, numberSource: 'NEW_UNUSED', urgent: false, billTotal: 775, noBillTotal: 110 });
+    await expect(service(rowChange).svc.linkNewVehicle('s1', 'v-new')).rejects.toMatchObject({ status: 400 });
   });
 });

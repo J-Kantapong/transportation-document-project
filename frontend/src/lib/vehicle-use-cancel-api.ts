@@ -31,6 +31,7 @@ export interface VehicleUseCancellation {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
+  urgent: boolean; // งานด่วน (ผู้ใช้ 2026-11-18) - ลงขันด่วนเพิ่มอยู่ใน noBillTotal แล้ว
   billTotal: string;
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม
@@ -53,6 +54,7 @@ export interface CreateVehicleUseCancellationInput {
   plateCategory: string;
   plateNumber: string;
   submitDate: string;
+  urgent?: boolean; // งานด่วน: รถยนต์ +100 / มอเตอร์ไซค์ +50 ใน No Bill
 }
 
 export interface UpdateVehicleUseCancellationInput {
@@ -64,6 +66,7 @@ export interface UpdateVehicleUseCancellationInput {
   plateCategory: string;
   plateNumber: string;
   submitDate: string;
+  urgent?: boolean; // เปลี่ยน = backend คิด No Bill ใหม่
   returnedDate?: string;
   remark: string;
   expectedUpdatedAt: string;

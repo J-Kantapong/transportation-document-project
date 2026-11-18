@@ -49,6 +49,7 @@ import {
   type JobSnapshot,
   type JobType,
 } from './other-jobs.js';
+import { dutyAmountOf, type FeeItem } from '../plate-swap/plate-swap-fee.js';
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถเข้าคิวเมื่อพนักงานบันทึกส่งงานแล้ว (Vehicle.deliveredDate) และยังไม่อยู่ในบิลที่ยังใช้อยู่
 // (บิลที่ VOID ไม่นับ - รถกลับเข้าคิว) เลขที่บิลพิมพ์เอง เพราะช่วงแรกยังรันเลขร่วมกับ Google Sheet ของงานประเภทอื่น
@@ -1146,7 +1147,7 @@ export class BillingService {
       noBillTotal: Number(r.noBillTotal),
       dutyAmount: Number(r.dutyAmount),
     });
-    const [transfers, cancels, copies, moveOuts, renewals] = await Promise.all([
+    const [transfers, cancels, copies, moveOuts, renewals, plateChanges] = await Promise.all([
       !opts.ids || opts.ids.has('TRANSFER')
         ? db.vehicleTransfer.findMany({ where: { ...done, ...idsOf('TRANSFER') }, select: { ...shape, transferType: true, transferorName: true, transfereeName: true } })
         : [],
@@ -1157,6 +1158,31 @@ export class BillingService {
         ? db.taxRenewal.findMany({
             where: { ...owner, cancelledAt: null, ...delivered, paymentDate: { not: null }, ...idsOf('TAX_RENEWAL') },
             select: { id: true, customerId: true, chassis: true, plateCategory: true, plateNumber: true, vehicleType: true, ownerName: true, deliveredDate: true, paymentDate: true, billTotal: true, noBillTotal: true },
+          })
+        : [],
+      // เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): PlateSwap kind CHANGE - ได้ใบเสร็จ (returnedDate) + ส่งงานลูกค้าแล้ว (deliveredDate) เหมือนงานอื่น
+      !opts.ids || opts.ids.has('PLATE_CHANGE')
+        ? db.plateSwap.findMany({
+            where: { ...done, kind: 'CHANGE', ...idsOf('PLATE_CHANGE') },
+            select: {
+              id: true,
+              customerId: true,
+              vehicleClass: true,
+              oldChassis: true,
+              oldBrand: true,
+              oldOwnerName: true,
+              oldPlateCategory: true,
+              oldPlateNumber: true,
+              newPlateCategory: true,
+              newPlateNumber: true,
+              returnedDate: true,
+              deliveredDate: true,
+              receiptNo: true,
+              receiptAmount: true,
+              billTotal: true,
+              noBillTotal: true,
+              noBillItems: true,
+            },
           })
         : [],
     ]);
@@ -1186,6 +1212,30 @@ export class BillingService {
           dutyAmount: 0,
         }),
       ),
+      ...plateChanges.map((r): BillableJob => {
+        // PlateSwap เก็บค่าอากรรวมอยู่ใน noBillTotal - แยกออกให้ตรงกับงานอื่น (ต้นทุน = No Bill + ค่าอากร เท่าเดิม)
+        const duty = dutyAmountOf(Array.isArray(r.noBillItems) ? (r.noBillItems as unknown as FeeItem[]) : []);
+        const newPlate = r.newPlateCategory && r.newPlateNumber ? `${r.newPlateCategory} ${r.newPlateNumber}` : '';
+        return {
+          type: 'PLATE_CHANGE',
+          id: r.id,
+          customerId: r.customerId!,
+          vehicleClass: r.vehicleClass === 'MOTO' ? 'MOTO' : 'CAR',
+          variant: null,
+          chassis: r.oldChassis,
+          // ทะเบียนที่ลูกค้าเห็นหลังงานเสร็จคือเลขใหม่ - แสดง "เดิม → ใหม่" ให้ตรวจได้
+          plateText: [`${r.oldPlateCategory} ${r.oldPlateNumber}`, newPlate].filter(Boolean).join(' → '),
+          brand: r.oldBrand,
+          ownerName: r.oldOwnerName,
+          doneDate: iso(r.returnedDate)!,
+          deliveredDate: iso(r.deliveredDate) ?? '',
+          receiptNo: r.receiptNo,
+          receiptAmount: num(r.receiptAmount),
+          billTotal: Number(r.billTotal),
+          noBillTotal: Number(r.noBillTotal) - duty,
+          dutyAmount: duty,
+        };
+      }),
     ];
     // งานที่อยู่ในบิลที่ยังไม่ VOID แล้ว (บอกเลขบิลไว้ให้ข้อความ error)
     const billed = new Map<string, string>();

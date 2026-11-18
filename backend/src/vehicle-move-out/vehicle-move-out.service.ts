@@ -17,7 +17,7 @@ import {
   sameTime,
   toUtcDate,
 } from '../plate-swap/plate-swap.service.js';
-import { calculateMoveOutFees, moveOutPricedFor } from './vehicle-move-out-fee.js';
+import { calculateMoveOutFees } from './vehicle-move-out-fee.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-extractor.js';
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
@@ -108,13 +108,9 @@ function parseFlag(value: unknown, label: string): boolean {
   throw new BadRequestException({ error: `${label} ต้องเป็น true หรือ false` });
 }
 
-// งานด่วนมีอัตราเฉพาะมอเตอร์ไซค์ (ผู้ใช้ 2026-10-06) - รถยนต์ยังไม่มีข้อมูล เลือกด่วนไม่ได้เพื่อไม่ให้ยอดผิด
-function urgentFor(vehicleClass: MoveOutVehicleClass, raw: unknown): boolean {
-  const urgent = parseFlag(raw, 'งานด่วน');
-  if (urgent && !moveOutPricedFor(vehicleClass)) {
-    throw new BadRequestException({ error: 'งานย้ายออกรถยนต์ยังไม่มีอัตรางานด่วน' });
-  }
-  return urgent;
+// งานด่วนมีอัตราทั้งสองประเภท (มอเตอร์ไซค์ +50 ผู้ใช้ 2026-10-06 / รถยนต์ +100 ผู้ใช้ 2026-11-18)
+function urgentFor(_vehicleClass: MoveOutVehicleClass, raw: unknown): boolean {
+  return parseFlag(raw, 'งานด่วน');
 }
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
@@ -368,7 +364,12 @@ export class VehicleMoveOutService {
       submitDate,
       urgent,
       // ติ๊กด่วนเปลี่ยนเท่านั้นที่คิดยอดใหม่ - แก้อย่างอื่นคงยอด snapshot เดิม (กันอัตราใหม่ในอนาคตทำให้งานเก่าเปลี่ยน)
-      noBillTotal: urgent === existing.urgent ? Number(existing.noBillTotal) : calculateMoveOutFees(parseVehicleClass(existing.vehicleClass), urgent).noBillTotal,
+      // งานรถยนต์ที่ยื่นก่อนมีอัตรา (ทุกยอด 0, ก่อน 2026-11-18): ติ๊กด่วนเปลี่ยน = ใส่ยอดครบทั้ง Bill / No Bill / ค่าอากร
+      ...(urgent === existing.urgent
+        ? { noBillTotal: Number(existing.noBillTotal) }
+        : Number(existing.billTotal) === 0 && Number(existing.noBillTotal) === 0 && Number(existing.dutyAmount) === 0
+          ? calculateMoveOutFees(parseVehicleClass(existing.vehicleClass), urgent)
+          : { noBillTotal: calculateMoveOutFees(parseVehicleClass(existing.vehicleClass), urgent).noBillTotal }),
       returnedDate,
     };
     const changes: AuditChanges = diffChanges(existing, next);

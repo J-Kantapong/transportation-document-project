@@ -34,10 +34,14 @@ export const PLATE_SWAP_CAR_NUMBER_ITEMS: Record<
 
 // No Bill: ลงขัน 200 + ค่าอากรของรถเก่า 10 บาท (ผู้ใช้ 2026-09-23: ค่าอากรแยกเป็นรายการของตัวเอง ไม่อยู่ในใบเสร็จ
 // แต่นับรวมในยอด No Bill)
+// ผู้ใช้ 2026-11-18: ลงขัน 200 เดิมของรถยนต์ "รวมด่วนแล้ว" -> แยกเป็น ลงขัน 100 + ลงขันด่วนเพิ่ม 100 (ฟอร์มติ๊กงานด่วนไว้ให้ก่อน)
+// งานที่บันทึกก่อนวันนั้นเก็บ snapshot "ลงขัน 200" ไว้ตามเดิม และ migration ตั้ง urgent = true ให้ (ยอดเท่าเดิมเมื่อคิดใหม่)
 export const PLATE_SWAP_CAR_NO_BILL_ITEMS: FeeItem[] = [
-  { label: 'ลงขัน', amount: 200 },
+  { label: 'ลงขัน', amount: 100 },
   { label: 'ค่าอากร', amount: 10 },
 ];
+
+export const PLATE_SWAP_CAR_URGENT_ITEM: FeeItem = { label: 'ลงขันด่วนเพิ่ม', amount: 100 };
 
 // --- รถจักรยานยนต์ (ผู้ใช้ 2026-09-28) ---------------------------------------------------------
 // ต่างจากรถยนต์ 4 จุด: ค่าขอแก้ไขฯ 10 (รถยนต์ 50), ค่าแผ่นป้าย 100 (รถยนต์ 200), ลงขัน 100 (รถยนต์ 200)
@@ -63,6 +67,7 @@ export interface PlateSwapFeeOptions {
   numberSource: PlateSwapNumberSource;
   buyNormalPlate: boolean;
   buyAuctionPlate: boolean;
+  urgent?: boolean; // งานด่วน +100 (No Bill) - ผู้ใช้ 2026-11-18
 }
 
 export interface PlateSwapMotoFeeOptions {
@@ -93,11 +98,21 @@ export function calculatePlateSwapCarFees(options: PlateSwapFeeOptions): PlateSw
   // ติ๊กป้ายประมูลกับเลขไม่เคยออก = ไม่มีรายการนี้ให้ซื้อ -> ไม่คิด (service ปฏิเสธไว้ก่อนแล้ว)
   if (options.buyAuctionPlate && numberItems.auctionPlate) billItems.push(numberItems.auctionPlate);
   const noBillItems = [...PLATE_SWAP_CAR_NO_BILL_ITEMS];
+  if (options.urgent) noBillItems.push(PLATE_SWAP_CAR_URGENT_ITEM);
   const billTotal = sum(billItems);
   const noBillTotal = sum(noBillItems);
   const dutyTotal = dutyAmountOf(noBillItems);
   // ยอดรวมไม่นับค่าอากร - ค่าอากรแสดงแยกบรรทัดของตัวเอง (ผู้ใช้ 2026-09-23)
   return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
+}
+
+// เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): ลูกค้าจองเลขในระบบกรมขนส่งแล้วเอามาลงกับรถ 1 คัน - รายการเดียวกับงานสลับเลข
+// แต่ "บังคับซื้อป้ายเสมอ" และไม่มีตัวเลือกเลขประมูล/ชุดสงวน: รถยนต์ Bill 5+20+50+500+200 = 775 / มอเตอร์ไซค์ 5+20+10+500+100 = 635
+// No Bill เท่างานสลับเลข: รถยนต์ ลงขัน 100 + ด่วนเพิ่ม 100 / มอเตอร์ไซค์ ลงขัน 100 + ด่วนเพิ่ม 50 / ค่าอากร 10
+export function calculatePlateChangeFees(vehicleClass: 'CAR' | 'MOTO', urgent: boolean): PlateSwapFees {
+  return vehicleClass === 'MOTO'
+    ? calculatePlateSwapMotoFees({ buyNormalPlate: true, urgent })
+    : calculatePlateSwapCarFees({ numberSource: PlateSwapNumberSource.NEW_UNUSED, buyNormalPlate: true, buyAuctionPlate: false, urgent });
 }
 
 // ค่าใช้จ่ายงานสลับเลขของรถจักรยานยนต์ (ผู้ใช้ 2026-09-28) - ไม่มี numberSource ให้เลือกเหมือนรถยนต์
