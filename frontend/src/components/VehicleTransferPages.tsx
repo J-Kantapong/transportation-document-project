@@ -1639,18 +1639,14 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ยื่น</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ยื่น / เจ้าของงาน</th>
                   <th scope="col">ผู้โอน → ผู้รับโอน</th>
-                  <th scope="col">ประเภทรถ</th>
-                  <th scope="col">ทะเบียน</th>
-                  <th scope="col">รูปใบเสร็จ</th>
-                  <th scope="col">ข้อมูลใบเสร็จ</th>
-                  <th scope="col">{status === "pending" ? "" : "วันที่รับกลับ"}</th>
-                  {anyWritable && <th />}
+                  <th scope="col">ทะเบียน / ประเภทรถ</th>
+                  <th scope="col">ใบเสร็จ</th>
+                  <th scope="col">{status === "pending" ? "รับกลับ" : "วันที่รับกลับ"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1761,18 +1757,28 @@ function ReturnRow({
     }
   }
 
+  // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - 5 ช่อง ผลตรวจใบเสร็จอยู่แถวล่าง (แบบเดียวกับหน้าสลับเลข)
+  const top: React.CSSProperties = { verticalAlign: "top", borderBottom: 0, paddingBottom: 8 };
+  const missing = item.receipts.length === 0 ? ["รูปใบเสร็จ"] : [];
   return (
+    <>
     <tr>
-      <td>{isoToDisplayDate(item.submitDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
-        <CustomerCell item={item} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
+        <div>{isoToDisplayDate(item.submitDate)}</div>
+        <div style={{ marginTop: 6 }}>
+          <CustomerCell item={item} />
+        </div>
       </td>
-      <td>
-        <PartiesCell item={item} />
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
+        <div className="job">{item.transferorName}</div>
+        <div className="job">→ {item.transfereeName}</div>
+        <div className="sub">ตัวถัง {item.chassis}</div>
+        <div className="sub">{item.brand}</div>
+        <div className="sub">เครื่อง {item.engine}</div>
       </td>
-      <td>{CLASS_LABEL[item.vehicleClass]}</td>
-      <td>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 110 }}>
         <PlateCell item={item} />
+        <div className="sub">{CLASS_LABEL[item.vehicleClass]}</div>
         {moveIn && !returned && canWrite && (
           <div style={{ marginTop: 4 }}>
             <div className="sub">ทะเบียนใหม่ {item.submitProvince ?? ""} *</div>
@@ -1780,8 +1786,9 @@ function ReturnRow({
           </div>
         )}
       </td>
-      <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <td style={{ ...top, minWidth: 150 }}>
+        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           {item.receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
@@ -1849,29 +1856,30 @@ function ReturnRow({
           </>
         )}
       </td>
-      <td>
-        <ReceiptFieldsCell item={item} canWrite={canWrite} onChange={onChange} />
-        <ReceiptRecheckBox type="TRANSFER" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
-      </td>
-      <td>
+      <td style={{ ...top, whiteSpace: "normal", minWidth: 120 }}>
         {item.returnedDate ? (
           isoToDisplayDate(item.returnedDate)
         ) : canWrite ? (
-          <button
-            type="button"
-            className="primary"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || item.receipts.length === 0}
-            title={item.receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(item, moveIn ? { newPlateCategory: newPlateCategory.trim(), newPlateNumber: newPlateNumber.trim() } : undefined)}
-          >
-            ยืนยันรับกลับ
-          </button>
+          <>
+            <button
+              type="button"
+              className="primary"
+              style={{ padding: "8px 14px", fontSize: 13, whiteSpace: "nowrap" }}
+              disabled={busy || item.receipts.length === 0}
+              aria-describedby={missing.length > 0 ? `transfer-missing-${item.id}` : undefined}
+              onClick={() => onConfirm(item, moveIn ? { newPlateCategory: newPlateCategory.trim(), newPlateNumber: newPlateNumber.trim() } : undefined)}
+            >
+              ยืนยันรับกลับ
+            </button>
+            {missing.length > 0 && (
+              <div id={`transfer-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+                ยังขาด: {missing.join(" · ")}
+              </div>
+            )}
+          </>
         ) : null}
-      </td>
-      {showActions && (
-        <td>
-          {canWrite && (
+        {canWrite && (
+          <div style={{ marginTop: 10 }}>
             <RowActions onEdit={() => onDialog("edit")} onCancel={() => onDialog("cancel")}>
               {returned && (
                 <button type="button" className="text-button" style={dangerButton} onClick={() => onDialog("undo")}>
@@ -1879,9 +1887,17 @@ function ReturnRow({
                 </button>
               )}
             </RowActions>
-          )}
-        </td>
-      )}
+          </div>
+        )}
+      </td>
     </tr>
+    <tr>
+      <td colSpan={5} style={{ paddingTop: 0, whiteSpace: "normal" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <ReceiptRecheckBox type="TRANSFER" id={item.id} refreshKey={`${item.receiptAmount ?? ""}|${item.receipts?.length ?? 0}|${item.billTotal ?? ""}`} />
+        </div>
+      </td>
+    </tr>
+    </>
   );
 }

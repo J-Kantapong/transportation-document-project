@@ -416,16 +416,13 @@ export function ReceivingQueuePage({
   const tableHead = (
     <thead>
       <tr>
-        {!groupBySheet && <th scope="col">{dateColumnLabel}</th>}
-        {!groupBySheet && <th scope="col">ชื่อลูกค้า</th>}
+        {/* ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - วันที่+ลูกค้า, ตัวถัง+ประเภทรถ, ทะเบียน+เลขที่ใบเสร็จ อยู่ช่องเดียวกัน */}
+        {!groupBySheet && <th scope="col">{dateColumnLabel} / ชื่อลูกค้า</th>}
         {groupBySheet && <th scope="col" style={{ width: 40 }}>ลำดับ</th>}
-        <th scope="col">เลขตัวถัง</th>
-        {!groupBySheet && <th scope="col">ประเภทรถ</th>}
-        <th scope="col">ทะเบียน</th>
-        {showReceiptNo && <th scope="col">เลขที่ใบเสร็จ</th>}
+        <th scope="col">เลขตัวถัง / ประเภทรถ</th>
+        <th scope="col">ทะเบียน{showReceiptNo ? " / เลขที่ใบเสร็จ" : ""}</th>
         {attachPhoto && <th scope="col">{doneDateLabel}</th>}
         {attachPhoto && <th scope="col">{attachPhoto.label}</th>}
-        {groupBySheet && <th scope="col">ประเภทรถ</th>}
       </tr>
     </thead>
   );
@@ -440,13 +437,21 @@ export function ReceivingQueuePage({
     );
     return (
       <tr key={r.id}>
-        {!groupBySheet && <td>{isoToDisplayDate(r.date) || r.date}</td>}
-        {!groupBySheet && <td>{r.customerName}</td>}
-        {groupBySheet && <td>{order}</td>}
-        <td>{r.chassis}</td>
-        {!groupBySheet && <td>{r.body || "—"}</td>}
-        <td>{plateText(r)}</td>
-        {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
+        {!groupBySheet && (
+          <td style={{ verticalAlign: "top", whiteSpace: "normal", minWidth: 110 }}>
+            <div>{isoToDisplayDate(r.date) || r.date}</div>
+            <div className="sub">{r.customerName}</div>
+          </td>
+        )}
+        {groupBySheet && <td style={{ verticalAlign: "top" }}>{order}</td>}
+        <td style={{ verticalAlign: "top" }}>
+          <div className="job">{r.chassis}</div>
+          <div className="sub">{r.body || "—"}</div>
+        </td>
+        <td style={{ verticalAlign: "top" }}>
+          <div>{plateText(r)}</div>
+          {showReceiptNo && <div className="sub">{r.receiptNo || "—"}</div>}
+        </td>
         {attachPhoto && (
           <>
             <td>
@@ -511,7 +516,6 @@ export function ReceivingQueuePage({
             </td>
           </>
         )}
-        {groupBySheet && <td>{r.body || "—"}</td>}
       </tr>
     );
   }
@@ -738,7 +742,7 @@ export function ReceivingQueuePage({
                   </div>
                   {open && (
                     <div className="table-wrap">
-                      <table>
+                      <table className="table-tight">
                         {tableHead}
                         <tbody>{sheet.rows.map((r, i) => renderPendingRow(r, i + 1))}</tbody>
                       </table>
@@ -750,7 +754,7 @@ export function ReceivingQueuePage({
           </div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               {tableHead}
               <tbody>{ordered.map((r) => renderPendingRow(r))}</tbody>
             </table>
@@ -788,31 +792,34 @@ export function ReceivingQueuePage({
           <div className="empty-customers">{completedLoading ? "กำลังโหลด..." : completedQuery.trim() ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการที่ดำเนินการแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            {/* ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - รวมคอลัมน์ (วันที่+ลูกค้า, ตัวถัง+ประเภท, ทะเบียน+เลขที่ใบเสร็จ, รูป+วันที่รับ+แก้ไข) */}
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">{dateColumnLabel}</th>
-                  <th scope="col">ชื่อลูกค้า</th>
-                  <th scope="col">เลขตัวถัง</th>
-                  <th scope="col">ประเภทรถ</th>
-                  <th scope="col">ทะเบียน</th>
-                  {showReceiptNo && <th scope="col">เลขที่ใบเสร็จ</th>}
+                  <th scope="col">{dateColumnLabel} / ชื่อลูกค้า</th>
+                  <th scope="col">เลขตัวถัง / ประเภทรถ</th>
+                  <th scope="col">ทะเบียน{showReceiptNo ? " / เลขที่ใบเสร็จ" : ""}</th>
                   {photoColumnLabel && <th scope="col">{photoColumnLabel}</th>}
                   <th scope="col">{doneDateLabel}</th>
-                  {fixReceived && <th scope="col">แก้ไข</th>}
                 </tr>
               </thead>
               <tbody>
                 {completed.map((r) => (
                   <tr key={r.id} style={r.id === lastSavedId ? { background: "#eaf7f2" } : undefined}>
-                    <td>{isoToDisplayDate(r.date) || r.date}</td>
-                    <td>{r.customerName}</td>
-                    <td>{r.chassis}</td>
-                    <td>{r.body || "—"}</td>
-                    <td>{plateText(r)}</td>
-                    {showReceiptNo && <td>{r.receiptNo || "—"}</td>}
+                    <td style={{ verticalAlign: "top", whiteSpace: "normal", minWidth: 110 }}>
+                      <div>{isoToDisplayDate(r.date) || r.date}</div>
+                      <div className="sub">{r.customerName}</div>
+                    </td>
+                    <td style={{ verticalAlign: "top" }}>
+                      <div className="job">{r.chassis}</div>
+                      <div className="sub">{r.body || "—"}</div>
+                    </td>
+                    <td style={{ verticalAlign: "top" }}>
+                      <div>{plateText(r)}</div>
+                      {showReceiptNo && <div className="sub">{r.receiptNo || "—"}</div>}
+                    </td>
                     {photoColumnLabel && (
-                      <td>
+                      <td style={{ verticalAlign: "top" }}>
                         {r.photoUrl ? (
                           <AuthedImage
                             src={r.photoUrl}
@@ -825,9 +832,10 @@ export function ReceivingQueuePage({
                         )}
                       </td>
                     )}
-                    <td>{r.doneDate ? isoToDisplayDate(r.doneDate) : "—"}</td>
+                    <td style={{ verticalAlign: "top" }}>
+                      <div>{r.doneDate ? isoToDisplayDate(r.doneDate) : "—"}</div>
                     {fixReceived && (
-                      <td style={{ whiteSpace: "nowrap" }}>
+                      <div style={{ marginTop: 6, whiteSpace: "nowrap" }}>
                         {r.itemDeliveredDate ? (
                           <span className="muted" title="ยกเลิกใบส่งงานก่อน (หน้ารายงานส่งงาน) แล้วจึงแก้ได้">
                             ส่ง{fixReceived.itemLabel}แล้ว {isoToDisplayDate(r.itemDeliveredDate)}
@@ -847,8 +855,9 @@ export function ReceivingQueuePage({
                             </button>
                           </span>
                         )}
-                      </td>
+                      </div>
                     )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

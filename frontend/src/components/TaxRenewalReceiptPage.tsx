@@ -126,15 +126,13 @@ export function TaxRenewalReceiptPage() {
           <div className="empty-customers">{tab === "pending" ? "ไม่มีงานที่รอรับใบเสร็จ" : "ยังไม่มีงานที่รับใบเสร็จแล้ว"}</div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="table-tight">
               <thead>
                 <tr>
-                  <th scope="col">วันที่ชำระ</th>
-                  <th scope="col">เจ้าของงาน</th>
+                  <th scope="col">วันที่ชำระ / เจ้าของงาน</th>
                   <th scope="col">รถ</th>
-                  <th scope="col">รูปใบเสร็จ</th>
-                  <th scope="col">ข้อมูลใบเสร็จ</th>
-                  <th scope="col">{tab === "pending" ? "" : "วันที่รับ"}</th>
+                  <th scope="col">ใบเสร็จ</th>
+                  <th scope="col">{tab === "pending" ? "รับใบเสร็จ" : "วันที่รับ"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -348,12 +346,26 @@ function ReceiptRow({
     }
   }
 
+  const missing: string[] = [];
+  if (receipts.length === 0) missing.push("แนบรูปใบเสร็จ");
+  const missingId = `tax-receipt-missing-${row.id}`;
+  const topCell = { verticalAlign: "top", borderBottom: 0, paddingBottom: 8 } as const;
+
   return (
+    // ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - ผลตรวจใบเสร็จอยู่แถวล่าง (แบบเดียวกับหน้าสลับเลข)
+    <>
     <tr>
-      <td>{day(row.paymentDate)}</td>
-      <td style={{ whiteSpace: "normal", minWidth: 140 }}>
+      <td style={{ ...topCell, whiteSpace: "normal", minWidth: 150 }}>
+        <div>{day(row.paymentDate)}</div>
+        <div style={{ marginTop: 6 }}>
         {canWrite ? (
-          <select value={row.customerId ?? ""} onChange={(e) => void changeCustomer(e.target.value)} aria-label="เจ้าของงาน">
+          <select
+            value={row.customerId ?? ""}
+            onChange={(e) => void changeCustomer(e.target.value)}
+            aria-label="เจ้าของงาน"
+            // ชื่อบริษัทยาวทำให้กล่องกว้างทั้งตาราง (ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน)
+            style={{ width: 170, maxWidth: "100%" }}
+          >
             <option value="">ยังไม่ระบุ - เลือกลูกค้า</option>
             {customerOptions.map((c) => (
               <option key={c.id} value={c.id}>
@@ -366,15 +378,16 @@ function ReceiptRow({
         ) : (
           <span className="muted">ยังไม่ระบุ</span>
         )}
-      </td>
-      <td>
-        <div className="job">{plateText(row)}</div>
-        <div className="sub">
-          {row.vehicleType} · ตัวถัง {row.chassis}
         </div>
       </td>
-      <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <td style={{ ...topCell, whiteSpace: "normal", minWidth: 130 }}>
+        <div className="job">{plateText(row)}</div>
+        <div className="sub">ตัวถัง {row.chassis}</div>
+        <div className="sub">{row.vehicleType}</div>
+      </td>
+      <td style={{ ...topCell, whiteSpace: "normal", minWidth: 150 }}>
+        <ReceiptFieldsCell row={row} canWrite={canWrite} onChange={onChange} />
+        <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {receipts.length === 0 && <span className="muted">ยังไม่มีรูป</span>}
           {receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
@@ -442,33 +455,46 @@ function ReceiptRow({
           </>
         )}
       </td>
-      <td>
-        <ReceiptFieldsCell row={row} canWrite={canWrite} onChange={onChange} />
-        <ReceiptRecheckBox type="TAX_RENEWAL" id={row.id} refreshKey={`${row.receiptAmount ?? ""}|${row.receipts?.length ?? 0}|${row.billTotal ?? ""}`} />
-      </td>
-      <td>
+      <td style={{ ...topCell, whiteSpace: "normal", minWidth: 110 }}>
         {received ? (
           <div>
             <div>{day(row.receivedDate)}</div>
             {canWrite && (
-              <button type="button" className="text-button" style={{ ...dangerButton, paddingLeft: 0 }} onClick={onUndo}>
-                ยกเลิกรับ
-              </button>
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="text-button" style={{ ...dangerButton, paddingLeft: 0 }} onClick={onUndo}>
+                  ยกเลิกรับ
+                </button>
+              </div>
             )}
           </div>
         ) : canWrite ? (
-          <button
-            type="button"
-            className="primary"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-            disabled={busy || receipts.length === 0}
-            title={receipts.length === 0 ? "แนบรูปใบเสร็จก่อน" : undefined}
-            onClick={() => onConfirm(row)}
-          >
-            ยืนยันรับใบเสร็จ
-          </button>
+          <div>
+            <button
+              type="button"
+              className="primary"
+              style={{ padding: "8px 14px", fontSize: 13 }}
+              disabled={busy || receipts.length === 0}
+              aria-describedby={missing.length > 0 ? missingId : undefined}
+              onClick={() => onConfirm(row)}
+            >
+              ยืนยันรับใบเสร็จ
+            </button>
+            {missing.length > 0 && (
+              <div id={missingId} className="sub" style={{ color: "#a86200" }}>
+                ยังขาด: {missing.join(" · ")}
+              </div>
+            )}
+          </div>
         ) : null}
       </td>
     </tr>
+    <tr>
+      <td colSpan={4} style={{ paddingTop: 0, whiteSpace: "normal" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <ReceiptRecheckBox type="TAX_RENEWAL" id={row.id} refreshKey={`${row.receiptAmount ?? ""}|${row.receipts?.length ?? 0}|${row.billTotal ?? ""}`} />
+        </div>
+      </td>
+    </tr>
+    </>
   );
 }
