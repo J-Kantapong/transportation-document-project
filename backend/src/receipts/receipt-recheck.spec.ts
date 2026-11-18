@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptRecheck, recheckReceipt } from './receipt-recheck.js';
+import { acceptRecheck, recheckJobs, recheckReceipt } from './receipt-recheck.js';
 import type { ReceiptReading } from './receipt-extraction.js';
 
 const reading = (o: Partial<ReceiptReading>): ReceiptReading => ({
@@ -44,5 +44,51 @@ describe('recheckReceipt (ตรวจใบเสร็จซ้ำ ผู้�
     expect(() => acceptRecheck(diff, '')).toThrow();
     expect(acceptRecheck(diff, 'ลูกค้าขอใช้ แก้ Bill แล้ว')).toBe('ลูกค้าขอใช้ แก้ Bill แล้ว');
     expect(acceptRecheck(recheckReceipt(job, [reading({})]), undefined)).toBeNull();
+  });
+});
+
+describe('recheckReceipt - ข้อ 1 2 6 (ผู้ใช้ 2026-11-19)', () => {
+  it('ข้อ 6: เทียบรายการทีละยอด + จับโอนปกติที่ใบเสร็จเป็นโอนขอใช้ (เคสจริง production)', () => {
+    const c = recheckReceipt(
+      { ...job, receiptAmount: 130, expectedItems: [{ label: 'คำขอ', amount: 5 }, { label: 'โอนทะเบียนรถ', amount: 100 }], useRequest: false },
+      [reading({ total: 130, items: [{ label: 'คำขอ', amount: 10 }, { label: 'โอนทะเบียนรถ', amount: 100 }, { label: 'ธรรมเนียมอื่นๆ(ขอใช้รถต่างภูมิลำเนา)', amount: 20 }] })],
+    );
+    expect(c.items).toEqual({ extra: [{ label: 'คำขอ', amount: 10 }, { label: 'ธรรมเนียมอื่นๆ(ขอใช้รถต่างภูมิลำเนา)', amount: 20 }], missing: [{ label: 'คำขอ', amount: 5 }] });
+    expect(c.problems.some((p) => p.includes('โอนขอใช้ แต่งานยื่นเป็นโอนปกติ'))).toBe(true);
+  });
+
+  it('ข้อ 6: ยอดรวมตรงแต่รายการต่าง = เตือน ไม่ขวาง', () => {
+    const c = recheckReceipt({ ...job, expectedItems: [{ label: 'คำขอ', amount: 5 }, { label: 'โอนทะเบียนรถ', amount: 100 }] }, [reading({ items: [{ label: 'รวม', amount: 105 }], total: 105 })]);
+    expect(c.problems).toEqual([]);
+    expect(c.warnings.some((w) => w.startsWith('รายการไม่ตรงกัน'))).toBe(true);
+  });
+
+  it('ข้อ 1-2: ช่องที่ AI ไม่แน่ใจ (ยกเว้นที่ตรวจแล้วตรง) + เลขที่ใบเสร็จผิดรูปแบบ = เตือน', () => {
+    const c = recheckReceipt({ ...job, receiptNo: '69-0001' }, [reading({ uncertainFields: ['total', 'chassis', 'cc'] })]);
+    expect(c.problems).toEqual([]);
+    expect(c.warnings.join(' ')).toContain('AI ไม่แน่ใจ: ยอดรวม');
+    expect(c.warnings.join(' ')).not.toContain('เลขตัวถัง'); // ตัวถังตรงกับงานแล้ว
+    expect(c.warnings.join(' ')).toContain('ผิดรูปแบบ');
+    expect(recheckReceipt({ ...job, receiptNo: '69/0001' }, [reading({})]).warnings).toEqual([]);
+  });
+});
+
+describe('recheckJobs - ข้อ 4 เลขที่ใบเสร็จซ้ำข้ามงาน', () => {
+  const none = { findMany: async () => [] };
+  const mk = (moveOutNo: string, transferType: string) => {
+    const moveOut = { id: 'm1', chassis: 'A', plateCategory: '7ขฐ', plateNumber: '4860', billTotal: 25, receiptAmount: 25, receiptNo: '70/0000301', receipts: [] };
+    const transfer = { id: 't1', receiptNo: moveOutNo, plateCategory: '7ขฐ', plateNumber: '5805', transferType };
+    return {
+      plateSwap: none, vehicleUseCancellation: none, plateCopy: none, taxRenewal: none, documentSubmission: none,
+      vehicleMoveOut: { findMany: async ({ where }: any) => (where.id ? [moveOut] : where.receiptNo.in.includes(moveOut.receiptNo) ? [moveOut] : []) },
+      vehicleTransfer: { findMany: async ({ where }: any) => (where.receiptNo?.in.includes(transfer.receiptNo) ? [transfer] : []) },
+    } as any;
+  };
+  it('ซ้ำกับงานอื่น = เตือน (เลขรันแยกต่อสำนักงาน) / ย้ายออกกับโอนย้ายเข้าคนละสำนักงาน = ไม่เตือน', async () => {
+    const dup = (await recheckJobs(mk('70/0000301', 'OWNER'), 'MOVE_OUT', ['m1'])).get('m1')!;
+    expect(dup.duplicates).toEqual(['งานโอน 7ขฐ 5805']);
+    expect(dup.problems).toEqual([]);
+    expect(dup.warnings.join(' ')).toContain('เลขที่ใบเสร็จซ้ำกับงานอื่น');
+    expect((await recheckJobs(mk('70/0000301', 'MOVE_IN'), 'MOVE_OUT', ['m1'])).get('m1')!.duplicates).toEqual([]);
   });
 });

@@ -22,7 +22,10 @@ export function ReceiptRecheckBox({ type, id, refreshKey }: { type: RecheckJobTy
   }, [type, id, refreshKey]);
   if (!check) return null;
   const ok = check.problems.length === 0;
+  // เตือน (สีเหลือง): AI ไม่แน่ใจ / เลขที่ใบเสร็จผิดรูปแบบ / เลขที่ซ้ำกับงานอื่น / รายการต่างแต่ยอดตรง - ไม่ขวางการยืนยัน
+  const warnings = check.warnings ?? [];
   return (
+    <>
     <div
       className="sub"
       role="status"
@@ -39,5 +42,14 @@ export function ReceiptRecheckBox({ type, id, refreshKey }: { type: RecheckJobTy
         </>
       )}
     </div>
+    {warnings.length > 0 && (
+      <div className="sub" style={{ marginTop: 4, padding: "6px 8px", borderRadius: 8, minWidth: 220, background: "#fff6e0", color: "#7a5300", whiteSpace: "normal" }}>
+        <strong>ควรดูรูปใบเสร็จซ้ำ</strong>
+        {warnings.map((w) => (
+          <div key={w}>• {w}</div>
+        ))}
+      </div>
+    )}
+    </>
   );
 }
