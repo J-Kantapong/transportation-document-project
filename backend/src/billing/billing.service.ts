@@ -1188,6 +1188,16 @@ export class BillingService {
         select: { sourceType: true, sourceId: true, invoice: { select: { invoiceNo: true } } },
       });
       for (const r of rows) billed.set(`${r.sourceType}:${r.sourceId}`, r.invoice.invoiceNo);
+      // งานที่ผูกกับใบเสนอราคาที่ออกเลขแล้ว (ผู้ใช้ 2026-11-18): วางบิลผ่านใบเสนอราคาใบนั้น ไม่อยู่ในคิวนี้ - บิลจากใบเสนอราคาเป็นบรรทัดกำหนดเอง
+      // (ไม่มี sourceType บน InvoiceItem) จึงต้องดูจาก QuotationItem · ใบเสนอราคาถูกยกเลิก / ไม่อนุมัติ / ถูกแทนที่ = งานกลับเข้าคิวเอง
+      const quoted = await db.quotationItem.findMany({
+        where: { sourceType: { not: null }, sourceId: { in: jobs.map((j) => j.id) }, quotation: { status: { in: ['ISSUED', 'APPROVED'] } } },
+        select: { sourceType: true, sourceId: true, quotation: { select: { quotationNo: true, invoices: { where: { status: { not: 'VOID' } }, select: { invoiceNo: true }, take: 1 } } } },
+      });
+      for (const r of quoted) {
+        const key = `${r.sourceType}:${r.sourceId}`;
+        if (!billed.has(key)) billed.set(key, r.quotation.invoices[0]?.invoiceNo ?? `ใบเสนอราคา ${r.quotation.quotationNo ?? ''}`.trim());
+      }
     }
     // งานที่ปิดงาน - วางบิลนอกระบบแล้ว (JobBillingClosure) ไม่อยู่ในคิวและลงบิลในระบบไม่ได้จนกว่า ADMIN เปิดกลับ
     const closed = new Map<string, string>();

@@ -19,6 +19,9 @@ export interface ItemRow {
   quantityText: string;
   unitPriceText: string;
   costText: string;
+  // ใบเสนอราคา: งานที่บรรทัดนี้ดึงมา (งานโอนย้ายเข้า ผู้ใช้ 2026-11-18) - ตัวแก้ไม่แตะ แค่พาไปกับแถว ลบแถว = เลิกผูก
+  sourceType?: string | null;
+  sourceId?: string | null;
 }
 
 export const emptyItemRow = (): ItemRow => ({

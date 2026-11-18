@@ -148,7 +148,16 @@ export function QuotationFormPage() {
           setValidDaysText(String(q.validDays));
           setTitle(q.title);
           setConditions(q.conditions ?? "");
-          if (q.kind === "JOB") setRows(itemRowsFromItems(q.items));
+          // บรรทัดที่ผูกกับงาน (sourceType) ต้องอยู่ในตัวแก้ด้วย - itemRowsFromItems ของบิลตัดบรรทัดแบบนี้ออก จึงแปลงทีละบรรทัดแล้วใส่ค่าผูกกลับ
+          if (q.kind === "JOB") {
+            setRows(
+              q.items.map((it) => ({
+                ...itemRowsFromItems([{ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: it.amount, cost: it.cost }])[0],
+                sourceType: it.sourceType ?? null,
+                sourceId: it.sourceId ?? null,
+              })),
+            );
+          }
           else setRateRows(rateRowsFromItems(q.items));
           if (q.yamahaMonth && q.yamahaCounts) setYamaha({ month: q.yamahaMonth, size: q.yamahaSize, counts: q.yamahaCounts });
         }
@@ -210,7 +219,18 @@ export function QuotationFormPage() {
       validDays,
       title: title.trim(),
       conditions: conditions.trim(),
-      items: kind === "JOB" ? items.map(({ kind: k, description, quantity, unitPrice, cost }) => ({ kind: k, description, quantity, unitPrice, cost })) : rateRowsToInput(rateRows),
+      items:
+        kind === "JOB"
+          ? items.map(({ kind: k, description, quantity, unitPrice, cost }, i) => ({
+              kind: k,
+              description,
+              quantity,
+              unitPrice,
+              cost,
+              // บรรทัดที่ดึงจากงานโอนย้ายเข้า - ส่งค่าผูกงานไปด้วย (items เรียงตรงกับ rows)
+              ...(rows[i]?.sourceId ? { sourceType: rows[i].sourceType, sourceId: rows[i].sourceId } : {}),
+            }))
+          : rateRowsToInput(rateRows),
       yamahaMonth: kind === "JOB" ? (yamaha?.month ?? null) : null,
       yamahaSize: kind === "JOB" ? (yamaha?.size ?? null) : null,
     };
@@ -246,9 +266,12 @@ export function QuotationFormPage() {
     if (!customerId || isNew) return setError("เลือกลูกค้าในระบบก่อนดึงงานโอนย้ายเข้า");
     setError("");
     try {
-      const res = await quotationApi.moveInJobs(customerId);
-      setMoveInJobs(res.jobs);
-      setMoveInPicked(new Set(res.jobs.map((j) => j.id)));
+      const res = await quotationApi.moveInJobs(customerId, editing?.id);
+      // งานที่มีบรรทัดอยู่ในใบนี้แล้วไม่แสดงซ้ำ
+      const inRows = new Set(rows.map((r) => r.sourceId).filter(Boolean));
+      const jobs = res.jobs.filter((j) => !inRows.has(j.id));
+      setMoveInJobs(jobs);
+      setMoveInPicked(new Set(jobs.map((j) => j.id)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "ดึงงานโอนย้ายเข้าไม่สำเร็จ");
     }
@@ -258,7 +281,14 @@ export function QuotationFormPage() {
     const picked = (moveInJobs ?? []).filter((j) => moveInPicked.has(j.id));
     if (picked.length === 0) return setError("ติ๊กงานโอนย้ายเข้าอย่างน้อย 1 งาน");
     setError("");
-    const added = itemRowsFromItems(picked.flatMap((j) => j.items).map((it) => ({ ...it, amount: round2(it.quantity * it.unitPrice) })));
+    // แต่ละบรรทัดผูกกับงานของมัน (sourceType / sourceId) - ลบบรรทัด = เลิกผูก
+    const added = picked.flatMap((j) =>
+      j.items.map((it) => ({
+        ...itemRowsFromItems([{ kind: it.kind, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, amount: round2(it.quantity * it.unitPrice), cost: it.cost }])[0],
+        sourceType: "TRANSFER",
+        sourceId: j.id,
+      })),
+    );
     // บรรทัดว่างที่ยังไม่ได้พิมพ์อะไรไม่เก็บไว้ - ที่พิมพ์ไว้แล้วอยู่ต่อ
     setRows((prev) => [...prev.filter((r) => r.description.trim() || r.unitPriceText.trim()), ...added]);
     if (!title.trim()) setTitle(`งานโอนย้ายเข้า ${picked.length} คัน`);
@@ -489,7 +519,8 @@ export function QuotationFormPage() {
                     </button>
                   </div>
                   <span className="muted" style={{ fontSize: 12 }}>
-                    บรรทัดที่เพิ่มแก้ได้ตามปกติ · งานเหล่านี้ยังอยู่ในคิววางบิลงานอื่นๆ - เมื่อออกใบวางบิลจากใบเสนอราคานี้แล้ว ให้ปิดงานในคิวนั้น (วางบิลนอกระบบ) เพื่อไม่ให้วางบิลซ้ำ
+                    บรรทัดที่เพิ่มแก้ข้อความ/ยอดได้ และผูกกับงานนั้นอยู่ (ลบบรรทัด = เลิกผูก) · ออกเลขใบเสนอราคาแล้วงานจะออกจากคิววางบิลงานอื่นๆ และดึงเข้าใบอื่นไม่ได้ จนกว่าใบนี้จะถูกยกเลิก / ไม่อนุมัติ ·
+                    ออกใบวางบิลจากใบนี้ได้เมื่อส่งงานลูกค้า (ใบ DL) แล้ว
                   </span>
                 </>
               )}

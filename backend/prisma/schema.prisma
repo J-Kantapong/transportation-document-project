@@ -1571,10 +1571,15 @@ model QuotationItem {
   chassisPrefix   String?
   vatInclusive    Boolean  @default(false)
   includesReceipt Boolean  @default(false)
+  // งานที่บรรทัดนี้ดึงมา (ผู้ใช้ 2026-11-18): sourceType = TRANSFER (งานโอนย้ายเข้า) sourceId = id ของงาน ไม่มี FK เหมือน InvoiceItem
+  // งานที่ผูกกับใบเสนอราคาที่ออกเลขแล้ว (ISSUED / APPROVED) ไม่อยู่ในคิววางบิลงานอื่นๆ และดึงเข้าใบเสนอราคาอื่นไม่ได้
+  sourceType      String?
+  sourceId        String?
 
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
 
   @@index([quotationId])
+  @@index([sourceType, sourceId])
 }
 
 // บรรทัดกำหนดเองของบิล (ผู้ใช้ 2026-09-29) ไม่ผูกกับรถ - งานเก่าที่ย้ายมาจากระบบเดิม / ขายสินค้า

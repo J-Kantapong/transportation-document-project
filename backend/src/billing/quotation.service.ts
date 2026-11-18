@@ -94,6 +94,8 @@ type ItemData = {
   chassisPrefix?: string | null;
   vatInclusive?: boolean;
   includesReceipt?: boolean;
+  sourceType?: string | null; // งานที่บรรทัดนี้ดึงมา (TRANSFER = งานโอนย้ายเข้า)
+  sourceId?: string | null;
 };
 
 // บรรทัดราคาต่อคัน - กติกาเดียวกับตารางราคาลูกค้า (BillingService.replaceRates) เพราะอนุมัติแล้วจะกลายเป็นตารางนั้น
@@ -222,6 +224,8 @@ export class QuotationService {
           chassisPrefix: it.chassisPrefix,
           vatInclusive: it.vatInclusive,
           includesReceipt: it.includesReceipt,
+          sourceType: it.sourceType,
+          sourceId: it.sourceId,
         })),
     };
   }
@@ -346,8 +350,80 @@ export class QuotationService {
   // งานโอนย้ายเข้าของลูกค้าที่รับใบเสร็จแล้ว พร้อมบรรทัดที่เสนอให้ใส่ในใบเสนอราคา (ผู้ใช้ 2026-11-18: เสนอราคาหลังงานเสร็จ เพราะไม่รู้ยอดที่แน่ชัดก่อน)
   // ต่องาน: ค่าธรรมเนียม (FEE) = ยอดบนใบเสร็จจริง ไม่มีใช้ยอด Bill ที่ระบบคิด + ค่าบริการ (SERVICE) จากตารางราคางานอื่นๆ ของลูกค้า (JobFeeRate แบบ MOVE_IN)
   // - ลูกค้ายังไม่ตั้งราคา = ไม่มีบรรทัดค่าบริการ ให้บัญชีเพิ่มเอง · ค่าอากรไม่ขึ้นเป็นบรรทัด (นับเป็นต้นทุนของค่าบริการ เหมือนวางบิลงานอื่นๆ)
-  // ไม่แสดงงานที่อยู่ในบิลที่ยังไม่ VOID · บรรทัดที่ดึงไปเป็นข้อความธรรมดา ไม่ผูกกับงาน: ออกบิลจากใบเสนอราคาแล้วงานยังอยู่ในคิววางบิลงานอื่นๆ ต้องปิดงานที่นั่นเอง
-  async moveInJobs(customerIdRaw: unknown) {
+  // บรรทัดที่ดึงไปผูกกับงาน (sourceType TRANSFER / sourceId) - ไม่แสดงงานที่อยู่ในบิล / ปิดงานแล้ว / อยู่ในใบเสนอราคาอื่นที่ยังมีผล
+  // quotationId = ร่างที่กำลังแก้ งานของร่างนั้นเอง (และของฉบับเดิมที่ร่างนี้แก้ไขแทน) ยังดึงได้
+  // งานที่ถูกใช้ไปแล้ว -> เหตุผล: อยู่ในบิลที่ยังไม่ VOID / ปิดงานวางบิลนอกระบบ / อยู่ในใบเสนอราคาอื่นที่ยังมีผล (ร่าง, ออกเลขแล้ว, อนุมัติแล้ว)
+  // self = ใบที่กำลังแก้ (และฉบับเดิมที่ใบนั้นแก้ไขแทน) ไม่นับ
+  private async jobsTaken(ids: string[], self: string[]): Promise<Map<string, string>> {
+    const taken = new Map<string, string>();
+    if (ids.length === 0) return taken;
+    const [billed, closed, quoted] = await Promise.all([
+      this.prisma.invoiceItem.findMany({ where: { sourceType: 'TRANSFER', sourceId: { in: ids }, invoice: LIVE_INVOICE }, select: { sourceId: true, invoice: { select: { invoiceNo: true } } } }),
+      this.prisma.jobBillingClosure.findMany({ where: { jobType: 'TRANSFER', jobId: { in: ids } }, select: { jobId: true } }),
+      this.prisma.quotationItem.findMany({
+        where: { sourceType: 'TRANSFER', sourceId: { in: ids }, quotation: { id: { notIn: self }, status: { in: ['DRAFT', 'ISSUED', 'APPROVED'] } } },
+        select: { sourceId: true, quotation: { select: { quotationNo: true } } },
+      }),
+    ]);
+    for (const r of quoted) if (r.sourceId) taken.set(r.sourceId, `อยู่ในใบเสนอราคา ${r.quotation.quotationNo ?? '(ร่าง)'} แล้ว`);
+    for (const r of closed) taken.set(r.jobId, 'ปิดงาน - วางบิลนอกระบบแล้ว');
+    for (const r of billed) if (r.sourceId) taken.set(r.sourceId, `อยู่ในบิล ${r.invoice.invoiceNo} แล้ว`);
+    return taken;
+  }
+
+  // ผูกบรรทัดกับงานโอนย้ายเข้าที่หน้าจอส่งมา (sourceType / sourceId ตามลำดับบรรทัด) - งานต้องเป็นของลูกค้านี้ รับใบเสร็จแล้ว ไม่ถูกยกเลิก และยังไม่ถูกใช้
+  private async attachJobLinks(items: ItemData[], raw: unknown, customerId: string | null, self: string[]) {
+    const rawItems = Array.isArray(raw) ? (raw as Array<Record<string, unknown> | null>) : [];
+    const ids = new Set<string>();
+    items.forEach((it, i) => {
+      const r = rawItems[i];
+      if (!r || r.sourceType === undefined || r.sourceType === null || r.sourceType === '') return;
+      if (r.sourceType !== 'TRANSFER' || typeof r.sourceId !== 'string' || !r.sourceId) throw bad(`บรรทัดที่ ${i + 1}: งานที่ผูกกับบรรทัดไม่ถูกต้อง`);
+      it.sourceType = 'TRANSFER';
+      it.sourceId = r.sourceId;
+      ids.add(r.sourceId);
+    });
+    if (ids.size === 0) return;
+    if (!customerId) throw bad('ใบเสนอราคาที่ดึงงานโอนย้ายเข้าต้องเลือกลูกค้าในระบบ');
+    const list = [...ids];
+    const jobs = await this.prisma.vehicleTransfer.findMany({
+      where: { id: { in: list } },
+      select: { id: true, customerId: true, transferType: true, cancelledAt: true, returnedDate: true, plateCategory: true, plateNumber: true },
+    });
+    const taken = await this.jobsTaken(list, self);
+    for (const id of list) {
+      const job = jobs.find((j) => j.id === id);
+      if (!job || job.transferType !== 'MOVE_IN') throw bad('ไม่พบงานโอนย้ายเข้าที่ผูกกับบรรทัด - ดึงงานใหม่');
+      const name = `งานโอนย้ายเข้า ${job.plateCategory} ${job.plateNumber}`;
+      if (job.customerId !== customerId) throw bad(`${name} ไม่ใช่งานของลูกค้านี้`);
+      if (job.cancelledAt) throw bad(`${name} ถูกยกเลิกแล้ว - ลบบรรทัดของงานนี้ออก`);
+      if (!job.returnedDate) throw bad(`${name} ยังไม่รับใบเสร็จ`);
+      const reason = taken.get(id);
+      if (reason) throw bad(`${name} ${reason} - ลบบรรทัดของงานนี้ออก`);
+    }
+  }
+
+  // ออกใบวางบิลจากใบเสนอราคา: งานที่ผูกไว้ต้องยังวางบิลได้ - ไม่ถูกยกเลิก ส่งงานลูกค้าแล้ว (ใบ DL - กติกาเดียวกับคิววางบิลงานอื่นๆ ผู้ใช้ 2026-10-08)
+  // และยังไม่อยู่ในบิลอื่น / ไม่ถูกปิดงานวางบิลนอกระบบ
+  private async assertLinkedJobsBillable(ids: string[], quotationId: string) {
+    if (ids.length === 0) return;
+    const jobs = await this.prisma.vehicleTransfer.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, cancelledAt: true, deliveredDate: true, plateCategory: true, plateNumber: true },
+    });
+    const taken = await this.jobsTaken(ids, [quotationId]);
+    for (const id of ids) {
+      const job = jobs.find((j) => j.id === id);
+      if (!job) throw bad('ไม่พบงานโอนย้ายเข้าที่ผูกกับใบเสนอราคานี้');
+      const name = `งานโอนย้ายเข้า ${job.plateCategory} ${job.plateNumber}`;
+      if (job.cancelledAt) throw bad(`${name} ถูกยกเลิกแล้ว - ทำฉบับแก้ไขของใบเสนอราคาก่อนออกใบวางบิล`);
+      if (!job.deliveredDate) throw bad(`${name} ยังไม่ได้ส่งงานลูกค้า (ใบ DL) - ส่งงานที่หน้า Delivery ก่อนออกใบวางบิล`);
+      const reason = taken.get(id);
+      if (reason) throw bad(`${name} ${reason}`);
+    }
+  }
+
+  async moveInJobs(customerIdRaw: unknown, quotationIdRaw?: unknown) {
     const customerId = typeof customerIdRaw === 'string' ? customerIdRaw.trim() : '';
     if (!customerId) throw bad('กรุณาเลือกลูกค้าก่อนดึงงานโอนย้ายเข้า');
     const rows = await this.prisma.vehicleTransfer.findMany({
@@ -356,14 +432,14 @@ export class QuotationService {
       take: 300,
     });
     if (rows.length === 0) return { jobs: [] };
-    const [billed, rates] = await Promise.all([
-      this.prisma.invoiceItem.findMany({
-        where: { sourceType: 'TRANSFER', sourceId: { in: rows.map((r) => r.id) }, invoice: { status: { not: 'VOID' } } },
-        select: { sourceId: true },
-      }),
+    const quotationId = typeof quotationIdRaw === 'string' && quotationIdRaw ? quotationIdRaw : null;
+    const editing = quotationId ? await this.prisma.quotation.findUnique({ where: { id: quotationId }, select: { id: true, replacesId: true } }) : null;
+    const self = editing ? [editing.id, ...(editing.replacesId ? [editing.replacesId] : [])] : [];
+    const [taken, rates] = await Promise.all([
+      this.jobsTaken(rows.map((r) => r.id), self),
       this.prisma.jobFeeRate.findMany({ where: { customerId }, orderBy: { sortOrder: 'asc' } }),
     ]);
-    const billedIds = new Set(billed.map((b) => b.sourceId));
+    const billedIds = new Set(taken.keys());
     const rate = matchJobRate(
       rates.map((r) => ({ ...r, amount: Number(r.amount) })),
       { jobType: 'TRANSFER', vehicleClass: 'MOTO', variant: 'MOVE_IN' },
@@ -377,10 +453,11 @@ export class QuotationService {
           const plate = `${r.plateCategory} ${r.plateNumber}`;
           const newPlate = r.newPlateCategory && r.newPlateNumber ? `${r.newPlateCategory} ${r.newPlateNumber} ${r.submitProvince ?? ''}`.trim() : null;
           const target = newPlate ? `${plate} → ${newPlate}` : `${plate}${r.submitProvince ? ` ย้ายเข้า${r.submitProvince}` : ''}`;
-          type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: number | null };
+          type Line = { kind: 'FEE' | 'SERVICE'; description: string; quantity: number; unitPrice: number; cost: number | null; sourceType: 'TRANSFER'; sourceId: string };
+          const link = { sourceType: 'TRANSFER' as const, sourceId: r.id };
           const items: Line[] = [];
           if (fee.amount > 0) {
-            items.push({ kind: 'FEE', description: `ค่าธรรมเนียมโอนย้ายเข้า ทะเบียน ${target}${r.receiptNo ? ` (ใบเสร็จ ${r.receiptNo})` : ''}`.slice(0, 300), quantity: 1, unitPrice: fee.amount, cost: null });
+            items.push({ kind: 'FEE', description: `ค่าธรรมเนียมโอนย้ายเข้า ทะเบียน ${target}${r.receiptNo ? ` (ใบเสร็จ ${r.receiptNo})` : ''}`.slice(0, 300), quantity: 1, unitPrice: fee.amount, cost: null, ...link });
           }
           if (serviceFee !== null && serviceFee > 0) {
             items.push({
@@ -389,6 +466,7 @@ export class QuotationService {
               quantity: 1,
               unitPrice: serviceFee,
               cost: Math.round((Number(r.noBillTotal) + Number(r.dutyAmount)) * 100) / 100,
+              ...link,
             });
           }
           return {
@@ -412,7 +490,7 @@ export class QuotationService {
   }
 
   // ---------- ร่าง ----------
-  private async build(dto: QuotationDto, kind: QuotationKind) {
+  private async build(dto: QuotationDto, kind: QuotationKind, self: string[] = []) {
     const issueDate = parseIsoDate(dto.issueDate, 'วันที่ออกใบเสนอราคา');
     const issueIso = iso(issueDate)!;
     const validDays = dto.validDays === undefined || dto.validDays === null ? 30 : dto.validDays;
@@ -439,6 +517,7 @@ export class QuotationService {
     terms = withWht(termsFor(account, terms), kind === 'JOB' ? parseWhtOverride(dto.whtRate) : null);
 
     const items: ItemData[] = kind === 'JOB' ? parseItems(dto.items) : parseRateItems(dto.items);
+    if (kind === 'JOB') await this.attachJobLinks(items, dto.items, customerId, self);
     const totals =
       kind === 'JOB'
         ? computeInvoiceTotals({ lines: [], extras: [], items, terms, issueDate: issueIso })
@@ -504,7 +583,7 @@ export class QuotationService {
   async update(id: string, dto: QuotationDto) {
     const current = await this.load(id);
     if (current.status !== 'DRAFT') throw conflict('ใบเสนอราคาออกเลขแล้ว แก้ไม่ได้ - ทำฉบับแก้ไขแทน');
-    const { items, data } = await this.build(dto, current.kind as QuotationKind);
+    const { items, data } = await this.build(dto, current.kind as QuotationKind, [id, ...(current.replacesId ? [current.replacesId] : [])]);
     const q = await this.prisma.$transaction(async (tx) => {
       const locked = await this.lock(tx, id);
       if (locked.status !== 'DRAFT') throw conflict(STALE);
@@ -791,6 +870,9 @@ export class QuotationService {
     if (q.invoices.length) throw conflict(`ใบเสนอราคานี้ออกใบวางบิล ${q.invoices[0].invoiceNo} ไปแล้ว`);
     const issueDate = parseIsoDate(dto?.issueDate, 'วันที่ออกบิล');
     if (q.approvedDate && issueDate < q.approvedDate) throw bad('วันที่ออกบิลต้องไม่ก่อนวันที่ลูกค้าอนุมัติ');
+
+    // งานโอนย้ายเข้าที่ผูกกับใบนี้ต้องยังวางบิลได้ (ส่งงานลูกค้าแล้ว ไม่อยู่ในบิลอื่น) - ออกบิลแล้วคิววางบิลงานอื่นๆ ตัดงานเหล่านี้ออกเอง (BillingService.loadJobs)
+    await this.assertLinkedJobsBillable([...new Set(q.items.filter((it) => it.sourceType === 'TRANSFER' && it.sourceId).map((it) => it.sourceId!))], q.id);
 
     const items = [...q.items]
       .sort((a, b) => a.sortOrder - b.sortOrder)
