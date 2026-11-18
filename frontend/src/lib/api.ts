@@ -63,8 +63,16 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   }
 
+  // บอกส่วนอื่นของหน้าว่ามีการบันทึกสำเร็จ (แถบ flow งานรถเก่า components/OldJobFlowBar.tsx ใช้เช็คว่างานขยับขั้นแล้วหรือยัง)
+  const method = (init?.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(API_MUTATED_EVENT, { detail: { path } }));
+  }
+
   return data as T;
 }
+
+export const API_MUTATED_EVENT = 'api-mutated';
 
 // รูป/ไฟล์หลัง backend (ต้องแนบ Authorization - <img src> ส่ง header เองไม่ได้) โหลดเป็น blob
 // 401 = token หมดอายุ/บัญชีถูกระงับ -> กลับไปหน้าล็อกอินเหมือน request() (พบ 2026-09-27: เดิมขึ้นแค่ "โหลดรูปไม่สำเร็จ")

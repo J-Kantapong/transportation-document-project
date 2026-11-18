@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { canEditEntrySteps, canEditSubmitSteps, canIntakeOldJobs, getCachedUser, submitWriteScopeFor } from "@/lib/auth";
@@ -118,6 +119,7 @@ const SUMMARY: { key: string; label: string; statuses: OldJobStatus[] }[] = [
 ];
 
 export function OldVehicleJobsPage() {
+  const router = useRouter();
   const writeScope = useWriteScope();
   const canIntake = useCanIntake();
   const { brandNames, customerOptions } = useChoices();
@@ -183,6 +185,26 @@ export function OldVehicleJobsPage() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [load]);
+
+  // รับงานเสร็จ -> ทำต่อตามขั้นเลย (ผู้ใช้ 2026-11-19: "ทำเสร็จให้ไปหน้าถัดไปเรื่อยๆ")
+  // งานใหม่งานเดียว (หรือคู่สลับเลข รถเก่า กับ รถเก่า) ที่เลือกประเภทแล้ว = เปิดหน้าขั้นถัดไปของงานนั้นพร้อม flow
+  // หลายงานที่ขั้นถัดไปอยู่หน้าเดียวกัน (เช่น ส่งตรวจทั้งชุด) = เปิดหน้านั้นโดยไม่มี flow · อื่นๆ / บัญชีรับงานอย่างเดียว = อยู่หน้านี้
+  const goToNextAfterIntake = (saved: HubVehicle[]) => {
+    const before = new Set(vehicles.flatMap((v) => v.jobs.map((j) => j.id)));
+    // งานใหม่ = ไม่อยู่ในรายการที่เห็นอยู่ และยังไม่ยื่น (รถที่ไม่อยู่ในรายการเพราะตัวกรอง / งานเสร็จหมดแล้ว มีงานเก่าที่ยื่นไปแล้วติดมาด้วย)
+    const created = saved.flatMap((vehicle) => vehicle.jobs.filter((job) => !before.has(job.id) && !job.jobId).map((job) => ({ vehicle, job })));
+    const steps = created
+      .filter(({ vehicle }) => canWriteClass(writeScope, vehicle.vehicleClass))
+      .map(({ vehicle, job }) => ({ job, href: nextStepHref(vehicle, job) }));
+    if (!steps.length || steps.length !== created.length || steps.some((s) => !s.href)) return;
+    const pairOnly = steps.length === 2 && steps[0].job.pair && steps.every((s) => s.job.pair);
+    if (steps.length === 1 || pairOnly) {
+      router.push(steps[0].href!);
+      return;
+    }
+    const pages = new Set(steps.map((s) => s.href!.split("?")[0]));
+    if (pages.size === 1) router.push([...pages][0]);
+  };
 
   const replace = (updated: HubVehicle[]) =>
     setVehicles((prev) => {
@@ -263,6 +285,7 @@ export function OldVehicleJobsPage() {
           brandNames={brandNames}
           customerOptions={customerOptions}
           onSaved={(saved) => {
+            goToNextAfterIntake(saved);
             replace(saved);
             setShowIntake(false);
           }}
@@ -478,6 +501,7 @@ export function OldVehicleJobsPage() {
           customerOptions={customerOptions}
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
+            goToNextAfterIntake(saved);
             replace(saved);
             setDialog(null);
           }}
@@ -1228,6 +1252,7 @@ function JobDialog({
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
 
+  const router = useRouter();
   const submitted = !!job.jobId;
   const closed = isClosedStatus(job.status);
   // คู่สลับเลขรับเป็นคู่ - เปลี่ยนประเภทงานของคันเดียวไม่ได้ (ยกเลิกการรับงานแล้วรับใหม่)
@@ -1255,9 +1280,22 @@ function JobDialog({
     if (payload.error) return setError(payload.error);
     if (!payload.jobType) return setError("กรุณาเลือกประเภทงาน");
     const { jobType, swapKind, newVehicleId, firstRegistrationDate, taxExpiryDate } = payload;
-    void run(() =>
-      oldVehicleJobsApi.chooseType(job.id, { jobType, swapKind, newVehicleId, firstRegistrationDate, taxExpiryDate, duplicateReason: duplicateReason.trim() || undefined }),
-    );
+    // เลือกประเภทให้งานที่ยังรอทำ = ทำต่อขั้นถัดไปเลย (ผู้ใช้ 2026-11-19) · เปลี่ยนประเภทของงานที่เลือกไว้แล้ว = อยู่ที่เดิม
+    const firstChoice = !job.jobType;
+    void run(async () => {
+      const saved = await oldVehicleJobsApi.chooseType(job.id, {
+        jobType,
+        swapKind,
+        newVehicleId,
+        firstRegistrationDate,
+        taxExpiryDate,
+        duplicateReason: duplicateReason.trim() || undefined,
+      });
+      const updated = saved.vehicle.jobs.find((j) => j.id === job.id);
+      const href = firstChoice && canWrite && updated ? nextStepHref(saved.vehicle, updated) : null;
+      if (href) router.push(href);
+      return saved;
+    });
   }
 
   if (cancelling) {

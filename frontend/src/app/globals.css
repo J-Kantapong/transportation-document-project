@@ -399,6 +399,12 @@ th.num-col{text-align:right}
 /* แถวของรถที่เปิดมาจากหน้าค้นหารถ (?focus=) - ดู components/FocusVehicleRow.tsx */
 tr.row-focus,tr.row-focus:hover{background:#fff1b8;box-shadow:inset 4px 0 0 #e0a800}
 [data-focus-row].row-focus{background:#fff1b8;outline:2px solid #e0a800;outline-offset:-2px}
+.flow-bar{position:sticky;top:0;z-index:15;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:12px 24px 0;padding:10px 14px;border-radius:10px;background:#e8f0ff;border:1px solid #b7cbf5;color:var(--ink);font-size:14px}
+.flow-bar.done{background:#e6f6ec;border-color:#a9dbbb}
+.flow-bar.error{background:#fdecec;border-color:#f3b8b8}
+.flow-bar-note{color:#2a5bd7;font-weight:600}
+.flow-bar .text-button{margin-left:auto}
+@media (max-width:640px){.flow-bar{margin:8px 16px 0}}
 .focus-missing{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px);background:var(--ink);color:white;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #18243c33}
 .focus-missing .text-button{color:#dfe7ff;font-size:18px}
 /* ยื่นเอกสาร 3 ขั้น (submit-documents/submit, review, done) */

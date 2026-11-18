@@ -249,20 +249,29 @@ export function nextStepHref(vehicle: HubVehicle, job: HubJob): string | null {
   const { status, jobType } = job;
   if (!jobType || status === "NEW" || isClosedStatus(status)) return null;
   if (status === "TO_DELIVER") return "/delivery";
+  const href = stepHref(vehicle, job);
+  if (!href) return null;
+  // flow = งานที่กำลังทำตามขั้น: แถบ OldJobFlowBar พาไปหน้าขั้นถัดไปเองเมื่อบันทึกขั้นนี้เสร็จ (ผู้ใช้ 2026-11-19)
+  const params = new URLSearchParams({ [OLD_JOB_FLOW_PARAM]: job.id });
   // ขั้นยื่น: พก id ของแถวรับงานไปด้วย ฟอร์มยื่นจะเติมข้อมูลรถ / เจ้าของงานให้เอง ไม่ต้องกรอกซ้ำ
-  if (status === "TO_SUBMIT") {
-    const href = stepHref(vehicle, job);
-    return href ? `${href}?intake=${encodeURIComponent(job.id)}` : null;
-  }
-  return stepHref(vehicle, job);
+  if (status === "TO_SUBMIT") params.set("intake", job.id);
+  // ขั้นอื่นเป็นคิวหลายคัน: เลื่อนไปไฮไลต์แถวของรถคันนี้ (FocusVehicleRow)
+  else params.set("focus", vehicle.chassis);
+  return `${href}?${params.toString()}`;
 }
+
+export const OLD_JOB_FLOW_PARAM = "flow";
+
+// ขั้นที่ flow พาไปต่อเอง - ส่งงาน (Delivery) ไม่พาไป ให้กลับหน้ารวม (ผู้ใช้ 2026-11-19: "จนจบก่อนถึง Delivery")
+export const isFlowEndStatus = (status: OldJobStatus) => status === "TO_DELIVER" || isClosedStatus(status);
 
 function stepHref(vehicle: HubVehicle, job: HubJob): string | null {
   const seg = vehicle.vehicleClass === "MOTO" ? "moto" : "car";
   const { status, jobType } = job;
   if (!jobType) return null;
   // ตรวจรถก่อนยื่นทำในหน้าตรวจรถของงานรถเก่า - งานโอนลำดับเดิมที่ยื่นไปแล้วยังตรวจในหน้าของงานโอน
-  if ((status === "TO_INSPECT" || status === "TO_RESULT") && !job.jobId) return OLD_VEHICLE_INSPECTION;
+  if (status === "TO_INSPECT" && !job.jobId) return OLD_VEHICLE_INSPECTION;
+  if (status === "TO_RESULT" && !job.jobId) return `${OLD_VEHICLE_INSPECTION}/result`;
   switch (jobType) {
     case "PLATE_SWAP": {
       const base = `/registration/plate-swap/${seg}/${job.variant === "CHANGE" ? "change" : job.variant === "OLD_OLD" ? "old-old" : "old-new"}`;
