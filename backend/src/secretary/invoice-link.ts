@@ -10,7 +10,11 @@ export const DEFAULT_LATEST = 2;
 export const MAX_INVOICE_LINKS = 5;
 
 // doc: iv = ใบวางบิล · tv = ใบกำกับภาษี (ชื่อเดียวกับชนิดของ token ใน print-link.ts)
-export type InvoiceLinkCommand = { doc: PrintKind; kind: 'latest'; count: number } | { doc: PrintKind; kind: 'numbers'; numbers: string[] };
+// kind customer = ใบล่าสุดของลูกค้ารายเดียว ("บิล SPI", ผู้ใช้ 2026-11-18) - มาจาก lookup.ts ที่หาลูกค้าให้แล้ว ไม่ได้มาจาก parseInvoiceLinkCommand
+export type InvoiceLinkCommand =
+  | { doc: PrintKind; kind: 'latest'; count: number }
+  | { doc: PrintKind; kind: 'numbers'; numbers: string[] }
+  | { doc: PrintKind; kind: 'customer'; customerId: string; count: number };
 
 const DOCS: Array<{ doc: PrintKind; number: RegExp; words: string }> = [
   // ใบกำกับก่อน: "ใบกำกับ" ไม่มีคำว่า "บิล" แต่กันไว้ไม่ให้รูปแบบของบิลจับคำของใบกำกับ
