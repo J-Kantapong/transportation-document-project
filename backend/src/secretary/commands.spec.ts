@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseCommand, QUICK_COMMANDS } from './commands.js';
 import { parseInvoiceLinkCommand } from './invoice-link.js';
 import { parseLookupCommand } from './lookup.js';
+import { parseProvinceRateCommand } from './province-rates.js';
 
 describe('parseCommand', () => {
   it('จับคำสั่งหลักจากคำสำคัญ ไม่ต้องพิมพ์ตรงเป๊ะ', () => {
@@ -24,9 +25,12 @@ describe('parseCommand', () => {
   });
 
   it('ปุ่มลัดทุกปุ่มต้องถูกจับโดยตัวรับคำสั่งตัวใดตัวหนึ่ง และ label ไม่เกิน 20 ตัวอักษร', () => {
-    // ลำดับเดียวกับ handleEvents: ลิงก์เอกสาร -> ค้นข้อมูล -> คำสั่งสรุป (ตู้ข้อความไม่มีปุ่มลัดแล้ว)
-    const handler = (text: string) => (parseInvoiceLinkCommand(text) ? 'link' : (parseLookupCommand(text)?.kind ?? parseCommand(text)));
-    expect(QUICK_COMMANDS.map((c) => handler(c.text))).toEqual(['menu', 'pending', 'finance', 'link', 'link', 'quotations', 'rates', 'cost', 'help']);
+    // ลำดับเดียวกับ handleEvents: ลิงก์เอกสาร -> เรทจังหวัด -> ค้นข้อมูล -> คำสั่งสรุป (ตู้ข้อความไม่มีปุ่มลัดแล้ว)
+    const handler = (text: string) => (parseInvoiceLinkCommand(text) ? 'link' : parseProvinceRateCommand(text) ? 'province' : (parseLookupCommand(text)?.kind ?? parseCommand(text)));
+    expect(QUICK_COMMANDS.map((c) => handler(c.text))).toEqual(['menu', 'pending', 'finance', 'link', 'link', 'quotations', 'rates', 'cost', 'province', 'help']);
+    // คำสั่งค้นข้อมูลที่ตามด้วยชื่อลูกค้า/งาน ไม่ถูกเรทจังหวัดแย่งไป · "ราคา <จังหวัด>" = เรทจังหวัด
+    for (const t of ['ราคา SPI', 'ต้นทุน สลับเลข', 'ต้นทุน เชียงใหม่', 'บิล SPI', 'ยอด SPI', 'งานค้าง', 'เมนู']) expect(parseProvinceRateCommand(t)).toBeNull();
+    expect(parseProvinceRateCommand('ราคา เชียงใหม่')).toEqual({ kind: 'province', province: 'เชียงใหม่' });
     for (const c of QUICK_COMMANDS) expect(c.label.length).toBeLessThanOrEqual(20);
     expect(QUICK_COMMANDS.length).toBeLessThanOrEqual(13); // ข้อจำกัดของ LINE
   });

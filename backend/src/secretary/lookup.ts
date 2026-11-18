@@ -488,7 +488,7 @@ export const MENU_GROUPS: Array<{ title: string; tone: keyof typeof TONES; butto
     tone: 'neutral',
     buttons: [{ label: 'บิลล่าสุด', text: 'บิลล่าสุด' }, { label: 'ใบกำกับล่าสุด', text: 'ใบกำกับล่าสุด' }, { label: 'ใบเสนอราคาล่าสุด', text: 'ใบเสนอราคาล่าสุด' }],
   },
-  { title: 'เสนอราคา', tone: 'success', buttons: [{ label: 'ราคาลูกค้า', text: 'ราคา' }, { label: 'ต้นทุนต่องาน', text: 'ต้นทุน' }] },
+  { title: 'เสนอราคา', tone: 'success', buttons: [{ label: 'ราคาลูกค้า', text: 'ราคา' }, { label: 'ต้นทุนต่อคัน', text: 'ต้นทุน' }, { label: 'เรทจังหวัด', text: 'เรทจังหวัด' }] },
   { title: 'สรุปประจำวัน', tone: 'neutral', buttons: [{ label: 'สรุปเช้า', text: 'สรุปเช้า' }, { label: 'สรุปเย็น', text: 'สรุปเย็น' }] },
 ];
 

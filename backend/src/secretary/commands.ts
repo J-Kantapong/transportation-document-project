@@ -36,5 +36,7 @@ export const QUICK_COMMANDS: Array<{ label: string; text: string }> = [
   { label: 'ใบเสนอราคาล่าสุด', text: 'ใบเสนอราคาล่าสุด' },
   { label: 'ราคาลูกค้า', text: 'ราคา' },
   { label: 'ต้นทุนต่อคัน', text: 'ต้นทุน' },
+  // จับก่อนโดย parseProvinceRateCommand (province-rates.ts)
+  { label: 'เรทจังหวัด', text: 'เรทจังหวัด' },
   { label: 'คำสั่งทั้งหมด', text: 'คำสั่ง' },
 ];
