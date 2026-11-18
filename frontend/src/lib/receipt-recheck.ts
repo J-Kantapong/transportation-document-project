@@ -14,7 +14,11 @@ export interface ReceiptRecheck {
   chassis: { status: RecheckStatus; read: string | null };
   plate: { status: RecheckStatus; read: string | null };
   itemsSumMismatch: boolean;
-  problems: string[];
+  // เทียบรายการบนใบเสร็จกับรายการ Bill ทีละยอดเงิน (null = งานนี้ไม่มีรายการให้เทียบ)
+  items: { extra: Array<{ label: string; amount: number }>; missing: Array<{ label: string; amount: number }> } | null;
+  duplicates: string[]; // งานอื่นที่ใช้เลขที่ใบเสร็จเดียวกัน
+  problems: string[]; // ไม่ผ่าน - ยืนยันต้องมีเหตุผล
+  warnings: string[]; // ควรดูรูปซ้ำ แต่ไม่ขวางการยืนยัน
 }
 
 export const fetchRechecks = (type: RecheckJobType, ids: string[]) =>
