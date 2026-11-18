@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { VIN_LENGTH, modelPrefix, normalizeChassis, oddChassisChars, type KnownModel } from "@/lib/vehicle-data-check";
 
 // ตัวช่วยกันคีย์ข้อมูลรถผิดในหน้าคีย์รถ (ผู้ใช้ 2026-10-13) - กฎอยู่ที่ backend/src/vehicles/vehicle-data-check.ts
@@ -69,10 +70,12 @@ export function KnownModelHint({
   if (!model) return null;
 
   const ccNumber = cc.trim() === "" ? null : Number(cc);
+  // รย.17 คือการจดแบบสาธารณะ มอเตอร์ไซค์รุ่นไหนก็เป็นได้ - ไม่เตือน และ "ใช้ค่านี้" ไม่เปลี่ยนกลับเป็น รย.12 (ตรงกับ bodyMatchesModel ฝั่ง backend)
+  const publicBody = body.startsWith("รย.17-") && isMotorcycleBody(model.body);
   const fields = [
     model.brand && { label: "ยี่ห้อ", known: model.brand.name, filled: brandId !== "", same: brandId === model.brand.id },
     model.cc !== null && { label: "CC", known: String(model.cc), filled: ccNumber !== null, same: ccNumber === model.cc },
-    model.body && { label: "ประเภทรถ", known: model.body, filled: body !== "", same: body === model.body },
+    model.body && { label: "ประเภทรถ", known: model.body, filled: body !== "", same: body === model.body || publicBody },
   ].filter((f): f is { label: string; known: string; filled: boolean; same: boolean } => Boolean(f));
   const different = fields.filter((f) => f.filled && !f.same);
   const allSame = fields.every((f) => f.same);
@@ -106,7 +109,7 @@ export function KnownModelHint({
             onApply({
               ...(model.brand ? { brandId: model.brand.id } : {}),
               ...(model.cc !== null ? { cc: String(model.cc) } : {}),
-              ...(model.body ? { body: model.body } : {}),
+              ...(model.body && !publicBody ? { body: model.body } : {}),
             })
           }
         >

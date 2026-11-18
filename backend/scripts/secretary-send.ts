@@ -22,8 +22,8 @@ const prisma = new PrismaService();
 let failed = false;
 try {
   await prisma.$connect();
-  const secretary = // สคริปต์นี้ส่งแค่สรุป/เตือน ไม่ได้รับไฟล์ statement จึงไม่ต้องมี StatementService จริง
-  new SecretaryService(new OverviewService(prisma), prisma, new NotesService(prisma), undefined as never);
+  const secretary = // สคริปต์นี้ส่งแค่สรุป/เตือน ไม่ได้รับไฟล์ statement หรือคำสั่งค้นข้อมูล จึงไม่ต้องมี StatementService / LookupService จริง
+  new SecretaryService(new OverviewService(prisma), prisma, new NotesService(prisma), undefined as never, undefined as never);
   if (kind === 'reminder') {
     const result = await secretary.runScheduled('reminder');
     console.log(result.sent ? `ส่งเตือนแล้ว: ${result.reminders?.join(', ')}` : 'วันนี้ยังไม่มีเตือนที่ถึงเวลา');

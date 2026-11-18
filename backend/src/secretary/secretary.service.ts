@@ -9,6 +9,8 @@ import { loadFinancePending } from './finance-pending.js';
 import { parseInvoiceLinkCommand } from './invoice-link.js';
 import { lineConfigFromEnv, pushLine, replyLine, type LineMessage } from './line-client.js';
 import type { LineEvent } from './line-webhook.js';
+import { LookupService } from './lookup.service.js';
+import { menuMessage, parseLookupCommand } from './lookup.js';
 import { NotesService } from './notes.service.js';
 import { parseNoteCommand } from './notes.js';
 import { buildMorningMessage } from './morning-message.js';
@@ -37,6 +39,7 @@ export class SecretaryService {
     private readonly prisma: PrismaService,
     private readonly notes: NotesService,
     private readonly statements: StatementService,
+    private readonly lookup: LookupService,
   ) {}
 
   // ที่อยู่เว็บสำหรับลิงก์ในการ์ด (ใช้ FRONTEND_ORIGIN ถ้าตั้งไว้เป็น URL จริง - ไม่ตั้ง = การ์ดไม่มีลิงก์)
@@ -114,8 +117,11 @@ export class SecretaryService {
         return [textMessage(spendText(await this.overviewService.overview()))];
       case 'reminders':
         return [textMessage(remindersText())];
-      default:
+      case 'help':
         return [textMessage(helpText())];
+      // ข้อความที่ไม่ตรงคำสั่งไหน = การ์ดเมนู (ผู้ใช้ 2026-11-18 "อยากมองอะไรง่ายๆ") แทนรายการคำสั่งยาวๆ ซึ่งยังดูได้ด้วย "คำสั่ง"
+      case 'menu':
+        return [menuMessage()];
     }
   }
 
@@ -160,10 +166,16 @@ export class SecretaryService {
           // ไม่งั้น "ขอบิลล่าสุด" จะไปตกคำสั่ง "ขอ" ของตู้ข้อความ
           const invoiceLink = parseInvoiceLinkCommand(typed);
           // "เรทจังหวัด" / "เรท ภูเก็ต" (ผู้ใช้ 2026-11-17) - ก่อนตู้ข้อความ ไม่งั้น "ขอนแก่น" จะไปตกคำสั่ง "ขอ"
+          // มาก่อนคำสั่งค้นข้อมูลด้วย: "ราคา เชียงใหม่" = เรทจังหวัด ส่วน "ราคา SPI" (ไม่ใช่ชื่อจังหวัด) = ตารางราคาลูกค้า
           const provinceRate = invoiceLink ? null : parseProvinceRateCommand(typed);
-          const note = invoiceLink || provinceRate ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
+          // เมนู / งานค้าง / ราคา / ต้นทุน / ใบเสนอราคา / เอกสารและยอดของลูกค้ารายเดียว (ผู้ใช้ 2026-11-18) - ข้อความต้องขึ้นต้นด้วยคำสั่ง
+          // null = ไม่ใช่ชื่อลูกค้า (เช่น "บิลเกินกำหนด") ให้คำสั่งเดิมตอบ
+          const lookup = invoiceLink || provinceRate ? null : parseLookupCommand(typed);
+          const found = lookup ? await this.lookup.run(lookup) : null;
+          const note = invoiceLink || provinceRate || found ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
           if (invoiceLink) messages = await this.statements.invoiceLinks(invoiceLink);
           else if (provinceRate) messages = await this.provinceRates(provinceRate);
+          else if (found) messages = found;
           else if (note) messages = await this.notes.run(note);
           else messages = await this.answer(parseCommand(typed));
         }

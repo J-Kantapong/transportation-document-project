@@ -95,6 +95,13 @@ describe('dataWarningsFor', () => {
     expect(warnings[1].message).toContain('149.5');
   });
 
+  it('รุ่นมอเตอร์ไซค์คีย์เป็น รย.17 = ไม่เตือนประเภทรถ และ รย.17 ไม่ถูกนับตอนเรียนประเภทรถของรุ่น', () => {
+    const publicBody = 'รย.17-จักรยานยนต์สาธารณะ';
+    expect(dataWarningsFor({ ...row, body: publicBody }, models, brandNameOf)).toEqual([]);
+    const mixed = buildKnownModels([zontes(1), zontes(2), zontes(3), { ...zontes(4), body: publicBody }, { ...zontes(5), body: publicBody }]);
+    expect(mixed.get('MLTZT150')?.body).toBe('รย.12-น้อยกว่า 300cc');
+  });
+
   it('รุ่นที่ไม่เคยคีย์ = ไม่มีอะไรให้เทียบ ไม่เตือน', () => {
     expect(dataWarningsFor({ ...row, chassis: 'JH2NC64TXTK000575', brandId: 'yamaha' }, models, brandNameOf)).toEqual([]);
   });

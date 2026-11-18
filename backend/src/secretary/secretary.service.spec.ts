@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OverviewService } from '../overview/overview.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import type { LookupService } from './lookup.service.js';
 import type { NotesService } from './notes.service.js';
 import { SecretaryService } from './secretary.service.js';
 import type { StatementService } from './statement.service.js';
 
 function service() {
-  const s = new SecretaryService({} as OverviewService, {} as PrismaService, {} as NotesService, {} as StatementService);
+  const s = new SecretaryService({} as OverviewService, {} as PrismaService, {} as NotesService, {} as StatementService, {} as LookupService);
   const morning = vi.spyOn(s, 'sendMorning').mockResolvedValue();
   const evening = vi.spyOn(s, 'sendEvening').mockResolvedValue();
   return { s, morning, evening };

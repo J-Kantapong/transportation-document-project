@@ -206,10 +206,15 @@ export class StatementService {
     if (command.doc === 'tv') return this.taxInvoiceLinks(command, base, secret);
     const select = { id: true, invoiceNo: true, issueDate: true, netTotal: true, status: true, customer: { select: { name: true, company: true } } } as const;
     const found =
-      command.kind === 'latest'
-        ? await this.prisma.invoice.findMany({ where: { status: { not: 'VOID' } }, orderBy: [{ createdAt: 'desc' }, { invoiceNo: 'desc' }], take: command.count, select })
-        : await this.prisma.invoice.findMany({ where: { invoiceNo: { in: command.numbers } }, select });
-    const ordered = command.kind === 'latest' ? found : command.numbers.flatMap((no) => found.filter((i) => i.invoiceNo === no));
+      command.kind === 'numbers'
+        ? await this.prisma.invoice.findMany({ where: { invoiceNo: { in: command.numbers } }, select })
+        : await this.prisma.invoice.findMany({
+            where: { status: { not: 'VOID' }, ...(command.kind === 'customer' ? { customerId: command.customerId } : {}) },
+            orderBy: [{ createdAt: 'desc' }, { invoiceNo: 'desc' }],
+            take: command.count,
+            select,
+          });
+    const ordered = command.kind === 'numbers' ? command.numbers.flatMap((no) => found.filter((i) => i.invoiceNo === no)) : found;
     const missing = command.kind === 'numbers' ? command.numbers.filter((no) => !found.some((i) => i.invoiceNo === no)) : [];
     return buildInvoiceLinkMessages(
       ordered.map((i) => ({
@@ -246,10 +251,15 @@ export class StatementService {
       customer: { select: { name: true, company: true } },
     } as const;
     const found =
-      command.kind === 'latest'
-        ? await this.prisma.taxInvoice.findMany({ where: { status: 'ISSUED' }, orderBy: [{ createdAt: 'desc' }, { taxInvoiceNo: 'desc' }], take: command.count, select })
-        : await this.prisma.taxInvoice.findMany({ where: { taxInvoiceNo: { in: command.numbers } }, select });
-    const ordered = command.kind === 'latest' ? found : command.numbers.flatMap((no) => found.filter((t) => t.taxInvoiceNo === no));
+      command.kind === 'numbers'
+        ? await this.prisma.taxInvoice.findMany({ where: { taxInvoiceNo: { in: command.numbers } }, select })
+        : await this.prisma.taxInvoice.findMany({
+            where: { status: 'ISSUED', ...(command.kind === 'customer' ? { customerId: command.customerId } : {}) },
+            orderBy: [{ createdAt: 'desc' }, { taxInvoiceNo: 'desc' }],
+            take: command.count,
+            select,
+          });
+    const ordered = command.kind === 'numbers' ? command.numbers.flatMap((no) => found.filter((t) => t.taxInvoiceNo === no)) : found;
     const missing = command.kind === 'numbers' ? command.numbers.filter((no) => !found.some((t) => t.taxInvoiceNo === no)) : [];
     return buildTaxInvoiceLinkMessages(
       ordered.map((t) => {
