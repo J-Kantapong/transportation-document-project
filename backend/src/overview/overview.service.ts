@@ -5,6 +5,7 @@ import { ACTIVE_SUBMISSION_STATUSES } from '../document-submission/submission-el
 import { PrismaService } from '../prisma/prisma.service.js';
 import { findSuspectVehicles } from '../vehicles/vehicle-data-check.js';
 import { motorcycleCcMismatch } from '../vehicles/vehicle-validation.js';
+import { transferPage } from '../vehicle-transfer/transfer-type.js';
 import {
   addDays,
   agingBuckets,
@@ -902,7 +903,7 @@ export class OverviewService {
         continue;
       }
       const waits = transferWaits({ ...t, returnedDate: null });
-      const href = waits[0]?.stage === 'transferJob' ? `/registration/transfer/${t.transferType === 'INSPECTION' ? 'inspection' : 'owner'}/return` : '/registration/transfer/inspection/inspect';
+      const href = transferPage(t.transferType, waits[0]?.stage === 'transferJob' ? 'return' : 'inspect');
       addJob(t, t.transfereeName, waits, href);
     }
     const backlog = summarizeBacklog(backlogItems, today);

@@ -30,7 +30,7 @@ export const JOB_DELEGATE = {
   TAX_RENEWAL: 'taxRenewal',
 } as const;
 
-const TRANSFER_LABEL: Record<string, string> = { OWNER: 'โอนตามผู้ถือกรรมสิทธิ์', INSPECTION: 'โอนตรวจรถ' };
+import { TRANSFER_TYPE_LABEL as TRANSFER_LABEL } from '../vehicle-transfer/transfer-type.js';
 import { motorcycleTypeWhere } from '../vehicles/vehicle-reference-data.js';
 
 export interface JobCustomer {

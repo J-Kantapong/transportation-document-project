@@ -3,6 +3,7 @@ import { vehicleKindOf, vehicleScopeFor, type VehicleKind } from '../auth/vehicl
 import type { Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { parseDateParam } from '../vehicles/vehicle-list-filter.js';
+import { transferHasInspection, transferPage } from '../vehicle-transfer/transfer-type.js';
 
 // หน้าค้นหารถ: ค้นงานอื่นๆ ที่ไม่ได้อยู่ในตารางรถจดใหม่ (ผู้ใช้ 2026-10-08 "รวมทุกงาน") - สลับเลข, ยกเลิกการใช้รถ, ย้ายออก,
 // คัดแผ่นป้าย, งานโอน, ต่อภาษี ค้นด้วยเลขตัวถัง / เลขเครื่อง / ทะเบียน / ชื่อ ได้เหมือนรถจดใหม่ - อ่านอย่างเดียว
@@ -245,19 +246,20 @@ export async function searchJobs(
   }
 
   for (const j of cut(transfers)) {
-    const inspection = j.transferType === 'INSPECTION';
-    const returnPage = `/registration/transfer/${inspection ? 'inspection' : 'owner'}/return`;
+    const inspection = transferHasInspection(j.transferType);
+    const returnPage = transferPage(j.transferType, 'return');
+    const inspectPage = transferPage(j.transferType, 'inspect');
     let status: string;
     let href = returnPage;
     if (inspection && !j.inspectionSentDate) {
       status = 'รอส่งตรวจ';
-      href = '/registration/transfer/inspection/inspect';
+      href = inspectPage;
     } else if (inspection && !j.inspectionResult) {
       status = 'ส่งตรวจแล้ว รอผลตรวจ';
-      href = '/registration/transfer/inspection/inspect';
+      href = inspectPage;
     } else if (inspection && j.inspectionResult === 'FAIL') {
       status = 'ตรวจไม่ผ่าน';
-      href = '/registration/transfer/inspection/inspect';
+      href = inspectPage;
     } else if (j.deliveredDate) {
       status = delivered(j)!;
     } else {

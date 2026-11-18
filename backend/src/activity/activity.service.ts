@@ -58,6 +58,7 @@ const AUDIT_ENTITY_LABELS: Record<string, string> = {
   IssuedWhtSeries: 'เลข 50 ทวิ ที่บริษัทออก',
   Supplier: 'ทะเบียน Supplier',
   SupplierProvinceRate: 'ราคาซับต่างจังหวัด',
+  TransferContributionRate: 'ลงขันงานโอนรายจังหวัด',
 };
 const AUDIT_ACTION_LABELS: Record<string, string> = {
   create: 'สร้าง',
@@ -135,6 +136,7 @@ const AUDIT_ENTITY_HREFS: Record<string, string> = {
   IssuedWhtSeries: '/hr/wht',
   Supplier: '/hr/suppliers',
   SupplierProvinceRate: '/admin/supplier-rates',
+  TransferContributionRate: '/registration/transfer/contribution-rates',
 };
 // หน้าสลับเลขแยกตามประเภทรถและแบบ (เดิมลิงก์ /registration/plate-swap/old-new ซึ่งไม่มีหน้านี้)
 const plateSwapHref = (vehicleClass: string, kind: string) => `/registration/plate-swap/${vehicleClass === 'MOTO' ? 'moto' : 'car'}/${kind === 'OLD_OLD' ? 'old-old' : 'old-new'}`;

@@ -78,4 +78,6 @@ export const CANCEL_USE_VEHICLE_KINDS: RegistrationSubtask[] = [
 export const TRANSFER_TYPES: RegistrationSubtask[] = [
   { title: "โอนตามผู้ถือกรรมสิทธิ์", href: "/registration/transfer/owner" },
   { title: "โอนตรวจรถ", href: "/registration/transfer/inspection" },
+  // โอนย้ายเข้า (ผู้ใช้ 2026-11-18): รถย้ายออกจากจังหวัดเดิมแล้ว มาย้ายเข้าพร้อมโอน + ตรวจรถ ป้ายเปลี่ยนจังหวัด
+  { title: "โอนย้ายเข้า (เปลี่ยนจังหวัด)", href: "/registration/transfer/move-in" },
 ];

@@ -47,13 +47,13 @@ function accountOn(periods: AccountPeriod[], iso: string): BillingAccount {
 }
 
 const CLASS_LABEL = { CAR: "รถยนต์", MOTO: "มอเตอร์ไซค์", ANY: "ทุกชนิด" } as const;
-const VARIANT_LABEL = { OWNER: "โอนตามผู้ถือกรรมสิทธิ์", INSPECTION: "โอนตรวจรถ" } as const;
+const VARIANT_LABEL = { OWNER: "โอนตามผู้ถือกรรมสิทธิ์", INSPECTION: "โอนตรวจรถ", MOVE_IN: "โอนย้ายเข้า" } as const;
 const FEE_SOURCE_LABEL = { RECEIPT: "ตามใบเสร็จ", ESTIMATE: "ยอดที่ระบบคิด (ยังไม่มียอดใบเสร็จ)", TAX: "ภาษีที่ชำระ" } as const;
 
 interface RateRow {
   jobType: JobType;
   vehicleClass: "CAR" | "MOTO" | "ANY";
-  variant: "OWNER" | "INSPECTION" | null;
+  variant: "OWNER" | "INSPECTION" | "MOVE_IN" | null;
   label: string;
   amountText: string;
   includesReceipt: boolean;
@@ -443,6 +443,7 @@ export function OtherJobsBillingPage() {
                           <option value="">ทุกแบบ</option>
                           <option value="OWNER">{VARIANT_LABEL.OWNER}</option>
                           <option value="INSPECTION">{VARIANT_LABEL.INSPECTION}</option>
+                          <option value="MOVE_IN">{VARIANT_LABEL.MOVE_IN}</option>
                         </select>
                       )}
                       <input

@@ -85,6 +85,16 @@ function service(found: unknown) {
       findUnique: vi.fn().mockResolvedValue(null),
     },
     auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit1' }) },
+    // ตารางลงขันรายจังหวัด - แถวตั้งต้นจาก migration (จังหวัดอื่นยังไม่มีแถว)
+    transferContributionRate: {
+      findUnique: vi.fn().mockImplementation(async ({ where }) =>
+        where.province === 'กรุงเทพมหานคร'
+          ? { transferMoto: 60, transferCar: 100, moveInMoto: null }
+          : where.province === 'สมุทรปราการ'
+            ? { transferMoto: 100, transferCar: 100, moveInMoto: null }
+            : null,
+      ),
+    },
   };
   prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
   const storage: ReceiptStorage = { put: vi.fn(), get: vi.fn(), delete: vi.fn().mockResolvedValue(undefined) };
@@ -133,7 +143,7 @@ describe('VehicleTransferService.create', () => {
   it('ต้องเลือกแบบงาน ประเภทรถ เจ้าของงาน และกรอกผู้โอน/ผู้รับโอนครบ', async () => {
     const { svc } = service(null);
     await expect(svc.create({ ...validDto, transferType: '' })).rejects.toMatchObject({
-      response: { error: 'กรุณาเลือกแบบงานโอน (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ)' },
+      response: { error: 'กรุณาเลือกแบบงานโอน (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ / โอนย้ายเข้า)' },
     });
     await expect(svc.create({ ...validDto, transferType: 'X' })).rejects.toMatchObject({ status: 400 });
     await expect(svc.create({ ...validDto, vehicleClass: '' })).rejects.toMatchObject({ response: { error: 'กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)' } });
@@ -429,5 +439,86 @@ describe('VehicleTransferService.update / cancel', () => {
   it('STAFF_MOTO แก้/ยกเลิกงานรถยนต์ไม่ได้', async () => {
     const { svc } = service(row());
     await expect(asUser(['STAFF_MOTO'], () => svc.cancel('t1', 'x'))).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', () => {
+  const moveInDto = { ...validDto, transferType: 'MOVE_IN', vehicleClass: 'MOTO', submitProvince: 'ชลบุรี', billTotal: undefined };
+  const moveInRow = (overrides: Record<string, unknown> = {}) =>
+    row({ transferType: 'MOVE_IN', vehicleClass: 'MOTO', submitProvince: 'ชลบุรี', billTotal: 225, noBillTotal: 0, dutyAmount: 40, stampDutyAmount: 0, ...overrides });
+
+  it('คิด Bill 225 (คำขอ 5 + ใบแทนป้ายภาษี 20 + โอน 100 + แผ่นป้าย 100) ค่าอากร 40 ลงขัน 0 ไม่ว่าจังหวัดไหน', async () => {
+    const { svc, create } = service(null);
+    await asUser(['ADMIN'], () => svc.create(moveInDto));
+    expect(create.mock.calls[0][0].data).toMatchObject({ transferType: 'MOVE_IN', billTotal: 225, noBillTotal: 0, dutyAmount: 40, submitProvince: 'ชลบุรี', moveOutId: null });
+  });
+
+  it('ค่าปรับ + ด่วน + ลงขันที่กรอก รวมเข้ายอด', async () => {
+    const { svc, create } = service(null);
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, fineAmount: '200', urgent: true, contribution: '150' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 425, noBillTotal: 200, dutyAmount: 40, fineAmount: 200 });
+  });
+
+  it('รถยนต์ / ไม่เลือกจังหวัด / โอนขอใช้ = 400', async () => {
+    const { svc } = service(null);
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, vehicleClass: 'CAR', billTotal: '0' }))).rejects.toMatchObject({ status: 400 });
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, submitProvince: undefined }))).rejects.toMatchObject({ status: 400 });
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, useRequest: true }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('ผูกงานย้ายออก: ต้องรับใบเสร็จแล้วและยังไม่ถูกใช้', async () => {
+    const { svc, create, prisma } = service(null);
+    const p = prisma as unknown as Record<string, unknown>;
+    const moveOutFind = vi.fn().mockResolvedValue({ id: 'm1', vehicleClass: 'MOTO', returnedDate: null });
+    p.vehicleMoveOut = { findFirst: moveOutFind };
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, moveOutId: 'm1' }))).rejects.toMatchObject({ status: 400 });
+    moveOutFind.mockResolvedValue({ id: 'm1', vehicleClass: 'MOTO', returnedDate: new Date('2026-09-10T00:00:00.000Z') });
+    prisma.vehicleTransfer.findFirst.mockResolvedValueOnce({ id: 'other' } as never);
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, moveOutId: 'm1' }))).rejects.toMatchObject({ status: 400 });
+    prisma.vehicleTransfer.findFirst.mockResolvedValueOnce(null as never);
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, moveOutId: 'm1' }));
+    expect(create.mock.calls[0][0].data.moveOutId).toBe('m1');
+  });
+
+  it('มีขั้นตรวจรถ: ยังไม่ผ่านรับกลับไม่ได้ / ผ่านแล้วต้องกรอกทะเบียนใหม่', async () => {
+    const pending = service(moveInRow({ receipts: oneReceipt }));
+    await expect(asUser(['ADMIN'], () => pending.svc.markReturned('t1', '2026-09-22', { category: '1กก', number: '99' }))).rejects.toMatchObject({ status: 400 });
+
+    const passed = moveInRow({
+      receipts: oneReceipt,
+      inspectionSentDate: new Date('2026-09-21T00:00:00.000Z'),
+      inspectionResult: 'PASS',
+      inspectionResultDate: new Date('2026-09-21T00:00:00.000Z'),
+    });
+    const noPlate = service(passed);
+    await expect(asUser(['ADMIN'], () => noPlate.svc.markReturned('t1', '2026-09-22'))).rejects.toMatchObject({ status: 400 });
+    const ok = service(passed);
+    await asUser(['ADMIN'], () => ok.svc.markReturned('t1', '2026-09-22', { category: '1กก', number: '99' }));
+    expect(ok.update.mock.calls[0][0].data).toMatchObject({ newPlateCategory: '1กก', newPlateNumber: '99' });
+  });
+
+  it('ค่าอากรโอนกรอกที่ข้อมูลใบเสร็จ - Bill เพิ่มตามส่วนต่าง / งานแบบอื่นกรอกไม่ได้', async () => {
+    const { svc, update } = service(moveInRow());
+    await asUser(['ADMIN'], () => svc.updateReceiptFields('t1', { stampDutyAmount: '350' }));
+    expect(update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 350, billTotal: 575 });
+    const again = service(moveInRow({ stampDutyAmount: 350, billTotal: 575 }));
+    await asUser(['ADMIN'], () => again.svc.updateReceiptFields('t1', { stampDutyAmount: '' }));
+    expect(again.update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 0, billTotal: 225 });
+    const owner = service(row());
+    await expect(asUser(['ADMIN'], () => owner.svc.updateReceiptFields('t1', { stampDutyAmount: '10' }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('แก้ค่าปรับหลังมีค่าอากรโอน - คิด Bill ใหม่โดยยังรวมค่าอากรโอน', async () => {
+    const { svc, update } = service(moveInRow({ stampDutyAmount: 350, billTotal: 575 }));
+    await asUser(['ADMIN'], () => svc.update('t1', { fineAmount: '100', remark: 'ลืมค่าปรับ' }));
+    expect(update.mock.calls[0][0].data).toMatchObject({ billTotal: 675, fineAmount: 100, noBillTotal: 0, dutyAmount: 40 });
+  });
+
+  it('คิวตรวจรถกรองตามแบบงานที่ขอ ไม่ระบุ = ทั้งโอนตรวจรถและโอนย้ายเข้า', async () => {
+    const { svc, findMany } = service(null);
+    await asUser(['ADMIN'], () => svc.list('to-send', undefined, 'MOVE_IN'));
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ transferType: 'MOVE_IN', inspectionSentDate: null });
+    await asUser(['ADMIN'], () => svc.list('to-send'));
+    expect(findMany.mock.calls[1][0].where.transferType).toEqual({ in: ['INSPECTION', 'MOVE_IN'] });
   });
 });

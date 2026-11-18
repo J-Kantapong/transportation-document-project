@@ -4,7 +4,7 @@
 // ประเภท: โอนปกติ / โอนขอใช้ (ผู้ใช้เลือกในฟอร์ม ค่าอากรออโต้ตามประเภทที่เลือก)
 // Bill: โอนปกติ = คำขอ 5 + โอนทะเบียนรถ 100 / โอนขอใช้ = คำขอ 10 + โอนทะเบียนรถ 100 + ค่าธรรมเนียมอื่นๆ 20
 //   ค่าปรับ (ถ้าเกิน 15 วันหลังออกใบเสร็จรับเงิน/ใบกำกับภาษี) มีได้ทั้งสองประเภท ยอดไม่แน่นอน พนักงานกรอกเอง รวมใน Bill
-// No Bill: ลงขันตามจังหวัดที่ยื่น (ดู defaultTransferContribution - ผู้ใช้ 2026-11-18) + ลงขันด่วนเพิ่ม 50 เมื่อเป็นงานด่วน / ค่าอากรแยก: โอนปกติ 20 / โอนขอใช้ 40 (ออโต้ตามประเภทที่เลือก)
+// No Bill: ลงขันตามจังหวัดที่ยื่น (ตาราง TransferContributionRate - ดู transfer-contribution-rates.service.ts ผู้ใช้ 2026-11-18) + ลงขันด่วนเพิ่ม 50 เมื่อเป็นงานด่วน / ค่าอากรแยก: โอนปกติ 20 / โอนขอใช้ 40 (ออโต้ตามประเภทที่เลือก)
 // ค่าอากรแยกต่างหาก (ผู้ใช้ 2026-10-02) ไม่รวมใน No Bill และไม่รวมในยอดรวม - เก็บแยกที่ dutyAmount แสดงเป็นบรรทัดของตัวเอง (แบบเดียวกับยกเลิกการใช้รถ)
 // เก็บเป็น snapshot ลงแถวตอนยื่น (billTotal / noBillTotal / dutyAmount) - เปลี่ยนอัตราในอนาคตไม่ทำให้งานเก่าเปลี่ยนตาม
 // สำเนาฝั่งหน้าเว็บ: frontend/src/lib/vehicle-transfer-fee.ts (แก้ทั้งสองที่พร้อมกัน)
@@ -26,18 +26,10 @@ export const TRANSFER_FINE_LABEL = 'ค่าปรับ';
 export const TRANSFER_MOTO_NO_BILL_SHARE: FeeItem = { label: 'ลงขัน', amount: 60 };
 
 // ลงขันตามจังหวัดที่ยื่น (ผู้ใช้ 2026-11-18: แต่ละจังหวัดราคาไม่เท่ากัน บางทีไม่เสีย) - ค่าตั้งต้นที่ระบบเติมให้ พนักงานแก้ได้
-// กรุงเทพฯ: มอเตอร์ไซค์ 60 / รถยนต์ 100 · สมุทรปราการ: มอเตอร์ไซค์ 100 (ผู้ใช้ 2026-11-17) / รถยนต์ 100 (ผู้ใช้ยังไม่ได้ตัดสินใจ - คงอัตราเดิม)
-// จังหวัดอื่น = null: ยังไม่มีอัตรา พนักงานต้องกรอกเอง (0 ได้ = ไม่เสียลงขัน) · ไม่ระบุจังหวัด (งานเก่า) = กรุงเทพฯ
+// อัตราอยู่ในตาราง TransferContributionRate ครบ 77 จังหวัด ADMIN กรอก/แก้จากหน้าจอ (ตั้งต้นจาก migration: กรุงเทพฯ มอเตอร์ไซค์ 60 / รถยนต์ 100 · สมุทรปราการ 100 / 100)
+// จังหวัดที่ช่องยังว่าง: พนักงานต้องกรอกเอง (0 ได้ = ไม่เสียลงขัน) ยกเว้นโอนย้ายเข้าใช้ 0 · ไม่ระบุจังหวัด (งานเก่า) = กรุงเทพฯ
 export const TRANSFER_DEFAULT_PROVINCE = 'กรุงเทพมหานคร';
-const TRANSFER_SAMUT_PRAKAN = 'สมุทรปราการ';
 export const TRANSFER_SHARE_LABEL = 'ลงขัน';
-
-export function defaultTransferContribution(vehicleClass: 'CAR' | 'MOTO', province: string | null | undefined): number | null {
-  const where = province || TRANSFER_DEFAULT_PROVINCE;
-  if (where !== TRANSFER_DEFAULT_PROVINCE && where !== TRANSFER_SAMUT_PRAKAN) return null;
-  if (vehicleClass === 'CAR') return 100;
-  return where === TRANSFER_SAMUT_PRAKAN ? 100 : 60;
-}
 
 export function transferUrgentAmount(vehicleClass: 'CAR' | 'MOTO', urgent: boolean): number {
   if (!urgent) return 0;
@@ -85,4 +77,37 @@ export function calculateTransferCarNoBill(options: { urgent: boolean; contribut
   const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_CAR_NO_BILL_SHARE.amount }];
   if (options.urgent) noBillItems.push(TRANSFER_CAR_URGENT_ITEM);
   return { noBillItems, noBillTotal: sum(noBillItems) };
+}
+
+// ---- โอนย้ายเข้า (MOVE_IN ผู้ใช้ 2026-11-18) - เฉพาะมอเตอร์ไซค์ รถย้ายออกจากจังหวัดเดิมแล้วมาย้ายเข้าพร้อมโอน ป้ายเปลี่ยนเป็นจังหวัดใหม่
+// Bill ตามใบเสร็จ: คำขอ 5 + ใบแทนเครื่องหมายภาษีประจำปี 20 + โอนทะเบียนรถ 100 + ค่าแผ่นป้ายทะเบียน 100 = 225
+//   + ค่าปรับ (เกิน 15 วันหลังออกใบกำกับภาษี พนักงานกรอก) + ค่าอากรโอน (ตามราคารถ รู้เมื่อใบเสร็จออก พนักงานกรอกตอนรับใบเสร็จ - งานยกเว้นภาษี/มีใบกำกับภาษีไม่มี)
+// ค่าอากรแยก 40 (ไม่รวมใน No Bill ไม่นับในยอดรวม) · ลงขัน: ยังไม่มีอัตรา (ผู้ใช้ไปทำเอง) ตั้งต้น 0 ทุกจังหวัด พนักงานแก้ได้ · ด่วนเพิ่ม 50 เหมือนงานโอนมอเตอร์ไซค์
+export const TRANSFER_MOVE_IN_BILL: FeeItem[] = [
+  { label: 'คำขอ', amount: 5 },
+  { label: 'ใบแทนเครื่องหมายภาษีประจำปี', amount: 20 },
+  { label: 'โอนทะเบียนรถ', amount: 100 },
+  { label: 'ค่าแผ่นป้ายทะเบียน', amount: 100 },
+];
+export const TRANSFER_MOVE_IN_DUTY = 40;
+export const TRANSFER_MOVE_IN_CONTRIBUTION = 0;
+export const TRANSFER_STAMP_DUTY_LABEL = 'ค่าอากรโอน (ตามราคารถ)';
+
+export interface TransferMoveInFeeOptions {
+  urgent: boolean;
+  fine: number; // ค่าปรับ (Bill) - 0 = ไม่มี
+  stampDuty: number; // ค่าอากรโอน (Bill) - 0 = ไม่มี/ยังไม่รู้
+  contribution?: number; // ลงขัน (No Bill) - ไม่ส่ง = 0
+}
+
+export function calculateTransferMoveInFees(options: TransferMoveInFeeOptions): TransferFees {
+  const billItems: FeeItem[] = [...TRANSFER_MOVE_IN_BILL];
+  if (options.stampDuty > 0) billItems.push({ label: TRANSFER_STAMP_DUTY_LABEL, amount: options.stampDuty });
+  if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
+  const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_MOVE_IN_CONTRIBUTION }];
+  if (options.urgent) noBillItems.push(TRANSFER_MOTO_URGENT_ITEM);
+  const dutyItem: FeeItem = { label: DUTY_LABEL, amount: TRANSFER_MOVE_IN_DUTY };
+  const billTotal = sum(billItems);
+  const noBillTotal = sum(noBillItems);
+  return { billItems, noBillItems, dutyItem, billTotal, noBillTotal, dutyTotal: dutyItem.amount, total: billTotal + noBillTotal };
 }

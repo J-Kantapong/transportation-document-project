@@ -439,7 +439,7 @@ export interface JobFeeRate {
   id?: string;
   jobType: JobType;
   vehicleClass: "CAR" | "MOTO" | "ANY";
-  variant: "OWNER" | "INSPECTION" | null; // งานโอนเท่านั้น (null = ทุกแบบ)
+  variant: "OWNER" | "INSPECTION" | "MOVE_IN" | null; // งานโอนเท่านั้น (null = ทุกแบบ)
   label: string;
   amount: number;
   includesReceipt: boolean; // ราคาเหมารวมค่าใบเสร็จ: ค่าบริการ = ราคา - ค่าธรรมเนียมของงานนั้น

@@ -23,7 +23,16 @@ import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '..
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
 import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
-import { calculateTransferCarNoBill, calculateTransferMotoFees, defaultTransferContribution, TRANSFER_DEFAULT_PROVINCE, transferUrgentAmount } from './vehicle-transfer-fee.js';
+import { transferContributionRate } from './transfer-contribution-rates.service.js';
+import { TRANSFER_INSPECTION_TYPES, TRANSFER_TYPES, transferHasInspection, type TransferType } from './transfer-type.js';
+import {
+  calculateTransferCarNoBill,
+  calculateTransferMotoFees,
+  calculateTransferMoveInFees,
+  TRANSFER_DEFAULT_PROVINCE,
+  TRANSFER_MOVE_IN_CONTRIBUTION,
+  transferUrgentAmount,
+} from './vehicle-transfer-fee.js';
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตา/ขั้นตอนเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง (ไม่ผูกตาราง Vehicle) รถยนต์ + มอเตอร์ไซค์รวมกัน
 // 2 แบบ: OWNER = โอนตามผู้ถือกรรมสิทธิ์ (ไม่มีตรวจรถ) / INSPECTION = โอนตรวจรถ (ตรวจรถแยกจากคิวตรวจรถของรถจดใหม่)
@@ -32,8 +41,11 @@ import { calculateTransferCarNoBill, calculateTransferMotoFees, defaultTransferC
 // รถยนต์: No Bill คิดเอง (ลงขัน 100 + ด่วน 100) ส่วน Bill ยังไม่มีอัตรา พนักงานกรอกเองตอนยื่น
 // สิทธิ์: กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO) - ดู access-policy.ts
 // แก้/ยกเลิกต้องระบุเหตุผลเสมอ บันทึกประวัติลง AuditLog ('VehicleTransfer') และยกเลิกแบบไม่ลบแถว (cancelledAt)
+// MOVE_IN = โอนย้ายเข้า (ผู้ใช้ 2026-11-18): รถที่ย้ายออกจากจังหวัดเดิมแล้ว มาย้ายเข้าพร้อมโอน ป้ายเปลี่ยนเป็นของจังหวัดใหม่ - เฉพาะมอเตอร์ไซค์
+//   ขั้นตอนเหมือนโอนตรวจรถ (ยื่น -> ส่งตรวจ -> ผลตรวจ -> รับใบเสร็จ) + เลือกงานย้ายออกที่ทำไว้ (moveOutId ไม่บังคับ) + กรอกทะเบียนใหม่ตอนรับใบเสร็จ
+//   + ค่าอากรโอนตามราคารถ (stampDutyAmount รู้เมื่อใบเสร็จออก กรอกที่ข้อมูลใบเสร็จ รวมเข้า Bill)
 
-export type TransferType = 'OWNER' | 'INSPECTION';
+export type { TransferType };
 export type TransferVehicleClass = 'CAR' | 'MOTO';
 export type InspectionResult = 'PASS' | 'FAIL';
 
@@ -63,6 +75,11 @@ export interface VehicleTransferRow {
   urgent: boolean; // งานด่วน
   submitProvince: string | null; // จังหวัดที่ยื่น (ผู้ใช้ 2026-11-18) - null = งานก่อนมีช่องนี้
   fineAmount: string; // ค่าปรับ (อยู่ใน billTotal แล้ว)
+  // โอนย้ายเข้า (MOVE_IN)
+  moveOutId: string | null; // งานย้ายออกที่ผูกไว้
+  newPlateCategory: string | null; // ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า - กรอกตอนรับใบเสร็จ
+  newPlateNumber: string | null;
+  stampDutyAmount: string; // ค่าอากรโอนตามราคารถ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
   inspectionResult: InspectionResult | null;
   inspectionResultDate: string | null;
@@ -81,7 +98,8 @@ export interface VehicleTransferRow {
 
 // Wire shape - ทุกช่องมาจาก JSON ที่ยังไม่ตรวจ จึงเป็น unknown ให้ service ตรวจเอง
 export interface CreateVehicleTransferDto {
-  transferType?: unknown; // OWNER | INSPECTION (บังคับ)
+  transferType?: unknown; // OWNER | INSPECTION | MOVE_IN (บังคับ)
+  moveOutId?: unknown; // โอนย้ายเข้า: งานย้ายออกที่รับใบเสร็จแล้ว (ไม่บังคับ)
   vehicleClass?: unknown; // CAR | MOTO (บังคับ)
   customerId?: unknown; // เจ้าของงาน (บังคับ)
   transferorName?: unknown;
@@ -119,6 +137,8 @@ export interface UpdateVehicleTransferDto {
   billTotal?: unknown;
   noBillTotal?: unknown;
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
+  newPlateCategory?: unknown; // โอนย้ายเข้าที่รับกลับแล้ว - แก้ทะเบียนใหม่
+  newPlateNumber?: unknown;
   remark?: unknown;
   expectedUpdatedAt?: unknown;
 }
@@ -128,11 +148,11 @@ type ListStatus = (typeof LIST_STATUSES)[number];
 
 export function parseTransferType(value: unknown, required = true): TransferType | undefined {
   if (value === undefined || value === null || value === '') {
-    if (required) throw new BadRequestException({ error: 'กรุณาเลือกแบบงานโอน (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ)' });
+    if (required) throw new BadRequestException({ error: 'กรุณาเลือกแบบงานโอน (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ / โอนย้ายเข้า)' });
     return undefined;
   }
-  if (value === 'OWNER' || value === 'INSPECTION') return value;
-  throw new BadRequestException({ error: 'transferType ต้องเป็น OWNER หรือ INSPECTION' });
+  if ((TRANSFER_TYPES as readonly unknown[]).includes(value)) return value as TransferType;
+  throw new BadRequestException({ error: 'transferType ต้องเป็น OWNER, INSPECTION หรือ MOVE_IN' });
 }
 
 export function parseTransferClass(value: unknown, required = true): TransferVehicleClass | undefined {
@@ -182,13 +202,23 @@ interface FeeInput {
   contribution?: number; // ลงขัน - ไม่ส่ง = อัตรากรุงเทพฯ
   fineAmount: number;
   billTotal?: unknown; // รถยนต์เท่านั้น
+  moveIn?: boolean; // โอนย้ายเข้า - อัตราของตัวเอง เฉพาะมอเตอร์ไซค์
+  stampDuty?: number; // ค่าอากรโอน (โอนย้ายเข้า) - รวมใน Bill
 }
 
 // ค่าใช้จ่ายที่จะเก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บสำหรับมอเตอร์ไซค์ (คิดจากอัตราของผู้ใช้เสมอ)
 // รถยนต์: No Bill คิดเอง / Bill พนักงานกรอก / ขอใช้และค่าปรับยังไม่มีอัตราให้คิด จึงใช้ไม่ได้
 const CAR_NO_RATE_ERROR = 'รถยนต์ยังไม่มีอัตราโอนขอใช้/ค่าปรับ - กรอก Bill เอง';
+const MOVE_IN_MOTO_ONLY_ERROR = 'โอนย้ายเข้ามีอัตราเฉพาะรถจักรยานยนต์';
+const MOVE_IN_NO_USE_REQUEST_ERROR = 'โอนย้ายเข้ายังไม่มีอัตราโอนขอใช้';
 
 export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInput): FeeSnapshot {
+  if (input.moveIn) {
+    if (vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
+    if (input.useRequest) throw new BadRequestException({ error: MOVE_IN_NO_USE_REQUEST_ERROR });
+    const fees = calculateTransferMoveInFees({ urgent: input.urgent, fine: input.fineAmount, stampDuty: input.stampDuty ?? 0, contribution: input.contribution });
+    return { billTotal: fees.billTotal, noBillTotal: fees.noBillTotal, dutyAmount: fees.dutyTotal, useRequest: false, urgent: input.urgent, fineAmount: input.fineAmount };
+  }
   if (vehicleClass === 'MOTO') {
     const fees = calculateTransferMotoFees({ useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
     return {
@@ -218,13 +248,6 @@ function parseSubmitProvince(value: unknown): string | undefined {
   throw new BadRequestException({ error: 'จังหวัดที่ยื่นไม่ถูกต้อง' });
 }
 
-// ลงขันของงาน: ที่พนักงานกรอก (0 ได้ = ไม่เสีย) หรืออัตราตั้งต้นของจังหวัด - จังหวัดที่ยังไม่มีอัตราต้องกรอก (ผู้ใช้ 2026-11-18)
-function resolveContribution(vehicleClass: TransferVehicleClass, province: string | null, value: unknown): number {
-  if (!(value === undefined || value === null || (typeof value === 'string' && !value.trim()))) return requiredAmount(value, 'ลงขัน');
-  const fallback = defaultTransferContribution(vehicleClass, province);
-  if (fallback === null) throw new BadRequestException({ error: `กรุณากรอกลงขัน - จังหวัด${province}ยังไม่มีอัตรา (ไม่เสียใส่ 0)` });
-  return fallback;
-}
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
 
@@ -258,6 +281,10 @@ interface TransferRecord {
   urgent: boolean;
   submitProvince?: string | null;
   fineAmount: Prisma.Decimal | number;
+  moveOutId?: string | null;
+  newPlateCategory?: string | null;
+  newPlateNumber?: string | null;
+  stampDutyAmount?: Prisma.Decimal | number;
   inspectionSentDate: Date | null;
   inspectionResult: string | null;
   inspectionResultDate: Date | null;
@@ -291,6 +318,10 @@ export function serializeTransfer(row: TransferRecord): VehicleTransferRow {
     urgent: row.urgent,
     submitProvince: row.submitProvince ?? null,
     fineAmount: String(row.fineAmount),
+    moveOutId: row.moveOutId ?? null,
+    newPlateCategory: row.newPlateCategory ?? null,
+    newPlateNumber: row.newPlateNumber ?? null,
+    stampDutyAmount: String(row.stampDutyAmount ?? 0),
     inspectionSentDate: isoDate(row.inspectionSentDate),
     inspectionResult: row.inspectionResult === 'PASS' || row.inspectionResult === 'FAIL' ? row.inspectionResult : null,
     inspectionResultDate: isoDate(row.inspectionResultDate),
@@ -316,6 +347,7 @@ function staleIfMissing(err: unknown): never {
 const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับเอกสารกลับ';
 const LAST_RECEIPT_ERROR = 'งานที่รับเอกสารกลับแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';
 const INSPECTION_NOT_PASSED_ERROR = 'งานโอนตรวจรถต้องตรวจรถผ่านก่อนจึงรับใบเสร็จได้';
+const NEW_PLATE_REQUIRED_ERROR = 'โอนย้ายเข้า: กรุณากรอกทะเบียนใหม่ (หมวดและเลข) ของจังหวัดที่ย้ายเข้า';
 
 type Tx = Prisma.TransactionClient;
 
@@ -339,6 +371,16 @@ export class VehicleTransferService {
     this.assertClassScope(vehicleClass);
   }
 
+  // ลงขันของงาน: ที่พนักงานกรอก (0 ได้ = ไม่เสีย) หรืออัตราตั้งต้นของจังหวัดจากตาราง TransferContributionRate (ผู้ใช้ 2026-11-18)
+  // จังหวัดที่ช่องยังว่าง: งานโอนปกติต้องกรอกเอง / โอนย้ายเข้าใช้ 0 (ผู้ใช้ไปทำเอง ยังไม่มีอัตรา)
+  private async resolveContribution(vehicleClass: TransferVehicleClass, province: string | null, value: unknown, moveIn = false): Promise<number> {
+    if (!(value === undefined || value === null || (typeof value === 'string' && !value.trim()))) return requiredAmount(value, 'ลงขัน');
+    const rate = await transferContributionRate(this.prisma, province || TRANSFER_DEFAULT_PROVINCE, vehicleClass, moveIn);
+    if (rate !== null) return rate;
+    if (moveIn) return TRANSFER_MOVE_IN_CONTRIBUTION;
+    throw new BadRequestException({ error: `กรุณากรอกลงขัน - จังหวัด${province}ยังไม่มีอัตรา (ไม่เสียใส่ 0)` });
+  }
+
   // เจ้าของงานเลือกจาก dropdown ลูกค้าในฐานข้อมูล - บังคับกรอก
   private async resolveCustomerId(raw: unknown): Promise<string> {
     const id = typeof raw === 'string' ? raw.trim() : '';
@@ -356,6 +398,19 @@ export class VehicleTransferService {
     return brand.name;
   }
 
+  // โอนย้ายเข้า: งานย้ายออกที่เลือก (ไม่บังคับ) ต้องเป็นมอเตอร์ไซค์ รับใบเสร็จแล้ว ไม่ถูกยกเลิก และยังไม่ถูกงานโอนย้ายเข้าอื่นใช้
+  private async resolveMoveOutId(raw: unknown): Promise<string | null> {
+    const id = typeof raw === 'string' ? raw.trim() : '';
+    if (!id) return null;
+    const moveOut = await this.prisma.vehicleMoveOut.findFirst({ where: { id, cancelledAt: null }, select: { id: true, vehicleClass: true, returnedDate: true } });
+    if (!moveOut) throw new BadRequestException({ error: 'ไม่พบงานย้ายออกที่เลือก' });
+    if (moveOut.vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
+    if (!moveOut.returnedDate) throw new BadRequestException({ error: 'งานย้ายออกนี้ยังไม่รับใบเสร็จ - ต้องย้ายออกเสร็จก่อนจึงโอนย้ายเข้าได้' });
+    const used = await this.prisma.vehicleTransfer.findFirst({ where: { moveOutId: id, cancelledAt: null }, select: { id: true } });
+    if (used) throw new BadRequestException({ error: 'งานย้ายออกนี้ถูกใช้กับงานโอนย้ายเข้าอื่นแล้ว' });
+    return moveOut.id;
+  }
+
   async create(dto: CreateVehicleTransferDto): Promise<{ transfer: VehicleTransferRow }> {
     const transferType = parseTransferType(dto?.transferType) as TransferType;
     const vehicleClass = parseTransferClass(dto?.vehicleClass) as TransferVehicleClass;
@@ -370,17 +425,24 @@ export class VehicleTransferService {
     const plateNumber = requiredText(dto?.plateNumber, 'เลขทะเบียน', 10);
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
-    const submitProvince = parseSubmitProvince(dto?.submitProvince) ?? TRANSFER_DEFAULT_PROVINCE;
+    const moveIn = transferType === 'MOVE_IN';
+    if (moveIn && vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
+    const pickedProvince = parseSubmitProvince(dto?.submitProvince);
+    // โอนย้ายเข้า: จังหวัดที่ย้ายเข้าคือจังหวัดของป้ายใหม่ ต้องเลือกเอง ไม่เดาเป็นกรุงเทพฯ
+    if (moveIn && !pickedProvince) throw new BadRequestException({ error: 'กรุณาเลือกจังหวัดที่ย้ายเข้า' });
+    const submitProvince = pickedProvince ?? TRANSFER_DEFAULT_PROVINCE;
+    const moveOutId = moveIn ? await this.resolveMoveOutId(dto?.moveOutId) : null;
     const fees = feeSnapshotFor(vehicleClass, {
       useRequest: parseFlag(dto?.useRequest, 'โอนขอใช้'),
       urgent: parseFlag(dto?.urgent, 'งานด่วน'),
-      contribution: resolveContribution(vehicleClass, submitProvince, dto?.contribution),
+      contribution: await this.resolveContribution(vehicleClass, submitProvince, dto?.contribution, moveIn),
       fineAmount: parseFine(dto?.fineAmount),
       billTotal: dto?.billTotal,
+      moveIn,
     });
 
     const row = await this.prisma.vehicleTransfer.create({
-      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, submitProvince, ...fees },
+      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, submitProvince, moveOutId, ...fees },
       include: transferInclude,
     });
     return { transfer: serializeTransfer(row) };
@@ -413,17 +475,19 @@ export class VehicleTransferService {
       submitDate = { gte: start, lt: new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)) };
     }
 
+    // ขั้นตรวจรถมีเฉพาะโอนตรวจรถ + โอนย้ายเข้า - ระบุแบบงานมาก็ใช้ตามนั้น ไม่ระบุ (หรือระบุแบบที่ไม่มีตรวจรถ) = ทั้งสองแบบ
+    const inspectionTypes = transferType && transferHasInspection(transferType) ? transferType : { in: TRANSFER_INSPECTION_TYPES };
     const statusWhere: Prisma.VehicleTransferWhereInput =
       status === 'pending'
         ? { returnedDate: null, OR: [{ transferType: 'OWNER' }, { inspectionResult: 'PASS' }] }
         : status === 'returned'
           ? { returnedDate: { not: null } }
           : status === 'to-send'
-            ? { transferType: 'INSPECTION', returnedDate: null, inspectionSentDate: null }
+            ? { transferType: inspectionTypes, returnedDate: null, inspectionSentDate: null }
             : status === 'to-result'
-              ? { transferType: 'INSPECTION', returnedDate: null, inspectionSentDate: { not: null }, inspectionResult: null }
+              ? { transferType: inspectionTypes, returnedDate: null, inspectionSentDate: { not: null }, inspectionResult: null }
               : status === 'inspected'
-                ? { transferType: 'INSPECTION', returnedDate: null, inspectionResult: { not: null } }
+                ? { transferType: inspectionTypes, returnedDate: null, inspectionResult: { not: null } }
                 : {};
 
     const rows = await this.prisma.vehicleTransfer.findMany({
@@ -472,7 +536,7 @@ export class VehicleTransferService {
   // ---- ตรวจรถ (เฉพาะโอนตรวจรถ) -------------------------------------------------------------
 
   private assertInspectionJob(row: TransferRecord) {
-    if (row.transferType !== 'INSPECTION') throw new BadRequestException({ error: 'งานโอนตามผู้ถือกรรมสิทธิ์ไม่มีขั้นตรวจรถ' });
+    if (!transferHasInspection(row.transferType)) throw new BadRequestException({ error: 'งานโอนตามผู้ถือกรรมสิทธิ์ไม่มีขั้นตรวจรถ' });
     if (row.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว - ยกเลิกรับกลับก่อนจึงแก้ขั้นตรวจรถได้' });
   }
 
@@ -555,12 +619,20 @@ export class VehicleTransferService {
   // ---- รับใบเสร็จกลับ --------------------------------------------------------------------
 
   // รับเอกสารกลับ - ต้องมีรูปใบเสร็จแนบอย่างน้อย 1 รูป / วันที่อยู่ระหว่างวันที่ยื่นถึงวันนี้ (เวลาไทย) / โอนตรวจรถต้องตรวจผ่านแล้ว
-  async markReturned(id: string, returnedDateRaw: unknown): Promise<{ transfer: VehicleTransferRow }> {
+  // โอนย้ายเข้า: ต้องกรอกทะเบียนใหม่ (หมวด + เลข) ของจังหวัดที่ย้ายเข้ามาด้วย
+  async markReturned(id: string, returnedDateRaw: unknown, newPlate: { category?: unknown; number?: unknown } = {}): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
+    const plateData =
+      existing.transferType === 'MOVE_IN'
+        ? { newPlateCategory: optionalText(newPlate.category, 'หมวดทะเบียนใหม่', 10), newPlateNumber: optionalText(newPlate.number, 'เลขทะเบียนใหม่', 10) }
+        : {};
+    if (existing.transferType === 'MOVE_IN' && (!plateData.newPlateCategory || !plateData.newPlateNumber)) {
+      throw new BadRequestException({ error: NEW_PLATE_REQUIRED_ERROR });
+    }
     const returnedDate = parseIsoDate(returnedDateRaw);
     if (!returnedDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่รับเอกสารกลับให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (existing.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว' });
-    if (existing.transferType === 'INSPECTION' && existing.inspectionResult !== 'PASS') {
+    if (transferHasInspection(existing.transferType) && existing.inspectionResult !== 'PASS') {
       throw new BadRequestException({ error: INSPECTION_NOT_PASSED_ERROR });
     }
     // วันที่รับกลับต้องไม่ก่อนวันที่ผลตรวจออก (งานโอนตรวจรถ) ไม่งั้นก่อนวันที่ยื่น
@@ -570,8 +642,8 @@ export class VehicleTransferService {
       // นับรูปหลังล็อกแถว - ลบรูปสุดท้ายที่บันทึกแทรกกลางต้องไม่หลุดเข้ามา
       const live = await this.lockRow(tx, id, null);
       if (live._count.receipts === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
-      if (live.transferType === 'INSPECTION' && live.inspectionResult !== 'PASS') throw new ConflictException({ error: STALE_ERROR });
-      await tx.vehicleTransfer.update({ where: { id, cancelledAt: null, returnedDate: null }, data: { returnedDate } }).catch(staleIfMissing);
+      if (transferHasInspection(live.transferType) && live.inspectionResult !== 'PASS') throw new ConflictException({ error: STALE_ERROR });
+      await tx.vehicleTransfer.update({ where: { id, cancelledAt: null, returnedDate: null }, data: { returnedDate, ...plateData } }).catch(staleIfMissing);
     });
     return this.reload(id);
   }
@@ -587,6 +659,8 @@ export class VehicleTransferService {
     const has = (key: keyof UpdateVehicleTransferDto) => dto[key] !== undefined;
 
     const vehicleClass = has('vehicleClass') ? (parseTransferClass(dto.vehicleClass) as TransferVehicleClass) : (existing.vehicleClass as TransferVehicleClass);
+    const moveIn = existing.transferType === 'MOVE_IN';
+    if (moveIn && vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
     if (vehicleClass !== existing.vehicleClass) this.assertClassScope(vehicleClass); // ย้ายไปอีกประเภทรถต้องมีสิทธิ์ทั้งสองฝั่ง
 
     const submitDate = has('submitDate') ? parseIsoDate(dto.submitDate) : existing.submitDate;
@@ -596,6 +670,16 @@ export class VehicleTransferService {
     }
 
     const submitProvince = has('submitProvince') ? (parseSubmitProvince(dto.submitProvince) ?? null) : (existing.submitProvince ?? null);
+    if (moveIn && !submitProvince) throw new BadRequestException({ error: 'กรุณาเลือกจังหวัดที่ย้ายเข้า' });
+
+    // ทะเบียนใหม่ของโอนย้ายเข้า - แก้ได้เฉพาะงานที่รับกลับแล้ว (ก่อนนั้นกรอกตอนยืนยันรับกลับ) และต้องครบทั้งหมวดและเลข
+    const newPlate: { newPlateCategory?: string | null; newPlateNumber?: string | null } = {};
+    if (has('newPlateCategory') || has('newPlateNumber')) {
+      if (!moveIn || !existing.returnedDate) throw new BadRequestException({ error: 'ทะเบียนใหม่แก้ได้เฉพาะงานโอนย้ายเข้าที่รับเอกสารกลับแล้ว' });
+      newPlate.newPlateCategory = has('newPlateCategory') ? optionalText(dto.newPlateCategory, 'หมวดทะเบียนใหม่', 10) : (existing.newPlateCategory ?? null);
+      newPlate.newPlateNumber = has('newPlateNumber') ? optionalText(dto.newPlateNumber, 'เลขทะเบียนใหม่', 10) : (existing.newPlateNumber ?? null);
+      if (!newPlate.newPlateCategory || !newPlate.newPlateNumber) throw new BadRequestException({ error: NEW_PLATE_REQUIRED_ERROR });
+    }
 
     let returnedDate = existing.returnedDate;
     if (has('returnedDate')) {
@@ -625,8 +709,9 @@ export class VehicleTransferService {
       plateNumber: has('plateNumber') ? requiredText(dto.plateNumber, 'เลขทะเบียน', 10) : existing.plateNumber,
       submitDate,
       submitProvince,
-      ...this.updatedFees(existing, vehicleClass, submitProvince, dto, has),
+      ...(await this.updatedFees(existing, vehicleClass, submitProvince, dto, has)),
       returnedDate,
+      ...newPlate,
     };
     const changes: AuditChanges = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });
@@ -645,13 +730,13 @@ export class VehicleTransferService {
   }
 
   // ค่าใช้จ่ายหลังแก้: ไม่ได้แตะประเภทรถ/ขอใช้/ด่วน/ค่าปรับ/จังหวัด/ลงขัน/ยอดที่กรอก = เก็บ snapshot เดิม (แก้ชื่อผิดต้องไม่ทำให้ยอดเก่าเปลี่ยนตามอัตราใหม่)
-  private updatedFees(
+  private async updatedFees(
     existing: TransferRecord,
     vehicleClass: TransferVehicleClass,
     submitProvince: string | null,
     dto: UpdateVehicleTransferDto,
     has: (key: keyof UpdateVehicleTransferDto) => boolean,
-  ): FeeSnapshot {
+  ): Promise<FeeSnapshot> {
     const snapshot: FeeSnapshot = {
       billTotal: Number(existing.billTotal),
       noBillTotal: Number(existing.noBillTotal),
@@ -667,15 +752,19 @@ export class VehicleTransferService {
     // ลงขันเดิม = No Bill เดิมหักด่วนเพิ่ม · กรอกมา = ใช้ตามนั้น · เปลี่ยนจังหวัด/ประเภทรถโดยไม่กรอก = อัตราตั้งต้นของจังหวัดใหม่
     const existingContribution = Math.max(0, snapshot.noBillTotal - transferUrgentAmount(existing.vehicleClass as TransferVehicleClass, snapshot.urgent));
     const provinceChanged = submitProvince !== (existing.submitProvince ?? null);
+    const moveIn = existing.transferType === 'MOVE_IN';
+    // โอนย้ายเข้า: เปลี่ยนจังหวัดไม่รีเซ็ตลงขัน (ไม่มีอัตราตามจังหวัด) - คงยอดเดิมจนกว่าจะกรอกใหม่
     const contribution = has('contribution')
-      ? resolveContribution(vehicleClass, submitProvince, dto.contribution)
-      : classChanged || provinceChanged
-        ? resolveContribution(vehicleClass, submitProvince, undefined)
+      ? await this.resolveContribution(vehicleClass, submitProvince, dto.contribution, moveIn)
+      : !moveIn && (classChanged || provinceChanged)
+        ? await this.resolveContribution(vehicleClass, submitProvince, undefined)
         : existingContribution;
     const contributionSame = contribution === existingContribution;
     if (vehicleClass === 'MOTO') {
       const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
-      return !classChanged && same ? snapshot : feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution });
+      return !classChanged && same
+        ? snapshot
+        : feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty: Number(existing.stampDutyAmount ?? 0) });
     }
     // รถยนต์: ขอใช้/ค่าปรับยังไม่มีอัตรา / No Bill (ลงขัน 100 + ด่วน 100) คิดใหม่เมื่อย้ายมาจากมอเตอร์ไซค์หรือเปลี่ยนติ๊กด่วนเท่านั้น
     // ย้ายมาจากมอเตอร์ไซค์ต้องกรอก Bill ใหม่เอง / แก้เฉพาะ Bill ที่กรอก No Bill เดิมคงไว้
@@ -746,6 +835,9 @@ export class VehicleTransferService {
           urgent: existing.urgent,
           submitProvince: existing.submitProvince ?? null,
           fineAmount: existing.fineAmount,
+          moveOutId: existing.moveOutId ?? null,
+          newPlate: existing.newPlateCategory ? `${existing.newPlateCategory} ${existing.newPlateNumber}` : null,
+          stampDutyAmount: existing.stampDutyAmount ?? 0,
           inspectionSentDate: existing.inspectionSentDate,
           inspectionResult: existing.inspectionResult,
           inspectionResultDate: existing.inspectionResultDate,
@@ -761,7 +853,7 @@ export class VehicleTransferService {
   // หลังรับเอกสารกลับแนบเพิ่มได้ แต่ต้องมีเหตุผลและบันทึกประวัติ / โอนตรวจรถแนบได้เมื่อตรวจผ่านแล้วเท่านั้น
   async addReceipt(id: string, file: UploadedReceiptFile | undefined, remarkRaw?: unknown): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
-    if (existing.transferType === 'INSPECTION' && existing.inspectionResult !== 'PASS') {
+    if (transferHasInspection(existing.transferType) && existing.inspectionResult !== 'PASS') {
       throw new BadRequestException({ error: INSPECTION_NOT_PASSED_ERROR });
     }
     const remark = existing.returnedDate ? requireRemark(remarkRaw, 'งานนี้รับเอกสารกลับแล้ว - แนบรูปเพิ่มต้องระบุเหตุผล') : null;
@@ -830,18 +922,27 @@ export class VehicleTransferService {
   // แก้/กรอกเองเลขที่ใบเสร็จ/วันที่/ยอดเงิน - ต้องมีเหตุผลเมื่องานรับเอกสารกลับแล้ว
   async updateReceiptFields(
     id: string,
-    dto: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; remark?: unknown },
+    dto: { receiptNo?: unknown; receiptDate?: unknown; receiptAmount?: unknown; stampDutyAmount?: unknown; remark?: unknown },
   ): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
     const receiptNo = optionalText(dto?.receiptNo, 'เลขที่ใบเสร็จ', 100);
     const receiptDate = optionalIsoDateField(dto?.receiptDate, 'วันที่ใบเสร็จ');
     if (receiptDate) assertDateInRange('วันที่ใบเสร็จ', receiptDate, existing.submitDate);
     const receiptAmount = optionalAmount(dto?.receiptAmount, 'ยอดเงินตามใบเสร็จ');
-    const next = { receiptNo, receiptDate, receiptAmount };
+    // ค่าอากรโอนตามราคารถ (โอนย้ายเข้า) - รู้เมื่อใบเสร็จออก จึงกรอกพร้อมข้อมูลใบเสร็จ / ว่าง = 0 / Bill ปรับตามส่วนต่าง ไม่คิดใหม่ทั้งชุด
+    let stampDuty: { stampDutyAmount: number; billTotal: number } | undefined;
+    if (dto?.stampDutyAmount !== undefined) {
+      if (existing.transferType !== 'MOVE_IN') throw new BadRequestException({ error: 'ค่าอากรโอนกรอกได้เฉพาะงานโอนย้ายเข้า' });
+      const amount = optionalAmount(dto.stampDutyAmount, 'ค่าอากรโอน') ?? 0;
+      const before = Number(existing.stampDutyAmount ?? 0);
+      if (amount !== before) stampDuty = { stampDutyAmount: amount, billTotal: Math.round((Number(existing.billTotal) - before + amount) * 100) / 100 };
+    }
+    const next = { receiptNo, receiptDate, receiptAmount, ...stampDuty };
     const changes = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) return this.reload(id);
     // เงื่อนไข returnedDate เท่ากับตอนตรวจ - มีคนยืนยัน/ยกเลิกรับกลับแทรกกลาง -> 409
-    const where = { id, cancelledAt: null, returnedDate: existing.returnedDate };
+    // แก้ Bill ด้วย (ค่าอากรโอน) = ต้องไม่มีใครแก้งานแทรก - ผูกเงื่อนไข updatedAt
+    const where = { id, cancelledAt: null, returnedDate: existing.returnedDate, ...(stampDuty ? { updatedAt: existing.updatedAt } : {}) };
     if (!existing.returnedDate) {
       await this.prisma.vehicleTransfer.update({ where, data: next }).catch(staleIfMissing);
       return this.reload(id);
