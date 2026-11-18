@@ -1,5 +1,5 @@
 import { type CallHandler, type ExecutionContext, Injectable, Logger, type NestInterceptor } from '@nestjs/common';
-import { type Observable, from, mergeMap } from 'rxjs';
+import { type Observable, defer, from, mergeMap } from 'rxjs';
 import { OldVehicleJobsService } from './old-vehicle-jobs.service.js';
 
 // ยื่นงานรถเก่าจากหน้าเดิมสำเร็จ (POST สร้างงาน) -> ผูกงานกับแถวรับงานทันที ก่อนส่งคำตอบกลับ
@@ -19,6 +19,12 @@ export class OldVehicleJobLinkInterceptor implements NestInterceptor {
     const req = context.switchToHttp().getRequest<{ method: string; path?: string; url: string }>();
     const path = (req.path ?? req.url.split('?')[0]) || '';
     if (req.method !== 'POST' || !CREATE_PATHS.test(path)) return next.handle();
+    // บังคับรับงานก่อนยื่น (ผู้ใช้ 2026-11-18): ไม่มีแถวรับงานของรถคันนี้ในประเภทงานนี้ = 400 ก่อนถึง service ของงาน
+    const body = context.switchToHttp().getRequest<{ body?: unknown }>().body;
+    return defer(() => from(this.jobs.assertIntakeBeforeSubmit(path, body))).pipe(mergeMap(() => this.linkAfter(next)));
+  }
+
+  private linkAfter(next: CallHandler): Observable<unknown> {
     return next.handle().pipe(
       mergeMap((body: unknown) =>
         from(

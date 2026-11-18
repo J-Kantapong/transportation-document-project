@@ -77,3 +77,16 @@ describe('calculateTaxRenewalFees', () => {
     expect(fees.billTotal).toBe(6844);
   });
 });
+
+// รถ ขส. ที่ยังไม่มีตารางอัตรา (ผู้ใช้ 2026-11-18): Bill = ยอดตามใบเสร็จ
+describe('calculateTaxRenewalFees - ภาษีตามใบเสร็จ', () => {
+  const tax = { vehicleType: 'ขส.-ไม่ประจำทาง', taxFromReceipt: true, taxCycleCount: 1, annualVehicleTax: 0, lateFee: 0 } as never;
+
+  it('ยังไม่มียอดใบเสร็จ = Bill 0 / มียอดใบเสร็จ = Bill ตามใบเสร็จ บรรทัดเดียว', () => {
+    expect(calculateTaxRenewalFees(tax, { skipContribution: false }).billTotal).toBe(0);
+    const fees = calculateTaxRenewalFees(tax, { skipContribution: false, receiptAmount: 4250 });
+    expect(fees.billItems).toEqual([{ label: 'ภาษีรถประจำปี (ตามใบเสร็จ)', amount: 4250 }]);
+    expect(fees.billTotal).toBe(4250);
+    expect(fees.noBillTotal).toBe(1100); // ค่าตรวจสภาพ 1,000 + ลงขัน 100 เหมือนรถ ขส. อื่น
+  });
+});

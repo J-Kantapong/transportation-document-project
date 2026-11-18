@@ -49,6 +49,8 @@ export interface TransferMotoFeeOptions {
   urgent: boolean; // งานด่วน +50 (No Bill)
   fine: number; // ค่าปรับ (Bill) - 0 = ไม่มี
   contribution?: number; // ลงขัน (No Bill) - ไม่ส่ง = อัตรากรุงเทพฯ 60
+  // ค่าอากรโอน (Bill) - ผู้ใช้ 2026-11-18: งานโอนทุกแบบมี ประเมินตามราคารถ รู้เมื่อใบเสร็จออก (0 / ไม่ส่ง = ไม่มีหรือยังไม่รู้)
+  stampDuty?: number;
 }
 
 export interface TransferFees {
@@ -71,6 +73,7 @@ export function calculateTransferMotoFees(options: TransferMotoFeeOptions): Tran
 export function calculateTransferFees(vehicleClass: 'CAR' | 'MOTO', options: TransferMotoFeeOptions): TransferFees {
   const car = vehicleClass === 'CAR';
   const billItems: FeeItem[] = [...(options.useRequest ? TRANSFER_MOTO_BILL_USE_REQUEST : TRANSFER_MOTO_BILL_NORMAL)];
+  if ((options.stampDuty ?? 0) > 0) billItems.push({ label: TRANSFER_STAMP_DUTY_LABEL, amount: options.stampDuty ?? 0 });
   if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
   const noBillItems: FeeItem[] = [
     { label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? (car ? TRANSFER_CAR_NO_BILL_SHARE.amount : TRANSFER_MOTO_NO_BILL_SHARE.amount) },

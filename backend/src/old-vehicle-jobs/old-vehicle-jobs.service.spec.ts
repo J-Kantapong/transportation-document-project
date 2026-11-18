@@ -203,3 +203,70 @@ describe('OldVehicleJobsService.sync', () => {
     expect(await svc.sync()).toEqual({ linked: 0, backfilled: 0 });
   });
 });
+
+// ---- สิทธิ์รับงาน + บังคับรับงานก่อนยื่น (ผู้ใช้ 2026-11-18) ----
+import { requestContext } from '../auth/request-context.js';
+import type { UserRole } from '../generated/prisma/enums.js';
+
+const asRole = <T>(roles: UserRole[], fn: () => T) => requestContext.run({ user: { id: 'u1', roles, customerId: null, name: 'ทดสอบ' } }, fn);
+
+describe('OldVehicleJobsService - ใครรับงานได้', () => {
+  const svc = () => new OldVehicleJobsService({ customer: { findUnique: vi.fn().mockResolvedValue(null) } } as unknown as PrismaService);
+
+  it('STAFF_CAR / STAFF_MOTO / ACCOUNTANT รับงานใหม่ไม่ได้ (403)', async () => {
+    for (const roles of [['STAFF_CAR'], ['STAFF_MOTO'], ['STAFF_CAR', 'STAFF_MOTO'], ['ACCOUNTANT']] as UserRole[][]) {
+      await expect(asRole(roles, () => svc().intake({ customerId: 'c1', receivedDate: '2026-11-18', vehicles: [] }))).rejects.toMatchObject({ status: 403 });
+    }
+  });
+
+  it('ADMIN / STAFF_ENTRY / DELIVERY ผ่านด่านสิทธิ์ (ไปติดที่การตรวจข้อมูลแทน = 400)', async () => {
+    for (const roles of [['ADMIN'], ['STAFF_ENTRY'], ['DELIVERY'], ['STAFF_CAR', 'DELIVERY']] as UserRole[][]) {
+      await expect(asRole(roles, () => svc().intake({ customerId: 'ไม่มี', receivedDate: '2026-11-18', vehicles: [] }))).rejects.toMatchObject({ status: 400 });
+    }
+  });
+});
+
+describe('OldVehicleJobsService.assertIntakeBeforeSubmit', () => {
+  const make = (rows: { inspectionRequired: boolean; inspectionResult: string | null }[]) => {
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const vehicleFind = vi.fn().mockResolvedValue({ chassis: 'FROMDB1' });
+    const svc = new OldVehicleJobsService({ oldVehicleJob: { findMany }, vehicle: { findFirst: vehicleFind } } as unknown as PrismaService);
+    return { svc, findMany, vehicleFind };
+  };
+
+  it('ไม่มีแถวรับงานของรถคันนี้ในประเภทงานนี้ = 400 บอกให้ไปรับงานก่อน', async () => {
+    const { svc, findMany } = make([]);
+    await expect(svc.assertIntakeBeforeSubmit('/api/vehicle-move-outs', { chassis: ' abc 123 ' })).rejects.toMatchObject({ status: 400 });
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ cancelledAt: null, jobId: null, jobType: { in: ['MOVE_OUT'] }, vehicle: { chassisKey: 'ABC123' } });
+  });
+
+  it('มีแถวรับงานที่ไม่ต้องตรวจรถ หรือตรวจผ่านแล้ว = ยื่นได้ / ต้องตรวจแต่ยังไม่ผ่าน = 400', async () => {
+    await expect(make([{ inspectionRequired: false, inspectionResult: null }]).svc.assertIntakeBeforeSubmit('/api/plate-copies/', { chassis: 'A1' })).resolves.toBeUndefined();
+    await expect(make([{ inspectionRequired: true, inspectionResult: 'PASS' }]).svc.assertIntakeBeforeSubmit('/api/vehicle-transfers', { chassis: 'A1', transferType: 'INSPECTION' })).resolves.toBeUndefined();
+    await expect(make([{ inspectionRequired: true, inspectionResult: null }]).svc.assertIntakeBeforeSubmit('/api/vehicle-transfers', { chassis: 'A1', transferType: 'MOVE_IN' })).rejects.toMatchObject({ status: 400 });
+    await expect(make([{ inspectionRequired: true, inspectionResult: 'FAIL' }]).svc.assertIntakeBeforeSubmit('/api/tax-renewals', { chassis: 'A1' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('แยกประเภทงานโอนและแบบของสลับเลข / เปลี่ยนเลข / คู่รถเก่า (ตรวจทั้งสองคัน)', async () => {
+    const t = make([{ inspectionRequired: false, inspectionResult: null }]);
+    await t.svc.assertIntakeBeforeSubmit('/api/vehicle-transfers', { chassis: 'A1', transferType: 'OWNER' });
+    expect(t.findMany.mock.calls[0][0].where.jobType).toEqual({ in: ['TRANSFER_OWNER'] });
+    const c = make([{ inspectionRequired: false, inspectionResult: null }]);
+    await c.svc.assertIntakeBeforeSubmit('/api/plate-swaps/change', { oldChassis: 'A1' });
+    expect(c.findMany.mock.calls[0][0].where).toMatchObject({ jobType: { in: ['PLATE_SWAP'] }, jobVariant: 'CHANGE' });
+    const pair = make([{ inspectionRequired: false, inspectionResult: null }]);
+    await pair.svc.assertIntakeBeforeSubmit('/api/plate-swaps/pair', { carA: { oldChassis: 'A1' }, carB: { oldChassis: 'B2' } });
+    expect(pair.findMany).toHaveBeenCalledTimes(2);
+    expect(pair.findMany.mock.calls[1][0].where).toMatchObject({ jobVariant: 'OLD_OLD', vehicle: { chassisKey: 'B2' } });
+  });
+
+  it('ต่อภาษีรถจากฐานข้อมูลรถจดใหม่ใช้เลขตัวถังของรถคันนั้น · path อื่น / ไม่มีเลขตัวถัง = ไม่ตรวจ', async () => {
+    const v = make([{ inspectionRequired: false, inspectionResult: null }]);
+    await v.svc.assertIntakeBeforeSubmit('/api/tax-renewals', { vehicleId: 'v1' });
+    expect(v.findMany.mock.calls[0][0].where.vehicle).toEqual({ chassisKey: 'FROMDB1' });
+    const none = make([]);
+    await none.svc.assertIntakeBeforeSubmit('/api/tax-renewals/preview', { chassis: 'A1' });
+    await none.svc.assertIntakeBeforeSubmit('/api/vehicle-move-outs', { chassis: '' });
+    expect(none.findMany).not.toHaveBeenCalled();
+  });
+});

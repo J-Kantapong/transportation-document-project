@@ -13,6 +13,8 @@ import {
   VEHICLE_USE_CANCEL_DUTY_FEE,
   VEHICLE_USE_CANCEL_NO_BILL_FEE,
 } from "@/lib/vehicle-use-cancel-fee";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleUseCancelApi,
@@ -414,6 +416,9 @@ type RowDialog = { kind: "edit" | "cancel"; item: VehicleUseCancellation } | nul
 export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: CancellationVehicleClass }) {
   const canWrite = useCanWrite(vehicleClass);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
+    setForm((prev) => ({ ...prev, customerId: job.customer?.id ?? prev.customerId, ownerName: vehicle.ownerName ?? "", chassis: vehicle.chassis, engine: vehicle.engine ?? "", brand: vehicle.brand ?? "", plateCategory: vehicle.plateCategory, plateNumber: vehicle.plateNumber })),
+  );
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
@@ -489,6 +494,7 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
         ← ยกเลิกการใช้รถ · {CLASS_LABEL[vehicleClass]}
       </Link>
       <h1>ยื่นงานยกเลิกการใช้รถ ({CLASS_LABEL[vehicleClass]})</h1>
+      <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>

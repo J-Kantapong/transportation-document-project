@@ -156,6 +156,13 @@ export interface HubVehicle {
   jobs: HubJob[];
 }
 
+// ข้อมูลที่ฟอร์มยื่นของหน้างานเดิมใช้เติมให้เอง เมื่อเปิดจากหน้ารวม (?intake=<id> - รอบ 2 ผู้ใช้ 2026-11-18)
+export interface IntakePrefill {
+  vehicle: HubVehicle;
+  job: HubJob;
+  pairVehicle: HubVehicle | null; // อีกคันของคู่สลับเลข รถเก่า กับ รถเก่า
+}
+
 export interface IntakeVehicleInput {
   vehicleId?: string;
   vehicleType?: string;
@@ -198,6 +205,8 @@ export const oldVehicleJobsApi = {
     if (vehicleClass) params.set("vehicleClass", vehicleClass);
     return request<{ vehicles: HubVehicle[]; truncated: boolean }>(`/api/old-vehicle-jobs?${params}`);
   },
+  // แถวรับงาน 1 งาน + ข้อมูลรถ - ฟอร์มยื่นของหน้างานเดิมใช้เติมข้อมูลให้เอง (?intake=<id>)
+  job: (id: string) => request<IntakePrefill>(`/api/old-vehicle-jobs/jobs/${encodeURIComponent(id)}`),
   lookup: (chassis: string, plateCategory = "", plateNumber = "") =>
     request<{ vehicle: HubVehicle | null; plateMatches: HubVehicle[]; warnings: string[] }>(
       `/api/old-vehicle-jobs/lookup?${new URLSearchParams({ chassis, plateCategory, plateNumber })}`,
@@ -226,10 +235,21 @@ export const OLD_VEHICLE_INSPECTION = "/registration/old-vehicle/inspection";
 // หน้าที่ต้องไปทำขั้นถัดไปของงานนั้น (รอบที่ 1: ขั้นยื่นและหลังจากนั้นยังอยู่ในหน้าเดิมของแต่ละงาน)
 // null = ทำในหน้ารวมนี้เอง (เลือกประเภทงาน) หรือไม่มีอะไรต้องทำ (เสร็จ / ถูกยกเลิก)
 export function nextStepHref(vehicle: HubVehicle, job: HubJob): string | null {
-  const seg = vehicle.vehicleClass === "MOTO" ? "moto" : "car";
   const { status, jobType } = job;
   if (!jobType || status === "NEW" || isClosedStatus(status)) return null;
   if (status === "TO_DELIVER") return "/delivery";
+  // ขั้นยื่น: พก id ของแถวรับงานไปด้วย ฟอร์มยื่นจะเติมข้อมูลรถ / เจ้าของงานให้เอง ไม่ต้องกรอกซ้ำ
+  if (status === "TO_SUBMIT") {
+    const href = stepHref(vehicle, job);
+    return href ? `${href}?intake=${encodeURIComponent(job.id)}` : null;
+  }
+  return stepHref(vehicle, job);
+}
+
+function stepHref(vehicle: HubVehicle, job: HubJob): string | null {
+  const seg = vehicle.vehicleClass === "MOTO" ? "moto" : "car";
+  const { status, jobType } = job;
+  if (!jobType) return null;
   // ตรวจรถก่อนยื่นทำในหน้าตรวจรถของงานรถเก่า - งานโอนลำดับเดิมที่ยื่นไปแล้วยังตรวจในหน้าของงานโอน
   if ((status === "TO_INSPECT" || status === "TO_RESULT") && !job.jobId) return OLD_VEHICLE_INSPECTION;
   switch (jobType) {

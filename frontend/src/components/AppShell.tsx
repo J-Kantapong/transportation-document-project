@@ -9,6 +9,7 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
   type RegistrationSubtask,
   NEW_VEHICLE_SUBTASKS,
   OTHER_SUBTASKS,
+  MENU_CATEGORIES,
   REGISTRATION_CATEGORIES,
   TRANSFER_TYPES,
   YAMAHA_RELOCATION_SUBTASKS,
@@ -246,7 +247,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <>
                 <div className="label">ประเภทงานทะเบียน</div>
                 {/* ซ่อนหมวดที่บทบาทนี้เปิดไม่ได้ (เช่น STAFF_ENTRY กับต่อภาษี) ไม่งั้นกดแล้ว proxy.ts เด้งกลับเงียบๆ (พบ 2026-09-27) */}
-                {REGISTRATION_CATEGORIES.filter((category) => canAccessPage(category.href, roles)).map((category) => (
+                {MENU_CATEGORIES.filter((category) => canAccessPage(category.href, roles)).map((category) => (
                   <NavLink
                     key={category.href}
                     href={category.href}

@@ -74,10 +74,12 @@ export function calculateTransferMotoFees(options: { useRequest: boolean; urgent
 // งานโอนทั้งสองประเภทรถ - Bill และค่าอากรเท่ากัน ต่างที่ลงขันตั้งต้นกับลงขันด่วนเพิ่ม (ผู้ใช้ 2026-11-18)
 export function calculateTransferFees(
   vehicleClass: "CAR" | "MOTO",
-  options: { useRequest: boolean; urgent: boolean; fine: number; contribution?: number },
+  // stampDuty = ค่าอากรโอนตามราคารถ (ผู้ใช้ 2026-11-18: งานโอนทุกแบบมี รู้เมื่อใบเสร็จออก) รวมใน Bill
+  options: { useRequest: boolean; urgent: boolean; fine: number; contribution?: number; stampDuty?: number },
 ): TransferFees {
   const car = vehicleClass === "CAR";
   const billItems: FeeItem[] = [...(options.useRequest ? TRANSFER_MOTO_BILL_USE_REQUEST : TRANSFER_MOTO_BILL_NORMAL)];
+  if ((options.stampDuty ?? 0) > 0) billItems.push({ label: TRANSFER_STAMP_DUTY_LABEL, amount: options.stampDuty ?? 0 });
   if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
   const noBillItems: FeeItem[] = [
     { label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? (car ? TRANSFER_CAR_NO_BILL_SHARE.amount : TRANSFER_MOTO_NO_BILL_SHARE.amount) },

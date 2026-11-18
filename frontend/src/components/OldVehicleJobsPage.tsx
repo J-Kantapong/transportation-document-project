@@ -235,6 +235,11 @@ export function OldVehicleJobsPage() {
         <div>
           <h1>งานรถเก่า</h1>
           <p>รับงาน แล้วเลือกว่าจะทำงานอะไรต่อ - สลับเลข / งานโอน / ต่อภาษี / ยกเลิกการใช้รถ / ย้ายออก / คัดแผ่นป้าย</p>
+          {/* เมนูเดิม 4 หมวดถูกซ่อนจากแถบข้างแล้ว (ผู้ใช้ 2026-11-18) - หน้าเดิมยังใช้ดูรายการที่ยื่น / รับใบเสร็จ / ตารางลงขัน */}
+          <p className="muted" style={{ fontSize: 13 }}>
+            หน้างานเดิม: <Link href="/registration/plate-swap">สลับเลข</Link> · <Link href="/registration/transfer">งานโอน</Link> ·{" "}
+            <Link href="/registration/tax-renewal">ต่อภาษี</Link> · <Link href="/registration/other">อื่นๆ</Link>
+          </p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link href={OLD_VEHICLE_INSPECTION} className="text-button" style={{ alignSelf: "center" }}>

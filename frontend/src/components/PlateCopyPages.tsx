@@ -19,6 +19,8 @@ import {
   plateCopyPlateFee,
   plateCopyUrgentFee,
 } from "@/lib/plate-copy-fee";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   plateCopyApi,
@@ -491,6 +493,9 @@ export function PlateCopySubmitPage() {
   const writable = useWritableClasses();
   const canWrite = Boolean(writable?.length);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
+    setForm((prev) => ({ ...prev, vehicleClass: vehicle.vehicleClass, customerId: job.customer?.id ?? prev.customerId, ownerName: vehicle.ownerName ?? "", chassis: vehicle.chassis, engine: vehicle.engine ?? "", brand: vehicle.brand ?? "", plateCategory: vehicle.plateCategory, plateNumber: vehicle.plateNumber })),
+  );
   // บันทึกได้ประเภทเดียว = ใช้ประเภทนั้นเลย ไม่ต้องเลือก
   const classValue: PlateCopyVehicleClass | "" = form.vehicleClass || (writable?.length === 1 ? writable[0] : "");
   const liveForm: FormState = { ...form, vehicleClass: classValue };
@@ -570,6 +575,7 @@ export function PlateCopySubmitPage() {
         ← คัดแผ่นป้ายทะเบียน
       </Link>
       <h1>ยื่นงานคัดแผ่นป้ายทะเบียน</h1>
+      <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>

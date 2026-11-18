@@ -29,6 +29,8 @@ import {
 } from "@/lib/plate-swap-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
+import { IntakeNotice } from "@/components/IntakeNotice";
+import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { DateInput } from "@/components/DateInput";
 import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
 
@@ -894,6 +896,14 @@ export function PlateSwapSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: P
   // เจ้าของงาน = ลูกค้าที่ส่งงานมา (ผู้ใช้ 2026-09-28) - คนละคนกับชื่อเจ้าของรถเก่าที่กรอกเอง
   const [customerId, setCustomerId] = useState("");
   const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
+  // เปิดจากหน้ารวมงานรถเก่า (?intake=) = เติมเจ้าของงาน + ข้อมูลรถเก่า + รถใหม่ที่เลือกไว้ตอนรับงานให้เอง
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) => {
+    setForm((prev) => ({ ...prev, ...{ oldOwnerName: vehicle.ownerName ?? "", oldEngine: vehicle.engine ?? "", oldChassis: vehicle.chassis, oldBrand: vehicle.brand ?? "", oldPlateCategory: vehicle.plateCategory, oldPlateNumber: vehicle.plateNumber } }));
+    if (job.customer) setCustomerId(job.customer.id);
+    if (job.newVehicle) {
+      setNewVehicle({ id: job.newVehicle.id, chassis: job.newVehicle.chassis, brandName: job.newVehicle.brandName, customerName: "", plateCategory: null, plateNumber: null, activeSubmissionStatus: null });
+    }
+  });
 
   const [month, setMonth] = useState(() => todayIso().slice(0, 7));
   const [swaps, setSwaps] = useState<PlateSwap[]>([]);
@@ -1007,6 +1017,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
         ← รถเก่า กับ รถใหม่
       </Link>
       <h1>ยื่นงานสลับเลข ({CLASS_LABEL[vehicleClass]})</h1>
+      <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>
@@ -2277,6 +2288,12 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [customerId, setCustomerId] = useState("");
   const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
+  // เปิดจากหน้ารวมงานรถเก่า = เติมเจ้าของงาน + รถทั้งสองคันของคู่ให้เอง
+  const intakePrefill = useIntakePrefill(({ vehicle, job, pairVehicle }) => {
+    setCarA({ oldOwnerName: vehicle.ownerName ?? "", oldEngine: vehicle.engine ?? "", oldChassis: vehicle.chassis, oldBrand: vehicle.brand ?? "", oldPlateCategory: vehicle.plateCategory, oldPlateNumber: vehicle.plateNumber });
+    if (pairVehicle) setCarB({ oldOwnerName: pairVehicle.ownerName ?? "", oldEngine: pairVehicle.engine ?? "", oldChassis: pairVehicle.chassis, oldBrand: pairVehicle.brand ?? "", oldPlateCategory: pairVehicle.plateCategory, oldPlateNumber: pairVehicle.plateNumber });
+    if (job.customer) setCustomerId(job.customer.id);
+  });
   const [numberSource, setNumberSource] = useState<PlateSwapNumberSource>("NEW_UNUSED");
   const [buyNormalPlate, setBuyNormalPlate] = useState(false);
   const [buyAuctionPlate, setBuyAuctionPlate] = useState(false);
@@ -2368,6 +2385,7 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
         ← รถเก่า กับ รถเก่า
       </Link>
       <h1>ยื่นงานสลับเลข · รถเก่า กับ รถเก่า ({CLASS_LABEL[vehicleClass]})</h1>
+      <IntakeNotice state={intakePrefill} />
       <p className="muted" style={{ marginBottom: 20 }}>
         กรอกรถทั้ง 2 คันในหน้านี้ ระบบจะบันทึกแยกเป็น 2 งาน (คันละงาน) และสลับทะเบียนให้อัตโนมัติ
       </p>
@@ -2570,6 +2588,10 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [customerId, setCustomerId] = useState("");
   const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const intakePrefill = useIntakePrefill(({ vehicle, job }) => {
+    setCar({ oldOwnerName: vehicle.ownerName ?? "", oldEngine: vehicle.engine ?? "", oldChassis: vehicle.chassis, oldBrand: vehicle.brand ?? "", oldPlateCategory: vehicle.plateCategory, oldPlateNumber: vehicle.plateNumber });
+    if (job.customer) setCustomerId(job.customer.id);
+  });
   const [urgent, setUrgent] = useState(vehicleClass === "CAR");
   const [brandNames, setBrandNames] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -2655,6 +2677,7 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
         ← {home.label}
       </Link>
       <h1>ยื่นงานเปลี่ยนเลขทะเบียน ({CLASS_LABEL[vehicleClass]})</h1>
+      <IntakeNotice state={intakePrefill} />
       <p className="muted" style={{ marginBottom: 20 }}>
         ลูกค้าจองเลขในระบบกรมขนส่งแล้วเอามาลงกับรถ 1 คัน - ซื้อแผ่นป้ายใหม่ทุกครั้ง
       </p>

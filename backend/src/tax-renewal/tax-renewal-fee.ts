@@ -44,17 +44,21 @@ export interface TaxRenewalFees {
 
 const sum = (items: FeeItem[]) => items.reduce((acc, item) => acc + item.amount, 0);
 
+// Bill ของรถ ขส. ที่ยังไม่มีตารางอัตรา: บรรทัดเดียว = ยอดตามใบเสร็จ (รวมเงินเพิ่มถ้ามี) - 0 จนกว่าจะมียอดใบเสร็จ
+export const TAX_FROM_RECEIPT_LABEL = 'ภาษีรถประจำปี (ตามใบเสร็จ)';
+
 export function calculateTaxRenewalFees(
   tax: VehicleTaxResult,
-  options: { skipContribution: boolean },
+  // receiptAmount: ยอดบนใบเสร็จ - ใช้เฉพาะรถ ขส. ที่ยังไม่มีตารางอัตรา (tax.taxFromReceipt) ซึ่ง Bill = ยอดตามใบเสร็จ (ผู้ใช้ 2026-11-18)
+  options: { skipContribution: boolean; receiptAmount?: number | null },
 ): TaxRenewalFees {
-  const billItems: FeeItem[] = [
+  const billItems: FeeItem[] = tax.taxFromReceipt ? [{ label: TAX_FROM_RECEIPT_LABEL, amount: options.receiptAmount ?? 0 }] : [
     {
       label: tax.taxCycleCount > 1 ? `ภาษีรถประจำปี (${tax.taxCycleCount} รอบปี)` : 'ภาษีรถประจำปี',
       amount: tax.annualVehicleTax,
     },
   ];
-  if (tax.lateFee > 0) {
+  if (!tax.taxFromReceipt && tax.lateFee > 0) {
     billItems.push({ label: 'เงินเพิ่มกรณีชำระล่าช้า', amount: tax.lateFee });
   }
 

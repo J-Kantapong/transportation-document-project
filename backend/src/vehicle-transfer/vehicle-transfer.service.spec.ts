@@ -28,6 +28,7 @@ function row(overrides: Record<string, unknown> = {}) {
     urgent: false,
     submitProvince: null,
     fineAmount: 0,
+    stampDutyAmount: 0,
     inspectionSentDate: null,
     inspectionResult: null,
     inspectionResultDate: null,
@@ -527,15 +528,16 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
     expect(ok.update.mock.calls[0][0].data).toMatchObject({ newPlateCategory: '1กก', newPlateNumber: '99' });
   });
 
-  it('ค่าอากรโอนกรอกที่ข้อมูลใบเสร็จ - Bill เพิ่มตามส่วนต่าง / งานแบบอื่นกรอกไม่ได้', async () => {
+  it('ค่าอากรโอนกรอกที่ข้อมูลใบเสร็จ - Bill เพิ่มตามส่วนต่าง / งานโอนแบบอื่นกรอกได้ด้วย (ผู้ใช้ 2026-11-18)', async () => {
     const { svc, update } = service(moveInRow());
     await asUser(['ADMIN'], () => svc.updateReceiptFields('t1', { stampDutyAmount: '350' }));
     expect(update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 350, billTotal: 580 });
     const again = service(moveInRow({ stampDutyAmount: 350, billTotal: 580 }));
     await asUser(['ADMIN'], () => again.svc.updateReceiptFields('t1', { stampDutyAmount: '' }));
     expect(again.update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 0, billTotal: 230 });
-    const owner = service(row());
-    await expect(asUser(['ADMIN'], () => owner.svc.updateReceiptFields('t1', { stampDutyAmount: '10' }))).rejects.toMatchObject({ status: 400 });
+    const owner = service(row({ billTotal: 105 }));
+    await asUser(['ADMIN'], () => owner.svc.updateReceiptFields('t1', { stampDutyAmount: '10' }));
+    expect(owner.update.mock.calls[0][0].data).toMatchObject({ stampDutyAmount: 10, billTotal: 115 });
   });
 
   it('แก้ค่าปรับหลังมีค่าอากรโอน - คิด Bill ใหม่โดยยังรวมค่าอากรโอน', async () => {
@@ -554,9 +556,13 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
     const old = service(moveInRow({ billTotal: 225 }));
     await asUser(['ADMIN'], () => old.svc.update('t1', { stampDutyAmount: '100', remark: 'ใบเสร็จมีค่าอากรโอน' }));
     expect(old.update.mock.calls[0][0].data).toMatchObject({ billTotal: 325, stampDutyAmount: 100 });
-    // งานแบบอื่นไม่มีค่าอากรโอน
+    // งานโอนแบบอื่นมีค่าอากรโอนได้เหมือนกัน (ผู้ใช้ 2026-11-18) - แก้อย่างเดียวปรับ Bill ตามส่วนต่าง / ตอนยื่นรวมใน Bill
     const owner = service(row({ vehicleClass: 'MOTO', billTotal: 105, noBillTotal: 60, dutyAmount: 20 }));
-    await expect(asUser(['ADMIN'], () => owner.svc.update('t1', { stampDutyAmount: '100', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
+    await asUser(['ADMIN'], () => owner.svc.update('t1', { stampDutyAmount: '100', remark: 'x' }));
+    expect(owner.update.mock.calls[0][0].data).toMatchObject({ billTotal: 205, stampDutyAmount: 100 });
+    const fresh = service(null);
+    await asUser(['ADMIN'], () => fresh.svc.create({ ...validDto, stampDutyAmount: '250' }));
+    expect(fresh.create.mock.calls[0][0].data).toMatchObject({ billTotal: 355, stampDutyAmount: 250 });
   });
 
   it('ค่าปรับคงที่ 200 บาท - ยอดอื่น = 400 ยกเว้นส่งยอดเดิมของงานเก่ากลับมา', async () => {

@@ -156,6 +156,10 @@ export interface VehicleTaxResult {
 
   warnings: string[];
   calculationDetails: VehicleTaxCalculationDetail[];
+
+  // รถตาม พ.ร.บ.ขนส่ง ประเภทที่ยังไม่มีตารางอัตรายืนยัน (ผู้ใช้ 2026-11-18: "ใช้ OCR อ่านได้" - ยื่นและชำระวันเดียว ยอดอยู่บนใบเสร็จ)
+  // true = ยอดภาษีในผลนี้เป็น 0 ทั้งหมด งานต่อภาษีจะใช้ยอดบนใบเสร็จเป็น Bill แทน (ดู calculateTaxRenewalFees)
+  taxFromReceipt?: boolean;
 }
 
 export class VehicleTaxInputError extends Error {}
@@ -274,6 +278,9 @@ function isValidDate(value: unknown): value is Date {
 export function calculateVehicleTax(
   input: VehicleTaxInput,
   rules: VehicleTaxRuleSet,
+  // allowReceiptTax: รถ ขส. ที่ยังไม่มีตารางอัตรา ไม่ตอบ error แต่คืนยอดภาษี 0 พร้อมธง taxFromReceipt (งานต่อภาษีเท่านั้น -
+  // บอทไลน์ลูกค้าที่ตอบยอดภาษีไม่เปิดตัวเลือกนี้ จึงยังบอกว่าคำนวณไม่ได้เหมือนเดิม)
+  options: { allowReceiptTax?: boolean } = {},
 ): VehicleTaxResult {
   const warnings: string[] = [];
 
@@ -326,11 +333,13 @@ export function calculateVehicleTax(
     input.owner ?? null,
     rules,
   );
-  if (gov.baseAmount === null) {
+  const taxFromReceipt = gov.baseAmount === null && options.allowReceiptTax === true && registrationCode === TRANSPORT_REGISTRATION_CODE;
+  if (gov.baseAmount === null && !taxFromReceipt) {
     throw new VehicleTaxInputError(gov.reason ?? 'คำนวณภาษีพื้นฐานไม่ได้');
   }
+  if (taxFromReceipt) warnings.push('รถประเภทนี้ยังไม่มีตารางอัตราภาษีในระบบ - ใช้ยอดภาษีตามใบเสร็จ (ระบบเติมให้ตอนแนบใบเสร็จ)');
 
-  const baseTax = gov.baseAmount;
+  const baseTax = gov.baseAmount ?? 0;
   const companyMultiplier = gov.juristicMultiplier;
 
   // ตัวคูณเชื้อเพลิง/EV ไม่ขึ้นกับรอบปี (อิงวันจดทะเบียนครั้งแรก) จึงคิดครั้งเดียวใช้ทุกรอบ
@@ -449,6 +458,7 @@ export function calculateVehicleTax(
     grandTotal: roundSatang(grandTotal),
     warnings,
     calculationDetails: [],
+    ...(taxFromReceipt ? { taxFromReceipt: true } : {}),
   };
 
   result.calculationDetails = buildCalculationDetails(result);
