@@ -24,6 +24,7 @@ import { VehicleMoveOutModule } from './vehicle-move-out/vehicle-move-out.module
 import { VehicleUseCancellationModule } from './vehicle-use-cancellation/vehicle-use-cancellation.module.js';
 import { VehicleTransferModule } from './vehicle-transfer/vehicle-transfer.module.js';
 import { PlateCopyModule } from './plate-copy/plate-copy.module.js';
+import { OldVehicleJobsModule } from './old-vehicle-jobs/old-vehicle-jobs.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ReceiptsModule } from './receipts/receipts.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
@@ -56,6 +57,7 @@ import { YamahaRelocationModule } from './yamaha-relocation/yamaha-relocation.mo
     VehicleMoveOutModule,
     VehicleTransferModule,
     PlateCopyModule,
+    OldVehicleJobsModule,
     DocumentSubmissionModule,
     ReceivingModule,
     ReceiptsModule,

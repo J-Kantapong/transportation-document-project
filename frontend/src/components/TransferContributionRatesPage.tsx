@@ -12,11 +12,12 @@ import { transferContributionRatesApi, type TransferContributionRate } from "@/l
 // ใช้เป็นค่าตั้งต้นของช่องลงขันในฟอร์มงานโอน (พนักงานแก้รายงานได้) ไม่กระทบงานที่ยื่นไปแล้ว
 // ทุกคนที่เข้าหน้างานโอนดูได้ แก้ได้เฉพาะ ADMIN · เติมช่องว่างครั้งแรกไม่ต้องมีเหตุผล แก้อัตราที่เคยตั้งแล้วต้องมี
 
-type Field = "transferMoto" | "transferCar" | "moveInMoto";
+type Field = "transferMoto" | "transferCar" | "moveInMoto" | "moveInCar";
 const FIELDS: { key: Field; label: string }[] = [
   { key: "transferMoto", label: "โอน (มอเตอร์ไซค์)" },
   { key: "transferCar", label: "โอน (รถยนต์)" },
   { key: "moveInMoto", label: "โอนย้ายเข้า (มอเตอร์ไซค์)" },
+  { key: "moveInCar", label: "โอนย้ายเข้า (รถยนต์)" },
 ];
 
 const money = (n: number | null) => (n === null ? <span className="muted">ยังไม่ตั้ง</span> : n.toLocaleString("th-TH", { maximumFractionDigits: 2 }));
@@ -27,6 +28,7 @@ interface Draft {
   transferMoto: string;
   transferCar: string;
   moveInMoto: string;
+  moveInCar: string;
   note: string;
   remark: string;
 }
@@ -69,7 +71,7 @@ export function TransferContributionRatesPage() {
 
   function openEdit(rate: TransferContributionRate) {
     setEditing(rate.province);
-    setDraft({ transferMoto: text(rate.transferMoto), transferCar: text(rate.transferCar), moveInMoto: text(rate.moveInMoto), note: rate.note ?? "", remark: "" });
+    setDraft({ transferMoto: text(rate.transferMoto), transferCar: text(rate.transferCar), moveInMoto: text(rate.moveInMoto), moveInCar: text(rate.moveInCar), note: rate.note ?? "", remark: "" });
     setMessage({ text: "" });
   }
 
@@ -90,6 +92,7 @@ export function TransferContributionRatesPage() {
         transferMoto: draft.transferMoto.trim(),
         transferCar: draft.transferCar.trim(),
         moveInMoto: draft.moveInMoto.trim(),
+        moveInCar: draft.moveInCar.trim(),
         note: draft.note.trim(),
         remark: draft.remark.trim(),
         expectedUpdatedAt: rate.updatedAt,

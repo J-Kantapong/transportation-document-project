@@ -122,11 +122,12 @@ describe('VehicleMoveOutService.create', () => {
     expect(create.mock.calls[0][0].data).toMatchObject({ urgent: true, billTotal: 25, noBillTotal: 130, dutyAmount: 10 });
   });
 
-  it('รถยนต์ยังไม่มีอัตรา: ยอดเป็น 0 และเลือกงานด่วนไม่ได้', async () => {
+  it('รถยนต์ (ผู้ใช้ 2026-11-18): Bill 55 / ลงขัน 100 + ด่วนเพิ่ม 100 / ค่าอากร 10', async () => {
     const { svc, create } = service(null);
     await svc.create(validDto);
-    expect(create.mock.calls[0][0].data).toMatchObject({ urgent: false, billTotal: 0, noBillTotal: 0, dutyAmount: 0 });
-    await expect(svc.create({ ...validDto, urgent: true })).rejects.toMatchObject({ response: { error: 'งานย้ายออกรถยนต์ยังไม่มีอัตรางานด่วน' } });
+    expect(create.mock.calls[0][0].data).toMatchObject({ urgent: false, billTotal: 55, noBillTotal: 100, dutyAmount: 10 });
+    await svc.create({ ...validDto, urgent: true });
+    expect(create.mock.calls[1][0].data).toMatchObject({ urgent: true, billTotal: 55, noBillTotal: 200, dutyAmount: 10 });
     await expect(svc.create({ ...validDto, vehicleClass: 'MOTO', urgent: 'ใช่' })).rejects.toBeDefined();
   });
 
@@ -217,14 +218,15 @@ describe('VehicleMoveOutService.update', () => {
     expect(Object.keys(audit.changes as object).sort()).toEqual(['ownerName']);
   });
 
-  it('แก้ติ๊กงานด่วนของมอเตอร์ไซค์: คิด No Bill ใหม่และลงประวัติ / รถยนต์ติ๊กด่วนไม่ได้', async () => {
+  it('แก้ติ๊กงานด่วนของมอเตอร์ไซค์: คิด No Bill ใหม่และลงประวัติ / รถยนต์ที่ยื่นก่อนมีอัตราได้ยอดครบ', async () => {
     const moto = service(row({ vehicleClass: 'MOTO' }));
     await asUser(['STAFF_MOTO'], () => moto.svc.update('x1', { urgent: true, remark: 'ลูกค้าขอด่วน' }));
     expect(moto.update.mock.calls[0][0].data).toMatchObject({ urgent: true, noBillTotal: 130 });
     const changes = auditOf(moto.prisma)[0].changes as Record<string, unknown>;
     expect(Object.keys(changes).sort()).toEqual(['noBillTotal', 'urgent']);
     const car = service(row({ billTotal: 0, noBillTotal: 0, dutyAmount: 0 }));
-    await expect(car.svc.update('x1', { urgent: true, remark: 'x' })).rejects.toMatchObject({ response: { error: 'งานย้ายออกรถยนต์ยังไม่มีอัตรางานด่วน' } });
+    await car.svc.update('x1', { urgent: true, remark: 'x' });
+    expect(car.update.mock.calls[0][0].data).toMatchObject({ urgent: true, billTotal: 55, noBillTotal: 200, dutyAmount: 10 });
   });
 
   it('ไม่มีอะไรเปลี่ยน = 400 / ฟอร์มเก่ากว่าในระบบ = 409', async () => {

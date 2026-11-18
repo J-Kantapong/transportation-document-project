@@ -4,3 +4,13 @@
 export const VEHICLE_USE_CANCEL_BILL_FEE = 25;
 export const VEHICLE_USE_CANCEL_NO_BILL_FEE = 100;
 export const VEHICLE_USE_CANCEL_DUTY_FEE = 10;
+
+// งานด่วน (ผู้ใช้ 2026-11-18): ลงขันด่วนเพิ่มใน No Bill - รถยนต์ +100 / มอเตอร์ไซค์ +50
+export const VEHICLE_USE_CANCEL_CAR_URGENT_EXTRA = 100;
+export const VEHICLE_USE_CANCEL_MOTO_URGENT_EXTRA = 50;
+
+export const cancelUseUrgentExtra = (vehicleClass: "CAR" | "MOTO") =>
+  vehicleClass === "MOTO" ? VEHICLE_USE_CANCEL_MOTO_URGENT_EXTRA : VEHICLE_USE_CANCEL_CAR_URGENT_EXTRA;
+
+export const cancelUseNoBillTotal = (vehicleClass: "CAR" | "MOTO", urgent: boolean) =>
+  VEHICLE_USE_CANCEL_NO_BILL_FEE + (urgent ? cancelUseUrgentExtra(vehicleClass) : 0);

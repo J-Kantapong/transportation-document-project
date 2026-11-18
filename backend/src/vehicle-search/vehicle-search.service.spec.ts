@@ -106,7 +106,7 @@ describe('VehicleSearchService.search', () => {
     expect(result.counts).toMatchObject({ billing: 1, done: 1 });
     const select = findMany.mock.calls[0][0].select;
     expect(select.billingClosedAt).toBe(true);
-    expect(select.plateSwapsAsNew.where).toEqual({ returnedDate: null, cancelledAt: null });
+    expect(select.plateSwapsAsNew.where).toEqual({ returnedDate: null, cancelledAt: null, vehicleClass: { not: 'MOTO' } });
   });
 
   it('ส่งคำค้นและช่วงวันที่ไปที่ query และไม่รวมรถที่ถูกลบ', async () => {

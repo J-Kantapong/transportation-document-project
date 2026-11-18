@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_RECEIPT_BYTES, type UploadedReceiptFile } from '../receipts/receipts.service.js';
-import { type CreatePlateSwapDto, type CreatePlateSwapPairDto, PlateSwapService, type UpdatePlateSwapDto } from './plate-swap.service.js';
+import { type CreatePlateChangeDto, type CreatePlateSwapDto, type CreatePlateSwapPairDto, PlateSwapService, type UpdatePlateSwapDto } from './plate-swap.service.js';
 
 // การสลับเลข รถเก่า <-> รถใหม่ - สิทธิ์กลุ่มยื่นเอกสาร (รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO) ดู access-policy.ts
 // ผู้ใช้ 2026-09-27: ไม่มีการลบงานแล้ว (DELETE /:id ถูกถอด) ใช้ POST /:id/cancel { remark } ยกเลิกแบบเก็บแถวไว้แทน
@@ -44,6 +44,12 @@ export class PlateSwapController {
   @Post('pair')
   createPair(@Body() body: CreatePlateSwapPairDto) {
     return this.service.createPair(body);
+  }
+
+  // ยื่นงานเปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18) - รถคันเดียว ไม่มีรถคู่ เก็บเป็น PlateSwap kind = CHANGE
+  @Post('change')
+  createChange(@Body() body: CreatePlateChangeDto) {
+    return this.service.createChange(body);
   }
 
   // แก้เจ้าของงาน / ข้อมูลรถเก่า / วันที่ยื่น / ที่มาของเลขและป้าย / วันที่รับกลับ - remark บังคับ (ผู้ใช้ 2026-09-27)

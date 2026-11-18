@@ -35,6 +35,7 @@ The detailed product state, API contracts and user decisions live in `docs/claud
 | `plate-swap.md` | การสลับเลข |
 | `yamaha-relocation.md` | งานแจ้งย้ายยามาฮ่า daily counts and attachments |
 | `other-jobs.md` | ยกเลิกการใช้รถ, ย้ายออก, คัดแผ่นป้าย, งานโอน (tables, fees, steps, API) |
+| `old-vehicle-jobs.md` | งานรถเก่า hub: intake (รับงาน) -> inspection before submit -> existing job pages, ติดขัด flag, backfill / linking of existing jobs, what later rounds still owe |
 | `tax-renewal.md` | ต่อภาษี: job owner, receipt page, รถตาม พ.ร.บ.ขนส่ง (ขส.) |
 | `billing.md` | Collection accounts (company / personal), `ServiceFeeRate` matching and add-ons, tick-only billing, receipt checks, custom invoices, per-bill WHT, other jobs in billing, `JobFeeRate`, close-billed-outside, invoice face layout, removed customer-payments page |
 | `tax-invoices.md` | ใบกำกับภาษี (TV) series and rules, custom TV, TV before payment, customer 50 ทวิ, credit terms, pay schedule by weekday, monthly accounting ZIP |

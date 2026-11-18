@@ -141,6 +141,7 @@ function setup(opts: { quotedBy?: string; billedBy?: string; closedNote?: string
     plateCopy: { findMany: vi.fn().mockResolvedValue([]) },
     vehicleMoveOut: { findMany: vi.fn().mockResolvedValue([]) },
     taxRenewal: { findMany: vi.fn().mockResolvedValue([]) },
+    plateSwap: { findMany: vi.fn().mockResolvedValue([]) },
     $queryRawUnsafe: queryRawUnsafe,
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
   } as unknown as PrismaService;
@@ -269,6 +270,7 @@ describe('BillingService.createInvoice with other jobs', () => {
       plateCopy: { findMany: vi.fn().mockResolvedValue([]) },
       vehicleMoveOut: { findMany: vi.fn().mockResolvedValue([]) },
       taxRenewal: { findMany: vi.fn().mockResolvedValue([]) },
+      plateSwap: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
       $queryRawUnsafe: queryRawUnsafe,
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),

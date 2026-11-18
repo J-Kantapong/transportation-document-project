@@ -7,7 +7,9 @@
 import type { AuditEntity } from '../audit/audit-log.js';
 import { round2, serviceFeeFromRate } from './billing-calculator.js';
 
-export const JOB_TYPES = ['TRANSFER', 'USE_CANCEL', 'PLATE_COPY', 'MOVE_OUT', 'TAX_RENEWAL'] as const;
+// PLATE_CHANGE = เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18: "เก็บตามเจ้าของงาน") - แถว PlateSwap ที่ kind = CHANGE ซึ่งไม่มีรถใหม่ให้พ่วงบิล
+//   จึงวางบิลเดี่ยวแบบงานอื่นๆ (งานสลับเลขแบบอื่นยังวางบิลพ่วงกับรถใหม่เหมือนเดิม) · การส่งงานยังใช้คิวของงานสลับเลข ไม่ใช่ job-delivery.ts
+export const JOB_TYPES = ['TRANSFER', 'USE_CANCEL', 'PLATE_COPY', 'MOVE_OUT', 'TAX_RENEWAL', 'PLATE_CHANGE'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const isJobType = (v: unknown): v is JobType => (JOB_TYPES as readonly unknown[]).includes(v);
@@ -18,6 +20,7 @@ export const JOB_LABEL: Record<JobType, string> = {
   PLATE_COPY: 'คัดแผ่นป้ายทะเบียน',
   MOVE_OUT: 'ย้ายออก',
   TAX_RENEWAL: 'ต่อภาษี',
+  PLATE_CHANGE: 'เปลี่ยนเลขทะเบียน',
 };
 
 // ชื่อตาราง - ใช้ล็อกแถว (SELECT ... FOR UPDATE) เท่านั้น มาจากรายการนี้เสมอ ไม่รับจากผู้ใช้
@@ -27,6 +30,7 @@ export const JOB_TABLE: Record<JobType, AuditEntity> = {
   PLATE_COPY: 'PlateCopy',
   MOVE_OUT: 'VehicleMoveOut',
   TAX_RENEWAL: 'TaxRenewal',
+  PLATE_CHANGE: 'PlateSwap',
 };
 
 export const JOB_RATE_VEHICLE_CLASSES = ['CAR', 'MOTO', 'ANY'] as const;

@@ -70,15 +70,21 @@ const RULES: Rule[] = [
   { pattern: /^\/api\/delivery(\/|$)/, access: [...SUBMIT, 'DELIVERY'] },
   // หน้าค้นหารถ + สถานะ (ผู้ใช้ 2026-09-25): พนักงานทุกฝ่าย + บัญชี อ่านอย่างเดียว - ขอบเขตประเภทรถกรองใน service
   { pattern: /^\/api\/vehicle-search(\/|$)/, method: 'GET', access: ALL_STAFF_READ },
-  { pattern: /^\/api\/customers$/, method: 'GET', access: ALL_STAFF_READ },
+  // DELIVERY อ่านรายชื่อลูกค้าได้ด้วย - เป็นคนคีย์รับงานรถเก่า ต้องเลือกเจ้าของงาน (ผู้ใช้ 2026-11-18)
+  { pattern: /^\/api\/customers$/, method: 'GET', access: [...ALL_STAFF_READ, 'DELIVERY'] },
+  { pattern: /^\/api\/brands$/, method: 'GET', access: [...ALL_STAFF_READ, 'DELIVERY'] },
+  // งานรถเก่า (หน้ารวม): คนคีย์รับงาน = ADMIN / STAFF_ENTRY / DELIVERY (ผู้ใช้ 2026-11-18) + กลุ่มยื่นเอกสารทำขั้นถัดไป · ACCOUNTANT อ่าน
+  // ใครทำอะไรได้ในแต่ละ action ตรวจใน OldVehicleJobsService (รับงานใหม่ = กลุ่มรับงาน / ตรวจรถ = กลุ่มยื่นเอกสาร)
+  { pattern: /^\/api\/old-vehicle-jobs(\/|$)/, method: 'GET', access: [...SUBMIT_READ, 'STAFF_ENTRY', 'DELIVERY'] },
+  { pattern: /^\/api\/old-vehicle-jobs(\/|$)/, access: [...SUBMIT, 'STAFF_ENTRY', 'DELIVERY'] },
   { pattern: /^\/api\/customers(\/|$)/, access: ['ADMIN'] },
   // ลบ/กู้คืนข้อมูลรถ และรายการรถที่ถูกลบ: ADMIN เท่านั้น (ผู้ใช้ 2026-09-23) - ต้องมาก่อนกฎขั้น 1-3 ด้านล่าง
   { pattern: /^\/api\/vehicles\/deleted$/, access: ['ADMIN'] },
   { pattern: /^\/api\/vehicles\/[^/]+\/restore$/, access: ['ADMIN'] },
   { pattern: /^\/api\/vehicles\/[^/]+$/, method: 'DELETE', access: ['ADMIN'] },
   // ขั้น 4-8: ยื่นเอกสาร / ภาษี / ใบเสร็จ / ป้าย / เล่ม / คิวรับของ + งานสลับเลข (ยื่น/รับเอกสารกลับ - กลุ่มเดียวกัน, รถยนต์ = STAFF_CAR, มอเตอร์ไซค์ = STAFF_MOTO)
-  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, method: 'GET', access: SUBMIT_READ },
-  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals)(\/|$)/, access: SUBMIT },
+  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals|old-vehicle-jobs)(\/|$)/, method: 'GET', access: SUBMIT_READ },
+  { pattern: /^\/api\/(receipts|plate-photos|book-photos|tax-calculations|plate-swaps|vehicle-use-cancellations|vehicle-move-outs|vehicle-transfers|plate-copies|tax-renewals|old-vehicle-jobs)(\/|$)/, access: SUBMIT },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|document-submission|receiving)(\/|$)/, method: 'GET', access: SUBMIT_READ },
   { pattern: /^\/api\/vehicles\/(submission-queue|search|lookup-by-chassis|document-submission|receiving)(\/|$)/, access: SUBMIT },
   // route ต่อคันของขั้น 4 เหลือแค่ GET :id/tax-calculations (:id/document-submission, :id/tax-input, :id/receiving/:step ถูกถอดแล้ว - พบ 2026-09-27)

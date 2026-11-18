@@ -3,7 +3,10 @@ import type { InspectionVehicle } from "@/lib/api";
 export const DEFAULT_INSPECTION_PRINT_HEADER = "บริษัท เอส.พี.อินเตอร์เนชั่นแนล จำกัด";
 
 // [หัวคอลัมน์, ความกว้าง (% ของความกว้างกระดาษ), ค่าในเซลล์] - รวมความกว้าง 100% ให้ตารางพอดี A4 เสมอ
-const COLUMNS: Array<[string, number, (v: InspectionVehicle, index: number) => string]> = [
+// ใบส่งตรวจของงานรถเก่าใช้แบบเดียวกัน (ผู้ใช้ 2026-11-18) - ส่งมาเฉพาะช่องที่พิมพ์
+export type InspectionSheetVehicle = Pick<InspectionVehicle, "body" | "brandName" | "chassis" | "engine" | "color">;
+
+const COLUMNS: Array<[string, number, (v: InspectionSheetVehicle, index: number) => string]> = [
   ["ลำดับที่", 8, (_v, index) => String(index + 1)],
   ["ประเภทรถ", 20, (v) => v.body ?? ""],
   ["ยี่ห้อ", 10, (v) => v.brandName],
@@ -15,8 +18,8 @@ const COLUMNS: Array<[string, number, (v: InspectionVehicle, index: number) => s
 const thaiCollator = new Intl.Collator("th", { numeric: true });
 
 // เรียงแถวตามลำดับคอลัมน์: ประเภทรถ → ยี่ห้อ → เลขตัวถัง → เลขเครื่อง → สี (ลำดับที่รันใหม่หลังเรียง)
-function sortVehicles(vehicles: InspectionVehicle[]): InspectionVehicle[] {
-  const keys: Array<(v: InspectionVehicle) => string> = [
+function sortVehicles(vehicles: InspectionSheetVehicle[]): InspectionSheetVehicle[] {
+  const keys: Array<(v: InspectionSheetVehicle) => string> = [
     (v) => v.body ?? "",
     (v) => v.brandName,
     (v) => v.chassis,
@@ -36,7 +39,7 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 }
 
-export function buildInspectionSheetHtml(title: string, header: string, subtitle: string, vehicles: InspectionVehicle[]): string {
+export function buildInspectionSheetHtml(title: string, header: string, subtitle: string, vehicles: InspectionSheetVehicle[]): string {
   const cols = COLUMNS.map(([, width]) => `<col style="width:${width}%">`).join("");
   const head = COLUMNS.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
   const body = sortVehicles(vehicles)
@@ -83,7 +86,7 @@ export function printInspectionSheet(options: {
   title: string;
   header: string;
   subtitle: string;
-  vehicles: InspectionVehicle[];
+  vehicles: InspectionSheetVehicle[];
 }): void {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");

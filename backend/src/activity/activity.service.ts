@@ -49,6 +49,8 @@ const AUDIT_ENTITY_LABELS: Record<string, string> = {
   VehicleTransfer: 'งานโอน',
   VehicleUseCancellation: 'ยกเลิกการใช้รถ',
   VehicleMoveOut: 'ย้ายออก',
+  OldVehicle: 'รถเก่า (ข้อมูลรถ)',
+  OldVehicleJob: 'รับงานรถเก่า',
   Quotation: 'ใบเสนอราคา',
   User: 'ผู้ใช้',
   PayrollRun: 'เงินเดือน',
@@ -79,6 +81,13 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   issue: 'ออกเอกสาร',
   invoice: 'ออกใบวางบิล',
   'undo-return': 'ยกเลิกการรับคืนเอกสาร',
+  // งานรถเก่า (ผู้ใช้ 2026-11-18)
+  'inspection-resend': 'ส่งตรวจรถใหม่หลังตรวจไม่ผ่าน',
+  'inspection-result-undo': 'ยกเลิกผลตรวจรถ',
+  'inspection-sent-undo': 'ยกเลิกการส่งตรวจรถ',
+  'inspection-from-intake': 'รับผลตรวจรถจากหน้างานรถเก่า',
+  block: 'ติดธงติดขัด',
+  unblock: 'ปลดติดขัด',
   'undo-inspection-sent': 'ยกเลิกการส่งตรวจ',
   'undo-inspection-result': 'ยกเลิกผลตรวจ',
   'set-password': 'ตั้งรหัสผ่านใหม่',
@@ -127,6 +136,8 @@ const AUDIT_ENTITY_HREFS: Record<string, string> = {
   VehicleTransfer: '/registration/transfer',
   VehicleUseCancellation: '/registration/other/cancel-use',
   VehicleMoveOut: '/registration/other/move-out',
+  OldVehicle: '/registration/old-vehicle',
+  OldVehicleJob: '/registration/old-vehicle',
   Quotation: '/accounting/quotations',
   User: '/admin/users',
   PayrollRun: '/hr/payroll',
@@ -139,7 +150,7 @@ const AUDIT_ENTITY_HREFS: Record<string, string> = {
   TransferContributionRate: '/registration/transfer/contribution-rates',
 };
 // หน้าสลับเลขแยกตามประเภทรถและแบบ (เดิมลิงก์ /registration/plate-swap/old-new ซึ่งไม่มีหน้านี้)
-const plateSwapHref = (vehicleClass: string, kind: string) => `/registration/plate-swap/${vehicleClass === 'MOTO' ? 'moto' : 'car'}/${kind === 'OLD_OLD' ? 'old-old' : 'old-new'}`;
+const plateSwapHref = (vehicleClass: string, kind: string) => `/registration/plate-swap/${vehicleClass === 'MOTO' ? 'moto' : 'car'}/${kind === 'CHANGE' ? 'change' : kind === 'OLD_OLD' ? 'old-old' : 'old-new'}`;
 const DELIVERY_ACTIONS = new Set(['delivery-update', 'delivery-cancel', 'delivery-add-plate']);
 export const auditHref = (entity: string, action: string) => {
   if (action === 'billing-close' || action === 'billing-reopen') return '/accounting/billing/jobs';

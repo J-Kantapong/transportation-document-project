@@ -26,8 +26,7 @@ import { PROVINCES } from '../vehicles/vehicle-reference-data.js';
 import { transferContributionRate } from './transfer-contribution-rates.service.js';
 import { TRANSFER_INSPECTION_TYPES, TRANSFER_TYPES, transferHasInspection, type TransferType } from './transfer-type.js';
 import {
-  calculateTransferCarNoBill,
-  calculateTransferMotoFees,
+  calculateTransferFees,
   calculateTransferMoveInFees,
   TRANSFER_DEFAULT_PROVINCE,
   TRANSFER_FINE_AMOUNT,
@@ -49,6 +48,8 @@ import {
 export type { TransferType };
 export type TransferVehicleClass = 'CAR' | 'MOTO';
 export type InspectionResult = 'PASS' | 'FAIL';
+// แบบการตรวจรถ (ผู้ใช้ 2026-11-18): ส่งตรวจนอก = มีค่าตรวจ พนักงานกรอกเอง / นำรถมาตรวจ = ไม่มีค่าตรวจ
+export type InspectionSentType = 'OUTSIDE' | 'BRING_IN';
 
 export interface TransferCustomer {
   id: string;
@@ -82,6 +83,8 @@ export interface VehicleTransferRow {
   newPlateNumber: string | null;
   stampDutyAmount: string; // ค่าอากรโอนตามราคารถ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
+  inspectionSentType: InspectionSentType | null; // ส่งตรวจนอก / นำรถมาตรวจ - null = ยังไม่ส่งตรวจ หรืองานก่อนมีช่องนี้
+  inspectionCost: string; // ค่าตรวจรถ (No Bill) เก็บแยก ไม่รวมใน noBillTotal
   inspectionResult: InspectionResult | null;
   inspectionResultDate: string | null;
   returnedDate: string | null; // YYYY-MM-DD
@@ -219,15 +222,15 @@ interface FeeInput {
 
 // ค่าใช้จ่ายที่จะเก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บสำหรับมอเตอร์ไซค์ (คิดจากอัตราของผู้ใช้เสมอ)
 // รถยนต์: No Bill คิดเอง / Bill พนักงานกรอก / ขอใช้และค่าปรับยังไม่มีอัตราให้คิด จึงใช้ไม่ได้
-const CAR_NO_RATE_ERROR = 'รถยนต์ยังไม่มีอัตราโอนขอใช้/ค่าปรับ - กรอก Bill เอง';
-const MOVE_IN_MOTO_ONLY_ERROR = 'โอนย้ายเข้ามีอัตราเฉพาะรถจักรยานยนต์';
+// ผู้ใช้ 2026-11-18: รถยนต์มีอัตราครบแล้ว (Bill 105 / 130, ค่าอากร 20 / 40, โอนย้ายเข้า 330) - ไม่รับ Bill ที่พนักงานกรอกอีก
+// ค่าปรับโอนล่าช้า 200 ใช้กับรถยนต์ด้วย (Claude เลือก: เป็นค่าปรับเดียวกัน และเดิมรถยนต์ใส่ผ่านช่อง Bill ที่กรอกเอง)
+const MOVE_OUT_CLASS_ERROR = 'งานย้ายออกที่เลือกต้องเป็นรถประเภทเดียวกับงานโอนย้ายเข้า';
 const MOVE_IN_NO_USE_REQUEST_ERROR = 'โอนย้ายเข้ายังไม่มีอัตราโอนขอใช้';
 
 export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInput): FeeSnapshot {
   if (input.moveIn) {
-    if (vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
     if (input.useRequest) throw new BadRequestException({ error: MOVE_IN_NO_USE_REQUEST_ERROR });
-    const fees = calculateTransferMoveInFees({ urgent: input.urgent, fine: input.fineAmount, stampDuty: input.stampDuty ?? 0, contribution: input.contribution });
+    const fees = calculateTransferMoveInFees({ vehicleClass, urgent: input.urgent, fine: input.fineAmount, stampDuty: input.stampDuty ?? 0, contribution: input.contribution });
     return {
       billTotal: fees.billTotal,
       noBillTotal: fees.noBillTotal,
@@ -238,25 +241,14 @@ export function feeSnapshotFor(vehicleClass: TransferVehicleClass, input: FeeInp
       stampDutyAmount: input.stampDuty ?? 0,
     };
   }
-  if (vehicleClass === 'MOTO') {
-    const fees = calculateTransferMotoFees({ useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
-    return {
-      billTotal: fees.billTotal,
-      noBillTotal: fees.noBillTotal,
-      dutyAmount: fees.dutyTotal,
-      useRequest: input.useRequest,
-      urgent: input.urgent,
-      fineAmount: input.fineAmount,
-    };
-  }
-  if (input.useRequest || input.fineAmount > 0) throw new BadRequestException({ error: CAR_NO_RATE_ERROR });
+  const fees = calculateTransferFees(vehicleClass, { useRequest: input.useRequest, urgent: input.urgent, fine: input.fineAmount, contribution: input.contribution });
   return {
-    billTotal: requiredAmount(input.billTotal, 'Bill'),
-    noBillTotal: calculateTransferCarNoBill({ urgent: input.urgent, contribution: input.contribution }).noBillTotal,
-    dutyAmount: 0,
-    useRequest: false,
+    billTotal: fees.billTotal,
+    noBillTotal: fees.noBillTotal,
+    dutyAmount: fees.dutyTotal,
+    useRequest: input.useRequest,
     urgent: input.urgent,
-    fineAmount: 0,
+    fineAmount: input.fineAmount,
   };
 }
 
@@ -315,6 +307,8 @@ interface TransferRecord {
   newPlateNumber?: string | null;
   stampDutyAmount?: Prisma.Decimal | number;
   inspectionSentDate: Date | null;
+  inspectionSentType?: string | null;
+  inspectionCost?: Prisma.Decimal | number;
   inspectionResult: string | null;
   inspectionResultDate: Date | null;
   returnedDate: Date | null;
@@ -352,6 +346,8 @@ export function serializeTransfer(row: TransferRecord): VehicleTransferRow {
     newPlateNumber: row.newPlateNumber ?? null,
     stampDutyAmount: String(row.stampDutyAmount ?? 0),
     inspectionSentDate: isoDate(row.inspectionSentDate),
+    inspectionSentType: row.inspectionSentType === 'OUTSIDE' || row.inspectionSentType === 'BRING_IN' ? row.inspectionSentType : null,
+    inspectionCost: String(row.inspectionCost ?? 0),
     inspectionResult: row.inspectionResult === 'PASS' || row.inspectionResult === 'FAIL' ? row.inspectionResult : null,
     inspectionResultDate: isoDate(row.inspectionResultDate),
     returnedDate: isoDate(row.returnedDate),
@@ -427,12 +423,12 @@ export class VehicleTransferService {
   }
 
   // โอนย้ายเข้า: งานย้ายออกที่เลือก (ไม่บังคับ) ต้องเป็นมอเตอร์ไซค์ รับใบเสร็จแล้ว ไม่ถูกยกเลิก และยังไม่ถูกงานโอนย้ายเข้าอื่นใช้
-  private async resolveMoveOutId(raw: unknown): Promise<string | null> {
+  private async resolveMoveOutId(raw: unknown, vehicleClass: TransferVehicleClass): Promise<string | null> {
     const id = typeof raw === 'string' ? raw.trim() : '';
     if (!id) return null;
     const moveOut = await this.prisma.vehicleMoveOut.findFirst({ where: { id, cancelledAt: null }, select: { id: true, vehicleClass: true, returnedDate: true } });
     if (!moveOut) throw new BadRequestException({ error: 'ไม่พบงานย้ายออกที่เลือก' });
-    if (moveOut.vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
+    if (moveOut.vehicleClass !== vehicleClass) throw new BadRequestException({ error: MOVE_OUT_CLASS_ERROR });
     if (!moveOut.returnedDate) throw new BadRequestException({ error: 'งานย้ายออกนี้ยังไม่รับใบเสร็จ - ต้องย้ายออกเสร็จก่อนจึงโอนย้ายเข้าได้' });
     const used = await this.prisma.vehicleTransfer.findFirst({ where: { moveOutId: id, cancelledAt: null }, select: { id: true } });
     if (used) throw new BadRequestException({ error: 'งานย้ายออกนี้ถูกใช้กับงานโอนย้ายเข้าอื่นแล้ว' });
@@ -454,12 +450,11 @@ export class VehicleTransferService {
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     const moveIn = transferType === 'MOVE_IN';
-    if (moveIn && vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
     const pickedProvince = parseSubmitProvince(dto?.submitProvince);
     // โอนย้ายเข้า: จังหวัดที่ย้ายเข้าคือจังหวัดของป้ายใหม่ ต้องเลือกเอง ไม่เดาเป็นกรุงเทพฯ
     if (moveIn && !pickedProvince) throw new BadRequestException({ error: 'กรุณาเลือกจังหวัดที่ย้ายเข้า' });
     const submitProvince = pickedProvince ?? TRANSFER_DEFAULT_PROVINCE;
-    const moveOutId = moveIn ? await this.resolveMoveOutId(dto?.moveOutId) : null;
+    const moveOutId = moveIn ? await this.resolveMoveOutId(dto?.moveOutId, vehicleClass) : null;
     const newPlate = moveIn ? parseNewPlate(dto?.newPlateCategory, dto?.newPlateNumber, false) : {};
     const fees = feeSnapshotFor(vehicleClass, {
       useRequest: parseFlag(dto?.useRequest, 'โอนขอใช้'),
@@ -571,16 +566,23 @@ export class VehicleTransferService {
     if (row.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว - ยกเลิกรับกลับก่อนจึงแก้ขั้นตรวจรถได้' });
   }
 
-  // บันทึกวันที่ส่งตรวจ - ไม่ก่อนวันที่ยื่น ไม่เกินวันนี้ (เวลาไทย)
-  async markInspectionSent(id: string, sentDateRaw: unknown): Promise<{ transfer: VehicleTransferRow }> {
+  // บันทึกส่งตรวจ: วันที่ (ไม่ก่อนวันที่ยื่น ไม่เกินวันนี้ เวลาไทย) + แบบการตรวจ + ค่าตรวจรถ (ผู้ใช้ 2026-11-18)
+  // ส่งตรวจนอก = พนักงานกรอกค่าตรวจเองทุกครั้ง (งานโอนไม่มีช่อง cc จึงไม่ดึงจากตารางค่าตรวจของรถจดใหม่ / 0 ได้)
+  // นำรถมาตรวจ = ไม่มีค่าตรวจ ยอดที่ส่งมาไม่ใช้
+  async markInspectionSent(id: string, sentDateRaw: unknown, sentTypeRaw: unknown, costRaw: unknown): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
     this.assertInspectionJob(existing);
     if (existing.inspectionSentDate) throw new BadRequestException({ error: 'งานนี้ส่งตรวจแล้ว' });
     const sentDate = parseIsoDate(sentDateRaw);
     if (!sentDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ส่งตรวจให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     assertDateInRange('วันที่ส่งตรวจ', sentDate, existing.submitDate);
+    if (sentTypeRaw !== 'OUTSIDE' && sentTypeRaw !== 'BRING_IN') throw new BadRequestException({ error: 'กรุณาเลือกแบบการตรวจ: ส่งตรวจนอก หรือ นำรถมาตรวจ' });
+    const inspectionCost = sentTypeRaw === 'OUTSIDE' ? requiredAmount(costRaw, 'ค่าตรวจรถ') : 0;
     await this.prisma.vehicleTransfer
-      .update({ where: { id, cancelledAt: null, returnedDate: null, inspectionSentDate: null }, data: { inspectionSentDate: sentDate } })
+      .update({
+        where: { id, cancelledAt: null, returnedDate: null, inspectionSentDate: null },
+        data: { inspectionSentDate: sentDate, inspectionSentType: sentTypeRaw, inspectionCost },
+      })
       .catch(staleIfMissing);
     return this.reload(id);
   }
@@ -630,7 +632,7 @@ export class VehicleTransferService {
         await tx.vehicleTransfer
           .update({
             where: { id, cancelledAt: null, returnedDate: null, inspectionSentDate: existing.inspectionSentDate, inspectionResult: null },
-            data: { inspectionSentDate: null },
+            data: { inspectionSentDate: null, inspectionSentType: null, inspectionCost: 0 },
           })
           .catch(staleIfMissing);
         await writeAudit(tx, {
@@ -638,7 +640,11 @@ export class VehicleTransferService {
           entityId: id,
           action: 'undo-inspection-sent',
           remark,
-          changes: { inspectionSentDate: { from: existing.inspectionSentDate, to: null } },
+          changes: {
+            inspectionSentDate: { from: existing.inspectionSentDate, to: null },
+            inspectionSentType: { from: existing.inspectionSentType ?? null, to: null },
+            inspectionCost: { from: Number(existing.inspectionCost ?? 0), to: 0 },
+          },
         });
       });
     } else {
@@ -661,7 +667,10 @@ export class VehicleTransferService {
       throw new BadRequestException({ error: INSPECTION_NOT_PASSED_ERROR });
     }
     // วันที่รับกลับต้องไม่ก่อนวันที่ผลตรวจออก (งานโอนตรวจรถ) ไม่งั้นก่อนวันที่ยื่น
-    assertDateInRange('วันที่รับเอกสารกลับ', returnedDate, existing.inspectionResultDate ?? existing.submitDate);
+    // (งานที่ตรวจรถก่อนยื่นจากหน้างานรถเก่า ผลตรวจออกก่อนวันที่ยื่น - ใช้วันที่ยื่นเป็นเกณฑ์)
+    const returnFloor =
+      existing.inspectionResultDate && existing.inspectionResultDate > existing.submitDate ? existing.inspectionResultDate : existing.submitDate;
+    assertDateInRange('วันที่รับเอกสารกลับ', returnedDate, returnFloor);
     if (existing.receipts.length === 0) throw new BadRequestException({ error: RECEIPT_REQUIRED_ERROR });
     await this.prisma.$transaction(async (tx) => {
       // นับรูปหลังล็อกแถว - ลบรูปสุดท้ายที่บันทึกแทรกกลางต้องไม่หลุดเข้ามา
@@ -671,6 +680,15 @@ export class VehicleTransferService {
       await tx.vehicleTransfer.update({ where: { id, cancelledAt: null, returnedDate: null }, data: { returnedDate, ...plateData } }).catch(staleIfMissing);
     });
     return this.reload(id);
+  }
+
+  // งานนี้ตรวจรถก่อนยื่นจากหน้างานรถเก่าหรือไม่ = มีแถวรับงาน (OldVehicleJob) ที่ผูกกับงานนี้และผลตรวจผ่าน
+  private async inspectedBeforeSubmit(id: string): Promise<boolean> {
+    const intake = await this.prisma.oldVehicleJob.findFirst({
+      where: { jobId: id, jobType: { in: ['TRANSFER_INSPECTION', 'TRANSFER_MOVE_IN'] }, inspectionResult: 'PASS', cancelledAt: null },
+      select: { id: true },
+    });
+    return intake !== null;
   }
 
   // แก้ข้อมูลงาน: เจ้าของงาน ข้อมูลรถ ผู้โอน/ผู้รับโอน วันที่ยื่น และวันที่รับกลับ (งานที่รับกลับแล้ว) ต้องมีเหตุผลเสมอ
@@ -685,12 +703,14 @@ export class VehicleTransferService {
 
     const vehicleClass = has('vehicleClass') ? (parseTransferClass(dto.vehicleClass) as TransferVehicleClass) : (existing.vehicleClass as TransferVehicleClass);
     const moveIn = existing.transferType === 'MOVE_IN';
-    if (moveIn && vehicleClass !== 'MOTO') throw new BadRequestException({ error: MOVE_IN_MOTO_ONLY_ERROR });
     if (vehicleClass !== existing.vehicleClass) this.assertClassScope(vehicleClass); // ย้ายไปอีกประเภทรถต้องมีสิทธิ์ทั้งสองฝั่ง
 
     const submitDate = has('submitDate') ? parseIsoDate(dto.submitDate) : existing.submitDate;
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
-    if (existing.inspectionSentDate && submitDate > existing.inspectionSentDate) {
+    // งานที่ตรวจรถก่อนยื่นจากหน้างานรถเก่า (ผู้ใช้ 2026-11-18: ลำดับจริงคือ ตรวจรถ -> ยื่น) วันที่ยื่นอยู่หลังหรือตรงกับวันที่ส่งตรวจได้ - กฎนี้ใช้กับงานลำดับเดิมเท่านั้น
+    // ดูจากแถวรับงานที่ผูกไว้ ไม่เดาจากวันที่ (ตรวจและยื่นวันเดียวกันได้)
+    const inspectedBeforeSubmit = existing.inspectionSentDate ? await this.inspectedBeforeSubmit(id) : false;
+    if (existing.inspectionSentDate && !inspectedBeforeSubmit && submitDate > existing.inspectionSentDate) {
       throw new BadRequestException({ error: 'วันที่ยื่นต้องไม่หลังวันที่ส่งตรวจ' });
     }
 
@@ -718,7 +738,8 @@ export class VehicleTransferService {
     }
     // ตรวจช่วงวันที่เฉพาะเมื่อแก้วันที่ - แก้ชื่อผิดอย่างเดียวไม่โดนขวางเพราะวันที่รับกลับเดิม
     const returnedChanged = returnedDate?.getTime() !== existing.returnedDate?.getTime();
-    const returnedFloor = existing.inspectionResultDate ?? submitDate;
+    // เกณฑ์ = วันที่หลังสุดระหว่างวันที่ยื่นกับวันที่ผลตรวจออก (งานที่ตรวจรถก่อนยื่น ผลตรวจออกก่อนวันที่ยื่น)
+    const returnedFloor = existing.inspectionResultDate && existing.inspectionResultDate > submitDate ? existing.inspectionResultDate : submitDate;
     if (returnedDate && returnedChanged) assertDateInRange('วันที่รับเอกสารกลับ', returnedDate, returnedFloor);
     else if (returnedDate && returnedDate < returnedFloor) {
       throw new BadRequestException({ error: 'วันที่ยื่นต้องไม่หลังวันที่รับเอกสารกลับ' });
@@ -791,27 +812,14 @@ export class VehicleTransferService {
     const stampBefore = Number(existing.stampDutyAmount ?? 0);
     const stampDuty = has('stampDutyAmount') ? (optionalAmount(dto.stampDutyAmount, 'ค่าอากรโอน') ?? 0) : stampBefore;
     if (!moveIn && stampDuty > 0) throw new BadRequestException({ error: 'ค่าอากรโอนกรอกได้เฉพาะงานโอนย้ายเข้า' });
-    if (vehicleClass === 'MOTO') {
-      const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
-      if (!classChanged && same) {
-        if (!moveIn || stampDuty === stampBefore) return snapshot;
-        return { ...snapshot, billTotal: Math.round((snapshot.billTotal - stampBefore + stampDuty) * 100) / 100, stampDutyAmount: stampDuty };
-      }
-      return feeSnapshotFor('MOTO', { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty });
+    // ทั้งสองประเภทรถคิดจากอัตรา (รถยนต์ตั้งแต่ 2026-11-18) - ไม่แตะตัวเลือกค่าใช้จ่าย = คง snapshot เดิม
+    // (งานรถยนต์เก่าที่พนักงานกรอก Bill เองจึงคงยอดนั้นไว้ จนกว่าจะแก้ ขอใช้ / ด่วน / ค่าปรับ / ลงขัน ซึ่งคิดใหม่ตามอัตรา)
+    const same = useRequest === snapshot.useRequest && urgent === snapshot.urgent && fineAmount === snapshot.fineAmount && contributionSame;
+    if (!classChanged && same) {
+      if (!moveIn || stampDuty === stampBefore) return snapshot;
+      return { ...snapshot, billTotal: Math.round((snapshot.billTotal - stampBefore + stampDuty) * 100) / 100, stampDutyAmount: stampDuty };
     }
-    // รถยนต์: ขอใช้/ค่าปรับยังไม่มีอัตรา / No Bill (ลงขัน 100 + ด่วน 100) คิดใหม่เมื่อย้ายมาจากมอเตอร์ไซค์หรือเปลี่ยนติ๊กด่วนเท่านั้น
-    // ย้ายมาจากมอเตอร์ไซค์ต้องกรอก Bill ใหม่เอง / แก้เฉพาะ Bill ที่กรอก No Bill เดิมคงไว้
-    if ((has('useRequest') && useRequest) || (has('fineAmount') && fineAmount > 0)) throw new BadRequestException({ error: CAR_NO_RATE_ERROR });
-    if (!classChanged && urgent === snapshot.urgent && contributionSame) {
-      return has('billTotal') ? { ...snapshot, billTotal: requiredAmount(dto.billTotal, 'Bill') } : snapshot;
-    }
-    return feeSnapshotFor('CAR', {
-      useRequest: false,
-      urgent,
-      contribution,
-      fineAmount: 0,
-      billTotal: has('billTotal') ? dto.billTotal : classChanged ? undefined : snapshot.billTotal,
-    });
+    return feeSnapshotFor(vehicleClass, { useRequest, urgent, fineAmount, contribution, moveIn, stampDuty });
   }
 
   // ยกเลิกการรับเอกสารกลับที่กดผิด - งานกลับไปรอรับเอกสาร
@@ -872,6 +880,8 @@ export class VehicleTransferService {
           newPlate: existing.newPlateCategory ? `${existing.newPlateCategory} ${existing.newPlateNumber}` : null,
           stampDutyAmount: existing.stampDutyAmount ?? 0,
           inspectionSentDate: existing.inspectionSentDate,
+          inspectionSentType: existing.inspectionSentType ?? null,
+          inspectionCost: existing.inspectionCost ?? 0,
           inspectionResult: existing.inspectionResult,
           inspectionResultDate: existing.inspectionResultDate,
           returnedDate: existing.returnedDate,

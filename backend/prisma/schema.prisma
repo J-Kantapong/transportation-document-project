@@ -147,6 +147,7 @@ model Customer {
   plateSwaps              PlateSwap[] // งานสลับเลขที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-09-28)
   vehicleUseCancellations VehicleUseCancellation[] // งานยกเลิกการใช้รถที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   vehicleMoveOuts         VehicleMoveOut[] // งานย้ายออกที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-06)
+  oldVehicleJobs          OldVehicleJob[] // การรับงานรถเก่าที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-11-18)
   plateCopies             PlateCopy[] // งานคัดแผ่นป้ายทะเบียนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   vehicleTransfers        VehicleTransfer[] // งานโอนที่ลูกค้ารายนี้เป็นเจ้าของงาน (ผู้ใช้ 2026-10-02)
   taxInvoices             TaxInvoice[]
@@ -450,6 +451,7 @@ model TransferContributionRate {
   transferMoto Decimal? @db.Decimal(10, 2)
   transferCar  Decimal? @db.Decimal(10, 2)
   moveInMoto   Decimal? @db.Decimal(10, 2)
+  moveInCar    Decimal? @db.Decimal(10, 2) // โอนย้ายเข้า รถยนต์ (ผู้ใช้ 2026-11-18)
   note         String?
   updatedAt    DateTime @updatedAt
   updatedById  String?
@@ -780,6 +782,7 @@ model ReceiptImage {
 enum PlateSwapKind {
   OLD_NEW // รถเก่า <-> รถใหม่ (รถใหม่จากฐานข้อมูลรถจดใหม่)
   OLD_OLD // รถเก่า <-> รถเก่า (ยังไม่เปิดใช้ - รอเงื่อนไข)
+  CHANGE // เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): รถคันเดียวรับเลขที่ลูกค้าจองไว้ ไม่มีรถคู่ บังคับซื้อป้าย
 }
 
 // ที่มาของเลขทะเบียนใหม่ของรถเก่า - กำหนดรายการค่าธรรมเนียม (Bill) ที่ต่างกัน
@@ -917,6 +920,7 @@ model VehicleUseCancellation {
 
   submitDate DateTime // วันที่ยื่น
 
+  urgent      Boolean @default(false) // งานด่วน (ผู้ใช้ 2026-11-18): ลงขันด่วนเพิ่มใน noBillTotal รถยนต์ +100 / มอเตอร์ไซค์ +50
   billTotal   Decimal @default(0) @db.Decimal(12, 2) // ค่าใช้จ่าย Bill - ตายตัว 25 บาท snapshot ตอนยื่น
   noBillTotal Decimal @default(0) @db.Decimal(12, 2) // ค่าใช้จ่าย No Bill - ตายตัว 100 บาท (ไม่รวมค่าอากร, snapshot ตอนยื่น)
   dutyAmount  Decimal @default(0) @db.Decimal(12, 2) // ค่าอากร 10 บาท แยกต่างหาก ไม่รวมใน noBillTotal และไม่นับในยอดรวม (snapshot ตอนยื่น)
@@ -1067,6 +1071,10 @@ model VehicleTransfer {
   inspectionSentDate   DateTime?
   inspectionResult     String?
   inspectionResultDate DateTime?
+  // แบบการตรวจ + ค่าตรวจรถ (ผู้ใช้ 2026-11-18): OUTSIDE = ส่งตรวจนอก พนักงานกรอกค่าตรวจเอง | BRING_IN = นำรถมาตรวจ ไม่มีค่าตรวจ
+  // null = งานก่อนมีช่องนี้ / ยังไม่ส่งตรวจ - ค่าตรวจเป็น No Bill เก็บแยก ไม่รวมใน noBillTotal
+  inspectionSentType String?
+  inspectionCost     Decimal @default(0) @db.Decimal(12, 2)
 
   // รับใบเสร็จกลับ - วันที่ไม่ว่าง = รับกลับแล้ว (แนบรูปผ่าน ReceiptImage.vehicleTransferId)
   returnedDate  DateTime?
@@ -2101,4 +2109,95 @@ model SecretaryNote {
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// --- งานรถเก่า: รับงาน -> ตรวจรถ -> ยื่น (ผู้ใช้ 2026-11-18) -------------------------------------
+// หน้ารวม "งานรถเก่า" ของ สลับเลข / งานโอน / ต่อภาษี / ยกเลิกการใช้รถ / ย้ายออก / คัดแผ่นป้าย (ไม่รวมแจ้งย้ายยามาฮ่าและงานจดใหม่)
+// OldVehicle = รถเก่า 1 คัน (คีย์ข้อมูลรถครั้งเดียว ทุกงานดึงไปใช้) / OldVehicleJob = การรับงาน 1 ครั้งของรถคันนั้น
+// รถไม่ซ้ำกันด้วย chassisKey (เลขตัวถังตัวพิมพ์ใหญ่ ตัดช่องว่างและขีด) - รถไม่ถูกลบ แก้ข้อมูลต้องมีเหตุผล (AuditLog 'OldVehicle')
+model OldVehicle {
+  id            String  @id @default(cuid())
+  // ประเภทรถ รย./ขส. (รายการเดียวกับ VEHICLE_TYPES + TRANSPORT_VEHICLE_TYPES) - null = แถวที่ระบบสร้างย้อนหลังจากงานเดิม
+  // ซึ่งรู้แค่รถยนต์/มอเตอร์ไซค์ (vehicleClass) ยังไม่รู้ รย.
+  vehicleType   String?
+  vehicleClass  String  @default("CAR") // CAR | MOTO - คิดจาก vehicleType เมื่อมี (isMotorcycleType)
+  plateCategory String // หมวดทะเบียน
+  plateNumber   String // เลขทะเบียน
+  chassis       String // เลขตัวถังตามที่พิมพ์ (ตัวพิมพ์ใหญ่ ตัดช่องว่าง)
+  chassisKey    String  @unique
+  engine        String? // เลขเครื่อง - ไม่บังคับตอนรับงาน
+  brand         String? // ยี่ห้อ (ชื่อตามตาราง Brand) - บังคับตอนรับงาน / null ได้เฉพาะแถวย้อนหลังจากงานต่อภาษีเดิมที่ไม่มียี่ห้อ
+  ownerName     String? // ชื่อเจ้าของรถ - บังคับตอนรับงาน / null ได้เฉพาะแถวย้อนหลัง
+
+  createdById String? // คนรับงานคนแรก (id ของ User ไม่มี FK)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  jobs OldVehicleJob[]
+
+  @@index([plateCategory, plateNumber])
+}
+
+// การรับงาน 1 ครั้ง: วันที่รับงานผูกกับงาน ไม่ใช่กับรถ (รถคันเดิมรับมาทำงานอื่นได้)
+// jobType ว่าง = รับมาแล้วยังไม่เลือกว่าจะทำงานอะไร ("รอทำ") / jobId ว่าง = ยังไม่ได้ยื่น
+// ตรวจรถทำก่อนยื่น (ผู้ใช้ 2026-11-18: ลำดับจริงคือ รับงาน -> ตรวจรถ -> ยื่น) จึงเก็บผลตรวจไว้ที่แถวนี้
+// เมื่อยื่นแล้ว (jobId ไม่ว่าง) สถานะต่อจากนั้นอ่านจากตารางงานจริง (PlateSwap / VehicleTransfer / TaxRenewal / ...)
+model OldVehicleJob {
+  id         String  @id @default(cuid())
+  vehicleId  String
+  customerId String? // เจ้าของงาน - บังคับตอนรับงาน / null ได้เฉพาะแถวย้อนหลังที่งานเดิมไม่มีลูกค้า
+
+  receivedDate       DateTime // วันที่รับงาน
+  receivedIsBackfill Boolean  @default(false) // true = ระบบสร้างย้อนหลัง วันที่รับ = วันที่สร้างงานเดิม ไม่ใช่วันรับจริง
+
+  // PLATE_SWAP | TRANSFER_OWNER | TRANSFER_INSPECTION | TRANSFER_MOVE_IN | TAX_RENEWAL | USE_CANCEL | MOVE_OUT | PLATE_COPY
+  jobType         String?
+  jobId           String? // id ของแถวในตารางงานจริง (ไม่มี FK เพราะชี้ได้หลายตาราง)
+  note            String?
+  duplicateReason String? // เหตุผลที่รับงานประเภทเดิมซ้ำทั้งที่งานก่อนยังไม่เสร็จ
+  // สลับเลข (ผู้ใช้ 2026-11-18): jobVariant = OLD_NEW (รถเก่า กับ รถใหม่ - รับคันเดียว) | OLD_OLD (รถเก่า กับ รถเก่า - รับ 2 คันพร้อมกัน
+  // ลูกค้าเดียวกัน ชื่อเจ้าของรถคนละคนได้) / pairId = รหัสคู่ที่สองแถวรับงานของคู่สลับใช้ร่วมกัน - งานประเภทอื่นเป็น null
+  jobVariant      String?
+  pairId          String?
+  // สลับเลข รถเก่า กับ รถใหม่: รถใหม่ที่จะรับเลข เลือกได้ตั้งแต่รับงาน (ไม่บังคับ) - id ของ Vehicle ในฐานข้อมูลรถจดใหม่ ไม่มี FK
+  // เป็นข้อมูลประกอบของหน้ารวมเท่านั้น การผูกจริงเกิดตอนยื่นงานสลับเลข (PlateSwap.newVehicleId) ซึ่งตรวจเงื่อนไขการผูกเอง
+  newVehicleId    String?
+
+  // ต่อภาษี: ใช้ตัดสินว่าต้องตรวจรถไหม (ครบ 7 ปี / มอเตอร์ไซค์ 5 ปี / ค้างภาษีเกิน 1 ปี / รถ ขส.)
+  firstRegistrationDate DateTime?
+  taxExpiryDate         DateTime?
+
+  // ตรวจรถก่อนยื่น - ระบบตัดสินจากประเภทงาน (โอนตรวจรถ / โอนย้ายเข้า ทุกคัน, ต่อภาษีตามเกณฑ์)
+  // OUTSIDE = ส่งตรวจนอก (พนักงานกรอกค่าตรวจ, รถ ขส. ตั้งต้น 1,000) | BRING_IN = นำรถมาตรวจ (0 บาท) - ค่าตรวจเป็น No Bill เก็บแยก
+  inspectionRequired   Boolean   @default(false)
+  inspectionSentType   String?
+  inspectionSentDate   DateTime?
+  inspectionCost       Decimal   @default(0) @db.Decimal(12, 2)
+  inspectionResult     String? // PASS | FAIL
+  inspectionResultDate DateTime?
+
+  // ติดขัด (ผู้ใช้ 2026-11-18 "บางทีเอกสารติดขัด"): ธงที่ติดได้ทุกขั้น ไม่เปลี่ยนขั้นของงาน - ประวัติติด/ปลดอยู่ใน AuditLog
+  blockedAt     DateTime?
+  blockedReason String? // รหัสเหตุผลจากรายการ (BLOCK_REASONS)
+  blockedNote   String? // รายละเอียดที่พิมพ์เพิ่ม
+  blockedById   String?
+
+  // ยกเลิกการรับงาน (soft cancel) - ได้เฉพาะงานที่ยังไม่ยื่น
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vehicle  OldVehicle @relation(fields: [vehicleId], references: [id])
+  customer Customer?  @relation(fields: [customerId], references: [id])
+
+  @@unique([jobType, jobId])
+  @@index([vehicleId])
+  @@index([customerId])
+  @@index([receivedDate])
+  @@index([blockedAt])
+  @@index([pairId])
 }

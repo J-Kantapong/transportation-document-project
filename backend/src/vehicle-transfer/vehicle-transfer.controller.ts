@@ -30,10 +30,10 @@ export class VehicleTransferController {
     return this.service.update(id, body ?? {});
   }
 
-  // โอนตรวจรถ: บันทึกวันที่ส่งตรวจ { sentDate }
+  // โอนตรวจรถ / โอนย้ายเข้า: บันทึกส่งตรวจ { sentDate, sentType: OUTSIDE|BRING_IN, cost } - cost ใช้เฉพาะส่งตรวจนอก
   @Patch(':id/inspection-sent')
-  markInspectionSent(@Param('id') id: string, @Body() body: { sentDate?: unknown }) {
-    return this.service.markInspectionSent(id, body?.sentDate);
+  markInspectionSent(@Param('id') id: string, @Body() body: { sentDate?: unknown; sentType?: unknown; cost?: unknown }) {
+    return this.service.markInspectionSent(id, body?.sentDate, body?.sentType, body?.cost);
   }
 
   // โอนตรวจรถ: บันทึกผลตรวจ { result: PASS|FAIL, resultDate }

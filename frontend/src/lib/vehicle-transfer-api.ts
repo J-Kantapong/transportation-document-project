@@ -10,7 +10,7 @@ import { request } from "@/lib/api";
 //        มอเตอร์ไซค์: ส่ง useRequest (โอนขอใช้) / urgent (ด่วน) / fineAmount (ค่าปรับ) - backend คิด Bill / No Bill / ค่าอากรตามอัตราเอง (vehicle-transfer-fee.ts)
 //        รถยนต์: ส่ง billTotal ที่พนักงานกรอก (บังคับ, 0 ได้ - ยังไม่มีอัตรา Bill) + urgent / backend คิด No Bill (ลงขัน 100 + ด่วน 100) / ไม่รับยอด No Bill จากหน้าเว็บ
 // PATCH  /api/vehicle-transfers/:id {…, remark, expectedUpdatedAt}  แก้งาน (remark บังคับ / expectedUpdatedAt ไม่ตรง = 409)
-// PATCH  /api/vehicle-transfers/:id/inspection-sent {sentDate}                  (เฉพาะโอนตรวจรถ)
+// PATCH  /api/vehicle-transfers/:id/inspection-sent {sentDate, sentType, cost}  (โอนตรวจรถ / โอนย้ายเข้า - cost เฉพาะส่งตรวจนอก)
 // PATCH  /api/vehicle-transfers/:id/inspection-result {result: PASS|FAIL, resultDate}
 // POST   /api/vehicle-transfers/:id/inspection-undo {remark}  ถอยหนึ่งขั้น: ล้างผลตรวจ หรือถ้าไม่มีผลก็ล้างวันที่ส่งตรวจ
 // POST   /api/vehicle-transfers/:id/receipts (multipart: file, remark?)  แนบรูปใบเสร็จ - อ่าน OCR เติมเลขที่/วันที่/ยอดเงินเมื่อช่องว่างทั้ง 3
@@ -25,6 +25,9 @@ import { request } from "@/lib/api";
 export type TransferType = "OWNER" | "INSPECTION" | "MOVE_IN";
 export type TransferVehicleClass = "CAR" | "MOTO";
 export type InspectionResult = "PASS" | "FAIL";
+// แบบการตรวจรถ (ผู้ใช้ 2026-11-18): ส่งตรวจนอก = มีค่าตรวจรถ พนักงานกรอกเอง / นำรถมาตรวจ = ไม่มีค่าตรวจ
+export type InspectionSentType = "OUTSIDE" | "BRING_IN";
+export const INSPECTION_SENT_TYPE_LABEL: Record<InspectionSentType, string> = { OUTSIDE: "ส่งตรวจนอก", BRING_IN: "นำรถมาตรวจ" };
 
 export interface TransferCustomer {
   id: string;
@@ -58,6 +61,8 @@ export interface VehicleTransfer {
   newPlateNumber: string | null;
   stampDutyAmount: string; // ค่าอากรโอนตามราคารถ (อยู่ใน billTotal แล้ว)
   inspectionSentDate: string | null;
+  inspectionSentType: InspectionSentType | null; // ส่งตรวจนอก / นำรถมาตรวจ - null = ยังไม่ส่งตรวจ หรืองานก่อนมีช่องนี้
+  inspectionCost: string; // ค่าตรวจรถ (No Bill) เก็บแยก ไม่รวมใน noBillTotal
   inspectionResult: InspectionResult | null;
   inspectionResultDate: string | null;
   returnedDate: string | null; // YYYY-MM-DD
@@ -129,8 +134,8 @@ export const vehicleTransferApi = {
   create: (data: CreateVehicleTransferInput) => request<One>("/api/vehicle-transfers", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: UpdateVehicleTransferInput) =>
     request<One>(`/api/vehicle-transfers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  markInspectionSent: (id: string, sentDate: string) =>
-    request<One>(`/api/vehicle-transfers/${id}/inspection-sent`, { method: "PATCH", body: JSON.stringify({ sentDate }) }),
+  markInspectionSent: (id: string, sentDate: string, sentType: InspectionSentType, cost: string) =>
+    request<One>(`/api/vehicle-transfers/${id}/inspection-sent`, { method: "PATCH", body: JSON.stringify({ sentDate, sentType, cost }) }),
   recordInspectionResult: (id: string, result: InspectionResult, resultDate: string) =>
     request<One>(`/api/vehicle-transfers/${id}/inspection-result`, { method: "PATCH", body: JSON.stringify({ result, resultDate }) }),
   undoInspection: (id: string, remark: string) =>

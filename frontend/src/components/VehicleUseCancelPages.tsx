@@ -6,7 +6,13 @@ import { api } from "@/lib/api";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatBaht } from "@/lib/plate-swap-fee";
-import { VEHICLE_USE_CANCEL_BILL_FEE, VEHICLE_USE_CANCEL_DUTY_FEE, VEHICLE_USE_CANCEL_NO_BILL_FEE } from "@/lib/vehicle-use-cancel-fee";
+import {
+  cancelUseNoBillTotal,
+  cancelUseUrgentExtra,
+  VEHICLE_USE_CANCEL_BILL_FEE,
+  VEHICLE_USE_CANCEL_DUTY_FEE,
+  VEHICLE_USE_CANCEL_NO_BILL_FEE,
+} from "@/lib/vehicle-use-cancel-fee";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import {
   vehicleUseCancelApi,
@@ -92,6 +98,7 @@ interface FormState {
   brand: string;
   plateCategory: string;
   plateNumber: string;
+  urgent: boolean; // งานด่วน (ผู้ใช้ 2026-11-18): ลงขันด่วนเพิ่ม รถยนต์ 100 / มอเตอร์ไซค์ 50
 }
 
 const EMPTY_FORM: FormState = {
@@ -102,6 +109,7 @@ const EMPTY_FORM: FormState = {
   brand: "",
   plateCategory: "",
   plateNumber: "",
+  urgent: false,
 };
 
 type Option = { id: string; label: string };
@@ -127,6 +135,7 @@ function useChoices(extraBrand?: string) {
 
 function VehicleFormFields({
   form,
+  vehicleClass,
   onChange,
   submitDateText,
   onSubmitDateChange,
@@ -137,6 +146,7 @@ function VehicleFormFields({
   customerPlaceholder = "เลือกลูกค้า",
 }: {
   form: FormState;
+  vehicleClass: CancellationVehicleClass;
   onChange: (patch: Partial<FormState>) => void;
   submitDateText: string;
   onSubmitDateChange: (text: string) => void;
@@ -216,6 +226,10 @@ function VehicleFormFields({
 
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
       {/* ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02) - ไม่ต้องกรอก ระบบเก็บยอดตามอัตรานี้ตอนบันทึก */}
+      <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <input type="checkbox" checked={form.urgent} onChange={(e) => onChange({ urgent: e.target.checked })} />
+        งานด่วน (ลงขันด่วนเพิ่ม {formatBaht(cancelUseUrgentExtra(vehicleClass))} ใน No Bill)
+      </label>
       <div className="customer-grid">
         <div>
           <strong>Bill (ใบเสร็จ)</strong>
@@ -223,7 +237,10 @@ function VehicleFormFields({
         </div>
         <div>
           <strong>No Bill</strong>
-          <div>{formatBaht(VEHICLE_USE_CANCEL_NO_BILL_FEE)} บาท</div>
+          <div>
+            ลงขัน {formatBaht(VEHICLE_USE_CANCEL_NO_BILL_FEE)}
+            {form.urgent ? ` + ด่วนเพิ่ม ${formatBaht(cancelUseUrgentExtra(vehicleClass))}` : ""} = {formatBaht(cancelUseNoBillTotal(vehicleClass, form.urgent))} บาท
+          </div>
         </div>
         <div>
           <strong>ค่าอากร</strong>
@@ -232,7 +249,7 @@ function VehicleFormFields({
         <div className="wide" style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 }}>
           <strong>รวม (Bill + No Bill)</strong>
           <span style={{ textAlign: "right" }}>
-            <strong>{formatBaht(VEHICLE_USE_CANCEL_BILL_FEE + VEHICLE_USE_CANCEL_NO_BILL_FEE)} บาท</strong>
+            <strong>{formatBaht(VEHICLE_USE_CANCEL_BILL_FEE + cancelUseNoBillTotal(vehicleClass, form.urgent))} บาท</strong>
             <div className="muted">แยกค่าอากร {formatBaht(VEHICLE_USE_CANCEL_DUTY_FEE)} บาท</div>
           </span>
         </div>
@@ -274,6 +291,7 @@ function EditDialog({
     brand: item.brand,
     plateCategory: item.plateCategory,
     plateNumber: item.plateNumber,
+    urgent: item.urgent,
   });
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
   const [returnedDateText, setReturnedDateText] = useState(() => (item.returnedDate ? isoToDisplayDate(item.returnedDate) : ""));
@@ -309,6 +327,7 @@ function EditDialog({
         // ส่งเฉพาะตอนเลือกไว้จริง - งานที่ไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
         ...(form.customerId ? { customerId: form.customerId } : {}),
         submitDate,
+        urgent: form.urgent,
         ...(returnedDate ? { returnedDate } : {}),
         remark: remark.trim(),
         // ฟอร์มส่งทุกช่องจากตอนเปิด - มีคนแก้/รับกลับไปก่อนระหว่างที่เปิดค้างไว้ backend ตอบ 409 ไม่ทับของเขา
@@ -333,6 +352,7 @@ function EditDialog({
       <div style={{ marginTop: 12 }}>
         <VehicleFormFields
           form={form}
+          vehicleClass={item.vehicleClass}
           onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
           submitDateText={submitDateText}
           onSubmitDateChange={setSubmitDateText}
@@ -443,6 +463,7 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
         submitDate,
+        urgent: form.urgent,
       });
       setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
       setForm((prev) => ({ ...EMPTY_FORM, customerId: prev.customerId })); // เจ้าของงานคนเดิมมักส่งมาหลายคัน - คงไว้ให้
@@ -474,6 +495,7 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
           <form className="customer-form" onSubmit={handleSubmit}>
             <VehicleFormFields
               form={form}
+              vehicleClass={vehicleClass}
               onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
               submitDateText={submitDateText}
               onSubmitDateChange={setSubmitDateText}

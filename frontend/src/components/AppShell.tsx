@@ -8,7 +8,9 @@ import { FocusVehicleRow } from "./FocusVehicleRow";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";import {
   type RegistrationSubtask,
   NEW_VEHICLE_SUBTASKS,
+  OTHER_SUBTASKS,
   REGISTRATION_CATEGORIES,
+  TRANSFER_TYPES,
   YAMAHA_RELOCATION_SUBTASKS,
   plateSwapSubtasks,
 } from "@/lib/categories";
@@ -40,6 +42,8 @@ const SUBTASKS_BY_CATEGORY: Record<string, RegistrationSubtask[]> = {
   "/registration/new-vehicle": NEW_VEHICLE_SUBTASKS,
   "/registration/plate-swap": [...plateSwapSubtasks("car"), ...plateSwapSubtasks("moto")],
   "/registration/yamaha-relocation": YAMAHA_RELOCATION_SUBTASKS,
+  "/registration/transfer": TRANSFER_TYPES,
+  "/registration/other": OTHER_SUBTASKS,
 };
 
 // หน้าย่อยใต้ขั้นตอนที่ควรขึ้นใน breadcrumb ด้วย (รับใบเสร็จ/ป้าย/เล่มแยกหน้ารถยนต์/มอเตอร์ไซค์ ผู้ใช้ 2026-09-25/26)
@@ -52,6 +56,10 @@ const DETAIL_CRUMBS: Record<string, string> = {
   "/registration/new-vehicle/receive-book/moto": "มอเตอร์ไซค์",
   "/registration/plate-swap/car": "รถยนต์",
   "/registration/plate-swap/moto": "มอเตอร์ไซค์",
+  "/registration/other/cancel-use/car": "รถยนต์",
+  "/registration/other/cancel-use/moto": "มอเตอร์ไซค์",
+  "/registration/other/move-out/car": "รถยนต์",
+  "/registration/other/move-out/moto": "มอเตอร์ไซค์",
 };
 
 function within(pathname: string, href: string): boolean {
@@ -234,7 +242,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink href="/tools/photo-sheet" icon="stack" label="จัดรูปลง A4" pathname={pathname} onClick={close} />
               </>
             )}
-            {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT") && (
+            {has("ADMIN", "STAFF_ENTRY", "STAFF_CAR", "STAFF_MOTO", "ACCOUNTANT", "DELIVERY") && (
               <>
                 <div className="label">ประเภทงานทะเบียน</div>
                 {/* ซ่อนหมวดที่บทบาทนี้เปิดไม่ได้ (เช่น STAFF_ENTRY กับต่อภาษี) ไม่งั้นกดแล้ว proxy.ts เด้งกลับเงียบๆ (พบ 2026-09-27) */}

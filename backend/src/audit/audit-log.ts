@@ -17,6 +17,8 @@ export type AuditEntity =
   | 'VehicleMoveOut'
   | 'VehicleTransfer'
   | 'PlateCopy'
+  | 'OldVehicle'
+  | 'OldVehicleJob'
   | 'User'
   | 'TaxInvoiceSeries'
   | 'TaxInvoice'

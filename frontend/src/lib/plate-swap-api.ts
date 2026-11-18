@@ -51,7 +51,8 @@ export interface PlateSwapVehicleHit extends PlateSwapNewVehicle {
   linkBlockedReason: string | null;
 }
 
-export type PlateSwapKind = "OLD_NEW" | "OLD_OLD";
+// CHANGE = เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): รถคันเดียวรับเลขที่ลูกค้าจองไว้ ไม่มีรถคู่ บังคับซื้อป้าย
+export type PlateSwapKind = "OLD_NEW" | "OLD_OLD" | "CHANGE";
 // ประเภทรถของงาน (ผู้ใช้ให้อัตรามอเตอร์ไซค์ 2026-09-28) - ระบบเดียวกับรถยนต์ แยกด้วยค่านี้
 export type PlateSwapVehicleClass = "CAR" | "MOTO";
 
@@ -59,7 +60,7 @@ export interface PlateSwap {
   id: string;
   kind: PlateSwapKind;
   vehicleClass: PlateSwapVehicleClass;
-  urgent: boolean; // งานด่วน +50 (No Bill) - มีเฉพาะมอเตอร์ไซค์
+  urgent: boolean; // งานด่วน (No Bill) - มอเตอร์ไซค์ +50 / รถยนต์ +100 (รถยนต์ตั้งแต่ 2026-11-18)
   // งานคู่ของเคสรถเก่า-รถเก่า (ผู้ใช้ 2026-09-28: กรอกหน้าเดียว 2 คัน แต่ "แยกเป็น 2 งานในระบบ")
   // null = งาน OLD_NEW ซึ่งไม่มีคู่
   pairId: string | null;
@@ -145,6 +146,22 @@ export interface PlateSwapPairCarInput {
   oldPlateNumber: string;
 }
 
+// ยื่นงานเปลี่ยนเลขทะเบียน - รถคันเดียว ไม่มีรถคู่ / ตัวเลือกที่มาของเลขและป้าย (บังคับซื้อป้าย)
+export interface CreatePlateChangeInput {
+  vehicleClass: PlateSwapVehicleClass;
+  urgent: boolean;
+  customerId: string;
+  oldOwnerName: string;
+  oldEngine: string;
+  oldChassis: string;
+  oldBrand: string;
+  oldPlateCategory: string;
+  oldPlateNumber: string;
+  newPlateCategory: string; // เลขที่จองไว้ - ยังไม่รู้ส่งว่างทั้งคู่ได้ (บังคับตอนรับใบเสร็จ)
+  newPlateNumber: string;
+  submitDate: string;
+}
+
 export interface CreatePlateSwapPairInput {
   vehicleClass?: PlateSwapVehicleClass;
   urgent?: boolean;
@@ -170,6 +187,8 @@ export const plateSwapApi = {
   // ยื่นงาน "รถเก่า กับ รถเก่า" - ส่ง 2 คันในคำขอเดียว ได้กลับมา 2 งานที่ผูกกัน
   createPair: (data: CreatePlateSwapPairInput) =>
     request<{ swaps: PlateSwap[] }>("/api/plate-swaps/pair", { method: "POST", body: JSON.stringify(data) }),
+  createChange: (data: CreatePlateChangeInput) =>
+    request<{ swap: PlateSwap }>("/api/plate-swaps/change", { method: "POST", body: JSON.stringify(data) }),
   // excludeSwapId = งานที่กำลังเปลี่ยนคัน (รถที่ผูกกับงานนี้เองไม่นับว่าผูกซ้ำ)
   searchNewVehicles: (chassis: string, excludeSwapId?: string, vehicleClass?: PlateSwapVehicleClass) =>
     request<{ vehicles: PlateSwapVehicleHit[] }>(

@@ -67,6 +67,7 @@ function service(o: { spendSubs?: unknown[]; inProcessSubs?: unknown[]; openVehi
     vehicleUseCancellation: empty(),
     plateCopy: empty(),
     vehicleMoveOut: empty(),
+    oldVehicleJob: empty(),
     vehicleTransfer: empty(),
     taxInvoice: empty(),
     quotation: empty(),

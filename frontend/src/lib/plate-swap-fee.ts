@@ -32,11 +32,14 @@ export const PLATE_SWAP_CAR_NUMBER_ITEMS: Record<
   },
 };
 
-// ลงขัน 200 + ค่าอากรของรถเก่า 10 บาท (ผู้ใช้ 2026-09-23) - ค่าอากรแยกรายการ ไม่อยู่ในใบเสร็จ แต่นับรวมในยอด No Bill
+// ลงขัน + ค่าอากรของรถเก่า 10 บาท (ผู้ใช้ 2026-09-23) - ค่าอากรแยกรายการ ไม่อยู่ในใบเสร็จ แต่นับรวมในยอด No Bill
+// ผู้ใช้ 2026-11-18: ลงขัน 200 เดิม "รวมด่วนแล้ว" -> ลงขัน 100 + ลงขันด่วนเพิ่ม 100 (ฟอร์มติ๊กงานด่วนไว้ให้ก่อน)
 export const PLATE_SWAP_CAR_NO_BILL_ITEMS: FeeItem[] = [
-  { label: "ลงขัน", amount: 200 },
+  { label: "ลงขัน", amount: 100 },
   { label: "ค่าอากร", amount: 10 },
 ];
+
+export const PLATE_SWAP_CAR_URGENT_ITEM: FeeItem = { label: "ลงขันด่วนเพิ่ม", amount: 100 };
 
 export interface PlateSwapFees {
   billItems: FeeItem[];
@@ -58,12 +61,14 @@ export function calculatePlateSwapCarFees(options: {
   numberSource: PlateSwapNumberSource;
   buyNormalPlate: boolean;
   buyAuctionPlate: boolean;
+  urgent?: boolean;
 }): PlateSwapFees {
   const numberItems = PLATE_SWAP_CAR_NUMBER_ITEMS[options.numberSource];
   const billItems: FeeItem[] = [...PLATE_SWAP_CAR_BASE_ITEMS, numberItems.number];
   if (options.buyNormalPlate) billItems.push(numberItems.normalPlate);
   if (options.buyAuctionPlate && numberItems.auctionPlate) billItems.push(numberItems.auctionPlate);
   const noBillItems = [...PLATE_SWAP_CAR_NO_BILL_ITEMS];
+  if (options.urgent) noBillItems.push(PLATE_SWAP_CAR_URGENT_ITEM);
   const billTotal = sum(billItems);
   const noBillTotal = sum(noBillItems);
   const dutyTotal = dutyAmountOf(noBillItems);
@@ -98,6 +103,14 @@ export function calculatePlateSwapMotoFees(options: { buyNormalPlate: boolean; u
   const noBillTotal = sum(noBillItems);
   const dutyTotal = dutyAmountOf(noBillItems);
   return { billItems, noBillItems, billTotal, noBillTotal, dutyTotal, total: billTotal + noBillTotal - dutyTotal };
+}
+
+// เปลี่ยนเลขทะเบียน (ผู้ใช้ 2026-11-18): รายการเดียวกับสลับเลข แต่บังคับซื้อป้ายเสมอ ไม่มีเลขประมูล/ชุดสงวน
+// รถยนต์ Bill 775 / มอเตอร์ไซค์ 635 · No Bill: รถยนต์ ลงขัน 100 + ด่วนเพิ่ม 100 / มอเตอร์ไซค์ ลงขัน 100 + ด่วนเพิ่ม 50 · ค่าอากร 10
+export function calculatePlateChangeFees(vehicleClass: "CAR" | "MOTO", urgent: boolean): PlateSwapFees {
+  return vehicleClass === "MOTO"
+    ? calculatePlateSwapMotoFees({ buyNormalPlate: true, urgent })
+    : calculatePlateSwapCarFees({ numberSource: "NEW_UNUSED", buyNormalPlate: true, buyAuctionPlate: false, urgent });
 }
 
 export const formatBaht = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 });

@@ -11,6 +11,8 @@ export interface RegistrationCategory {
 // Matches the `types` array in prototype/sites-reference/dist/index.html.
 export const REGISTRATION_CATEGORIES: RegistrationCategory[] = [
   { title: "จดทะเบียนรถใหม่", icon: "car", href: "/registration/new-vehicle", color: "#2854d9", bg: "#edf2ff" },
+  // งานรถเก่า (ผู้ใช้ 2026-11-18): หน้ารวม รับงาน -> ตรวจรถ -> ยื่น ของ สลับเลข / งานโอน / ต่อภาษี / อื่นๆ - เมนูเดิม 4 อันยังอยู่จนกว่าขั้นยื่นจะย้ายเข้าหน้านี้
+  { title: "งานรถเก่า", icon: "stack", href: "/registration/old-vehicle", color: "#2f6f9f", bg: "#e9f3fa" },
   { title: "การสลับเลข", icon: "swap", href: "/registration/plate-swap", color: "#7560c7", bg: "#f2eeff" },
   { title: "งานโอน", icon: "transfer", href: "/registration/transfer", color: "#228d91", bg: "#eaf7f7" },
   { title: "ต่อภาษี", icon: "card", href: "/registration/tax-renewal", color: "#2f8a5b", bg: "#eaf7f0" },
@@ -52,6 +54,7 @@ export function plateSwapSubtasks(kind: PlateSwapVehicleKind): RegistrationSubta
   return [
     { title: `รถเก่า กับ รถใหม่ (${label})`, href: `/registration/plate-swap/${kind}/old-new` },
     { title: "รถเก่า กับ รถเก่า", href: `/registration/plate-swap/${kind}/old-old` },
+    { title: "เปลี่ยนเลขทะเบียน (คันเดียว)", href: `/registration/plate-swap/${kind}/change` },
   ];
 }
 

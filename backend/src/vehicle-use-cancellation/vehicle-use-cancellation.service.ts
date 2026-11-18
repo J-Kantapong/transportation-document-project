@@ -22,7 +22,7 @@ import { RECEIPT_EXTRACTOR, type ReceiptExtractor } from '../receipts/receipt-ex
 import { MAX_RECEIPT_BYTES, detectImageType, type UploadedReceiptFile } from '../receipts/receipts.service.js';
 import { RECEIPT_STORAGE, type ReceiptStorage } from '../receipts/receipt-storage.js';
 import { contentHashOf, duplicateUpload, isContentHashConflict } from '../receipts/upload-hash.js';
-import { VEHICLE_USE_CANCEL_BILL_FEE, VEHICLE_USE_CANCEL_DUTY_FEE, VEHICLE_USE_CANCEL_NO_BILL_FEE } from './vehicle-use-cancellation-fee.js';
+import { cancelUseNoBillTotal, VEHICLE_USE_CANCEL_BILL_FEE, VEHICLE_USE_CANCEL_DUTY_FEE } from './vehicle-use-cancellation-fee.js';
 
 // ยกเลิกการใช้รถ (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) รถยนต์ + มอเตอร์ไซค์
 // ขั้นตอน: ยื่น (POST) -> รับใบเสร็จกลับ (วันที่ + รูปใบเสร็จอย่างน้อย 1 รูป, อ่าน OCR เติมเลขที่/วันที่/ยอดเงินให้)
@@ -49,6 +49,7 @@ export interface VehicleUseCancellationRow {
   plateCategory: string;
   plateNumber: string;
   submitDate: string; // YYYY-MM-DD
+  urgent: boolean; // งานด่วน (ผู้ใช้ 2026-11-18) - ลงขันด่วนเพิ่มอยู่ใน noBillTotal แล้ว
   billTotal: string;
   noBillTotal: string;
   dutyAmount: string; // ค่าอากร - แยกต่างหากจาก billTotal / noBillTotal
@@ -76,6 +77,7 @@ export interface CreateVehicleUseCancellationDto {
   plateCategory?: unknown;
   plateNumber?: unknown;
   submitDate?: unknown;
+  urgent?: unknown; // งานด่วน (รถยนต์ +100 / มอเตอร์ไซค์ +50 ใน No Bill)
 }
 
 export interface UpdateVehicleUseCancellationDto {
@@ -87,6 +89,7 @@ export interface UpdateVehicleUseCancellationDto {
   plateCategory?: unknown;
   plateNumber?: unknown;
   submitDate?: unknown;
+  urgent?: unknown; // เปลี่ยน = คิด No Bill ใหม่
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
   remark?: unknown;
   expectedUpdatedAt?: unknown;
@@ -97,6 +100,12 @@ export function parseVehicleClass(value: unknown): CancellationVehicleClass {
   if (value === undefined || value === null || value === '') return 'CAR';
   if (value === 'CAR' || value === 'MOTO') return value;
   throw new BadRequestException({ error: 'พารามิเตอร์ vehicleClass ต้องเป็น CAR หรือ MOTO' });
+}
+
+function parseUrgent(value: unknown): boolean {
+  if (value === undefined || value === null || value === '' || value === false || value === 'false') return false;
+  if (value === true || value === 'true') return true;
+  throw new BadRequestException({ error: 'งานด่วน ต้องเป็น true หรือ false' });
 }
 
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
@@ -123,6 +132,7 @@ interface CancellationRecord {
   plateCategory: string;
   plateNumber: string;
   submitDate: Date;
+  urgent?: boolean;
   billTotal: Prisma.Decimal | number;
   noBillTotal: Prisma.Decimal | number;
   dutyAmount: Prisma.Decimal | number;
@@ -147,6 +157,7 @@ export function serializeCancellation(row: CancellationRecord): VehicleUseCancel
     plateCategory: row.plateCategory,
     plateNumber: row.plateNumber,
     submitDate: row.submitDate.toISOString().slice(0, 10),
+    urgent: row.urgent ?? false,
     billTotal: String(row.billTotal),
     noBillTotal: String(row.noBillTotal),
     dutyAmount: String(row.dutyAmount),
@@ -224,9 +235,11 @@ export class VehicleUseCancellationService {
     const submitDate = parseIsoDate(dto?.submitDate);
     if (!submitDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่ยื่นให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
 
-    // ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02: Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ และแก้ภายหลังไม่ได้
+    // ค่าใช้จ่ายตายตัว (ผู้ใช้ 2026-10-02: Bill 25 / No Bill 100 / ค่าอากร 10 แยกต่างหาก) เก็บเป็น snapshot - ไม่รับยอดจากหน้าเว็บ
+    // งานด่วน (ผู้ใช้ 2026-11-18): ลงขันด่วนเพิ่มใน No Bill รถยนต์ +100 / มอเตอร์ไซค์ +50
+    const urgent = parseUrgent(dto?.urgent);
     const row = await this.prisma.vehicleUseCancellation.create({
-      data: { createdById: currentUser()?.id ?? null, vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, billTotal: VEHICLE_USE_CANCEL_BILL_FEE, noBillTotal: VEHICLE_USE_CANCEL_NO_BILL_FEE, dutyAmount: VEHICLE_USE_CANCEL_DUTY_FEE },
+      data: { createdById: currentUser()?.id ?? null, vehicleClass, customerId, ownerName, engine, chassis, brand, plateCategory, plateNumber, submitDate, urgent, billTotal: VEHICLE_USE_CANCEL_BILL_FEE, noBillTotal: cancelUseNoBillTotal(vehicleClass, urgent), dutyAmount: VEHICLE_USE_CANCEL_DUTY_FEE },
       include: cancellationInclude,
     });
     return { cancellation: serializeCancellation(row) };
@@ -343,6 +356,10 @@ export class VehicleUseCancellationService {
       plateNumber: has('plateNumber') ? requiredText(dto.plateNumber, 'เลขทะเบียน', 10) : existing.plateNumber,
       submitDate,
       returnedDate,
+      // ติ๊กด่วนเปลี่ยนเท่านั้นที่คิด No Bill ใหม่ - แก้อย่างอื่นคงยอด snapshot เดิม
+      ...(has('urgent') && parseUrgent(dto.urgent) !== (existing.urgent ?? false)
+        ? { urgent: parseUrgent(dto.urgent), noBillTotal: cancelUseNoBillTotal(parseVehicleClass(existing.vehicleClass), parseUrgent(dto.urgent)) }
+        : {}),
     };
     const changes: AuditChanges = diffChanges(existing, next);
     if (Object.keys(changes).length === 0) throw new BadRequestException({ error: 'ไม่มีข้อมูลที่เปลี่ยน' });

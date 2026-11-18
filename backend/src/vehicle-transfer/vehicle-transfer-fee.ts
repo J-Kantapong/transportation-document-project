@@ -1,3 +1,6 @@
+// ผู้ใช้ 2026-11-18: รถยนต์มีอัตราครบแล้ว - Bill โอนปกติ 105 / โอนขอใช้ 130 และค่าอากร 20 / 40 (รายการเดียวกับมอเตอร์ไซค์) ต่างกันที่ลงขันด่วนเพิ่ม 100
+//   โอนย้ายเข้ารถยนต์: Bill 130 (คำขอ 10 + ใบแทนเครื่องหมายภาษี 20 + โอนทะเบียนรถ 100) + ค่าแผ่นป้าย 200, ค่าอากร 40, ด่วนเพิ่ม 100
+//   ข้อความด้านล่างที่ว่า "Bill รถยนต์พนักงานกรอกเอง / ไม่มีค่าอากร" เป็นของเดิมก่อนวันนั้น
 // ค่าใช้จ่ายงานโอน - ผู้ใช้กำหนด 2026-10-02: มอเตอร์ไซค์ครบทั้ง Bill / No Bill / รถยนต์ให้เฉพาะ No Bill (ลงขัน 100 + ด่วน 100) ส่วน Bill รถยนต์ยังไม่มีอัตรา พนักงานกรอกเอง
 // รถยนต์ไม่มีค่าอากร (ผู้ใช้ไม่ได้ให้) และชื่อรายการ "ลงขัน" เป็นการตั้งของ Claude ตามชื่อของมอเตอร์ไซค์
 // ใช้กับงานโอนทั้งสองแบบ (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ) เหมือนกัน - ผู้ใช้ไม่ได้แยกอัตราตามแบบงาน
@@ -61,10 +64,18 @@ export interface TransferFees {
 const sum = (items: FeeItem[]) => items.reduce((acc, item) => acc + item.amount, 0);
 
 export function calculateTransferMotoFees(options: TransferMotoFeeOptions): TransferFees {
+  return calculateTransferFees('MOTO', options);
+}
+
+// งานโอน (โอนตามผู้ถือกรรมสิทธิ์ / โอนตรวจรถ) ทั้งสองประเภทรถ - Bill และค่าอากรเท่ากัน ต่างที่ลงขันตั้งต้นกับลงขันด่วนเพิ่ม (ผู้ใช้ 2026-11-18)
+export function calculateTransferFees(vehicleClass: 'CAR' | 'MOTO', options: TransferMotoFeeOptions): TransferFees {
+  const car = vehicleClass === 'CAR';
   const billItems: FeeItem[] = [...(options.useRequest ? TRANSFER_MOTO_BILL_USE_REQUEST : TRANSFER_MOTO_BILL_NORMAL)];
   if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
-  const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_MOTO_NO_BILL_SHARE.amount }];
-  if (options.urgent) noBillItems.push(TRANSFER_MOTO_URGENT_ITEM);
+  const noBillItems: FeeItem[] = [
+    { label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? (car ? TRANSFER_CAR_NO_BILL_SHARE.amount : TRANSFER_MOTO_NO_BILL_SHARE.amount) },
+  ];
+  if (options.urgent) noBillItems.push(car ? TRANSFER_CAR_URGENT_ITEM : TRANSFER_MOTO_URGENT_ITEM);
   const dutyItem: FeeItem = { label: DUTY_LABEL, amount: options.useRequest ? TRANSFER_MOTO_DUTY_USE_REQUEST : TRANSFER_MOTO_DUTY_NORMAL };
   const billTotal = sum(billItems);
   const noBillTotal = sum(noBillItems);
@@ -91,11 +102,21 @@ export const TRANSFER_MOVE_IN_BILL: FeeItem[] = [
   { label: 'โอนทะเบียนรถ', amount: 100 },
   { label: 'ค่าแผ่นป้ายทะเบียน', amount: 100 },
 ];
+// รถยนต์ (ผู้ใช้ 2026-11-18): รายการเดียวกัน ค่าแผ่นป้าย 200 = 330
+export const TRANSFER_MOVE_IN_CAR_BILL: FeeItem[] = [
+  { label: 'คำขอ', amount: 10 },
+  { label: 'ใบแทนเครื่องหมายภาษีประจำปี', amount: 20 },
+  { label: 'โอนทะเบียนรถ', amount: 100 },
+  { label: 'ค่าแผ่นป้ายทะเบียน', amount: 200 },
+];
 export const TRANSFER_MOVE_IN_DUTY = 40;
-export const TRANSFER_MOVE_IN_CONTRIBUTION = 0;
+export const TRANSFER_MOVE_IN_CONTRIBUTION = 0; // จังหวัดที่ยังไม่ได้ตั้งอัตราในตาราง
+// ลงขันโอนย้ายเข้าที่กรุงเทพฯ 100 ทั้งรถยนต์และมอเตอร์ไซค์ (ผู้ใช้ 2026-11-18) - ค่าจริงอยู่ในตาราง TransferContributionRate (migration ใส่ให้)
+export const TRANSFER_MOVE_IN_BANGKOK_CONTRIBUTION = 100;
 export const TRANSFER_STAMP_DUTY_LABEL = 'ค่าอากรโอน (ตามราคารถ)';
 
 export interface TransferMoveInFeeOptions {
+  vehicleClass?: 'CAR' | 'MOTO'; // ไม่ส่ง = มอเตอร์ไซค์
   urgent: boolean;
   fine: number; // ค่าปรับ (Bill) - 0 = ไม่มี
   stampDuty: number; // ค่าอากรโอน (Bill) - 0 = ไม่มี/ยังไม่รู้
@@ -103,11 +124,12 @@ export interface TransferMoveInFeeOptions {
 }
 
 export function calculateTransferMoveInFees(options: TransferMoveInFeeOptions): TransferFees {
-  const billItems: FeeItem[] = [...TRANSFER_MOVE_IN_BILL];
+  const car = options.vehicleClass === 'CAR';
+  const billItems: FeeItem[] = [...(car ? TRANSFER_MOVE_IN_CAR_BILL : TRANSFER_MOVE_IN_BILL)];
   if (options.stampDuty > 0) billItems.push({ label: TRANSFER_STAMP_DUTY_LABEL, amount: options.stampDuty });
   if (options.fine > 0) billItems.push({ label: TRANSFER_FINE_LABEL, amount: options.fine });
   const noBillItems: FeeItem[] = [{ label: TRANSFER_SHARE_LABEL, amount: options.contribution ?? TRANSFER_MOVE_IN_CONTRIBUTION }];
-  if (options.urgent) noBillItems.push(TRANSFER_MOTO_URGENT_ITEM);
+  if (options.urgent) noBillItems.push(car ? TRANSFER_CAR_URGENT_ITEM : TRANSFER_MOTO_URGENT_ITEM);
   const dutyItem: FeeItem = { label: DUTY_LABEL, amount: TRANSFER_MOVE_IN_DUTY };
   const billTotal = sum(billItems);
   const noBillTotal = sum(noBillItems);

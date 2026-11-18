@@ -133,8 +133,9 @@ describe('DocumentSubmissionService.submit - เงื่อนไขการ�
     await service.submit('v1', OPTIONS);
     const openQuery = findSwap.mock.calls.findIndex((c) => c[0]?.where);
     expect(findSwap.mock.calls[openQuery][0]).toEqual({
-      where: { newVehicleId: 'v1', returnedDate: null, cancelledAt: null },
-      select: { returnedDate: true },
+      // งานสลับเลขมอเตอร์ไซค์ไม่ล็อกการยื่นของรถใหม่ (ผู้ใช้ 2026-10-13, SUBMIT_BLOCKING_SWAP_WHERE)
+      where: { newVehicleId: 'v1', returnedDate: null, cancelledAt: null, vehicleClass: { not: 'MOTO' } },
+      select: { returnedDate: true, vehicleClass: true },
     });
     // อ่านใน transaction หลัง SELECT ... FOR UPDATE ของแถวรถ - ผูกงานสลับเลขแทรกระหว่างตรวจกับบันทึกไม่ได้
     const lock = mocksOf(prisma).$queryRaw as unknown as ReturnType<typeof vi.fn>;

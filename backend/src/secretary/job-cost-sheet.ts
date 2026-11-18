@@ -8,6 +8,7 @@ import {
   PLATE_SWAP_CAR_BASE_ITEMS,
   PLATE_SWAP_CAR_NO_BILL_ITEMS,
   PLATE_SWAP_CAR_NUMBER_ITEMS,
+  PLATE_SWAP_CAR_URGENT_ITEM,
   PLATE_SWAP_MOTO_BASE_ITEMS,
   PLATE_SWAP_MOTO_NO_BILL_ITEMS,
   PLATE_SWAP_MOTO_NUMBER_ITEM,
@@ -16,7 +17,16 @@ import {
   type FeeItem,
 } from '../plate-swap/plate-swap-fee.js';
 import { TAX_RENEWAL_CONTRIBUTION_CAR, TAX_RENEWAL_CONTRIBUTION_MOTO, TAX_RENEWAL_CONTRIBUTION_TRANSPORT, TAX_RENEWAL_INSPECTION_FEE_TRANSPORT } from '../tax-renewal/tax-renewal-fee.js';
-import { MOVE_OUT_MOTO_BILL_FEE, MOVE_OUT_MOTO_DUTY_FEE, MOVE_OUT_MOTO_LUNGKAN_FEE, MOVE_OUT_MOTO_URGENT_EXTRA } from '../vehicle-move-out/vehicle-move-out-fee.js';
+import {
+  MOVE_OUT_CAR_BILL_FEE,
+  MOVE_OUT_CAR_DUTY_FEE,
+  MOVE_OUT_CAR_LUNGKAN_FEE,
+  MOVE_OUT_CAR_URGENT_EXTRA,
+  MOVE_OUT_MOTO_BILL_FEE,
+  MOVE_OUT_MOTO_DUTY_FEE,
+  MOVE_OUT_MOTO_LUNGKAN_FEE,
+  MOVE_OUT_MOTO_URGENT_EXTRA,
+} from '../vehicle-move-out/vehicle-move-out-fee.js';
 import {
   TRANSFER_CAR_NO_BILL_SHARE,
   TRANSFER_CAR_URGENT_ITEM,
@@ -29,11 +39,18 @@ import {
   TRANSFER_MOTO_NO_BILL_SHARE,
   TRANSFER_MOTO_URGENT_ITEM,
   TRANSFER_MOVE_IN_BILL,
-  TRANSFER_MOVE_IN_CONTRIBUTION,
+  TRANSFER_MOVE_IN_BANGKOK_CONTRIBUTION,
+  TRANSFER_MOVE_IN_CAR_BILL,
   TRANSFER_MOVE_IN_DUTY,
   TRANSFER_STAMP_DUTY_LABEL,
 } from '../vehicle-transfer/vehicle-transfer-fee.js';
-import { VEHICLE_USE_CANCEL_BILL_FEE, VEHICLE_USE_CANCEL_DUTY_FEE, VEHICLE_USE_CANCEL_NO_BILL_FEE } from '../vehicle-use-cancellation/vehicle-use-cancellation-fee.js';
+import {
+  VEHICLE_USE_CANCEL_BILL_FEE,
+  VEHICLE_USE_CANCEL_CAR_URGENT_EXTRA,
+  VEHICLE_USE_CANCEL_DUTY_FEE,
+  VEHICLE_USE_CANCEL_MOTO_URGENT_EXTRA,
+  VEHICLE_USE_CANCEL_NO_BILL_FEE,
+} from '../vehicle-use-cancellation/vehicle-use-cancellation-fee.js';
 import { YAMAHA_RELOCATION_BILL_RATE, YAMAHA_RELOCATION_NO_BILL_RATE } from '../yamaha-relocation/yamaha-relocation-fee.js';
 import type { LineMessage, QuickReply } from './line-client.js';
 
@@ -67,6 +84,7 @@ const swapCar = (title: string, source: keyof typeof PLATE_SWAP_CAR_NUMBER_ITEMS
     bill: [...PLATE_SWAP_CAR_BASE_ITEMS, n.number],
     billOptional: [n.normalPlate, ...(n.auctionPlate ? [n.auctionPlate] : [])],
     noBill: withoutDuty(PLATE_SWAP_CAR_NO_BILL_ITEMS),
+    noBillOptional: [PLATE_SWAP_CAR_URGENT_ITEM],
     duty: dutyOf(PLATE_SWAP_CAR_NO_BILL_ITEMS),
   };
 };
@@ -125,17 +143,34 @@ export const COST_SHEETS: CostSheet[] = [
         title: 'จักรยานยนต์ - โอนย้ายเข้า',
         bill: TRANSFER_MOVE_IN_BILL,
         billOptional: [item(`${TRANSFER_FINE_LABEL} (เกิน 15 วัน)`, TRANSFER_FINE_AMOUNT)],
-        noBill: [item('ลงขัน (ยังไม่มีอัตรา)', TRANSFER_MOVE_IN_CONTRIBUTION)],
+        noBill: [item('ลงขัน', TRANSFER_MOVE_IN_BANGKOK_CONTRIBUTION)],
         noBillOptional: [TRANSFER_MOTO_URGENT_ITEM],
         duty: TRANSFER_MOVE_IN_DUTY,
         notes: [`+ ${TRANSFER_STAMP_DUTY_LABEL} ใน Bill รู้ยอดเมื่อใบเสร็จออก`],
       },
       {
-        title: 'รถยนต์',
-        bill: [],
+        title: 'รถยนต์ - โอนปกติ',
+        bill: TRANSFER_MOTO_BILL_NORMAL,
+        billOptional: [item(`${TRANSFER_FINE_LABEL} (เกิน 15 วัน)`, TRANSFER_FINE_AMOUNT)],
         noBill: [TRANSFER_CAR_NO_BILL_SHARE],
         noBillOptional: [TRANSFER_CAR_URGENT_ITEM],
-        notes: ['Bill รถยนต์ยังไม่มีอัตราในระบบ (พนักงานกรอกตามใบเสร็จ) · ไม่มีค่าอากร'],
+        duty: TRANSFER_MOTO_DUTY_NORMAL,
+      },
+      {
+        title: 'รถยนต์ - โอนขอใช้',
+        bill: TRANSFER_MOTO_BILL_USE_REQUEST,
+        billOptional: [item(`${TRANSFER_FINE_LABEL} (เกิน 15 วัน)`, TRANSFER_FINE_AMOUNT)],
+        noBill: [TRANSFER_CAR_NO_BILL_SHARE],
+        noBillOptional: [TRANSFER_CAR_URGENT_ITEM],
+        duty: TRANSFER_MOTO_DUTY_USE_REQUEST,
+      },
+      {
+        title: 'รถยนต์ - โอนย้ายเข้า',
+        bill: TRANSFER_MOVE_IN_CAR_BILL,
+        noBill: [item('ลงขัน', TRANSFER_MOVE_IN_BANGKOK_CONTRIBUTION)],
+        noBillOptional: [TRANSFER_CAR_URGENT_ITEM],
+        duty: TRANSFER_MOVE_IN_DUTY,
+        notes: [`+ ${TRANSFER_STAMP_DUTY_LABEL} ใน Bill รู้ยอดเมื่อใบเสร็จออก`],
       },
     ],
     notes: [PROVINCE_NOTE, 'งานโอนตรวจรถมีค่าตรวจรถเพิ่มตามที่จ่ายจริง'],
@@ -167,6 +202,7 @@ export const COST_SHEETS: CostSheet[] = [
         title: 'รถยนต์ / จักรยานยนต์',
         bill: [item('ค่าธรรมเนียม', VEHICLE_USE_CANCEL_BILL_FEE)],
         noBill: [item('ลงขัน', VEHICLE_USE_CANCEL_NO_BILL_FEE)],
+        noBillOptional: [item('ลงขันด่วนเพิ่ม (รถยนต์)', VEHICLE_USE_CANCEL_CAR_URGENT_EXTRA), item('ลงขันด่วนเพิ่ม (จักรยานยนต์)', VEHICLE_USE_CANCEL_MOTO_URGENT_EXTRA)],
         duty: VEHICLE_USE_CANCEL_DUTY_FEE,
       },
     ],
@@ -183,8 +219,14 @@ export const COST_SHEETS: CostSheet[] = [
         noBillOptional: [item('ลงขันด่วนเพิ่ม', MOVE_OUT_MOTO_URGENT_EXTRA)],
         duty: MOVE_OUT_MOTO_DUTY_FEE,
       },
+      {
+        title: 'รถยนต์',
+        bill: [item('ค่าธรรมเนียม', MOVE_OUT_CAR_BILL_FEE)],
+        noBill: [item('ลงขัน', MOVE_OUT_CAR_LUNGKAN_FEE)],
+        noBillOptional: [item('ลงขันด่วนเพิ่ม', MOVE_OUT_CAR_URGENT_EXTRA)],
+        duty: MOVE_OUT_CAR_DUTY_FEE,
+      },
     ],
-    notes: ['รถยนต์ยังไม่มีอัตราในระบบ'],
   },
   {
     key: 'taxRenewal',
