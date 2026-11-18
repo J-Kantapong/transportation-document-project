@@ -690,10 +690,6 @@ export class OldVehicleJobsService {
   ) {
     if (!isOldJobType(dto.jobType)) throw new BadRequestException({ error: 'กรุณาเลือกประเภทงานจากรายการ' });
     const jobType = dto.jobType;
-    // โอนย้ายเข้ายังเปิดเฉพาะมอเตอร์ไซค์ (ฟอร์มยื่นเดิมรับเฉพาะมอเตอร์ไซค์ - ราคารถยนต์ที่ผู้ใช้ให้ 2026-11-18 ยังไม่ได้ใส่)
-    if (jobType === 'TRANSFER_MOVE_IN' && vehicle.vehicleClass !== 'MOTO') {
-      throw new BadRequestException({ error: 'โอนย้ายเข้ายังเปิดเฉพาะมอเตอร์ไซค์' });
-    }
     if (isTransportType(vehicle.vehicleType) && jobType !== 'TAX_RENEWAL') {
       throw new BadRequestException({ error: 'รถตาม พ.ร.บ.ขนส่ง (ขส.) ทำได้เฉพาะงานต่อภาษี' });
     }
@@ -1129,9 +1125,6 @@ export class OldVehicleJobsService {
     const pending = existing.jobs.filter((j) => !j.jobId && j.jobType).map((j) => j.jobType);
     if (isTransportType(vehicleType) && pending.some((t) => t !== 'TAX_RENEWAL')) {
       throw new BadRequestException({ error: 'รถคันนี้มีงานที่ยังไม่ยื่นซึ่งไม่ใช่ต่อภาษี - รถ ขส. ทำได้เฉพาะต่อภาษี ยกเลิกหรือเปลี่ยนประเภทงานนั้นก่อน' });
-    }
-    if (vehicleClass !== 'MOTO' && pending.includes('TRANSFER_MOVE_IN')) {
-      throw new BadRequestException({ error: 'รถคันนี้มีงานโอนย้ายเข้าที่ยังไม่ยื่น ซึ่งเปิดเฉพาะมอเตอร์ไซค์ - ยกเลิกหรือเปลี่ยนประเภทงานนั้นก่อน' });
     }
     if (vehicleClass !== existing.vehicleClass && existing.jobs.some((j) => !j.jobId && j.pairId)) {
       throw new BadRequestException({ error: 'รถคันนี้มีงานสลับเลขคู่ที่ยังไม่ยื่น - คู่สลับต้องเป็นประเภทรถเดียวกัน ยกเลิกการรับงานนั้นก่อน' });
