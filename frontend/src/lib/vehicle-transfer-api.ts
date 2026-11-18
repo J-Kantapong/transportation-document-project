@@ -89,6 +89,8 @@ export interface CreateVehicleTransferInput {
   fineAmount?: string;
   billTotal?: string;
   moveOutId?: string; // โอนย้ายเข้า - งานย้ายออกที่รับใบเสร็จแล้ว (ไม่บังคับ)
+  newPlateCategory?: string; // โอนย้ายเข้า - ทะเบียนใหม่ (รู้ตอนยื่นก็กรอกได้ ไม่บังคับจนกว่าจะรับใบเสร็จ)
+  newPlateNumber?: string;
 }
 
 export interface UpdateVehicleTransferInput {
@@ -109,7 +111,7 @@ export interface UpdateVehicleTransferInput {
   fineAmount?: string;
   billTotal?: string;
   returnedDate?: string;
-  newPlateCategory?: string; // โอนย้ายเข้าที่รับกลับแล้ว
+  newPlateCategory?: string; // โอนย้ายเข้า (รับกลับแล้วต้องมีครบ)
   newPlateNumber?: string;
   remark: string;
   expectedUpdatedAt: string;

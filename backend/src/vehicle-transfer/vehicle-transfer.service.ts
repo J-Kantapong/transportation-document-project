@@ -100,6 +100,8 @@ export interface VehicleTransferRow {
 export interface CreateVehicleTransferDto {
   transferType?: unknown; // OWNER | INSPECTION | MOVE_IN (บังคับ)
   moveOutId?: unknown; // โอนย้ายเข้า: งานย้ายออกที่รับใบเสร็จแล้ว (ไม่บังคับ)
+  newPlateCategory?: unknown; // โอนย้ายเข้า: ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า - รู้ตอนยื่นก็กรอกได้เลย (ไม่บังคับจนกว่าจะรับใบเสร็จ)
+  newPlateNumber?: unknown;
   vehicleClass?: unknown; // CAR | MOTO (บังคับ)
   customerId?: unknown; // เจ้าของงาน (บังคับ)
   transferorName?: unknown;
@@ -137,7 +139,7 @@ export interface UpdateVehicleTransferDto {
   billTotal?: unknown;
   noBillTotal?: unknown;
   returnedDate?: unknown; // เฉพาะงานที่รับกลับแล้ว
-  newPlateCategory?: unknown; // โอนย้ายเข้าที่รับกลับแล้ว - แก้ทะเบียนใหม่
+  newPlateCategory?: unknown; // โอนย้ายเข้า - แก้ทะเบียนใหม่ (รับกลับแล้วต้องมีครบ)
   newPlateNumber?: unknown;
   remark?: unknown;
   expectedUpdatedAt?: unknown;
@@ -249,6 +251,16 @@ function parseSubmitProvince(value: unknown): string | undefined {
 }
 
 
+// ทะเบียนใหม่ของโอนย้ายเข้า = หมวด + เลข ต้องมาครบคู่ หรือไม่มีเลย (ยังไม่รู้ตอนยื่น) - required = งานที่รับใบเสร็จแล้วต้องมีครบ
+function parseNewPlate(categoryRaw: unknown, numberRaw: unknown, required: boolean): { newPlateCategory: string | null; newPlateNumber: string | null } {
+  const newPlateCategory = optionalText(categoryRaw, 'หมวดทะเบียนใหม่', 10);
+  const newPlateNumber = optionalText(numberRaw, 'เลขทะเบียนใหม่', 10);
+  if ((required || newPlateCategory || newPlateNumber) && (!newPlateCategory || !newPlateNumber)) {
+    throw new BadRequestException({ error: 'โอนย้ายเข้า: กรุณากรอกทะเบียนใหม่ (หมวดและเลข) ของจังหวัดที่ย้ายเข้า' });
+  }
+  return { newPlateCategory, newPlateNumber };
+}
+
 const isValidMonthParam = (value: string) => /^\d{4}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}-01`));
 
 const customerSelect = { id: true, name: true, company: true } as const;
@@ -347,7 +359,6 @@ function staleIfMissing(err: unknown): never {
 const RECEIPT_REQUIRED_ERROR = 'กรุณาแนบรูปใบเสร็จก่อนยืนยันรับเอกสารกลับ';
 const LAST_RECEIPT_ERROR = 'งานที่รับเอกสารกลับแล้วต้องมีรูปใบเสร็จอย่างน้อย 1 รูป - แนบรูปที่ถูกต้องก่อนแล้วจึงลบรูปนี้';
 const INSPECTION_NOT_PASSED_ERROR = 'งานโอนตรวจรถต้องตรวจรถผ่านก่อนจึงรับใบเสร็จได้';
-const NEW_PLATE_REQUIRED_ERROR = 'โอนย้ายเข้า: กรุณากรอกทะเบียนใหม่ (หมวดและเลข) ของจังหวัดที่ย้ายเข้า';
 
 type Tx = Prisma.TransactionClient;
 
@@ -432,6 +443,7 @@ export class VehicleTransferService {
     if (moveIn && !pickedProvince) throw new BadRequestException({ error: 'กรุณาเลือกจังหวัดที่ย้ายเข้า' });
     const submitProvince = pickedProvince ?? TRANSFER_DEFAULT_PROVINCE;
     const moveOutId = moveIn ? await this.resolveMoveOutId(dto?.moveOutId) : null;
+    const newPlate = moveIn ? parseNewPlate(dto?.newPlateCategory, dto?.newPlateNumber, false) : {};
     const fees = feeSnapshotFor(vehicleClass, {
       useRequest: parseFlag(dto?.useRequest, 'โอนขอใช้'),
       urgent: parseFlag(dto?.urgent, 'งานด่วน'),
@@ -442,7 +454,7 @@ export class VehicleTransferService {
     });
 
     const row = await this.prisma.vehicleTransfer.create({
-      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, submitProvince, moveOutId, ...fees },
+      data: { createdById: currentUser()?.id ?? null, transferType, vehicleClass, customerId, transferorName, transfereeName, engine, chassis, brand, plateCategory, plateNumber, submitDate, submitProvince, moveOutId, ...newPlate, ...fees },
       include: transferInclude,
     });
     return { transfer: serializeTransfer(row) };
@@ -622,13 +634,7 @@ export class VehicleTransferService {
   // โอนย้ายเข้า: ต้องกรอกทะเบียนใหม่ (หมวด + เลข) ของจังหวัดที่ย้ายเข้ามาด้วย
   async markReturned(id: string, returnedDateRaw: unknown, newPlate: { category?: unknown; number?: unknown } = {}): Promise<{ transfer: VehicleTransferRow }> {
     const existing = await this.findOrThrow(id);
-    const plateData =
-      existing.transferType === 'MOVE_IN'
-        ? { newPlateCategory: optionalText(newPlate.category, 'หมวดทะเบียนใหม่', 10), newPlateNumber: optionalText(newPlate.number, 'เลขทะเบียนใหม่', 10) }
-        : {};
-    if (existing.transferType === 'MOVE_IN' && (!plateData.newPlateCategory || !plateData.newPlateNumber)) {
-      throw new BadRequestException({ error: NEW_PLATE_REQUIRED_ERROR });
-    }
+    const plateData = existing.transferType === 'MOVE_IN' ? parseNewPlate(newPlate.category, newPlate.number, true) : {};
     const returnedDate = parseIsoDate(returnedDateRaw);
     if (!returnedDate) throw new BadRequestException({ error: 'กรุณาระบุวันที่รับเอกสารกลับให้ถูกต้อง (ค.ศ. YYYY-MM-DD)' });
     if (existing.returnedDate) throw new BadRequestException({ error: 'งานนี้รับเอกสารกลับแล้ว' });
@@ -672,13 +678,15 @@ export class VehicleTransferService {
     const submitProvince = has('submitProvince') ? (parseSubmitProvince(dto.submitProvince) ?? null) : (existing.submitProvince ?? null);
     if (moveIn && !submitProvince) throw new BadRequestException({ error: 'กรุณาเลือกจังหวัดที่ย้ายเข้า' });
 
-    // ทะเบียนใหม่ของโอนย้ายเข้า - แก้ได้เฉพาะงานที่รับกลับแล้ว (ก่อนนั้นกรอกตอนยืนยันรับกลับ) และต้องครบทั้งหมวดและเลข
-    const newPlate: { newPlateCategory?: string | null; newPlateNumber?: string | null } = {};
+    // ทะเบียนใหม่ของโอนย้ายเข้า - แก้ได้ทุกเมื่อ (หมวด + เลขครบคู่ หรือว่างทั้งคู่) งานที่รับกลับแล้วต้องมีครบ
+    let newPlate: { newPlateCategory?: string | null; newPlateNumber?: string | null } = {};
     if (has('newPlateCategory') || has('newPlateNumber')) {
-      if (!moveIn || !existing.returnedDate) throw new BadRequestException({ error: 'ทะเบียนใหม่แก้ได้เฉพาะงานโอนย้ายเข้าที่รับเอกสารกลับแล้ว' });
-      newPlate.newPlateCategory = has('newPlateCategory') ? optionalText(dto.newPlateCategory, 'หมวดทะเบียนใหม่', 10) : (existing.newPlateCategory ?? null);
-      newPlate.newPlateNumber = has('newPlateNumber') ? optionalText(dto.newPlateNumber, 'เลขทะเบียนใหม่', 10) : (existing.newPlateNumber ?? null);
-      if (!newPlate.newPlateCategory || !newPlate.newPlateNumber) throw new BadRequestException({ error: NEW_PLATE_REQUIRED_ERROR });
+      if (!moveIn) throw new BadRequestException({ error: 'ทะเบียนใหม่มีเฉพาะงานโอนย้ายเข้า' });
+      newPlate = parseNewPlate(
+        has('newPlateCategory') ? dto.newPlateCategory : existing.newPlateCategory,
+        has('newPlateNumber') ? dto.newPlateNumber : existing.newPlateNumber,
+        Boolean(existing.returnedDate),
+      );
     }
 
     let returnedDate = existing.returnedDate;

@@ -459,6 +459,22 @@ describe('VehicleTransferService โอนย้ายเข้า (MOVE_IN)', (
     expect(create.mock.calls[0][0].data).toMatchObject({ billTotal: 425, noBillTotal: 200, dutyAmount: 40, fineAmount: 200 });
   });
 
+  it('ทะเบียนใหม่กรอกตอนยื่นได้ (ครบคู่หรือว่างทั้งคู่) และแก้ก่อนรับกลับได้', async () => {
+    const { svc, create } = service(null);
+    await asUser(['ADMIN'], () => svc.create({ ...moveInDto, newPlateCategory: ' 1กต ', newPlateNumber: '555' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ newPlateCategory: '1กต', newPlateNumber: '555' });
+    await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, newPlateCategory: '1กต' }))).rejects.toMatchObject({ status: 400 });
+
+    const pending = service(moveInRow());
+    await asUser(['ADMIN'], () => pending.svc.update('t1', { newPlateCategory: '2กต', newPlateNumber: '77', remark: 'รู้ทะเบียนใหม่แล้ว' }));
+    expect(pending.update.mock.calls[0][0].data).toMatchObject({ newPlateCategory: '2กต', newPlateNumber: '77' });
+    // งานที่รับกลับแล้วล้างทะเบียนใหม่ไม่ได้ / งานแบบอื่นไม่มีทะเบียนใหม่
+    const returned = service(moveInRow({ returnedDate: new Date('2026-09-22T00:00:00.000Z'), newPlateCategory: '1กต', newPlateNumber: '555' }));
+    await expect(asUser(['ADMIN'], () => returned.svc.update('t1', { newPlateCategory: '', newPlateNumber: '', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
+    const owner = service(row());
+    await expect(asUser(['ADMIN'], () => owner.svc.update('t1', { newPlateCategory: '1กต', newPlateNumber: '5', remark: 'x' }))).rejects.toMatchObject({ status: 400 });
+  });
+
   it('รถยนต์ / ไม่เลือกจังหวัด / โอนขอใช้ = 400', async () => {
     const { svc } = service(null);
     await expect(asUser(['ADMIN'], () => svc.create({ ...moveInDto, vehicleClass: 'CAR', billTotal: '0' }))).rejects.toMatchObject({ status: 400 });

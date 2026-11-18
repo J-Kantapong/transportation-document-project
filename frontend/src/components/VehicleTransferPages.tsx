@@ -162,6 +162,8 @@ interface FormState {
   submitProvince: string; // จังหวัดที่ยื่น (ผู้ใช้ 2026-11-18)
   contribution: string | null; // ลงขัน - null = ยังไม่แก้ ใช้อัตราตั้งต้นของจังหวัด (ดู contributionText)
   fineAmount: string; // มอเตอร์ไซค์ - ค่าปรับ
+  newPlateCategory: string; // โอนย้ายเข้า - ทะเบียนใหม่ของจังหวัดที่ย้ายเข้า (submitProvince) ยังไม่รู้เว้นว่างได้จนถึงตอนรับใบเสร็จ
+  newPlateNumber: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -180,6 +182,8 @@ const EMPTY_FORM: FormState = {
   submitProvince: TRANSFER_DEFAULT_PROVINCE,
   contribution: null,
   fineAmount: "",
+  newPlateCategory: "",
+  newPlateNumber: "",
 };
 
 type Option = { id: string; label: string };
@@ -258,18 +262,19 @@ function ProvinceContributionFields({
   const noRate = !moveIn && !!form.vehicleClass && defaultTransferContribution(rates, form.vehicleClass, form.submitProvince) === null;
   return (
     <>
-      <label className="field" style={{ minWidth: 200 }}>
-        {moveIn ? "จังหวัดที่ย้ายเข้า *" : "จังหวัดที่ยื่น *"}
-        {/* เปลี่ยนจังหวัด = เติมอัตราตั้งต้นของจังหวัดใหม่จากตาราง */}
-        <select value={form.submitProvince} onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}>
-          {moveIn && <option value="">เลือกจังหวัด</option>}
-          {PROVINCES.map((province) => (
-            <option key={province} value={province}>
-              {province}
-            </option>
-          ))}
-        </select>
-      </label>
+      {!moveIn && (
+        <label className="field" style={{ minWidth: 200 }}>
+          จังหวัดที่ยื่น *
+          {/* เปลี่ยนจังหวัด = เติมอัตราตั้งต้นของจังหวัดใหม่จากตาราง */}
+          <select value={form.submitProvince} onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}>
+            {PROVINCES.map((province) => (
+              <option key={province} value={province}>
+                {province}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="field" style={{ minWidth: 200 }}>
         ลงขัน (บาท) *
         <input
@@ -564,6 +569,46 @@ function VehicleFormFields({
             />
           </div>
         </div>
+        {/* โอนย้ายเข้า (ผู้ใช้ 2026-11-18): ทะเบียนใหม่พร้อมจังหวัด - จังหวัดบังคับ (ใช้เติมลงขัน) หมวด/เลขยังไม่รู้เว้นว่างได้ */}
+        {moveIn && (
+          <div className="field wide">
+            ทะเบียนใหม่ (จังหวัดที่ย้ายเข้า)
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={form.newPlateCategory}
+                onChange={text("newPlateCategory")}
+                maxLength={3}
+                placeholder="หมวดใหม่"
+                aria-label="หมวดทะเบียนใหม่"
+                style={{ flex: "1 1 110px" }}
+              />
+              <input
+                value={form.newPlateNumber}
+                onChange={(e) => onChange({ newPlateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                maxLength={4}
+                inputMode="numeric"
+                placeholder="เลขใหม่"
+                aria-label="เลขทะเบียนใหม่"
+                style={{ flex: "1 1 110px" }}
+              />
+              {/* เปลี่ยนจังหวัด = เติมลงขันตั้งต้นของจังหวัดใหม่จากตาราง */}
+              <select
+                value={form.submitProvince}
+                onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}
+                aria-label="จังหวัดที่ย้ายเข้า"
+                style={{ flex: "2 1 200px" }}
+              >
+                <option value="">เลือกจังหวัด *</option>
+                {PROVINCES.map((province) => (
+                  <option key={province} value={province}>
+                    {province}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="muted">จังหวัดต้องเลือกตอนยื่น · หมวด/เลขใหม่ยังไม่รู้เว้นว่างได้ แล้วกรอกตอนรับใบเสร็จ</span>
+          </div>
+        )}
         {children}
       </div>
 
@@ -577,6 +622,7 @@ function validateForm(form: FormState, requireCustomer: boolean, moveIn = false)
   if (!form.vehicleClass) return "กรุณาเลือกประเภทรถ (รถยนต์ / รถจักรยานยนต์)";
   if (moveIn && form.vehicleClass !== "MOTO") return "โอนย้ายเข้ามีอัตราเฉพาะรถจักรยานยนต์";
   if (moveIn && !form.submitProvince) return "กรุณาเลือกจังหวัดที่ย้ายเข้า";
+  if (moveIn && Boolean(form.newPlateCategory.trim()) !== Boolean(form.newPlateNumber.trim())) return "ทะเบียนใหม่ต้องกรอกทั้งหมวดและเลข (ยังไม่รู้เว้นว่างทั้งคู่)";
   if (requireCustomer && !form.customerId) return "กรุณาเลือกเจ้าของงาน (ลูกค้าที่ส่งงานมา)";
   if (!form.transferorName.trim()) return "กรุณากรอกผู้โอน";
   if (!form.transfereeName.trim()) return "กรุณากรอกผู้รับโอน";
@@ -625,12 +671,10 @@ function EditDialog({
     submitProvince: item.submitProvince ?? TRANSFER_DEFAULT_PROVINCE,
     contribution: String(Math.max(0, Number(item.noBillTotal) - transferUrgentAmount(item.vehicleClass, item.urgent))),
     fineAmount: Number(item.fineAmount) > 0 ? String(Number(item.fineAmount)) : "",
+    newPlateCategory: item.newPlateCategory ?? "",
+    newPlateNumber: item.newPlateNumber ?? "",
   });
   const moveIn = isMoveIn(item.transferType);
-  // ทะเบียนใหม่ของโอนย้ายเข้า - แก้ได้เมื่อรับกลับแล้ว (ก่อนนั้นกรอกตอนยืนยันรับกลับ)
-  const editNewPlate = moveIn && Boolean(item.returnedDate);
-  const [newPlateCategory, setNewPlateCategory] = useState(item.newPlateCategory ?? "");
-  const [newPlateNumber, setNewPlateNumber] = useState(item.newPlateNumber ?? "");
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(item.submitDate));
   const [returnedDateText, setReturnedDateText] = useState(() => (item.returnedDate ? isoToDisplayDate(item.returnedDate) : ""));
   const [remark, setRemark] = useState("");
@@ -653,7 +697,8 @@ function EditDialog({
     if (returnedDate && returnedDate < submitDate) return setError("วันที่รับเอกสารกลับต้องไม่ก่อนวันที่ยื่น");
     const invalid = validateForm(form, false, moveIn);
     if (invalid) return setError(invalid);
-    if (editNewPlate && (!newPlateCategory.trim() || !newPlateNumber.trim())) return setError("กรุณากรอกทะเบียนใหม่ (หมวดและเลข)");
+    // โอนย้ายเข้าที่รับกลับแล้วต้องมีทะเบียนใหม่ครบ
+    if (moveIn && item.returnedDate && (!form.newPlateCategory.trim() || !form.newPlateNumber.trim())) return setError("กรุณากรอกทะเบียนใหม่ (หมวดและเลข)");
     if (!remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้");
     setSaving(true);
     try {
@@ -667,7 +712,7 @@ function EditDialog({
         plateCategory: form.plateCategory,
         plateNumber: form.plateNumber,
         ...feePayload(form, rates, moveIn),
-        ...(editNewPlate ? { newPlateCategory: newPlateCategory.trim(), newPlateNumber: newPlateNumber.trim() } : {}),
+        ...(moveIn ? { newPlateCategory: form.newPlateCategory.trim(), newPlateNumber: form.newPlateNumber.trim() } : {}),
         // ส่งเฉพาะตอนเลือกไว้จริง - งานที่ไม่มีเจ้าของงานและไม่ได้เลือกในรอบนี้ ไม่ต้องแตะ
         ...(form.customerId ? { customerId: form.customerId } : {}),
         submitDate,
@@ -707,14 +752,7 @@ function EditDialog({
           moveIn={moveIn}
           stampDuty={Number(item.stampDutyAmount) || 0}
           rates={rates}
-        >
-          {editNewPlate && (
-            <div className="field">
-              ทะเบียนใหม่ ({form.submitProvince}) *
-              <NewPlateInputs category={newPlateCategory} number={newPlateNumber} onCategory={setNewPlateCategory} onNumber={setNewPlateNumber} />
-            </div>
-          )}
-        </VehicleFormFields>
+        />
       </div>
       <label className="field" style={{ marginTop: 12 }}>
         เหตุผลที่แก้ *
@@ -904,6 +942,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
         submitDate,
         ...feePayload({ ...form, vehicleClass: classValue }, rates, moveIn),
         ...(moveIn && moveOutId ? { moveOutId } : {}),
+        ...(moveIn && form.newPlateCategory.trim() ? { newPlateCategory: form.newPlateCategory.trim(), newPlateNumber: form.newPlateNumber.trim() } : {}),
       });
       setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
       // เจ้าของงานคนเดิมและประเภทรถเดิมมักส่งมาหลายคัน - คงไว้ให้ (โอนย้ายเข้าคงจังหวัดที่ย้ายเข้าไว้ด้วย)
