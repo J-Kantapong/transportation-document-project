@@ -90,3 +90,23 @@ describe('calculateTaxRenewalFees - ภาษีตามใบเสร็จ',
     expect(fees.noBillTotal).toBe(1100); // ค่าตรวจสภาพ 1,000 + ลงขัน 100 เหมือนรถ ขส. อื่น
   });
 });
+
+// ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) - Bill 100 รถยนต์และจักรยานยนต์ (ผู้ใช้ 2026-11-19)
+describe('ใบแทนคู่มือจดทะเบียน', () => {
+  it('รถยนต์ติ๊กแล้วเพิ่ม 100 ใน Bill', () => {
+    const fees = calculateTaxRenewalFees(tax(), { skipContribution: false, bookReplacement: true });
+    expect(fees.billItems).toContainEqual({ label: 'ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม)', amount: 100 });
+    expect(fees.billTotal).toBe(3000);
+    expect(fees.noBillTotal).toBe(20);
+  });
+  it('ไม่ติ๊ก = ไม่มีบรรทัด', () => {
+    expect(calculateTaxRenewalFees(tax(), { skipContribution: false }).billTotal).toBe(2900);
+  });
+  it('จักรยานยนต์ก็ 100', () => {
+    expect(calculateTaxRenewalFees(tax({ vehicleType: 'รย.12-น้อยกว่า 300cc', annualVehicleTax: 100 }), { skipContribution: false, bookReplacement: true }).billTotal).toBe(200);
+    expect(calculateTaxRenewalFees(tax({ vehicleType: 'รย.17-จักรยานยนต์สาธารณะ', annualVehicleTax: 100 }), { skipContribution: false, bookReplacement: true }).billTotal).toBe(200);
+  });
+  it('รถ ขส. ไม่เพิ่มแม้ติ๊ก', () => {
+    expect(calculateTaxRenewalFees(tax({ vehicleType: 'ขส.-ส่วนบุคคล', annualVehicleTax: 3600 }), { skipContribution: false, bookReplacement: true }).billTotal).toBe(3600);
+  });
+});

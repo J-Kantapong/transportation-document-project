@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { LoadingState, Notice, Req } from "@/components/ui";
+import { OwnerTypeFields, type OwnerTypeValue } from "@/components/OwnerTypeFields";
 import { api } from "@/lib/api";
 import { canEditEntrySteps, canEditSubmitSteps, canIntakeOldJobs, getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
@@ -765,6 +766,8 @@ interface IntakeRow {
   plateNumber: string;
   brand: string;
   ownerName: string;
+  ownerType: OwnerTypeValue; // ผู้ใช้ 2026-11-19: เลือกตั้งแต่รับงาน (ต่อภาษีใช้คิดตัวคูณนิติบุคคล)
+  financed: boolean;
   engine: string;
   note: string;
   type: JobTypeState;
@@ -784,6 +787,8 @@ const newRow = (pairOf: number | null = null): IntakeRow => ({
   plateNumber: "",
   brand: "",
   ownerName: "",
+  ownerType: "",
+  financed: false,
   engine: "",
   note: "",
   type: EMPTY_TYPE,
@@ -874,8 +879,10 @@ function IntakePanel({
               ? "ยี่ห้อ"
               : !row.ownerName.trim()
                 ? "ชื่อเจ้าของรถ"
-                : "";
-      if (missing) return setMessage({ text: `${label}กรุณากรอก${missing}`, error: true });
+                : !row.ownerType
+                  ? "ประเภทเจ้าของรถ"
+                  : "";
+      if (missing) return setMessage({ text: `${label}กรุณา${missing === "ประเภทเจ้าของรถ" ? "เลือก" : "กรอก"}${missing}`, error: true });
       vehicles.push({
         vehicleType: row.vehicleType,
         chassis: row.chassis,
@@ -883,6 +890,8 @@ function IntakePanel({
         plateNumber: row.plateNumber,
         brand: row.brand,
         ownerName: row.ownerName,
+        ownerType: row.ownerType || undefined,
+        financed: isTransportType(row.vehicleType) ? false : row.financed,
         engine: row.engine,
         ...shared,
       });
@@ -992,7 +1001,14 @@ function IntakePanel({
                   </div>
                   <label className="field">
                     ประเภทรถ (รย. / ขส.) <Req />
-                    <select value={row.vehicleType} onChange={(e) => patch(row.key, { vehicleType: e.target.value, type: row.pairOf !== null ? row.type : EMPTY_TYPE })}>
+                    <select
+                      value={row.vehicleType}
+                      onChange={(e) => {
+                        const transport = isTransportType(e.target.value);
+                        // รถ ขส. ตั้งต้นเป็นนิติบุคคลและไม่มีไฟแนนซ์ (เหมือนฟอร์มต่อภาษี)
+                        patch(row.key, { vehicleType: e.target.value, type: row.pairOf !== null ? row.type : EMPTY_TYPE, ownerType: transport && !row.ownerType ? "JURISTIC" : row.ownerType, financed: transport ? false : row.financed });
+                      }}
+                    >
                       <option value="">เลือกประเภทรถ</option>
                       {OLD_VEHICLE_TYPE_GROUPS.map((group) => (
                         <optgroup key={group.label} label={group.label}>
@@ -1020,6 +1036,13 @@ function IntakePanel({
                     ชื่อเจ้าของรถ <Req />
                     <input value={row.ownerName} onChange={(e) => patch(row.key, { ownerName: e.target.value })} />
                   </label>
+                  <OwnerTypeFields
+                    ownerType={row.ownerType}
+                    financed={row.financed}
+                    hideFinanced={isTransportType(row.vehicleType)}
+                    onOwnerTypeChange={(v) => patch(row.key, { ownerType: v })}
+                    onFinancedChange={(v) => patch(row.key, { financed: v })}
+                  />
                 </div>
               )}
               {row.warnings.map((w) => (
@@ -1084,10 +1107,17 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
   );
 }
 
+// ประเภทเจ้าของรถสั้นๆ ต่อท้ายชื่อเจ้าของ (ว่าง = ยังไม่ได้ระบุ ไม่แสดง)
+function ownerTypeText(vehicle: HubVehicle): string {
+  if (!vehicle.ownerType) return "";
+  const kind = vehicle.ownerType === "JURISTIC" ? "นิติบุคคล" : "บุคคลธรรมดา";
+  return vehicle.financed ? `ไฟแนนซ์ (ผู้เช่าซื้อ${kind})` : kind;
+}
+
 function VehicleLine({ vehicle }: { vehicle: HubVehicle }) {
   return (
     <p className="muted">
-      {plateOf(vehicle)} · {[vehicle.brand, vehicle.vehicleType, vehicle.ownerName].filter(Boolean).join(" · ")} · ตัวถัง {vehicle.chassis}
+      {plateOf(vehicle)} · {[vehicle.brand, vehicle.vehicleType, vehicle.ownerName, ownerTypeText(vehicle)].filter(Boolean).join(" · ")} · ตัวถัง {vehicle.chassis}
     </p>
   );
 }
@@ -1467,6 +1497,8 @@ function VehicleDialog({
     engine: vehicle.engine ?? "",
     brand: vehicle.brand ?? "",
     ownerName: vehicle.ownerName ?? "",
+    ownerType: (vehicle.ownerType ?? "") as OwnerTypeValue,
+    financed: vehicle.financed,
     remark: "",
   });
   // เวลาแก้ล่าสุดที่ผู้ใช้เห็นตอนเปิดฟอร์ม - เก็บคู่กับค่าในฟอร์ม ไม่อ่านจาก vehicle ที่ถูกโหลดใหม่ตอน focus
@@ -1475,7 +1507,8 @@ function VehicleDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const brands = useMemo(() => Array.from(new Set([...(vehicle.brand ? [vehicle.brand] : []), ...brandNames])), [vehicle.brand, brandNames]);
-  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  const set = (key: Exclude<keyof typeof form, "ownerType" | "financed">) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  const transport = isTransportType(form.vehicleType);
 
   async function save() {
     setError("");
@@ -1483,7 +1516,10 @@ function VehicleDialog({
     if (!form.remark.trim()) return setError("กรุณาระบุเหตุผลที่แก้ข้อมูลรถ");
     setSaving(true);
     try {
-      onSaved((await oldVehicleJobsApi.updateVehicle(vehicle.id, { ...form, remark: form.remark.trim(), expectedUpdatedAt: seenUpdatedAt })).vehicle);
+      // ประเภทเจ้าของรถ: ส่งเฉพาะเมื่อเลือกแล้ว (รถที่รับก่อนมีช่องนี้ยังว่างได้)
+      const { ownerType, financed, ...rest } = form;
+      const owner = ownerType ? { ownerType, financed: transport ? false : financed } : {};
+      onSaved((await oldVehicleJobsApi.updateVehicle(vehicle.id, { ...rest, ...owner, remark: form.remark.trim(), expectedUpdatedAt: seenUpdatedAt })).vehicle);
     } catch (err) {
       setError(errorText(err, "บันทึกไม่สำเร็จ"));
     } finally {
@@ -1568,6 +1604,13 @@ function VehicleDialog({
               ชื่อเจ้าของรถ <Req />
               <input value={form.ownerName} onChange={set("ownerName")} />
             </label>
+            <OwnerTypeFields
+              ownerType={form.ownerType}
+              financed={form.financed}
+              hideFinanced={transport}
+              onOwnerTypeChange={(v) => setForm((prev) => ({ ...prev, ownerType: v }))}
+              onFinancedChange={(v) => setForm((prev) => ({ ...prev, financed: v }))}
+            />
             <label className="field wide">
               เหตุผลที่แก้ <Req />
               <input value={form.remark} onChange={set("remark")} placeholder="เช่น พิมพ์เลขตัวถังผิด" />

@@ -76,6 +76,7 @@ function renewalRow(overrides: Record<string, unknown> = {}) {
     insuranceConfirmed: false,
     paymentDate: null,
     skipContribution: false,
+    bookReplacement: false,
     taxBreakdown: null,
     receivedDate: null,
     deliveredDate: null,
