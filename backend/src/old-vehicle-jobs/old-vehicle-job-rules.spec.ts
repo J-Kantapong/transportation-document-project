@@ -68,17 +68,11 @@ describe('ระบบตัดสินว่าต้องตรวจรถ�
     expect(inspectionRequiredFor({ ...base, jobType: 'TAX_RENEWAL', vehicleType: 'ขส.-ส่วนบุคคล' })).toBe(true);
   });
 
-  it('ต่อภาษี รถยนต์ครบ 7 ปี (นับถึงวันครบภาษี)', () => {
+  it('ต่อภาษี รถอายุมากแต่ภาษีไม่ขาด ไม่ผ่านคิวตรวจรถ (ตรอ. ติ๊กในใบต่อภาษีเอง)', () => {
     const tax = { ...base, jobType: 'TAX_RENEWAL' as const, taxExpiryDate: d('2026-12-01') };
-    expect(inspectionRequiredFor({ ...tax, firstRegistrationDate: d('2019-12-01') })).toBe(true); // ครบ 7 ปีพอดี
-    expect(inspectionRequiredFor({ ...tax, firstRegistrationDate: d('2019-12-02') })).toBe(false); // ขาด 1 วัน
-  });
-
-  it('ต่อภาษี มอเตอร์ไซค์ครบ 5 ปี รวม รย.17', () => {
-    const tax = { ...base, jobType: 'TAX_RENEWAL' as const, taxExpiryDate: d('2026-12-01'), firstRegistrationDate: d('2021-12-01') };
-    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.12-น้อยกว่า 300cc' })).toBe(true);
-    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.17-จักรยานยนต์สาธารณะ' })).toBe(true);
-    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.1-เก๋ง 2 ตอน' })).toBe(false); // รถยนต์ 5 ปียังไม่ตรวจ
+    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.3-กระบะบรรทุก', firstRegistrationDate: d('2009-12-02') })).toBe(false); // อายุ 17 ปี
+    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.12-น้อยกว่า 300cc', firstRegistrationDate: d('2019-12-11') })).toBe(false);
+    expect(inspectionRequiredFor({ ...tax, vehicleType: 'รย.17-จักรยานยนต์สาธารณะ', firstRegistrationDate: d('2019-12-11') })).toBe(false);
   });
 
   it('ต่อภาษี ค้างภาษีเกิน 1 ปี ตรวจแม้รถใหม่', () => {
