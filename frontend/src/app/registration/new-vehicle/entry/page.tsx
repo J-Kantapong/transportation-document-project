@@ -29,6 +29,7 @@ import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { ChassisCounter, DataWarningBox, KnownModelHint } from "@/components/VehicleDataCheck";
 import { rowWarningsOf, warningKeys, type RowDataWarnings } from "@/lib/vehicle-data-check";
 import { confirmDialog } from "@/lib/confirm-dialog";
+import { useDebouncedValue } from "@/lib/use-type-ahead";
 
 type Tab = "single" | "batch";
 type BatchRow = NormalizedVehicleRow & { sourceRow: number; issues: string[] };
@@ -505,6 +506,19 @@ export default function VehicleEntryPage() {
     setFilter(next);
     loadVehicles(next, false);
   }
+
+  // ช่องค้นหาค้นเองระหว่างพิมพ์ (ผู้ใช้ 2026-11-19 - เดิมต้องกด Enter / ปุ่มค้นหา) ใช้ช่วงวันที่ที่กดค้นหาไว้แล้ว
+  // ช่องวันที่ยังใช้ปุ่มค้นหา (พิมพ์วันที่ยังไม่ครบแล้วค้นทันทีจะขึ้นข้อผิดพลาดระหว่างพิมพ์)
+  const debouncedSearch = useDebouncedValue(searchText);
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (q === filter.q || q.length === 1) return;
+    const next = { ...filter, q };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ค้นตามคำที่หยุดพิมพ์แล้ว
+    setFilter(next);
+    loadVehicles(next, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ทำงานเมื่อคำค้นที่หยุดพิมพ์เปลี่ยนเท่านั้น
+  }, [debouncedSearch]);
 
   function clearFilter() {
     const next = { q: "", from: "", to: "" };

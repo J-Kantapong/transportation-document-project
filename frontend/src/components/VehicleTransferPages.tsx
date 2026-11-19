@@ -834,13 +834,14 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
   // โอนย้ายเข้า: จังหวัดที่ย้ายเข้าต้องเลือกเอง ไม่ตั้งต้นเป็นกรุงเทพฯ
   const emptyForm = useMemo<FormState>(() => (moveIn ? { ...EMPTY_FORM, submitProvince: "" } : EMPTY_FORM), [moveIn]);
   const [form, setForm] = useState<FormState>(emptyForm);
-  // เปิดจากหน้ารวมงานรถเก่า = เติมเจ้าของงาน + ข้อมูลรถ (ผู้โอน = เจ้าของรถตอนรับงาน) ให้เอง
+  // เปิดจากหน้ารวมงานรถเก่า = เติมเจ้าของงาน + ข้อมูลรถ ให้เอง: ผู้โอน = ผู้ถือกรรมสิทธิ์ / ผู้รับโอน = ผู้ครอบครอง (ถ้ากรอกไว้ตอนรับงาน)
   const intakePrefill = useIntakePrefill(({ vehicle, job }) =>
     setForm((prev) => ({
       ...prev,
       vehicleClass: vehicle.vehicleClass,
       customerId: job.customer?.id ?? prev.customerId,
       transferorName: vehicle.ownerName ?? "",
+      transfereeName: vehicle.possessorName ?? prev.transfereeName,
       chassis: vehicle.chassis,
       engine: vehicle.engine ?? "",
       brand: vehicle.brand ?? "",

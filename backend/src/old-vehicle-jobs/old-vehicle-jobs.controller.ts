@@ -23,6 +23,18 @@ export class OldVehicleJobsController {
     return this.service.lookup(chassis, plateCategory, plateNumber);
   }
 
+  // GET /api/old-vehicle-jobs/suggest?q= - คำแนะนำระหว่างพิมพ์ (รถเก่า + รถจดใหม่ที่ยังไม่เคยรับงาน)
+  @Get('suggest')
+  suggest(@Query('q') q?: string) {
+    return this.service.suggest(q);
+  }
+
+  // GET /api/old-vehicle-jobs/finance-companies - รายชื่อไฟแนนซ์ให้ฟอร์มรับงาน
+  @Get('finance-companies')
+  financeCompanies() {
+    return this.service.financeCompanyNames();
+  }
+
   // รับงาน { customerId, receivedDate, vehicles: [...] }
   // แถวรับงาน 1 งาน + ข้อมูลรถ (+ รถคู่ของสลับเลข รถเก่า กับ รถเก่า) - ฟอร์มยื่นของหน้างานเดิมใช้เติมข้อมูลให้เอง
   @Get('jobs/:id')

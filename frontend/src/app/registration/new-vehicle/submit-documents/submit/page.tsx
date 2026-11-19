@@ -8,6 +8,7 @@ import { api, ApiError, type SubmitCandidate } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { isSupplierProvince } from "@/lib/supplier-route";
 import { FOCUS_PARAM } from "@/lib/vehicle-focus";
+import { useTypeAhead } from "@/lib/use-type-ahead";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
 import { SubmitDateField } from "@/components/submit-flow/SubmitDateField";
 import {
@@ -84,11 +85,6 @@ function SubmitPickStep() {
   const [chassisFilter, setChassisFilter] = useState(() => searchParams.get(FOCUS_PARAM) ?? "");
   const [page, setPage] = useState(0);
 
-  // ผลค้น "ทำไมไม่อยู่ในคิว" ตรวจ ณ วันที่ยื่นตอนค้น - แสดงเฉพาะตอนวันที่ยื่นยังเป็นวันเดียวกัน (พบ 2026-09-27: เปลี่ยนวันที่ยื่นแล้ว
-  // ผลของวันเดิม เช่น "ยื่นได้" ยังค้างอยู่ข้างคิวของวันใหม่)
-  const [lookup, setLookup] = useState<{ date: string; vehicles: SubmitCandidate[] } | null>(null);
-  const lookupResults = lookup && lookup.date === queueDate ? lookup.vehicles : null;
-  const [lookupLoading, setLookupLoading] = useState(false);
 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
@@ -157,6 +153,16 @@ function SubmitPickStep() {
   const pageRows = filtered.slice(currentPage * QUEUE_PAGE_SIZE, (currentPage + 1) * QUEUE_PAGE_SIZE);
   const allFilteredSelected = filtered.length > 0 && filtered.every((v) => selectedIds.has(v.id));
 
+  // "ทำไมไม่อยู่ในคิว": ค้นเองระหว่างพิมพ์เมื่อเลขตัวถังที่พิมพ์ (3 ตัวขึ้นไป) ไม่อยู่ในคิว (ผู้ใช้ 2026-11-19 - เดิมต้องกดปุ่ม)
+  // คำค้นรวมวันที่ยื่นไว้ด้วย - เปลี่ยนวันที่ยื่นแล้วผลของวันเดิมไม่ค้างข้างคิวของวันใหม่ (พบ 2026-09-27)
+  const outsideQuery = queueReady && filtered.length === 0 && chassisQuery.length >= 3 ? `${queueDate}|${chassisFilter.trim()}` : "";
+  const outside = useTypeAhead(outsideQuery, (key) => {
+    const [date, ...rest] = key.split("|");
+    return api.searchVehiclesByChassis(rest.join("|"), date);
+  });
+  const lookupResults: SubmitCandidate[] | null = outside.data?.vehicles ?? null;
+  const lookupLoading = outside.searching;
+
   function onFilterChange(apply: () => void) {
     apply();
     setPage(0);
@@ -171,23 +177,6 @@ function SubmitPickStep() {
   function toggleAllFiltered() {
     if (allFilteredSelected) unselect(filtered.map((v) => v.id));
     else select(filtered, queueLoadedFor);
-  }
-
-  async function handleLookupOutsideQueue() {
-    const query = chassisFilter.trim();
-    if (!query) return;
-    setLookupLoading(true);
-    setNotice(null);
-    const date = queueDate;
-    try {
-      const { vehicles } = await api.searchVehiclesByChassis(query, date);
-      setLookup({ date, vehicles });
-    } catch (err) {
-      setLookup(null);
-      setNotice({ text: err instanceof ApiError ? err.message : "ค้นหาไม่สำเร็จ", error: true });
-    } finally {
-      setLookupLoading(false);
-    }
   }
 
   // วางเลขตัวถังหลายคัน = เลือกคันที่พร้อมยื่นให้ทีเดียว (ต้องอยู่ในคิว) คันที่ยื่นไม่ได้แจ้งพร้อมเหตุผล
@@ -294,10 +283,7 @@ function SubmitPickStep() {
             <input
               value={chassisFilter}
               onChange={(e) =>
-                onFilterChange(() => {
-                  setChassisFilter(e.target.value);
-                  setLookup(null);
-                })
+                onFilterChange(() => setChassisFilter(e.target.value))
               }
               placeholder="บางส่วนก็ได้"
             />
@@ -380,10 +366,8 @@ function SubmitPickStep() {
           <div className="empty-customers">
             {chassisQuery ? (
               <>
-                ไม่พบเลขตัวถังนี้ในคิวรอยื่น ·{" "}
-                <button type="button" className="text-button" disabled={lookupLoading} onClick={handleLookupOutsideQueue}>
-                  {lookupLoading ? "กำลังค้นหา…" : "ตรวจสอบว่าทำไมไม่อยู่ในคิว"}
-                </button>
+                ไม่พบเลขตัวถังนี้ในคิวรอยื่น
+                {chassisQuery.length < 3 ? " · พิมพ์อย่างน้อย 3 ตัวเพื่อตรวจว่าทำไมไม่อยู่ในคิว" : lookupLoading ? " · กำลังตรวจว่าทำไมไม่อยู่ในคิว…" : ""}
               </>
             ) : rows.length === 0 ? (
               "ยังไม่มีรถที่พร้อมยื่น ณ วันที่ยื่นนี้ (ต้องแจ้งย้าย/ตัดบัญชีและตรวจรถผ่านไม่เกิน 90 วัน - รถจดต่างจังหวัดที่ส่งซับไม่ต้องตรวจรถ)"

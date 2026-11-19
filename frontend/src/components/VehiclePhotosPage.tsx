@@ -1,11 +1,12 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
-import { ApiError, bookPhotoImageUrl, platePhotoImageUrl, receiptImageUrl } from "@/lib/api";
+import { useState } from "react";
+import { bookPhotoImageUrl, platePhotoImageUrl, receiptImageUrl } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
-import { Notice, PageHeader } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { isoToDisplayDate } from "@/lib/date";
 import { type VehiclePhotos, vehiclePhotosApi } from "@/lib/vehicle-photos-api";
+import { useTypeAhead } from "@/lib/use-type-ahead";
 
 // ค้นรูปตามเลขตัวถัง (ผู้ใช้ 2026-09-22): พิมพ์เลขตัวถัง (ทั้งหมดหรือส่วนท้าย) แล้วเห็นใบเสร็จ ป้าย เล่ม ของคันนั้นในหน้าเดียว
 // รูปป้าย/เล่ม 1 รูปมีหลายคัน จึงแสดงรูปที่ใช้ยืนยันการรับของคันนั้น (Vehicle.platePhotoId / bookPhotoId)
@@ -95,33 +96,14 @@ function VehicleCard({ v }: { v: VehiclePhotos }) {
 
 export function VehiclePhotosPage() {
   const [chassis, setChassis] = useState("");
-  const [results, setResults] = useState<VehiclePhotos[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function search(e: FormEvent) {
-    e.preventDefault();
-    if (!chassis.trim()) {
-      setError("กรุณาระบุเลขตัวถัง");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const { vehicles } = await vehiclePhotosApi.search(chassis);
-      setResults(vehicles);
-    } catch (err) {
-      setError(err instanceof ApiError || err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
-      setResults(null);
-    } finally {
-      setLoading(false);
-    }
-  }
+  // ค้นระหว่างพิมพ์ตั้งแต่ 3 ตัวอักษร (ผู้ใช้ 2026-11-19) - เดิมต้องกดปุ่มค้นหา
+  const { data, searching: loading } = useTypeAhead(chassis, vehiclePhotosApi.search, { minLength: 3 });
+  const results = data?.vehicles ?? null;
 
   return (
     <div className="content">
       <PageHeader title="ค้นหารูปตามเลขตัวถัง" subtitle="พิมพ์เลขตัวถังทั้งหมดหรือเฉพาะส่วนท้าย แล้วดูใบเสร็จ ป้ายทะเบียน และเล่มทะเบียนของรถคันนั้น" />
-      <form onSubmit={search} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+      <form onSubmit={(e) => e.preventDefault()} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
         <input
           className="inspect-input"
           style={{ flex: "1 1 260px", maxWidth: 420 }}
@@ -130,11 +112,9 @@ export function VehiclePhotosPage() {
           placeholder="เลขตัวถัง เช่น MR0FZ29G001234567 หรือ 234567"
           autoFocus
         />
-        <button type="submit" className="primary" disabled={loading}>
-          {loading ? "กำลังค้นหา…" : "ค้นหา"}
-        </button>
+        {loading && <span className="muted">กำลังค้นหา…</span>}
       </form>
-      <Notice tone="error">{error}</Notice>
+      {chassis.trim().length > 0 && chassis.trim().length < 3 && <div className="muted">พิมพ์อย่างน้อย 3 ตัวอักษร</div>}
       {results && results.length === 0 && <div className="empty-page">ไม่พบรถที่มีเลขตัวถังนี้</div>}
       {results && results.length >= 10 && <div className="muted" style={{ marginBottom: 10 }}>แสดง 10 คันแรก พิมพ์เลขตัวถังให้ยาวขึ้นเพื่อให้แคบลง</div>}
       {results?.map((v) => <VehicleCard key={v.id} v={v} />)}
