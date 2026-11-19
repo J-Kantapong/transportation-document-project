@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { billingApi, slipNoText, type DeliverySlip } from "@/lib/billing-api";
 import { getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
@@ -56,7 +59,6 @@ export function DeliverySheetPage() {
   const [customerInfo, setCustomerInfo] = useState<Record<string, SheetCustomer>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [makingPdf, setMakingPdf] = useState(false);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -99,13 +101,11 @@ export function DeliverySheetPage() {
     const to = toText ? displayDateToIso(toText.replace(/\D/g, "")) : "";
     if ((fromText && !from) || (toText && !to)) return setError("วันที่ไม่ถูกต้อง (วว/ดด/ปปปป)");
     if (from && to && from > to) return setError("วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
-    setNotice("");
     load(from, to, customerId);
   }
 
   function chooseCustomer(id: string) {
     setCustomerId(id);
-    setNotice("");
     load(range.from, range.to, id);
   }
 
@@ -139,7 +139,6 @@ export function DeliverySheetPage() {
   }
 
   async function startEdit(row: SheetRow, ownerLabel: string) {
-    setNotice("");
     setError("");
     if (row.slipId) {
       // ใบ DL: แก้ทั้งใบ (วันที่ส่ง + ผู้รับ) ด้วยหน้าต่างเดิมของรายงานส่งงาน
@@ -157,14 +156,13 @@ export function DeliverySheetPage() {
   }
 
   function saved(message: string) {
-    setNotice(message);
+    toast.success(message);
     load(range.from, range.to, customerId, { quiet: true });
   }
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>รายงานส่งงาน</h1>
-      <p>ดูและพิมพ์ใบส่งงานตามเจ้าของงานและวันที่ รวมงานทุกประเภท (รถจดใหม่, สลับเลข, ต่อภาษี, ยกเลิกการใช้รถ, คัดป้าย, งานโอน, แจ้งย้ายยามาฮ่า)</p>
+      <PageHeader title="รายงานส่งงาน" titleFocus subtitle={<>ดูและพิมพ์ใบส่งงานตามเจ้าของงานและวันที่ รวมงานทุกประเภท (รถจดใหม่, สลับเลข, ต่อภาษี, ยกเลิกการใช้รถ, คัดป้าย, งานโอน, แจ้งย้ายยามาฮ่า)</>} />
       <DeliveryReportTabs current="sheet" />
 
       <section className="panel" style={{ marginTop: 20, padding: "18px 23px", overflow: "visible" }}>
@@ -207,25 +205,20 @@ export function DeliverySheetPage() {
           วันที่รับเอกสารกลับ · ยามาฮ่า = วันที่แจ้งย้าย (ไม่มีเจ้าของงาน จึงขึ้นเฉพาะตอนเลือก &quot;ทุกเจ้าของงาน&quot;)
         </p>
         {error && (
-          <div className="customer-message error" role="status" style={{ marginTop: 14 }}>
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="customer-message" role="status" style={{ marginTop: 14 }}>
-            {notice}
+          <div style={{ marginTop: 14 }}>
+            <Notice tone="error">{error}</Notice>
           </div>
         )}
         {truncated && !loading && (
-          <div className="customer-message" role="status" style={{ marginTop: 14, color: "#bb6a00" }}>
-            ⚠ งานในช่วงนี้มีมากกว่าที่ระบบแสดงได้ครั้งเดียว - ใบที่พิมพ์ยังไม่ครบ เลือกช่วงวันที่ให้สั้นลงหรือเลือกเจ้าของงาน
+          <div style={{ marginTop: 14 }}>
+            <Notice tone="warn">งานในช่วงนี้มีมากกว่าที่ระบบแสดงได้ครั้งเดียว - ใบที่พิมพ์ยังไม่ครบ เลือกช่วงวันที่ให้สั้นลงหรือเลือกเจ้าของงาน</Notice>
           </div>
         )}
       </section>
 
       {loading ? (
-        <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-          กำลังโหลด...
+        <div style={{ marginTop: 20 }}>
+          <LoadingState />
         </div>
       ) : (
         <>
@@ -305,7 +298,7 @@ export function DeliverySheetPage() {
                             <td>
                               {canEditSheetRow(r, roles) && (
                                 <button className="text-button" disabled={opening === r.key} onClick={() => startEdit(r, g.ownerLabel)}>
-                                  ✎ แก้วันที่
+                                  <Icon name="pencil" /> แก้วันที่
                                 </button>
                               )}
                             </td>

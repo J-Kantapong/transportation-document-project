@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
@@ -22,6 +21,7 @@ import {
   type YamahaSize,
 } from "@/lib/quotation-api";
 import { DateInput } from "@/components/DateInput";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { emptyItemRow, InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 
 // ออกใบเสนอราคา / แก้ร่าง (ผู้ใช้ 2026-10-01) - ?edit=<id> = แก้ร่างที่ยังไม่ออกเลข
@@ -381,25 +381,24 @@ export function QuotationFormPage() {
   if (loading) {
     return (
       <section className="content">
-        <h1 tabIndex={-1}>ออกใบเสนอราคา</h1>
-        <div className="customer-message" role="status">
-          กำลังโหลด...
-        </div>
+        <PageHeader titleFocus title="ออกใบเสนอราคา" />
+        <LoadingState />
       </section>
     );
   }
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>{heading}</h1>
-      <p>
-        {editing?.replaces?.quotationNo
-          ? `ออกเลขแล้วจะได้เลขเดิมต่อท้าย -R และใบ ${editing.replaces.quotationNo} จะถูกแทนที่`
-          : "บันทึกเป็นร่างไว้แก้ต่อได้ - ได้เลข QT ตอนกด “ออกเลขและพิมพ์” หลังจากนั้นแก้ไม่ได้ ต้องทำฉบับแก้ไข"}
-      </p>
-      <Link href="/accounting/quotations" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        ← กลับไปรายการใบเสนอราคา
-      </Link>
+      <PageHeader
+        back={{ href: "/accounting/quotations", label: "รายการใบเสนอราคา" }}
+        titleFocus
+        title={heading}
+        subtitle={
+          editing?.replaces?.quotationNo
+            ? `ออกเลขแล้วจะได้เลขเดิมต่อท้าย -R และใบ ${editing.replaces.quotationNo} จะถูกแทนที่`
+            : "บันทึกเป็นร่างไว้แก้ต่อได้ - ได้เลข QT ตอนกด “ออกเลขและพิมพ์” หลังจากนั้นแก้ไม่ได้ ต้องทำฉบับแก้ไข"
+        }
+      />
 
       <section className="panel compact-form" style={{ marginTop: 16, padding: "16px 20px", overflow: "visible", display: "grid", gap: 12, fontSize: 14 }}>
         <div className="inspect-filter" style={{ padding: 0 }} role="group" aria-label="แบบใบเสนอราคา">
@@ -413,7 +412,7 @@ export function QuotationFormPage() {
 
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
           <label className="field">
-            ลูกค้า *
+            ลูกค้า <Req />
             <select value={customerId} onChange={(e) => chooseCustomer(e.target.value)}>
               <option value="">— เลือกลูกค้า —</option>
               <option value={NEW_CUSTOMER}>+ ลูกค้าใหม่ (ยังไม่อยู่ในระบบ)</option>
@@ -425,11 +424,11 @@ export function QuotationFormPage() {
             </select>
           </label>
           <label className="field">
-            วันที่ออก *
+            วันที่ออก <Req />
             <DateInput value={issueDateText} onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} />
           </label>
           <label className="field">
-            ยืนราคา (วัน) *
+            ยืนราคา (วัน) <Req />
             <input type="text" inputMode="numeric" value={validDaysText} onChange={(e) => setValidDaysText(e.target.value.replace(/\D/g, "").slice(0, 3))} />
           </label>
         </div>
@@ -437,7 +436,7 @@ export function QuotationFormPage() {
         {isNew && (
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", background: "#f5f7fb", borderRadius: 10, padding: "12px 14px" }}>
             <label className="field">
-              ชื่อลูกค้า / บริษัท *
+              ชื่อลูกค้า / บริษัท <Req />
               <input type="text" value={typed.name} onChange={(e) => setTyped({ ...typed, name: e.target.value })} maxLength={200} />
             </label>
             <label className="field">
@@ -567,14 +566,10 @@ export function QuotationFormPage() {
         </button>
         {showPreview && preview && <iframe title="ตัวอย่างใบเสนอราคา" srcDoc={buildQuotationHtml(preview)} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />}
 
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
+        <Notice tone="error">{error}</Notice>
 
         <div className="form-actions" style={{ marginTop: 0, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => save(false)} disabled={saving}>
+          <button type="button" className="secondary" onClick={() => save(false)} disabled={saving}>
             บันทึกร่าง
           </button>
           <button type="button" className="primary" onClick={() => save(true)} disabled={saving}>

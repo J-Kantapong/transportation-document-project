@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
@@ -41,6 +40,9 @@ import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
 import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { confirmDialog } from "@/lib/confirm-dialog";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice, Req } from "@/components/ui";
 
 // งานโอน (งานหลัก, ผู้ใช้ 2026-10-02) - หน้าตาเหมือนยกเลิกการใช้รถ กรอกข้อมูลรถเอง รถยนต์ + มอเตอร์ไซค์รวมกันในหน้าเดียว (เลือกประเภทรถในฟอร์ม)
 // 2 แบบ: โอนตามผู้ถือกรรมสิทธิ์ (ยื่น -> รับใบเสร็จ) / โอนตรวจรถ (ยื่น -> ตรวจรถ -> รับใบเสร็จ) - ตรวจรถแยกจากคิวตรวจรถของรถจดใหม่
@@ -103,7 +105,7 @@ function PartiesCell({ item }: { item: VehicleTransfer }) {
   return (
     <>
       <div className="job">
-        {item.transferorName} → {item.transfereeName}
+        {item.transferorName} <Icon name="arrow-right" size={14} /> {item.transfereeName}
       </div>
       <div className="sub">{vehicleText(item)}</div>
     </>
@@ -114,7 +116,7 @@ function Summary({ item }: { item: VehicleTransfer }) {
   return (
     <div style={{ padding: "10px 12px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 8, fontSize: 14 }}>
       <strong>
-        {item.transferorName} → {item.transfereeName}
+        {item.transferorName} <Icon name="arrow-right" size={14} /> {item.transfereeName}
       </strong>{" "}
       · ทะเบียน {plateText(item)}
       <div className="muted">{vehicleText(item)}</div>
@@ -128,7 +130,7 @@ function StatusBadge({ item }: { item: VehicleTransfer }) {
   if (transferHasInspection(item.transferType)) {
     if (!item.inspectionSentDate) return <span className="badge">รอส่งตรวจ</span>;
     if (!item.inspectionResult) return <span className="badge">ส่งตรวจ {isoToDisplayDate(item.inspectionSentDate)} · รอผล</span>;
-    if (item.inspectionResult === "FAIL") return <span className="badge" style={{ color: "#b43434" }}>ตรวจไม่ผ่าน</span>;
+    if (item.inspectionResult === "FAIL") return <span className="badge" style={{ color: "var(--danger)" }}>ตรวจไม่ผ่าน</span>;
   }
   return <span className="badge">รอรับเอกสารกลับ</span>;
 }
@@ -138,7 +140,8 @@ function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCanc
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
       <button type="button" className="text-button" onClick={onEdit}>
-        ✎ แก้
+        <Icon name="pencil" />
+            แก้
       </button>
       {children}
       <button type="button" className="text-button" style={dangerButton} onClick={onCancel}>
@@ -284,7 +287,7 @@ function ProvinceContributionFields({
     <>
       {!moveIn && (
         <label className="field" style={{ minWidth: 200 }}>
-          จังหวัดที่ยื่น *
+          จังหวัดที่ยื่น <Req />
           {/* เปลี่ยนจังหวัด = เติมอัตราตั้งต้นของจังหวัดใหม่จากตาราง */}
           <select value={form.submitProvince} onChange={(e) => onChange({ submitProvince: e.target.value, contribution: null })}>
             {PROVINCES.map((province) => (
@@ -296,7 +299,7 @@ function ProvinceContributionFields({
         </label>
       )}
       <label className="field" style={{ minWidth: 200 }}>
-        ลงขัน (บาท) *
+        ลงขัน (บาท) <Req />
         <input
           value={contributionText(form, rates, moveIn)}
           onChange={(e) => onChange({ contribution: moneyOnly(e.target.value) })}
@@ -329,7 +332,7 @@ function MoveInFeeSection({ form, onChange, rates }: { form: FormState; onChange
         </label>
       </div>
       <p className="muted" style={{ margin: "6px 0 12px" }}>
-        ติ๊กค่าปรับเมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี (คงที่ 200 บาท) · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถไม่บังคับ (บางงานไม่มี) ยังไม่รู้เว้นว่างไว้ก่อน แล้วใส่ทีหลังที่ ✎ แก้ หรือที่หน้ารับใบเสร็จได้ ระบบบวกเข้า Bill ให้
+        ติ๊กค่าปรับเมื่อโอนเกิน 15 วันหลังออกใบกำกับภาษี (คงที่ 200 บาท) · ลงขันเติมตามตารางลงขันรายจังหวัด (จังหวัดที่ยังไม่ได้ตั้ง = 0 แก้ได้) · ค่าอากรโอนตามราคารถไม่บังคับ (บางงานไม่มี) ยังไม่รู้เว้นว่างไว้ก่อน แล้วใส่ทีหลังที่ ปุ่มแก้ หรือที่หน้ารับใบเสร็จได้ ระบบบวกเข้า Bill ให้
       </p>
       <div className="customer-grid">
         <FeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
@@ -380,7 +383,7 @@ function FeeSection({
       <h2 style={{ marginTop: 22 }}>ค่าใช้จ่าย</h2>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label className="field" style={{ minWidth: 200 }}>
-          ประเภทโอน *
+          ประเภทโอน <Req />
           <select value={form.useRequest ? "USE_REQUEST" : "NORMAL"} onChange={(e) => onChange({ useRequest: e.target.value === "USE_REQUEST" })}>
             <option value="NORMAL">โอนปกติ</option>
             <option value="USE_REQUEST">โอนขอใช้</option>
@@ -466,7 +469,7 @@ function VehicleFormFields({
       {/* เจ้าของงาน = ลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ - ไม่ใช่ผู้โอน/ผู้รับโอน (ช่องข้างล่าง) */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         <label className="field" style={{ minWidth: 280, maxWidth: 420, flex: 1 }}>
-          เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+          เจ้าของงาน <Req /> (ลูกค้าที่ส่งงานมา)
           <select value={form.customerId} onChange={(e) => onChange({ customerId: e.target.value })}>
             <option value="">{customerPlaceholder}</option>
             {customerOptions.map((c) => (
@@ -478,7 +481,7 @@ function VehicleFormFields({
         </label>
         {/* รถยนต์/มอเตอร์ไซค์รวมกันในหน้าเดียว (ผู้ใช้ 2026-10-02) - ราคาต่างกันจึงต้องระบุประเภทรถทุกงาน */}
         <label className="field" style={{ minWidth: 200 }}>
-          ประเภทรถ *
+          ประเภทรถ <Req />
           <select value={form.vehicleClass} onChange={(e) => onChange({ vehicleClass: e.target.value as TransferVehicleClass | "", contribution: null })}>
             <option value="">เลือกประเภทรถ</option>
             {classOptions.map((c) => (
@@ -493,11 +496,11 @@ function VehicleFormFields({
       <h2 style={{ marginTop: 22 }}>ผู้โอน / ผู้รับโอน</h2>
       <div className="customer-grid">
         <label className="field">
-          ผู้โอน *
+          ผู้โอน <Req />
           <input value={form.transferorName} onChange={text("transferorName")} />
         </label>
         <label className="field">
-          ผู้รับโอน *
+          ผู้รับโอน <Req />
           <input value={form.transfereeName} onChange={text("transfereeName")} />
         </label>
       </div>
@@ -506,17 +509,17 @@ function VehicleFormFields({
       {/* ลำดับช่อง (ผู้ใช้ 2026-10-02): วันที่ยื่น -> ยี่ห้อ -> เลขตัวถัง -> เลขเครื่อง -> ทะเบียน */}
       <div className="customer-grid">
         <label className="field">
-          วันที่ยื่น *
+          วันที่ยื่น <Req />
           <DateTextInput value={submitDateText} onChange={onSubmitDateChange} label="วันที่ยื่น" />
         </label>
         {returnedDateText !== undefined && onReturnedDateChange && (
           <label className="field">
-            วันที่รับเอกสารกลับ *
+            วันที่รับเอกสารกลับ <Req />
             <DateTextInput value={returnedDateText} onChange={onReturnedDateChange} label="วันที่รับเอกสารกลับ" />
           </label>
         )}
         <label className="field">
-          ยี่ห้อ *
+          ยี่ห้อ <Req />
           <select value={form.brand} onChange={(e) => onChange({ brand: e.target.value })}>
             <option value="">เลือกยี่ห้อ</option>
             {brandNames.map((name) => (
@@ -527,15 +530,15 @@ function VehicleFormFields({
           </select>
         </label>
         <label className="field">
-          เลขตัวถัง *
+          เลขตัวถัง <Req />
           <input value={form.chassis} onChange={text("chassis")} />
         </label>
         <label className="field">
-          เลขเครื่อง *
+          เลขเครื่อง <Req />
           <input value={form.engine} onChange={text("engine")} />
         </label>
         <div className="field">
-          ทะเบียน *
+          ทะเบียน <Req />
           <div style={{ display: "flex", gap: 8 }}>
             <input value={form.plateCategory} onChange={text("plateCategory")} maxLength={3} placeholder="หมวด เช่น 4กข" aria-label="หมวดทะเบียน" />
             <input
@@ -708,8 +711,8 @@ function EditDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(720px, 96vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แก้งานโอน ({TRANSFER_TYPE_LABEL[item.transferType]})</h2>
       <Summary item={item} />
@@ -730,20 +733,16 @@ function EditDialog({
         />
       </div>
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อผู้รับโอนผิด" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
         </button>
       </div>
     </dialog>
@@ -803,11 +802,23 @@ function CancelDialog({ item, onClose, onCancelled }: { item: VehicleTransfer; o
   );
 }
 
-const BackLink = ({ transferType }: { transferType: TransferType }) => (
-  <Link href={transferHome(transferType)} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-    ← งานโอน · {TRANSFER_TYPE_LABEL[transferType]}
-  </Link>
+const TransferBack = ({ transferType }: { transferType: TransferType }) => (
+  <BackLink href={transferHome(transferType)} label={TRANSFER_TYPE_LABEL[transferType]} />
 );
+
+// ข้อความหลังกดปุ่ม: สำเร็จ = toast (หายเอง) / ผิดพลาดหรือกำลังบันทึก = เก็บไว้แสดงในหน้า
+function useMessage() {
+  const [message, setState] = useState<{ text: string; error?: boolean }>({ text: "" });
+  function setMessage(next: { text: string; error?: boolean }) {
+    if (next.text && !next.error && next.text !== "กำลังบันทึก…") {
+      toast.success(next.text);
+      setState({ text: "" });
+    } else {
+      setState(next);
+    }
+  }
+  return [message, setMessage] as const;
+}
 
 // ---------------------------------------------------------------------------------------------
 // หน้ายื่น
@@ -844,7 +855,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const { brandNames, customerOptions } = useChoices();
   const rates = useContributionRates();
 
@@ -962,7 +973,7 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
 
   return (
     <section className="content">
-      <BackLink transferType={transferType} />
+      <TransferBack transferType={transferType} />
       <h1>ยื่นงานโอน ({TRANSFER_TYPE_LABEL[transferType]})</h1>
       <IntakeNotice state={intakePrefill} />
 
@@ -994,13 +1005,14 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
               customerOptions={customerOptions}
             />
             <div className="form-actions">
+              <span className="form-actions-note" role="status">
+                {message.error ? "" : message.text}
+              </span>
               <button className="primary" type="submit" disabled={saving}>
                 บันทึกการยื่น
               </button>
-              <span className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`} role="status">
-                {message.text}
-              </span>
             </div>
+            <Notice tone="error">{message.error ? message.text : ""}</Notice>
           </form>
         </div>
       )}
@@ -1014,11 +1026,9 @@ export function VehicleTransferSubmitPage({ transferType }: { transferType: Tran
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
@@ -1143,7 +1153,7 @@ export function VehicleTransferInspectionPage({ transferType = "INSPECTION" }: {
   const [listError, setListError] = useState("");
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const date = useMemo(() => textToIso(dateText), [dateText]);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const [dialog, setDialog] = useState<InspectionDialog>(null);
   // แบบการตรวจ + ค่าตรวจรถที่เลือกไว้ของแต่ละแถวในแท็บรอส่งตรวจ (ผู้ใช้ 2026-11-18) - ส่งตรวจนอกกรอกค่าตรวจเอง / นำรถมาตรวจไม่มีค่าตรวจ
   const [sendChoice, setSendChoice] = useState<Record<string, { type: InspectionSentType | null; cost: string }>>({});
@@ -1229,7 +1239,7 @@ export function VehicleTransferInspectionPage({ transferType = "INSPECTION" }: {
 
   return (
     <section className="content">
-      <BackLink transferType={transferType} />
+      <TransferBack transferType={transferType} />
       <h1>ตรวจรถ ({TRANSFER_TYPE_LABEL[transferType]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         เลือกแบบการตรวจ (ส่งตรวจนอกมีค่าตรวจรถ / นำรถมาตรวจไม่มีค่าตรวจ) แล้วบันทึกวันที่ส่งตรวจและผลตรวจ - ตรวจผ่านแล้วถึงจะรับใบเสร็จได้
@@ -1252,17 +1262,11 @@ export function VehicleTransferInspectionPage({ transferType = "INSPECTION" }: {
             </label>
           )}
         </div>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
-          </div>
-        )}
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">{INSPECTION_TABS.find((t) => t.key === tab)?.empty}</div>
         ) : (
@@ -1353,7 +1357,7 @@ export function VehicleTransferInspectionPage({ transferType = "INSPECTION" }: {
                             {item.inspectionResult === "PASS" ? (
                               <span className="badge portal-badge-done">ผ่าน {item.inspectionResultDate ? isoToDisplayDate(item.inspectionResultDate) : ""}</span>
                             ) : (
-                              <span className="badge" style={{ color: "#b43434" }}>
+                              <span className="badge" style={{ color: "var(--danger)" }}>
                                 ไม่ผ่าน {item.inspectionResultDate ? isoToDisplayDate(item.inspectionResultDate) : ""}
                               </span>
                             )}
@@ -1480,7 +1484,8 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
         {<div className="sub">ค่าอากรโอน {Number(item.stampDutyAmount) > 0 ? `${formatBaht(Number(item.stampDutyAmount))} บาท` : "ไม่มี"}</div>}
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
-            ✎ แก้
+            <Icon name="pencil" />
+            แก้
           </button>
         )}
       </div>
@@ -1512,11 +1517,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleTransfer
       {needsRemark && (
         <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เหตุผลที่แก้ *" aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ" className="inspect-input" />
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" className="text-button" disabled={busy} onClick={save}>
           บันทึก
@@ -1547,7 +1548,7 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
   const [listError, setListError] = useState("");
   const [returnDateText, setReturnDateText] = useState(() => isoToDisplayDate(todayIso()));
   const returnDate = useMemo(() => textToIso(returnDateText), [returnDateText]);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const [dialog, setDialog] = useState<ReturnDialog>(null);
   const anyWritable = Boolean(writable && writable.length > 0);
 
@@ -1599,12 +1600,12 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
 
   return (
     <section className="content">
-      <BackLink transferType={transferType} />
+      <TransferBack transferType={transferType} />
       <h1>รับใบเสร็จ ({TRANSFER_TYPE_LABEL[transferType]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         {transferHasInspection(transferType) ? "แสดงเฉพาะงานที่ตรวจรถผ่านแล้ว - " : ""}
         ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
-        {isMoveIn(transferType) ? " - โอนย้ายเข้าต้องกรอกทะเบียนใหม่ของจังหวัดที่ย้ายเข้า และใส่ค่าอากรโอน (ถ้าใบเสร็จมี) ที่ ✎ แก้ ของข้อมูลใบเสร็จ" : ""}
+        {isMoveIn(transferType) ? " - โอนย้ายเข้าต้องกรอกทะเบียนใหม่ของจังหวัดที่ย้ายเข้า และใส่ค่าอากรโอน (ถ้าใบเสร็จมี) ที่ ปุ่มแก้ ของข้อมูลใบเสร็จ" : ""}
       </p>
 
       <div className="panel">
@@ -1624,17 +1625,11 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
             </label>
           )}
         </div>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
-          </div>
-        )}
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
@@ -1693,7 +1688,7 @@ export function VehicleTransferReturnPage({ transferType }: { transferType: Tran
         >
           <Summary item={dialog.item} />
           <p style={{ marginTop: 12 }}>
-            งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot; - ถ้าแค่วันที่รับกลับผิด ใช้ ✎ แก้ แทน
+            งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot; - ถ้าแค่วันที่รับกลับผิด ใช้ ปุ่มแก้ แทน
           </p>
         </ReasonDialog>
       )}
@@ -1771,7 +1766,7 @@ function ReturnRow({
       </td>
       <td style={{ ...top, whiteSpace: "normal", minWidth: 150 }}>
         <div className="job">{item.transferorName}</div>
-        <div className="job">→ {item.transfereeName}</div>
+        <div className="job"><Icon name="arrow-right" size={14} /> {item.transfereeName}</div>
         <div className="sub">ตัวถัง {item.chassis}</div>
         <div className="sub">{item.brand}</div>
         <div className="sub">เครื่อง {item.engine}</div>
@@ -1781,7 +1776,7 @@ function ReturnRow({
         <div className="sub">{CLASS_LABEL[item.vehicleClass]}</div>
         {moveIn && !returned && canWrite && (
           <div style={{ marginTop: 4 }}>
-            <div className="sub">ทะเบียนใหม่ {item.submitProvince ?? ""} *</div>
+            <div className="sub">ทะเบียนใหม่ {item.submitProvince ?? ""} <Req /></div>
             <NewPlateInputs category={newPlateCategory} number={newPlateNumber} onCategory={setNewPlateCategory} onNumber={setNewPlateNumber} compact />
           </div>
         )}
@@ -1793,7 +1788,7 @@ function ReturnRow({
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
-                🧾 รูป {i + 1}
+                <Icon name="receipt" /> รูป {i + 1}
               </button>
               {receiptWritable && (
                 <button
@@ -1805,7 +1800,7 @@ function ReturnRow({
                   title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
-                  ×
+                  <Icon name="x" />
                 </button>
               )}
             </span>
@@ -1838,7 +1833,7 @@ function ReturnRow({
                 title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                 onClick={() => inputRef.current?.click()}
               >
-                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+                {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> ถ่าย/แนบใบเสร็จ</>}
               </button>
               {returned && (
                 <button
@@ -1872,7 +1867,7 @@ function ReturnRow({
               ยืนยันรับกลับ
             </button>
             {missing.length > 0 && (
-              <div id={`transfer-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+              <div id={`transfer-missing-${item.id}`} className="sub" style={{ color: "var(--warn)" }}>
                 ยังขาด: {missing.join(" · ")}
               </div>
             )}

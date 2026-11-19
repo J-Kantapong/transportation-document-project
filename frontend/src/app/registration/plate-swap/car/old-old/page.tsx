@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageHeader } from "@/components/ui";
 
 const SUBMIT_HREF = "/registration/plate-swap/car/old-old/submit";
 const RECEIVE_RECEIPT_HREF = "/registration/plate-swap/car/old-old/receive-receipt";
@@ -11,13 +12,11 @@ const RECEIVE_BOOK_HREF = "/registration/plate-swap/car/old-old/receive-book";
 export default function PlateSwapOldOldMenuPage() {
   return (
     <section className="content">
-      <Link href="/registration/plate-swap/car" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← การสลับเลข · รถยนต์
-      </Link>
-      <h1>รถเก่า กับ รถเก่า (รถยนต์)</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        กรอกรถทั้ง 2 คันในหน้าเดียว ระบบสลับทะเบียนให้และแยกเป็น 2 งาน
-      </p>
+      <PageHeader
+        back={{ href: "/registration/plate-swap/car", label: "การสลับเลข · รถยนต์" }}
+        title="รถเก่า กับ รถเก่า (รถยนต์)"
+        subtitle="กรอกรถทั้ง 2 คันในหน้าเดียว ระบบสลับทะเบียนให้และแยกเป็น 2 งาน"
+      />
       <section className="panel">
         <div className="choices" style={{ padding: 22 }}>
           <Link href={SUBMIT_HREF}>

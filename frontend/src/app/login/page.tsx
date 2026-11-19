@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { homeFor, safeNextPath, saveSession } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
@@ -51,11 +52,11 @@ function LoginForm() {
       )}
       <div className="auth-fields">
         <label className="field">
-          อีเมล
+          อีเมล <Req />
           <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
         </label>
         <label className="field">
-          รหัสผ่าน
+          รหัสผ่าน <Req />
           <input
             type="password"
             autoComplete="current-password"
@@ -65,7 +66,7 @@ function LoginForm() {
           />
         </label>
       </div>
-      {error && <div className="customer-message error">{error}</div>}
+      <Notice tone="error">{error}</Notice>
       <button type="submit" className="primary auth-submit" disabled={busy}>
         {busy ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
       </button>

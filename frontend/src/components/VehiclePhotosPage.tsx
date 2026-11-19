@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from "react";
 import { ApiError, bookPhotoImageUrl, platePhotoImageUrl, receiptImageUrl } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
+import { Notice, PageHeader } from "@/components/ui";
 import { isoToDisplayDate } from "@/lib/date";
 import { type VehiclePhotos, vehiclePhotosApi } from "@/lib/vehicle-photos-api";
 
@@ -119,10 +120,7 @@ export function VehiclePhotosPage() {
 
   return (
     <div className="content">
-      <h1>ค้นหารูปตามเลขตัวถัง</h1>
-      <p className="muted" style={{ marginTop: -6, marginBottom: 16 }}>
-        พิมพ์เลขตัวถังทั้งหมดหรือเฉพาะส่วนท้าย แล้วดูใบเสร็จ ป้ายทะเบียน และเล่มทะเบียนของรถคันนั้น
-      </p>
+      <PageHeader title="ค้นหารูปตามเลขตัวถัง" subtitle="พิมพ์เลขตัวถังทั้งหมดหรือเฉพาะส่วนท้าย แล้วดูใบเสร็จ ป้ายทะเบียน และเล่มทะเบียนของรถคันนั้น" />
       <form onSubmit={search} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
         <input
           className="inspect-input"
@@ -133,10 +131,10 @@ export function VehiclePhotosPage() {
           autoFocus
         />
         <button type="submit" className="primary" disabled={loading}>
-          {loading ? "กำลังค้นหา..." : "ค้นหา"}
+          {loading ? "กำลังค้นหา…" : "ค้นหา"}
         </button>
       </form>
-      {error && <div className="import-error">{error}</div>}
+      <Notice tone="error">{error}</Notice>
       {results && results.length === 0 && <div className="empty-page">ไม่พบรถที่มีเลขตัวถังนี้</div>}
       {results && results.length >= 10 && <div className="muted" style={{ marginBottom: 10 }}>แสดง 10 คันแรก พิมพ์เลขตัวถังให้ยาวขึ้นเพื่อให้แคบลง</div>}
       {results?.map((v) => <VehicleCard key={v.id} v={v} />)}

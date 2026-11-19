@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import { isoToDisplayDate } from "@/lib/date";
+import { Icon } from "./Icon";
 import type { AlertDoc, ProcessRow, SplitValue, StuckItem, VehicleKind } from "@/lib/overview-api";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 
@@ -120,17 +121,18 @@ export function ProcessBoard({ rows, dayWord }: { rows: ProcessRow[]; dayWord: s
                       <td>
                         {r.lateCount > 0 ? (
                           <span className="badge warn">
-                            ⚠ {r.lateCount} คัน (เกิน {r.sla} วัน)
+                            <Icon name="alert-triangle" size={14} /> {r.lateCount} คัน (เกิน {r.sla} วัน)
                           </span>
                         ) : r.pending && (r.pending.car || r.pending.moto) ? (
-                          <span className="badge done">✓ ตามกำหนด</span>
+                          <span className="badge done"><Icon name="tick" size={14} /> ตามกำหนด</span>
                         ) : (
                           <span className="muted">–</span>
                         )}
                       </td>
                       <td>
                         <Link href={r.href} className="text-button">
-                          เปิด →
+                          เปิด
+                          <Icon name="arrow-right" />
                         </Link>
                       </td>
                     </tr>
@@ -220,6 +222,7 @@ function StuckTable({ items, linkLabel, showSeverity }: { items: StuckItem[]; li
               <td>
                 <Link href={stuckHref(s)} className="text-button">
                   {linkLabel}
+                  <Icon name="arrow-right" />
                 </Link>
               </td>
             </tr>
@@ -257,7 +260,8 @@ function DocTable({ docs }: { docs: AlertDoc[] }) {
               <td className="stuck-reason">{doc.note}</td>
               <td>
                 <Link href={doc.href} className="text-button">
-                  ไปที่รายการนี้ →
+                  ไปที่รายการนี้
+                  <Icon name="arrow-right" />
                 </Link>
               </td>
             </tr>
@@ -274,12 +278,13 @@ export function AlertItems({ items, docs, total, queueHref }: { items: StuckItem
   const shown = items.length + docs.length;
   return (
     <div className="exec-alert-items">
-      {items.length > 0 && <StuckTable items={items} linkLabel="ไปที่คันนี้ →" />}
+      {items.length > 0 && <StuckTable items={items} linkLabel="ไปที่คันนี้" />}
       {docs.length > 0 && <DocTable docs={docs} />}
       <p className="exec-note">
         {total > shown && `แสดง ${shown} รายการแรก จากทั้งหมด ${total} รายการ · `}
         <Link href={queueHref} className="text-button">
-          เปิดหน้าคิวทั้งหมด →
+          เปิดหน้าคิวทั้งหมด
+          <Icon name="arrow-right" />
         </Link>
       </p>
     </div>
@@ -329,9 +334,9 @@ export function StuckList({
         ))}
       </div>
       {shown.length === 0 ? (
-        <div className="exec-empty">✓ ไม่มีรถติดขัด{filter === "all" ? "" : `ในกลุ่ม${KIND_LABEL[filter]}`}</div>
+        <div className="exec-empty"><Icon name="tick" size={16} /> ไม่มีรถติดขัด{filter === "all" ? "" : `ในกลุ่ม${KIND_LABEL[filter]}`}</div>
       ) : (
-        <StuckTable items={shown} linkLabel="ไปจัดการ →" showSeverity />
+        <StuckTable items={shown} linkLabel="ไปจัดการ" showSeverity />
       )}
       {count > shown.length && (
         <p className="exec-note stuck-more">

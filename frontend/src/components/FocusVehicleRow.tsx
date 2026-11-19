@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/Icon";
 import { focusChassis } from "@/lib/vehicle-focus";
 
 // เปิดหน้าด้วย ?focus=<เลขตัวถัง> (จากหน้าค้นหารถ) = รอจนแถวของรถคันนั้นขึ้นบนจอ แล้วเลื่อนไปหาและไฮไลต์ให้
@@ -88,7 +89,7 @@ export function FocusVehicleRow() {
     <div className="focus-missing" role="status">
       ไม่พบ {missing.chassis} ในหน้านี้ (อาจผ่านขั้นนี้ไปแล้ว หรือถูกกรองออก)
       <button type="button" className="text-button" onClick={() => setMissing(null)} aria-label="ปิด">
-        ×
+        <Icon name="x" />
       </button>
     </div>
   );

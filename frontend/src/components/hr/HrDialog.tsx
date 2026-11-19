@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, Req } from "@/components/ui";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import type { HistoryEntry } from "@/lib/hr-api";
 
@@ -39,7 +41,7 @@ export function HrDialog({
   return (
     <dialog ref={ref} onClose={onClose} style={{ width: `min(${width}px, 94vw)` }}>
       <button className="close" type="button" aria-label="ปิด" onClick={() => ref.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>{title}</h2>
       {children}
@@ -102,15 +104,11 @@ export function ReasonDialog({
       )}
       {!noReason && (
         <label className="field">
-          เหตุผล *
+          เหตุผล <Req />
           <textarea value={remark} onChange={(e) => setRemark(e.target.value)} rows={3} maxLength={500} />
         </label>
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 14 }}>
         <button type="button" className={`primary${danger ? " danger" : ""}`} disabled={busy} onClick={submit}>
           {busy ? "กำลังทำรายการ…" : confirmLabel}
@@ -180,8 +178,8 @@ export function HistoryDialog({ title, load, onClose }: { title: string; load: (
   }, []);
   return (
     <HrDialog title={title} onClose={onClose} width={640}>
-      {state === null && <p className="muted">กำลังโหลด…</p>}
-      {state && "error" in state && <p className="customer-message error">{state.error}</p>}
+      {state === null && <LoadingState />}
+      {state && "error" in state && <Notice tone="error">{state.error}</Notice>}
       {state && "rows" in state && state.rows.length === 0 && <p className="muted">ยังไม่มีประวัติ</p>}
       {state && "rows" in state && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 12, maxHeight: "60vh", overflow: "auto" }}>

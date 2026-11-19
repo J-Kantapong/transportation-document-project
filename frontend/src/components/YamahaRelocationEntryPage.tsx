@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
@@ -18,6 +17,9 @@ import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { DateInput } from "@/components/DateInput";
 import { downloadYamahaAttachmentsPdf } from "@/lib/yamaha-attachments-pdf";
 import { alertDialog } from "@/lib/confirm-dialog";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice, Req } from "@/components/ui";
 
 function currentMonthIso(): string {
   return todayIso().slice(0, 7);
@@ -90,7 +92,7 @@ function AttachmentLinks({ attachments }: { attachments: YamahaRelocationAttachm
             title={attachment.originalName ?? undefined}
             onClick={() => openAuthedFile(yamahaRelocationAttachmentUrl(attachment.id), fileName)}
           >
-            {isPdf ? "📄" : "🖼️"} {attachments.length > 1 ? `เปิดไฟล์ ${i + 1}` : "เปิดไฟล์"}
+            <Icon name={isPdf ? "file-text" : "image"} /> {attachments.length > 1 ? `เปิดไฟล์ ${i + 1}` : "เปิดไฟล์"}
           </button>
         );
       })}
@@ -111,7 +113,7 @@ function FileField({ label, files, disabled, onAdd, onRemove }: FileFieldProps) 
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="field">
-      <span>{label} *</span>
+      <span>{label} <Req /></span>
       <input
         ref={inputRef}
         type="file"
@@ -125,7 +127,7 @@ function FileField({ label, files, disabled, onAdd, onRemove }: FileFieldProps) 
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button type="button" style={attachButtonStyle} disabled={disabled || files.length >= MAX_FILES_PER_KIND} onClick={() => inputRef.current?.click()}>
-          📎 {joinLabel(files.length ? "เพิ่ม" : "แนบ", label)}
+          <Icon name="paperclip" /> {joinLabel(files.length ? "เพิ่ม" : "แนบ", label)}
         </button>
         {!files.length && <span className="muted">รูปหรือ PDF ไม่เกิน 8MB (แนบได้หลายไฟล์)</span>}
       </div>
@@ -148,6 +150,20 @@ interface YamahaRelocationEntryPageProps {
   title: string;
 }
 
+// ข้อความหลังกดปุ่ม: สำเร็จ = toast (หายเอง) / ผิดพลาดหรือกำลังทำ = เก็บไว้แสดงในหน้า
+function useMessage() {
+  const [message, setState] = useState<{ text: string; error?: boolean }>({ text: "" });
+  function setMessage(next: { text: string; error?: boolean }) {
+    if (next.text && !next.error && !next.text.startsWith("กำลัง")) {
+      toast.success(next.text);
+      setState({ text: "" });
+    } else {
+      setState(next);
+    }
+  }
+  return [message, setMessage] as const;
+}
+
 export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntryPageProps) {
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const dateIso = useMemo(() => displayDateToIso(dateText.replace(/\D/g, "")), [dateText]);
@@ -158,7 +174,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
   const [compactPdf, setCompactPdf] = useState(true); // ย่อไฟล์เป็นค่าเริ่มต้น (ผู้ใช้ 2026-09-30)
-  const [formMessage, setFormMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [formMessage, setFormMessage] = useMessage();
 
   const [month, setMonth] = useState(() => currentMonthIso());
   const [entries, setEntries] = useState<YamahaRelocationEntry[]>([]);
@@ -309,9 +325,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
 
   return (
     <section className="content">
-      <Link href="/registration/yamaha-relocation" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← งานแจ้งย้ายยามาฮ่า
-      </Link>
+      <BackLink href="/registration/yamaha-relocation" label="งานแจ้งย้ายยามาฮ่า" />
       <h1>{title}</h1>
 
       {canEdit && (
@@ -322,7 +336,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
           <form className="customer-form" onSubmit={handleSubmit}>
             <div className="customer-grid">
               <div className="field">
-                <span>วันที่ *</span>
+                <span>วันที่ <Req /></span>
                 <DateInput
                   value={dateText}
                   onChange={(value) => handleDateTextChange(value)}
@@ -330,7 +344,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
                 />
               </div>
               <label className="field">
-                จำนวนคัน *
+                จำนวนคัน <Req />
                 <input
                   type="number"
                   min={1}
@@ -361,16 +375,14 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
               />
             </div>
             <div className="form-actions">
+              <span className="form-actions-note" role="status">
+                {formMessage.error ? "" : formMessage.text}
+              </span>
               <button className="primary" type="submit" disabled={saving}>
                 บันทึก
               </button>
-              <span
-                className={`customer-message${formMessage.error ? " error" : formMessage.text ? " success" : ""}`}
-                role="status"
-              >
-                {formMessage.text}
-              </span>
             </div>
+            <Notice tone="error">{formMessage.error ? formMessage.text : ""}</Notice>
           </form>
         </div>
       )}
@@ -380,7 +392,7 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
           <h2>รายการที่เพิ่มใหม่</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <button type="button" style={attachButtonStyle} disabled={exporting || loading || !entries.length} onClick={exportPdf}>
-              {exporting ? exportProgress || "กำลังสร้าง PDF…" : "⬇ Export รูปใบเสร็จ + Report (PDF)"}
+              {exporting ? exportProgress || "กำลังสร้าง PDF…" : <><Icon name="download" /> Export รูปใบเสร็จ + Report (PDF)</>}
             </button>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
               <input type="checkbox" checked={compactPdf} disabled={exporting} onChange={(e) => setCompactPdf(e.target.checked)} />
@@ -394,11 +406,9 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
         </div>
 
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : !entries.length ? (
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
@@ -427,12 +437,13 @@ export function YamahaRelocationEntryPage({ size, title }: YamahaRelocationEntry
                     {canEdit && (
                       <td>
                         <button type="button" className="text-button" onClick={() => setDialog({ kind: "edit", entry })}>
-                          ✎ แก้
+                          <Icon name="pencil" />
+                          แก้
                         </button>
                         <button
                           type="button"
                           className="text-button"
-                          style={{ color: "#b43434" }}
+                          style={{ color: "var(--danger)" }}
                           onClick={() => setDialog({ kind: "cancel", entry })}
                         >
                           ยกเลิก
@@ -546,8 +557,8 @@ function EntryDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{kind === "edit" ? "แก้รายการแจ้งย้าย" : "ยกเลิกรายการแจ้งย้าย"}</h2>
       <p className="muted">
@@ -556,7 +567,7 @@ function EntryDialog({
       {kind === "edit" ? (
         <div className="customer-grid" style={{ marginTop: 12 }}>
           <div className="field">
-            <span>วันที่ *</span>
+            <span>วันที่ <Req /></span>
             <DateInput
               value={dateText}
               onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))}
@@ -564,7 +575,7 @@ function EntryDialog({
             />
           </div>
           <label className="field">
-            จำนวนคัน *
+            จำนวนคัน <Req />
             <input type="number" min={1} step={1} value={countText} onChange={(e) => setCountText(e.target.value)} required />
           </label>
           <label className="field">
@@ -581,7 +592,7 @@ function EntryDialog({
         </p>
       )}
       <label className="field" style={{ marginTop: 12 }}>
-        {kind === "edit" ? "เหตุผลที่แก้ *" : "เหตุผลที่ยกเลิก *"}
+        {kind === "edit" ? "เหตุผลที่แก้" : "เหตุผลที่ยกเลิก"} <Req />
         <input
           type="text"
           value={remark}
@@ -589,17 +600,13 @@ function EntryDialog({
           placeholder={kind === "edit" ? "เช่น พิมพ์จำนวนคันเกิน" : "เช่น บันทึกซ้ำ / แนบไฟล์ผิด"}
         />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={confirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : kind === "edit" ? "บันทึกการแก้ไข" : "ยืนยันยกเลิก"}
+          {saving ? "กำลังบันทึก…" : kind === "edit" ? "บันทึกการแก้ไข" : "ยืนยันยกเลิก"}
         </button>
       </div>
     </dialog>

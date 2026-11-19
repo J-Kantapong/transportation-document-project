@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
 import { billingApi, ACCOUNT_LABEL, WHT_METHOD_LABEL, type Invoice, type TaxInvoice, type TaxInvoicePreview, type WhtMethod } from "@/lib/billing-api";
 import { DateInput } from "@/components/DateInput";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { emptyItemRow, InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { checkBackdate } from "@/lib/tax-invoice-date";
@@ -226,34 +227,31 @@ export function TaxInvoiceCustomPage() {
   if (loading) {
     return (
       <section className="content">
-        <h1 tabIndex={-1}>ใบกำกับภาษีกำหนดเอง</h1>
-        <div className="customer-message" role="status">
-          กำลังโหลด...
-        </div>
+        <PageHeader titleFocus title="ใบกำกับภาษีกำหนดเอง" />
+        <LoadingState />
       </section>
     );
   }
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>{replaced ? `ออกใบกำกับใหม่แทน ${replaced.taxInvoiceNo}` : "ใบกำกับภาษีกำหนดเอง"}</h1>
-      <p>
-        ออกใบกำกับภาษี/ใบเสร็จรับเงินสำหรับงานที่ไม่อยู่ในระบบ (ไม่มีใบวางบิล) - พิมพ์รายการเอง แล้วเลือกประเภทให้ถูกเพราะ VAT และหัก ณ ที่จ่ายคิดต่างกัน ออกตอนรับเงินแล้ว
-      </p>
-      <Link href="/accounting/tax-invoices" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        ← กลับไปหน้าใบกำกับภาษี
-      </Link>
+      <PageHeader
+        back={{ href: "/accounting/tax-invoices", label: "ใบกำกับภาษี" }}
+        titleFocus
+        title={replaced ? `ออกใบกำกับใหม่แทน ${replaced.taxInvoiceNo}` : "ใบกำกับภาษีกำหนดเอง"}
+        subtitle="ออกใบกำกับภาษี/ใบเสร็จรับเงินสำหรับงานที่ไม่อยู่ในระบบ (ไม่มีใบวางบิล) - พิมพ์รายการเอง แล้วเลือกประเภทให้ถูกเพราะ VAT และหัก ณ ที่จ่ายคิดต่างกัน ออกตอนรับเงินแล้ว"
+      />
 
       <section className="panel" style={{ marginTop: 16, padding: "18px 23px", overflow: "visible", display: "grid", gap: 14 }}>
         {replaced && (
-          <div className="customer-message" style={{ fontSize: 13 }}>
+          <Notice tone="info">
             ใบนี้จะออกแทน {replaced.taxInvoiceNo} ที่ยกเลิกไป{replaced.cancelReason ? ` (${replaced.cancelReason})` : ""}
             {replaced.whtCertificate ? " · 50 ทวิ ที่แนบไว้ย้ายมาใบนี้ (ถ้าเป็นลูกค้าคนเดิมและยังมียอดหัก)" : ""}
-          </div>
+          </Notice>
         )}
 
         {customerId && waitingBills.some((b) => b.customerId === customerId) && (
-          <div className="customer-message" style={{ fontSize: 13 }}>
+          <Notice tone="warn">
             ลูกค้ารายนี้มีบิลรอรับเงินในระบบ - ถ้าเป็นงานเดียวกัน ให้ออกใบกำกับจากบิลโดยตรง (ดึงยอดและรายการจากบิล ผูกกับบิล และปิดบิลเป็นรับเงินแล้วให้เอง ไม่ต้องพิมพ์รายการซ้ำ):
             <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
               {waitingBills
@@ -267,12 +265,12 @@ export function TaxInvoiceCustomPage() {
                   </li>
                 ))}
             </ul>
-          </div>
+          </Notice>
         )}
 
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
           <label className="field">
-            ลูกค้า *
+            ลูกค้า <Req />
             <select value={customerId} onChange={(e) => chooseCustomer(e.target.value)}>
               <option value="">— เลือกลูกค้า —</option>
               {customers.map((c) => (
@@ -299,7 +297,7 @@ export function TaxInvoiceCustomPage() {
             </span>
           </div>
           <label className="field">
-            วันที่รับเงิน *
+            วันที่รับเงิน <Req />
             <DateInput
               value={paidDateText}
               onChange={(value) => (setPaidDateText(formatDateDigitsCe(digits(value))), setConfirming(false))}
@@ -309,19 +307,13 @@ export function TaxInvoiceCustomPage() {
         </div>
 
         {preview && !preview.enabled && (
-          <div className="customer-message error" role="alert">
-            ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มที่หน้า &quot;ใบกำกับภาษี&quot; ก่อน
-          </div>
+          <Notice tone="error">ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มที่หน้า &quot;ใบกำกับภาษี&quot; ก่อน</Notice>
         )}
         {preview && preview.account && preview.account !== "COMPANY" && (
-          <div className="customer-message error" role="alert">
-            ลูกค้ารายนี้ใช้{ACCOUNT_LABEL[preview.account]} ณ วันที่นี้ ไม่มีใบกำกับภาษี
-          </div>
+          <Notice tone="error">ลูกค้ารายนี้ใช้{ACCOUNT_LABEL[preview.account]} ณ วันที่นี้ ไม่มีใบกำกับภาษี</Notice>
         )}
         {missing.length > 0 && (
-          <div className="customer-message error" role="alert">
-            ข้อมูลลูกค้ายังขาด {missing.join(", ")} - แก้ที่หน้าฐานข้อมูลลูกค้าก่อน (ADMIN)
-          </div>
+          <Notice tone="error">ข้อมูลลูกค้ายังขาด {missing.join(", ")} - แก้ที่หน้าฐานข้อมูลลูกค้าก่อน (ADMIN)</Notice>
         )}
         {onlyTaxIdMissing && (
           <label style={{ display: "flex", gap: 8, fontSize: 13 }}>
@@ -382,11 +374,7 @@ export function TaxInvoiceCustomPage() {
           <iframe title="ตัวอย่างใบกำกับภาษี" srcDoc={buildTaxInvoiceHtml(draft, "original")} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />
         )}
 
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
+        <Notice tone="error">{error}</Notice>
 
         {confirming && customer ? (
           <div style={{ border: "1px solid #c9d6f5", background: "#f6f9ff", borderRadius: 10, padding: "14px 16px", display: "grid", gap: 8 }}>
@@ -401,7 +389,7 @@ export function TaxInvoiceCustomPage() {
             </div>
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>ออกแล้วแก้ไม่ได้ - ผิดต้องยกเลิกแล้วออกใหม่ (เลขเดิมไม่ใช้ซ้ำ)</p>
             <div className="form-actions" style={{ marginTop: 0 }}>
-              <button type="button" onClick={() => setConfirming(false)} disabled={saving}>
+              <button type="button" className="secondary" onClick={() => setConfirming(false)} disabled={saving}>
                 กลับไปแก้
               </button>
               <button type="button" className="primary" onClick={handleSave} disabled={saving}>

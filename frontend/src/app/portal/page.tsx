@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { authApi, type PortalVehicle } from "@/lib/auth-api";
 import { timestampToDisplayDate } from "@/lib/date";
@@ -52,7 +54,7 @@ function VehicleCard({ vehicle, onConfirmed }: { vehicle: PortalVehicle; onConfi
       <ol className="portal-steps">
         {vehicle.steps.map((step, i) => (
           <li key={step.key} className={`portal-step portal-step--${step.state.toLowerCase()}`}>
-            <span className="portal-step-dot">{step.state === "DONE" ? "✓" : i + 1}</span>
+            <span className="portal-step-dot">{step.state === "DONE" ? <Icon name="tick" size={14} /> : i + 1}</span>
             <div>
               <div className="portal-step-title">{step.title}</div>
               <div className="sub">
@@ -75,7 +77,7 @@ function VehicleCard({ vehicle, onConfirmed }: { vehicle: PortalVehicle; onConfi
               ยืนยันว่าได้รับของแล้ว
             </button>
           ))}
-        {error && <span className="customer-message error">{error}</span>}
+        <Notice tone="error">{error}</Notice>
       </div>
     </div>
   );
@@ -104,12 +106,10 @@ export default function PortalPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>สถานะรถของคุณ</h1>
-          <p>{company ? `รถที่ ${company} ส่งจดทะเบียนกับเรา` : "รถที่บริษัทของคุณส่งจดทะเบียนกับเรา"}</p>
-        </div>
-      </div>
+      <PageHeader
+        title="สถานะรถของคุณ"
+        subtitle={company ? `รถที่ ${company} ส่งจดทะเบียนกับเรา` : "รถที่บริษัทของคุณส่งจดทะเบียนกับเรา"}
+      />
       <div className="inspect-filter" style={{ padding: "0 0 18px" }}>
         {(
           [
@@ -123,9 +123,9 @@ export default function PortalPage() {
           </button>
         ))}
       </div>
-      {error && <div className="empty-page customer-message error">{error}</div>}
+      <Notice tone="error">{error}</Notice>
       {loading ? (
-        <div className="empty-page">กำลังโหลด…</div>
+        <LoadingState />
       ) : !error && shown.length === 0 ? (
         <div className="empty-page">ยังไม่มีรถในรายการนี้</div>
       ) : (

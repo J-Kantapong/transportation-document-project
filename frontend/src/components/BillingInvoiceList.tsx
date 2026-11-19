@@ -21,6 +21,9 @@ import { InvoiceDueBadge } from "@/components/InvoiceDueBadge";
 import { computeTotals, effectiveWhtRate, formatMoney, jobsOfItems, round2, sortLinesByPlate, termsSummary, VAT_RATE } from "@/lib/invoice";
 import { downloadInvoicePdf, printInvoice } from "@/lib/invoice-print";
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
 import { InvoiceItemsEditor, itemRowsFromItems, itemRowsProblem, itemRowsToItems, SourceItemsNotice, type ItemRow } from "@/components/InvoiceItemsEditor";
 import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
@@ -79,7 +82,6 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   // ข้อความที่ต้องเห็นแม้ช่องกรอก/หน้าแก้ถูกปิดไปแล้ว (บิลเปลี่ยนสถานะจากอีกหน้าจอ = 409)
   const [staleError, setStaleError] = useState("");
   const [editing, setEditing] = useState<Invoice | null>(null);
@@ -144,7 +146,6 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
   function open(next: Action) {
     setAction(next);
     setError("");
-    setNotice("");
     setStaleError("");
     setTaxInvoiceNo("");
     setReason("");
@@ -173,7 +174,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
         if (!reason.trim()) return setError("ใส่เหตุผลที่ยกเลิกการรับเงิน");
         setSaving(true);
         await billingApi.unpayInvoice(invoice.id, reason.trim());
-        setNotice(`ยกเลิกการรับเงิน ${invoice.invoiceNo} แล้ว - บิลกลับเป็นรอรับเงิน บันทึกรับเงินใหม่ แก้ไข หรือยกเลิกบิลได้ตามปกติ`);
+        toast.success(`ยกเลิกการรับเงิน ${invoice.invoiceNo} แล้ว - บิลกลับเป็นรอรับเงิน บันทึกรับเงินใหม่ แก้ไข หรือยกเลิกบิลได้ตามปกติ`);
         if (filter === "PAID") setFilter("ISSUED"); // ให้เห็นบิลใบนั้นต่อในสถานะใหม่
       }
       setAction(null);
@@ -218,23 +219,12 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
           </button>
         ))}
       </div>
-      {loadError && (
-        <div className="customer-message error" role="alert" style={{ padding: "0 23px 12px" }}>
-          {loadError}
-        </div>
-      )}
-      {notice && (
-        <div className="customer-message success" role="status" style={{ padding: "0 23px 12px" }}>
-          {notice}
-        </div>
-      )}
-      {staleError && (
-        <div className="customer-message error" role="alert" style={{ padding: "0 23px 12px" }}>
-          {staleError}
-        </div>
-      )}
+      <div style={{ padding: "0 23px" }}>
+        <Notice tone="error">{loadError}</Notice>
+        <Notice tone="error">{staleError}</Notice>
+      </div>
       {!list ? (
-        !loadError && <div className="empty-customers">กำลังโหลด...</div>
+        !loadError && <LoadingState />
       ) : visible.length === 0 ? (
         <div className="empty-customers">
           {invoices.length === 0 && !list.hasMore ? "ยังไม่มีบิลที่ออกจากระบบนี้" : filter === "ISSUED" ? "ไม่มีบิลรอรับเงิน" : "ไม่มีบิลในสถานะนี้"}
@@ -361,7 +351,6 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                                 style={{ fontWeight: 600 }}
                                 onClick={() => {
                                   setAction(null);
-                                  setNotice("");
                                   setStaleError("");
                                   setIssuing(i);
                                 }}
@@ -383,7 +372,6 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
                                 className="text-button"
                                 onClick={() => {
                                   setAction(null);
-                                  setNotice("");
                                   setStaleError("");
                                   setEditing(i);
                                 }}
@@ -433,7 +421,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
         <div className="inspect-pagination">
           <span className="muted">แสดงประวัติ {historyCount} ใบล่าสุด</span>
           <button className="text-button" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? "กำลังโหลด..." : `โหลดเพิ่มอีก ${HISTORY_PAGE} ใบ`}
+            {loadingMore ? "กำลังโหลด…" : `โหลดเพิ่มอีก ${HISTORY_PAGE} ใบ`}
           </button>
         </div>
       )}
@@ -443,7 +431,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
           invoice={editing}
           onClose={() => setEditing(null)}
           onSaved={(saved, removedVehicles) => {
-            setNotice(`แก้ไข ${saved.invoiceNo} แล้ว ยอดสุทธิ ${formatMoney(saved.netTotal)} บาท - กด "พิมพ์" เพื่อพิมพ์บิลที่แก้แล้วให้ลูกค้าแทนใบเดิม`);
+            toast.success(`แก้ไข ${saved.invoiceNo} แล้ว ยอดสุทธิ ${formatMoney(saved.netTotal)} บาท - กด "พิมพ์" เพื่อพิมพ์บิลที่แก้แล้วให้ลูกค้าแทนใบเดิม`);
             reload();
             if (removedVehicles) onQueueChanged();
           }}
@@ -463,7 +451,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
           invoice={issuing}
           onClose={() => setIssuing(null)}
           onIssued={(_tv, text) => {
-            setNotice(text);
+            toast.success(text);
             reload();
           }}
           onRefused={() => reload()}
@@ -475,7 +463,7 @@ export function BillingInvoiceList({ reloadKey, onQueueChanged }: { reloadKey: n
           taxInvoice={{ ...tvRemark.invoice.taxInvoice, invoiceNo: tvRemark.invoice.invoiceNo }}
           onClose={() => setTvRemark(null)}
           onDone={(_tv, text) => {
-            setNotice(text);
+            toast.success(text);
             if (tvRemark.kind === "cancel" && filter === "PAID") setFilter("ISSUED");
             reload();
           }}
@@ -735,7 +723,7 @@ function InvoiceEditDialog({
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(1100px, 96vw)", maxHeight: "92vh", overflow: "auto" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>แก้ไขบิล {invoice.invoiceNo}</h2>
       <p className="muted">
@@ -744,17 +732,17 @@ function InvoiceEditDialog({
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
         <label className="field" style={{ flex: "0 1 200px" }}>
-          วันที่ออกบิล *
+          วันที่ออกบิล <Req />
           <DateInput value={issueDateText} onChange={(value) => setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} />
         </label>
         <label className="field" style={{ flex: "1 1 260px" }}>
-          ชื่องานบนบิล *
+          ชื่องานบนบิล <Req />
           <input type="text" value={jobLabel} onChange={(e) => setJobLabel(e.target.value)} />
         </label>
       </div>
 
       {changedCount > 0 && (
-        <p className="customer-message" style={{ marginTop: 12, color: "#946712" }}>
+        <p className="customer-message" style={{ marginTop: 12, color: "var(--warn)" }}>
           รถ {changedCount} คันมีข้อมูลเปลี่ยนหลังออกบิล (เช่น ทะเบียน / เลขที่ใบเสร็จ) - ติ๊ก &quot;ใช้ข้อมูลรถล่าสุด&quot; ในแถวนั้น
           บิลจะพิมพ์ตามข้อมูลปัจจุบันโดยใช้เลขที่บิลเดิม
         </p>
@@ -787,7 +775,7 @@ function InvoiceEditDialog({
                       {l.chassis} · {l.brandName}
                     </div>
                     {diffs.length > 0 && (
-                      <div style={{ fontSize: 12, marginTop: 4, maxWidth: 260, color: "#946712" }}>
+                      <div style={{ fontSize: 12, marginTop: 4, maxWidth: 260, color: "var(--warn)" }}>
                         ข้อมูลรถตอนนี้: {diffs.map((d) => `${d.label} ${d.from} → ${d.to}`).join(" · ")}
                         <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2, color: "#34415a" }}>
                           <input
@@ -959,20 +947,16 @@ function InvoiceEditDialog({
       </div>
 
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ค่าดำเนินการคีย์ผิด" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleSave} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้"}
         </button>
       </div>
     </dialog>
@@ -981,7 +965,7 @@ function InvoiceEditDialog({
 
 function SumLine({ label, value }: { label: string; value: number }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: value < 0 ? "#b43434" : undefined }}>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: value < 0 ? "var(--danger)" : undefined }}>
       <span style={{ color: value < 0 ? undefined : "#576781" }}>{label}</span>
       <span>{formatMoney(value || 0)}</span>
     </div>
@@ -1066,17 +1050,13 @@ function InvoiceHistoryDialog({ invoice, onClose }: { invoice: Invoice; onClose:
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(760px, 96vw)", maxHeight: "90vh", overflow: "auto" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>ประวัติบิล {invoice.invoiceNo}</h2>
       <p className="muted">{invoice.customer.name} · ใหม่สุดก่อน</p>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       {!entries ? (
-        !error && <p className="muted">กำลังโหลด...</p>
+        !error && <LoadingState />
       ) : entries.length === 0 ? (
         <p className="muted">ยังไม่มีประวัติการแก้ไข</p>
       ) : (
@@ -1098,7 +1078,9 @@ function InvoiceHistoryDialog({ invoice, onClose }: { invoice: Invoice; onClose:
                       <tr key={key}>
                         <td style={{ color: "#576781" }}>{fieldText(key)}</td>
                         <td>{valueText(key, change?.from)}</td>
-                        <td>→</td>
+                        <td>
+                          <Icon name="arrow-right" />
+                        </td>
                         <td>{valueText(key, change?.to)}</td>
                       </tr>
                     ))}
@@ -1110,7 +1092,7 @@ function InvoiceHistoryDialog({ invoice, onClose }: { invoice: Invoice; onClose:
         </div>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()}>
           ปิด
         </button>
       </div>

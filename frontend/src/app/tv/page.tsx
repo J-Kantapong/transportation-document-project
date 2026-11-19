@@ -5,6 +5,7 @@
 // ปุ่มและไฟล์ PDF (รวมแผ่นแชร์บนมือถือ) อยู่ใน DocumentLinkView ใช้ร่วมกับ /iv
 import { useEffect, useMemo, useState } from "react";
 import { DocumentLinkView } from "@/components/DocumentLinkView";
+import { LoadingState, Notice } from "@/components/ui";
 import type { TaxInvoice } from "@/lib/billing-api";
 import { buildTaxInvoiceHtml, printTaxInvoice } from "@/lib/tax-invoice-print";
 
@@ -45,12 +46,12 @@ export default function TaxInvoiceLinkPage() {
     return (
       <main style={{ padding: 24, maxWidth: 520, margin: "0 auto" }}>
         <h1 style={{ fontSize: 20, marginBottom: 8 }}>เปิดใบกำกับไม่ได้</h1>
-        <p role="alert">{error}</p>
+        <Notice tone="error">{error}</Notice>
         <p style={{ color: "#666", marginTop: 8 }}>ลิงก์ใช้ได้ 7 วันหลังออกใบกำกับ หลังจากนั้นเปิดได้จากหน้าใบกำกับภาษีในระบบ</p>
       </main>
     );
   }
-  if (!taxInvoice) return <main style={{ padding: 24 }}>กำลังโหลดใบกำกับ…</main>;
+  if (!taxInvoice) return <main style={{ padding: 24 }}><LoadingState label="กำลังโหลดใบกำกับ…" /></main>;
 
   return (
     <DocumentLinkView

@@ -7,6 +7,8 @@ import { ApiError } from "@/lib/api";
 import { getCachedUser } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 import { formatMoney } from "@/lib/invoice";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import {
   QUOTATION_KIND_LABEL,
   QUOTATION_STAGE_LABEL,
@@ -96,21 +98,19 @@ export function QuotationsPage() {
 
   return (
     <section className="content">
-      <div className="heading">
-        <div>
-          <h1 tabIndex={-1}>ใบเสนอราคา</h1>
-          <p>เสนอราคาให้ลูกค้าก่อนวางบิล - ลูกค้าอนุมัติแล้วออกใบวางบิลจากใบเสนอราคาได้เลย หรือตั้งเป็นราคาต่อคันของลูกค้า</p>
-        </div>
-        <Link href="/accounting/quotations/new" className="primary" style={{ textDecoration: "none" }}>
-          + ออกใบเสนอราคา
-        </Link>
-      </div>
+      <PageHeader
+        titleFocus
+        title="ใบเสนอราคา"
+        subtitle="เสนอราคาให้ลูกค้าก่อนวางบิล - ลูกค้าอนุมัติแล้วออกใบวางบิลจากใบเสนอราคาได้เลย หรือตั้งเป็นราคาต่อคันของลูกค้า"
+        actions={
+          <Link href="/accounting/quotations/new" className="primary">
+            <Icon name="plus" />
+            ออกใบเสนอราคา
+          </Link>
+        }
+      />
 
-      {error && (
-        <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
-          {error}
-        </div>
-      )}
+      <Notice tone="error">{error}</Notice>
 
       <section className="panel">
         <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -136,7 +136,7 @@ export function QuotationsPage() {
         </div>
 
         {!data ? (
-          !error && <div className="empty-customers">กำลังโหลด...</div>
+          !error && <LoadingState />
         ) : data.quotations.length === 0 ? (
           <div className="empty-customers">{q || stage ? "ไม่พบใบเสนอราคาตามที่ค้น" : "ยังไม่มีใบเสนอราคา - กด “+ ออกใบเสนอราคา” เพื่อเริ่ม"}</div>
         ) : (
@@ -173,7 +173,7 @@ export function QuotationsPage() {
         {data?.hasMore && (
           <div style={{ padding: "12px 23px", borderTop: "1px solid #f0f2f6" }}>
             <button type="button" className="text-button" onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? "กำลังโหลด..." : "โหลดเพิ่มอีก 100 ใบ"}
+              {loadingMore ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 ใบ"}
             </button>
           </div>
         )}
@@ -240,18 +240,14 @@ function SeriesPanel({ series, onSaved }: { series: QuotationSeries; onSaved: (s
             <input type="text" inputMode="numeric" value={lastNumber} onChange={(e) => setLastNumber(e.target.value.replace(/\D/g, "").slice(0, 5))} style={{ width: 110 }} />
           </label>
           <label className="field" style={{ flex: "1 1 220px" }}>
-            ที่มา / เหตุผล *
+            ที่มา / เหตุผล <Req />
             <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ระบบเดิมออกถึง QT2026-022" />
           </label>
           <button type="button" className="primary" onClick={save} disabled={saving}>
-            {saving ? "กำลังบันทึก..." : "บันทึก"}
+            {saving ? "กำลังบันทึก…" : "บันทึก"}
           </button>
         </div>
-        {error && (
-          <p className="customer-message error" role="alert">
-            {error}
-          </p>
-        )}
+        <Notice tone="error">{error}</Notice>
       </div>
     </section>
   );

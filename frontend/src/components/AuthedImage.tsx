@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fetchAuthedBlob } from "@/lib/api";
+import { Icon } from "@/components/Icon";
 
 // รูปใบเสร็จ/ป้าย/เล่ม อยู่หลัง backend endpoint ที่ต้องมี Authorization header (ดู auth.guard.ts)
 // <img src="..."> ส่ง header เองไม่ได้ - เคยชี้ตรงไปที่ endpoint แล้วขึ้น 401 (รูปพัง) จึงต้องโหลดเป็น blob เองก่อน
@@ -154,7 +155,7 @@ export function AuthedImage({
             onClick={() => setZoomed(false)}
             style={{ position: "absolute", top: 12, right: 16, fontSize: 28, lineHeight: 1, color: "#fff", background: "transparent", border: 0, cursor: "pointer" }}
           >
-            ×
+            <Icon name="x" size={28} />
           </button>
         </div>
       )}

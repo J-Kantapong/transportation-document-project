@@ -8,6 +8,7 @@ import { isoToDisplayDate } from "@/lib/date";
 import { usePathname, useSearchParams } from "next/navigation";
 import { JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
 import { PageTabs } from "@/components/PageTabs";
+import { LoadingState, Notice } from "@/components/ui";
 import { SubmissionBulkCancelDialog } from "@/components/SubmissionBulkCancelDialog";
 import { SubmissionCancelDialog } from "@/components/SubmissionCancelDialog";
 import { compareSubmittedOrder, dutyOfItems, savedTotalExcludingDuty, swapPlateLabel, useReadScope } from "@/components/submit-flow/shared";
@@ -94,8 +95,7 @@ export function GroupTable({
               </button>
               <button
                 type="button"
-                className="text-button"
-                style={{ color: "#c2410c" }}
+                className="text-button danger"
                 disabled={picked.length === 0}
                 onClick={() => onBulkCancel?.(picked)}
               >
@@ -171,7 +171,7 @@ export function GroupTable({
                     <td>
                       {/* ยกเลิกได้เฉพาะที่ยังรอใบเสร็จ ในประเภทรถที่บัญชีนี้บันทึกได้ - backend เช็กซ้ำ */}
                       {cancellable(r) && (
-                        <button type="button" className="text-button" style={{ color: "#c2410c" }} onClick={() => onCancel(r)}>
+                        <button type="button" className="text-button danger" onClick={() => onCancel(r)}>
                           ยกเลิก
                         </button>
                       )}
@@ -377,29 +377,31 @@ export function SubmittedRecordsView({
             </select>
           </label>
           <span className="muted" role="status">
-            {loading ? "กำลังโหลด..." : loadError ? "" : `พบ ${filtered.length} คัน`}
+            {loading ? "กำลังโหลด…" : loadError ? "" : `พบ ${filtered.length} คัน`}
           </span>
         </div>
         {truncated && !loading && (
-          <p className="customer-message error" role="alert" style={{ margin: "14px 0 0" }}>
+          <Notice tone="error">
             วันที่ยื่น {isoToDisplayDate(date) || date} มีรายการมากกว่าที่แสดง - ตารางและใบส่งงานของวันที่นี้ยังไม่ครบ
-          </p>
+          </Notice>
         )}
       </section>
 
       {loadError ? (
-        <div className="empty-customers" role="alert">
-          <p className="customer-message error" style={{ marginBottom: 12 }}>
-            โหลดรายการที่ยื่นไม่สำเร็จ: {loadError}
-          </p>
-          {onRetry && (
-            <button type="button" className="primary" disabled={loading} onClick={onRetry}>
-              {loading ? "กำลังโหลด…" : "ลองใหม่"}
-            </button>
-          )}
-        </div>
+        <Notice
+          tone="error"
+          action={
+            onRetry && (
+              <button type="button" className="secondary" disabled={loading} onClick={onRetry}>
+                {loading ? "กำลังโหลด…" : "ลองใหม่"}
+              </button>
+            )
+          }
+        >
+          โหลดรายการที่ยื่นไม่สำเร็จ: {loadError}
+        </Notice>
       ) : loading && records.length === 0 ? (
-        <p className="muted">กำลังโหลด...</p>
+        <LoadingState />
       ) : !loading && dates.length === 0 ? (
         <p className="muted">ยังไม่มีข้อมูลที่ยื่นแล้ว</p>
       ) : (

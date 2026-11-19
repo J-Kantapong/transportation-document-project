@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
@@ -379,31 +381,26 @@ export function BillingCustomInvoicePage() {
   if (loading) {
     return (
       <section className="content">
-        <h1 tabIndex={-1}>บิลกำหนดเอง</h1>
-        <div className="customer-message" role="status">
-          กำลังโหลด...
-        </div>
+        <PageHeader back={{ href: "/accounting/billing", label: "วางบิล" }} title="บิลกำหนดเอง" titleFocus />
+        <LoadingState />
       </section>
     );
   }
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>
-        {editing ? `แก้ไขบิล ${editing.invoiceNo}` : "บิลกำหนดเอง"}
-      </h1>
-      <p>
-        ออกบิลที่ไม่มีรถในระบบ เช่น งานเก่าที่ย้ายมาจากระบบเดิม หรือขายสินค้า
-        (ขายรถออกจากบริษัท) - พิมพ์รายการเองทีละบรรทัด แล้วเลือกประเภทให้ถูก
-        เพราะ VAT และหัก ณ ที่จ่ายคิดต่างกัน
-      </p>
-      <Link
-        href="/accounting/billing"
-        className="text-button"
-        style={{ marginTop: 8, display: "inline-block" }}
-      >
-        ← กลับไปหน้าวางบิล
-      </Link>
+      <PageHeader
+        back={{ href: "/accounting/billing", label: "วางบิล" }}
+        title={editing ? `แก้ไขบิล ${editing.invoiceNo}` : "บิลกำหนดเอง"}
+        titleFocus
+        subtitle={
+          <>
+          ออกบิลที่ไม่มีรถในระบบ เช่น งานเก่าที่ย้ายมาจากระบบเดิม หรือขายสินค้า
+          (ขายรถออกจากบริษัท) - พิมพ์รายการเองทีละบรรทัด แล้วเลือกประเภทให้ถูก
+          เพราะ VAT และหัก ณ ที่จ่ายคิดต่างกัน
+          </>
+        }
+      />
 
       <section
         className="panel"
@@ -423,7 +420,7 @@ export function BillingCustomInvoicePage() {
           }}
         >
           <label className="field">
-            ลูกค้า *
+            ลูกค้า <Req />
             <select
               value={customerId}
               disabled={!!editing}
@@ -445,8 +442,9 @@ export function BillingCustomInvoicePage() {
           </label>
           <label className="field">
             {account === "PERSONAL"
-              ? "เลขที่บิล (บัญชีบุคคล) *"
-              : "เลขที่ IV *"}
+              ? "เลขที่บิล (บัญชีบุคคล)"
+              : "เลขที่ IV"}{" "}
+            <Req />
             <input
               type="text"
               value={invoiceNo}
@@ -462,7 +460,7 @@ export function BillingCustomInvoicePage() {
             )}
           </label>
           <label className="field">
-            วันที่ออกบิล *
+            วันที่ออกบิล <Req />
             <DateInput
               value={issueDateText}
               onChange={(value) =>
@@ -476,25 +474,17 @@ export function BillingCustomInvoicePage() {
 
         {/* ลูกค้าที่ต้องเสนอราคาก่อนวางบิล (ผู้ใช้ 2026-10-01, YM) - ออกบิลจากใบเสนอราคาที่อนุมัติแล้วเท่านั้น */}
         {!editing && terms?.requiresQuotation && (
-          <div
-            className="customer-message"
-            role="alert"
-            style={{
-              background: "#fff6e7",
-              color: "#8a6412",
-              borderRadius: 10,
-              padding: "10px 14px",
-            }}
-          >
+          <Notice tone="warn">
             ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล -
             ออกใบวางบิลจากหน้าใบเสนอราคา{" "}
             <Link
               href="/accounting/quotations?stage=APPROVED"
               className="text-button"
             >
-              ไปหน้าใบเสนอราคา →
+              ไปหน้าใบเสนอราคา
+              <Icon name="arrow-right" />
             </Link>
-          </div>
+                    </Notice>
         )}
 
         {/* ราคายามาฮ่า (ผู้ใช้ 2026-10-05): เลือกลูกค้ายามาฮ่าแล้วมีตัวเลือกราคาให้เลือกเติมบรรทัดได้เลย */}
@@ -694,7 +684,7 @@ export function BillingCustomInvoicePage() {
                 className="muted"
                 style={{
                   fontSize: 12,
-                  color: unknownProfit ? "#946712" : undefined,
+                  color: unknownProfit ? "var(--warn)" : undefined,
                 }}
               >
                 {unknownProfit
@@ -707,7 +697,7 @@ export function BillingCustomInvoicePage() {
 
         {editing && (
           <label className="field">
-            เหตุผลที่แก้ *
+            เหตุผลที่แก้ <Req />
             <input
               type="text"
               value={remark}
@@ -738,11 +728,7 @@ export function BillingCustomInvoicePage() {
           />
         )}
 
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
+        <Notice tone="error">{error}</Notice>
 
         {confirming && totals && customer ? (
           // ตรวจก่อนออกบิล (ผู้ใช้ 2026-09-29): อัตราหัก ณ ที่จ่ายต้องเห็นชัดทุกครั้ง
@@ -769,7 +755,7 @@ export function BillingCustomInvoicePage() {
               <b
                 style={{
                   fontWeight: 600,
-                  color: totals.whtRate !== defaultWht ? "#c0392b" : undefined,
+                  color: totals.whtRate !== defaultWht ? "var(--danger)" : undefined,
                 }}
               >
                 หัก ณ ที่จ่าย{" "}
@@ -784,6 +770,7 @@ export function BillingCustomInvoicePage() {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <button
                 type="button"
+                className="secondary"
                 onClick={() => setConfirming(false)}
                 disabled={saving}
               >

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 import type { DocumentSubmission } from "@/lib/api";
 import {
   buildJobSheets,
@@ -79,8 +81,8 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
       }}
       style={{ width: "min(720px, 94vw)" }}
     >
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ปริ้นใบส่งงาน - {groupTitle}</h2>
       <p className="muted">
@@ -133,12 +135,12 @@ export function JobSheetPrintDialog({ kind, urgent, groupTitle, rows, defaultNot
         </p>
       )}
       {missingTax > 0 && (
-        <p className="customer-message error" role="alert">
+        <Notice tone="error">
           {missingTax} คันยังคำนวณภาษีไม่ได้ -{" "}
           {kind === "moto"
             ? "จะพิมพ์ค่าธรรมเนียมของคันเหล่านั้นเป็น \"-\" (ไม่พิมพ์ยอดที่ขาดภาษี)"
             : "จะพิมพ์ค่าภาษีเป็น \"-\" และยอดรวมไม่รวมภาษีของคันเหล่านั้น"}
-        </p>
+        </Notice>
       )}
 
       <div className="form-actions">

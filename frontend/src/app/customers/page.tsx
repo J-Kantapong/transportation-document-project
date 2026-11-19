@@ -12,6 +12,9 @@ import {
 import { canCreateCustomer, getCachedUser } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, timestampToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 
 const EMPTY_FORM: NewCustomerInput = {
   name: "",
@@ -62,11 +65,9 @@ function CustomerHistory({ entries, error }: { entries: CustomerHistoryEntry[] |
     <section style={{ marginTop: 24, borderTop: "1px solid #edf0f5", paddingTop: 16 }}>
       <h3 style={{ fontSize: 15, margin: "0 0 10px" }}>ประวัติการแก้ไข</h3>
       {error ? (
-        <div className="customer-message error">{error}</div>
+        <Notice tone="error">{error}</Notice>
       ) : entries === null ? (
-        <div className="muted" style={{ fontSize: 13 }}>
-          กำลังโหลดประวัติ…
-        </div>
+        <LoadingState label="กำลังโหลดประวัติ…" inline />
       ) : !entries.length ? (
         <div className="muted" style={{ fontSize: 13 }}>
           ยังไม่เคยแก้ไข
@@ -160,7 +161,7 @@ function CustomerFieldInputs({
   return (
     <div className="customer-grid">
       <label className="field">
-        ชื่อลูกค้า *
+        ชื่อลูกค้า <Req />
         <input value={value.name} maxLength={250} required autoComplete="name" onChange={(e) => onChange("name", e.target.value)} />
       </label>
       <label className="field">
@@ -279,7 +280,8 @@ export default function CustomersPage() {
     try {
       await api.createCustomer(form);
       setForm(EMPTY_FORM);
-      setMessage({ text: "บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว" });
+      setMessage({ text: "" });
+      toast.success("บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว");
       await loadCustomers();
     } catch (error) {
       setMessage({
@@ -337,7 +339,8 @@ export default function CustomersPage() {
       const { customer } = await api.updateCustomer(detail.id, data);
       setDetail(customer);
       setEditing(false);
-      setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
+      setEditMessage({ text: "" });
+      toast.success("บันทึกการแก้ไขเรียบร้อยแล้ว");
       void loadHistory(customer.id);
       await loadCustomers();
     } catch (error) {
@@ -371,12 +374,7 @@ export default function CustomersPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>ฐานข้อมูลลูกค้า</h1>
-          <p>จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ</p>
-        </div>
-      </div>
+      <PageHeader title="ฐานข้อมูลลูกค้า" subtitle="จัดเก็บข้อมูลลูกค้า บริษัท และข้อมูลติดต่อ" />
 
       {canAdd && (
         <section className="panel">
@@ -385,22 +383,21 @@ export default function CustomersPage() {
             style={{ borderBottom: "1px solid #edf0f5" }}
           >
             <h2>เพิ่มลูกค้า</h2>
-            <span className="muted">* จำเป็นต้องกรอก</span>
+            <span className="muted"><Req /> จำเป็นต้องกรอก</span>
           </div>
           <form className="customer-form" onSubmit={handleSubmit}>
             <CustomerFieldInputs value={form} onChange={updateField} />
             <div className="form-actions">
+              {message.text && !message.error && (
+                <span className="form-actions-note" role="status" aria-live="polite">
+                  {message.text}
+                </span>
+              )}
               <button className="primary" type="submit" disabled={saving}>
                 บันทึกข้อมูลลูกค้า
               </button>
-              <span
-                className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`}
-                role="status"
-                aria-live="polite"
-              >
-                {message.text}
-              </span>
             </div>
+            <Notice tone="error">{message.error ? message.text : ""}</Notice>
           </form>
         </section>
       )}
@@ -418,11 +415,9 @@ export default function CustomersPage() {
           </button>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดข้อมูลลูกค้า…</div>
+          <LoadingState label="กำลังโหลดข้อมูลลูกค้า…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : !customers.length ? (
           <div className="empty-customers">
             ยังไม่มีข้อมูลลูกค้า
@@ -480,7 +475,7 @@ export default function CustomersPage() {
           aria-label="ปิด"
           onClick={() => dialogRef.current?.close()}
         >
-          ×
+          <Icon name="x" />
         </button>
         {detail && !editing && (
           <>
@@ -504,13 +499,9 @@ export default function CustomersPage() {
                 <button type="button" className="primary" onClick={startEdit}>
                   แก้ไข
                 </button>
-                {editMessage.text && (
-                  <span className={`customer-message${editMessage.error ? " error" : " success"}`} role="status">
-                    {editMessage.text}
-                  </span>
-                )}
               </div>
             )}
+            {canAdd && <Notice tone="error">{editMessage.error ? editMessage.text : ""}</Notice>}
             {canAdd && <CustomerHistory entries={history} error={historyError} />}
           </>
         )}
@@ -555,7 +546,7 @@ export default function CustomersPage() {
                 </fieldset>
               )}
               <label className="field" style={{ marginTop: 20 }}>
-                เหตุผลที่แก้ไข (Remark) *
+                เหตุผลที่แก้ไข (Remark) <Req />
                 <textarea
                   required
                   maxLength={500}
@@ -565,16 +556,19 @@ export default function CustomersPage() {
                 />
               </label>
               <div className="form-actions" style={{ marginTop: 16 }}>
+                {editMessage.text && !editMessage.error && (
+                  <span className="form-actions-note" role="status">
+                    {editMessage.text}
+                  </span>
+                )}
+                <button type="button" className="secondary" disabled={editSaving} onClick={() => setEditing(false)}>
+                  ยกเลิก
+                </button>
                 <button type="submit" className="primary" disabled={editSaving || !editRemark.trim()}>
                   บันทึกการแก้ไข
                 </button>
-                <button type="button" className="text-button" disabled={editSaving} onClick={() => setEditing(false)}>
-                  ยกเลิก
-                </button>
-                <span className={`customer-message${editMessage.error ? " error" : editMessage.text ? " success" : ""}`} role="status">
-                  {editMessage.text}
-                </span>
               </div>
+              <Notice tone="error">{editMessage.error ? editMessage.text : ""}</Notice>
             </form>
           </>
         )}

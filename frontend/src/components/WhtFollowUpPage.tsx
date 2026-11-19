@@ -7,6 +7,9 @@ import { isoToDisplayDate, timestampToDisplayDate } from "@/lib/date";
 import { formatMoney, isoToThaiDate, round2 } from "@/lib/invoice";
 import { WhtCertificateDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 
 // ติดตาม 50 ทวิ (ผู้ใช้ 2026-09-28): ใบกำกับที่ลูกค้าหัก ณ ที่จ่ายแต่เรายังไม่ได้หนังสือรับรอง จัดกลุ่มตามลูกค้า เก่าสุดก่อน
@@ -45,7 +48,6 @@ export function WhtFollowUpPage() {
   const [overdueDays, setOverdueDays] = useState(30);
   const [certificates, setCertificates] = useState<WhtCertificate[]>([]);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [attaching, setAttaching] = useState<Group | null>(null);
@@ -93,7 +95,7 @@ export function WhtFollowUpPage() {
     try {
       await navigator.clipboard.writeText(reminderText(g, rows));
       await billingApi.whtRemind(rows.map((r) => r.id));
-      setNotice(`คัดลอกข้อความทวง ${g.customerName} (${rows.length} รายการ) แล้ว - วางใน LINE หรืออีเมลได้เลย`);
+      toast.success(`คัดลอกข้อความทวง ${g.customerName} (${rows.length} รายการ) แล้ว - วางใน LINE หรืออีเมลได้เลย`);
       reload();
     } catch (err) {
       setError(errorText(err, "คัดลอกไม่สำเร็จ"));
@@ -114,7 +116,7 @@ export function WhtFollowUpPage() {
     if (!cancelRemark.trim()) return setError("ใส่เหตุผลที่ยกเลิก");
     try {
       await billingApi.cancelWhtCertificate(cancelling.id, cancelRemark.trim());
-      setNotice(`ยกเลิก 50 ทวิ ของ ${cancelling.customerName} แล้ว - ใบกำกับกลับเป็นรอ 50 ทวิ`);
+      toast.success(`ยกเลิก 50 ทวิ ของ ${cancelling.customerName} แล้ว - ใบกำกับกลับเป็นรอ 50 ทวิ`);
       setCancelling(null);
       setCancelRemark("");
       reload();
@@ -127,19 +129,13 @@ export function WhtFollowUpPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>ใบกำกับภาษี</h1>
-      <p>ตามหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) จากลูกค้า - ภาษีที่ถูกหักใช้หักภาษีตอนยื่น ภ.ง.ด.50 ได้เฉพาะรายการที่มีหลักฐาน</p>
+      <PageHeader
+        titleFocus
+        title="ใบกำกับภาษี"
+        subtitle="ตามหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) จากลูกค้า - ภาษีที่ถูกหักใช้หักภาษีตอนยื่น ภ.ง.ด.50 ได้เฉพาะรายการที่มีหลักฐาน"
+      />
       <TaxInvoiceTabs />
-      {notice && (
-        <div className="customer-message success" role="status" style={{ margin: "12px 0" }}>
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
-          {error}
-        </div>
-      )}
+      <Notice tone="error">{error}</Notice>
       <section className="panel" style={{ marginTop: 12 }}>
         <div className="panel-head">
           <h2>รอ 50 ทวิ</h2>
@@ -148,7 +144,7 @@ export function WhtFollowUpPage() {
           </span>
         </div>
         {!pending ? (
-          !error && <div className="empty-customers">กำลังโหลด...</div>
+          !error && <LoadingState />
         ) : groups.length === 0 ? (
           <div className="empty-customers">ได้ 50 ทวิ ครบทุกใบแล้ว</div>
         ) : (
@@ -165,11 +161,11 @@ export function WhtFollowUpPage() {
                     style={{ all: "unset", cursor: "pointer", display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", width: "100%", padding: "10px 14px", boxSizing: "border-box" }}
                   >
                     <span>
-                      {isOpen ? "▾" : "▸"} <b>{g.customerName}</b>
+                      <Icon name={isOpen ? "chevron-down" : "chevron-right"} /> <b>{g.customerName}</b>
                     </span>
                     <span className="muted">
                       {g.rows.length} ใบ · {formatMoney(g.total)} บาท ·{" "}
-                      <span style={{ color: late ? "#b43434" : undefined, fontWeight: late ? 600 : 400 }}>ค้างนานสุด {g.oldest} วัน</span>
+                      <span style={{ color: late ? "var(--danger)" : undefined, fontWeight: late ? 600 : 400 }}>ค้างนานสุด {g.oldest} วัน</span>
                     </span>
                   </button>
                   {isOpen && (
@@ -216,7 +212,7 @@ export function WhtFollowUpPage() {
                                 <td>{isoToDisplayDate(r.issueDate)}</td>
                                 <td style={{ textAlign: "right" }}>{formatMoney(r.whtAmount)}</td>
                                 <td>{WHT_METHOD_LABEL[r.whtMethod]}</td>
-                                <td style={{ color: r.daysWaiting > overdueDays ? "#b43434" : undefined }}>{r.daysWaiting} วัน</td>
+                                <td style={{ color: r.daysWaiting > overdueDays ? "var(--danger)" : undefined }}>{r.daysWaiting} วัน</td>
                                 <td>{r.remindedAt ? timestampToDisplayDate(r.remindedAt) : <span className="muted">—</span>}</td>
                               </tr>
                             ))}
@@ -271,7 +267,7 @@ export function WhtFollowUpPage() {
                     </td>
                     <td style={{ textAlign: "right" }}>
                       {formatMoney(c.amount)}
-                      {!c.cancelledAt && c.amount !== c.taxInvoiceWhtTotal && <div style={{ color: "#b43434", fontSize: 12 }}>ใบกำกับรวม {formatMoney(c.taxInvoiceWhtTotal)}</div>}
+                      {!c.cancelledAt && c.amount !== c.taxInvoiceWhtTotal && <div style={{ color: "var(--danger)", fontSize: 12 }}>ใบกำกับรวม {formatMoney(c.taxInvoiceWhtTotal)}</div>}
                     </td>
                     <td>{c.cancelledAt ? <span className="muted">ยกเลิก: {c.cancelReason}</span> : c.taxInvoices.map((t) => t.taxInvoiceNo).join(", ")}</td>
                     <td>{timestampToDisplayDate(c.createdAt)}</td>
@@ -297,11 +293,11 @@ export function WhtFollowUpPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", padding: "12px 23px" }}>
             <span>ยกเลิก 50 ทวิ ของ {cancelling.customerName}:</span>
             <input type="text" placeholder="เหตุผล เช่น แนบผิดใบ" value={cancelRemark} onChange={(e) => setCancelRemark(e.target.value)} style={{ width: 240 }} />
-            <button className="text-button danger" onClick={confirmCancel}>
-              ยืนยัน
-            </button>
-            <button className="text-button" onClick={() => setCancelling(null)}>
+            <button type="button" className="secondary" onClick={() => setCancelling(null)}>
               ปิด
+            </button>
+            <button type="button" className="primary danger" onClick={confirmCancel}>
+              ยืนยัน
             </button>
           </div>
         )}
@@ -313,7 +309,7 @@ export function WhtFollowUpPage() {
           taxInvoices={attaching.rows}
           onClose={() => setAttaching(null)}
           onSaved={(text) => {
-            setNotice(text);
+            toast.success(text);
             setSelected(new Set());
             reload();
           }}

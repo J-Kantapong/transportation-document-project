@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, receiptImageUrl, type ReceiptImage, type ReceiptSummary } from "@/lib/api";
 import { AuthedImage } from "@/components/AuthedImage";
+import { Icon } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { compressedFileName, compressReceiptImage } from "@/lib/receipt-image";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
@@ -67,7 +69,7 @@ export function ReceiptThumbs({ receipts, onDelete }: { receipts: ReceiptSummary
                 height: 18,
                 borderRadius: 9,
                 border: "none",
-                background: "#c0392b",
+                background: "var(--danger)",
                 color: "#fff",
                 fontSize: 12,
                 lineHeight: "18px",
@@ -75,7 +77,7 @@ export function ReceiptThumbs({ receipts, onDelete }: { receipts: ReceiptSummary
                 cursor: "pointer",
               }}
             >
-              ×
+              <Icon name="x" size={12} />
             </button>
           )}
         </div>
@@ -127,7 +129,13 @@ export function ReceiptAttachButton({
     <>
       <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
       <button type="button" className="text-button" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
-        {busy ? "กำลังอัปโหลด…" : "📷 แนบใบเสร็จ"}
+        {busy ? (
+          "กำลังอัปโหลด…"
+        ) : (
+          <>
+            <Icon name="camera" /> แนบใบเสร็จ
+          </>
+        )}
       </button>
     </>
   );
@@ -263,18 +271,24 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
         <h2>อัปโหลดใบเสร็จหลายใบ ({Math.max(total, tray.length)} รูปรอจับคู่)</h2>
         <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
         <button type="button" className="text-button" disabled={busy} onClick={() => inputRef.current?.click()}>
-          {busy ? "กำลังอัปโหลด…" : "📷 เลือกรูปหลายใบ"}
+          {busy ? (
+            "กำลังอัปโหลด…"
+          ) : (
+            <>
+              <Icon name="camera" /> เลือกรูปหลายใบ
+            </>
+          )}
         </button>
       </div>
       <div style={{ padding: "0 23px 20px" }}>
         {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginBottom: 10 }}>
-            {message.text}
+          <div style={{ marginBottom: 10 }}>
+            <Notice tone={message.error ? "error" : "success"}>{message.text}</Notice>
           </div>
         )}
         {/* คนที่ถือใบเสร็จอยู่เปิดหน้านี้บนมือถือแล้วถ่ายส่งเข้าระบบได้เลย - รูปที่จับคู่ไม่ได้จะมาโผล่ในถาดนี้ */}
         <div className="customer-message" style={{ marginBottom: 10 }}>
-          📱 ถ่ายจากมือถือ: เปิด <Link href="/registration/new-vehicle/receive-receipt/capture">หน้าถ่ายใบเสร็จ</Link> บนมือถือ
+          ถ่ายจากมือถือ: เปิด <Link href="/registration/new-vehicle/receive-receipt/capture">หน้าถ่ายใบเสร็จ</Link> บนมือถือ
         </div>
         {tray.length === 0 ? (
           <div className="customer-message">ไม่มีรูปรอจับคู่ - กด &quot;เลือกรูปหลายใบ&quot; เพื่ออัปโหลดใบเสร็จทีละหลายรูป</div>
@@ -306,17 +320,17 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                       {r.originalName}
                     </div>
                   )}
-                  {r.readPending && <div style={{ fontSize: 12, color: "#4a5a78", fontWeight: 600, marginTop: 2 }}>⏳ กำลังอ่านใบเสร็จ…</div>}
+                  {r.readPending && <div style={{ fontSize: 12, color: "#4a5a78", fontWeight: 600, marginTop: 2 }}><Icon name="loader" className="spin" /> กำลังอ่านใบเสร็จ…</div>}
                   {r.extraction?.duplicate && (
-                    <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600, marginTop: 2 }}>⚠️ {receiptDuplicateText(r.extraction.duplicate)}</div>
+                    <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600, marginTop: 2 }}><Icon name="alert-triangle" /> {receiptDuplicateText(r.extraction.duplicate)}</div>
                   )}
                   {r.extraction && "reading" in r.extraction && !r.extraction.duplicate && (
-                    <div style={{ fontSize: 12, color: "#946712", marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: "var(--warn)", marginTop: 2 }}>
                       AI อ่านเลขตัวถัง {r.extraction.reading.chassis ?? "ไม่ออก"} - ไม่พบรถที่รอใบเสร็จ
                     </div>
                   )}
                   {r.extraction && "error" in r.extraction && (
-                    <div style={{ fontSize: 12, color: "#b43434", marginTop: 2 }}>{r.extraction.error}</div>
+                    <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 2 }}>{r.extraction.error}</div>
                   )}
                   <select
                     value={choice[r.id] ?? ""}
@@ -335,7 +349,7 @@ export function ReceiptBatchPanel({ targets, onAssigned }: { targets: BatchTarge
                     <button type="button" className="text-button" onClick={() => assign(r.id)}>
                       จับคู่
                     </button>
-                    <button type="button" className="text-button" style={{ color: "#c0392b" }} onClick={() => remove(r.id)}>
+                    <button type="button" className="text-button" style={{ color: "var(--danger)" }} onClick={() => remove(r.id)}>
                       ลบ
                     </button>
                   </div>

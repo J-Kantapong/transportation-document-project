@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
 import { useEffect, useState } from "react";
 import { OTHER_SUBTASKS } from "@/lib/categories";
 import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
@@ -25,7 +26,7 @@ export default function OtherRegistrationPage() {
             <span className="task-number">{index + 1}</span>
             <strong>{task.title}</strong>
             <span className="task-arrow" aria-hidden="true">
-              →
+              <Icon name="chevron-right" />
             </span>
           </Link>
         ))}

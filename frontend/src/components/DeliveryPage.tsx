@@ -12,6 +12,8 @@ import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, sameChassis } from "@/lib/vehicle-focus";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
 import { WEEKEND_WARNING, isWeekend, weekdayName } from "@/lib/date-check";
 
 // ส่งงานลูกค้า (พนักงาน): หน้านี้ไม่มีราคา/ยอดบิล เรื่องวางบิลฝ่ายบัญชีทำต่อที่ /accounting/billing (ผู้ใช้ 2026-09-21)
@@ -77,8 +79,8 @@ function ItemCell({ item, kind }: { item: ItemState; kind: keyof typeof WAIT_TEX
   if (item.state === "none") return <span className="muted">—</span>;
   if (item.state === "notNeeded") return <span className="muted">ไม่ซื้อป้าย</span>;
   if (item.state === "sent") return <span className="delivery-item sent">ส่งแล้ว {item.date ? isoToDisplayDate(item.date).slice(0, 5) : ""}</span>;
-  if (item.state === "ready") return <span className="delivery-item ready">✓ มีแล้ว</span>;
-  return <span className="delivery-item waiting">⏳ {WAIT_TEXT[kind]}</span>;
+  if (item.state === "ready") return <span className="delivery-item ready"><Icon name="tick" /> มีแล้ว</span>;
+  return <span className="delivery-item waiting"><Icon name="clock" /> {WAIT_TEXT[kind]}</span>;
 }
 
 interface Lot {
@@ -338,18 +340,17 @@ export function DeliveryPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>Delivery</h1>
-      <p>
+      <PageHeader title="Delivery" titleFocus subtitle={<>
         ติ๊กคันที่ส่งให้ลูกค้าแล้ว ใส่วันที่ส่งและผู้รับ แล้วกดบันทึก รถที่ส่งแล้วจะไปรอฝ่ายบัญชีวางบิลต่อ ใบยื่นที่ยังไม่พร้อมทุกคัน ส่งคันที่พร้อมไปก่อนได้ ·
         งานโอน / ยกเลิกการใช้รถ / ย้ายออก / คัดป้าย / ต่อภาษี ที่ใบเสร็จกลับแล้วก็ส่งใบเสร็จให้ลูกค้าเซ็นรับที่นี่ (ใบเดียวกับรถจดใหม่ได้ถ้าลูกค้าเดียวกัน) จึงจะวางบิลได้
-      </p>
+      </>} />
       <Link href="/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        รายงานส่งงาน / พิมพ์ใบส่งงานย้อนหลัง →
+        รายงานส่งงาน / พิมพ์ใบส่งงานย้อนหลัง <Icon name="arrow-right" />
       </Link>
 
       {message.error && selected.size === 0 && !lastSlip && (
-        <div className="customer-message error" role="alert" style={{ marginTop: 16 }}>
-          {message.text}
+        <div style={{ marginTop: 16 }}>
+          <Notice tone="error">{message.text}</Notice>
         </div>
       )}
 
@@ -375,7 +376,7 @@ export function DeliveryPage() {
             )}
             {/* คิวเปลี่ยนได้ตลอด (อีกคนส่งไปแล้ว / ป้ายเพิ่งรับเข้ามา) - โหลดใหม่เองได้ คันที่เลือกไว้ยังอยู่ถ้ายังส่งได้ */}
             <button type="button" className="text-button" disabled={loading || saving} onClick={() => loadAll({ keepSelection: true })}>
-              ↻ โหลดใหม่
+              <Icon name="refresh" /> โหลดใหม่
             </button>
           </span>
         </div>
@@ -441,9 +442,7 @@ export function DeliveryPage() {
         )}
 
         {loading ? (
-          <div className="customer-message" role="status" style={{ padding: "0 23px 20px" }}>
-            กำลังโหลด...
-          </div>
+          <LoadingState />
         ) : allLots.length === 0 ? (
           <div className="empty-customers">ไม่มีรถหรืองานที่รอส่ง (รถจดใหม่ต้องได้รับใบเสร็จและเล่มทะเบียนก่อน งานอื่นต้องได้ใบเสร็จกลับก่อน)</div>
         ) : (
@@ -491,14 +490,16 @@ export function DeliveryPage() {
                         onChange={(e) => setMany(ready.map((r) => r.id), e.target.checked)}
                         aria-label="เลือกคันที่พร้อมส่งทั้งใบ"
                       />
-                      <span className="queue-caret">{open ? "▾" : "▸"}</span>
+                      <span className="queue-caret">
+                        <Icon name={open ? "chevron-down" : "chevron-right"} />
+                      </span>
                       {lot.date ? isoToDisplayDate(lot.date) : "ไม่ทราบวันที่ยื่น"} · {lot.label} · {lot.customerName}
                     </span>
                     <span className="queue-sheet-counts">
-                      {lot.rows.length} คัน · <b style={{ color: "#1f7a4d", margin: "0 4px" }}>พร้อมส่ง {ready.length}</b>
+                      {lot.rows.length} คัน · <b style={{ color: "var(--ok)", margin: "0 4px" }}>พร้อมส่ง {ready.length}</b>
                       {done > 0 && ` · ส่งครบแล้ว ${done}`}
                       {pickedHere > 0 && <span className="badge done queue-warn">เลือกแล้ว {pickedHere}</span>}
-                      {notReady > 0 && <span className="badge warn queue-warn">⚠ ยังไม่พร้อม {notReady}</span>}
+                      {notReady > 0 && <span className="badge warn queue-warn"><Icon name="alert-triangle" /> ยังไม่พร้อม {notReady}</span>}
                       {waitTone !== "ok" && (
                         <span className={`badge ${waitTone === "late" ? "alert" : "warn"} queue-warn`} title="ของครบแล้วแต่ยังไม่ได้ลงส่งงาน - ส่งแล้วอย่าลืมลง">
                           ⏰ {agingText(waitDays)}
@@ -546,7 +547,7 @@ export function DeliveryPage() {
                                 <td>
                                   {r.chassis}
                                   {r.deliveredDate ? (
-                                    <div style={{ fontSize: 12, color: "#9a6700", fontWeight: 600, whiteSpace: "nowrap" }}>
+                                    <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600, whiteSpace: "nowrap" }}>
                                       ส่งเล่มแล้ว {isoToDisplayDate(r.deliveredDate)}
                                       {r.bookSlip ? ` (${slipNoText(r.bookSlip.slipNo)})` : ""} · เหลือส่งป้าย
                                     </div>
@@ -590,7 +591,7 @@ export function DeliveryPage() {
           <h2>ส่งแล้วล่าสุด ({recentRows.length})</h2>
           {recentRows.length > 0 && (
             <button type="button" className="text-button" aria-expanded={recentOpen} onClick={() => setRecentOpen((open) => !open)}>
-              {recentOpen ? "▾ ซ่อนข้อมูลรถ" : "▸ แสดงข้อมูลรถ"}
+              <Icon name={recentOpen ? "chevron-down" : "chevron-right"} /> {recentOpen ? "ซ่อนข้อมูลรถ" : "แสดงข้อมูลรถ"}
             </button>
           )}
         </div>
@@ -673,16 +674,16 @@ export function DeliveryPage() {
                 {saving ? "กำลังบันทึก…" : `บันทึกส่งงาน ${selected.size} คัน`}
               </button>
               {message.text && (
-                <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ flexBasis: "100%" }}>
-                  {message.text}
+                <div style={{ flexBasis: "100%" }}>
+                  <Notice tone={message.error ? "error" : "success"}>{message.text}</Notice>
                 </div>
               )}
             </>
           ) : (
             lastSlip && (
               <>
-                <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ flex: 1 }}>
-                  {message.text}
+                <div style={{ flex: 1 }}>
+                  <Notice tone={message.error ? "error" : "success"}>{message.text}</Notice>
                 </div>
                 <button className="primary" disabled={printing} onClick={() => outputSlip(lastSlip.id, "print")}>
                   {printing ? "กำลังเตรียม…" : `พิมพ์ใบส่งงาน ${slipNoText(lastSlip.slipNo)}`}
@@ -755,20 +756,24 @@ function DeliveryConfirmDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(480px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ยืนยันบันทึกส่งงาน</h2>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
         <div>
           วันที่ส่ง:{" "}
-          <b style={{ fontSize: 20, color: days === 0 && !isWeekend(dateIso) ? undefined : "#bb6a00" }}>
+          <b style={{ fontSize: 20, color: days === 0 && !isWeekend(dateIso) ? undefined : "var(--warn)" }}>
             {weekdayName(dateIso)}ที่ {isoToDisplayDate(dateIso)}
           </b>{" "}
           <span className={days === 0 ? "badge done" : "badge warn"}>{dayNote}</span>
         </div>
         {/* ผู้ใช้ 2026-10-13: ใบส่งงาน 61 คันเคยลงวันเสาร์ ทั้งที่ส่งจริงวันจันทร์ */}
-        {isWeekend(dateIso) && <div style={{ color: "#c2410c", fontWeight: 600 }}>⚠ {WEEKEND_WARNING}</div>}
+        {isWeekend(dateIso) && (
+          <div style={{ color: "var(--warn)", fontWeight: 600 }}>
+            <Icon name="alert-triangle" /> {WEEKEND_WARNING}
+          </div>
+        )}
         <div>ลูกค้า: {customerName}</div>
         <div>ผู้รับ: {recipient}</div>
         <div>
@@ -781,7 +786,7 @@ function DeliveryConfirmDialog({
         </div>
       </div>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()}>
           กลับไปแก้
         </button>
         <button type="button" className="primary" onClick={onConfirm} autoFocus>

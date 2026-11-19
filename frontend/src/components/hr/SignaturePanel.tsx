@@ -3,6 +3,8 @@
 /* eslint-disable @next/next/no-img-element -- ลายเซ็นเป็น data URL จากฐานข้อมูล ใช้ next/image ไม่ได้ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorText } from "@/components/hr/HrDialog";
+import { Notice } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { hrApi, type PayslipSignature } from "@/lib/hr-api";
 import { cleanSignatureImage } from "@/lib/signature-image";
 import { timestampToDisplayDate } from "@/lib/date";
@@ -58,7 +60,8 @@ export function SignaturePanel() {
       const s = await hrApi.setSignature(image, name.trim() || null);
       setSig(s);
       setPreview(null);
-      setMessage({ text: "บันทึกลายเซ็นแล้ว สลิปที่พิมพ์ต่อจากนี้จะมีลายเซ็นนี้" });
+      setMessage({ text: "" });
+      toast.success("บันทึกลายเซ็นแล้ว สลิปที่พิมพ์ต่อจากนี้จะมีลายเซ็นนี้");
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
     } finally {
@@ -73,7 +76,8 @@ export function SignaturePanel() {
       setSig(await hrApi.removeSignature());
       setPreview(null);
       setName("");
-      setMessage({ text: "ลบลายเซ็นแล้ว" });
+      setMessage({ text: "" });
+      toast.success("ลบลายเซ็นแล้ว");
     } catch (err) {
       setMessage({ text: errorText(err, "ลบไม่สำเร็จ"), error: true });
     } finally {
@@ -105,7 +109,7 @@ export function SignaturePanel() {
           </label>
           <div className="form-actions" style={{ flexWrap: "wrap" }}>
             <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void onPick(e.target.files?.[0])} />
-            <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <button type="button" className="secondary" disabled={busy} onClick={() => fileRef.current?.click()}>
               {sig?.exists ? "เปลี่ยนรูปลายเซ็น" : "เลือกรูปลายเซ็น"}
             </button>
             <button type="button" className="primary" disabled={busy || !shown || !dirty} onClick={save}>
@@ -125,11 +129,12 @@ export function SignaturePanel() {
           {sig.updatedByName ? ` โดย ${sig.updatedByName}` : ""}
         </p>
       )}
-      {message.text && (
-        <p className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 8 }}>
+      {message.text && !message.error && (
+        <p className="muted" role="status" style={{ marginTop: 8 }}>
           {message.text}
         </p>
       )}
+      <Notice tone="error">{message.error ? message.text : ""}</Notice>
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { BackLink } from "./ui";
 
 interface EmptyWorkPageProps {
   title: string;
@@ -11,11 +11,7 @@ interface EmptyWorkPageProps {
 export function EmptyWorkPage({ title, backHref, backLabel }: EmptyWorkPageProps) {
   return (
     <div className="content">
-      {backHref && (
-        <Link href={backHref} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-          ← {backLabel}
-        </Link>
-      )}
+      {backHref && <BackLink href={backHref} label={backLabel ?? "กลับ"} />}
       <h1>{title}</h1>
       <div className="empty-page">ยังไม่มีข้อมูลสำหรับหัวข้อนี้ รอรายละเอียดเพิ่มเติมจากผู้ใช้</div>
     </div>

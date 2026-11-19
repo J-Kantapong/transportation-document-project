@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
+import { Icon } from "./Icon";
+import { LoadingState, Notice, PageHeader } from "./ui";
 import { DateInput } from "./DateInput";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { overviewApi, type AgingBucket, type Overview, type OverviewAlert } from "@/lib/overview-api";
@@ -43,7 +45,7 @@ function Change({ pct, suffix, invert }: { pct: number | null; suffix: string; i
   const tone = pct === 0 ? "" : up !== !!invert ? " good" : " bad";
   return (
     <span className={`exec-change${tone}`}>
-      {up ? "▲" : pct < 0 ? "▼" : "•"} {Math.abs(pct).toLocaleString("en-US", { maximumFractionDigits: 1 })}% {suffix}
+      {up ? <Icon name="chevron-up" size={12} /> : pct < 0 ? <Icon name="chevron-down" size={12} /> : "•"} {Math.abs(pct).toLocaleString("en-US", { maximumFractionDigits: 1 })}% {suffix}
     </span>
   );
 }
@@ -60,7 +62,7 @@ const SEVERITY: Record<OverviewAlert["severity"], { label: string; icon: string 
 type Tone = "red" | "orange" | "green" | "neutral";
 const DETAILS_KEY = "overview-details-v1";
 
-function FocusTile({ tone, label, value, unit, lines, href }: { tone: Tone; label: string; value: string; unit?: string; lines: Array<string | null | false | undefined>; href?: string }) {
+function FocusTile({ tone, label, value, unit, lines, href }: { tone: Tone; label: string; value: string; unit?: string; lines: ReactNode[]; href?: string }) {
   const body = (
     <>
       <div className="exec-tile-label">{label}</div>
@@ -108,19 +110,23 @@ function AlertRow({ alert: a }: { alert: OverviewAlert }) {
       </div>
       {only ? (
         <Link href={stuckHref(only)} className="text-button">
-          ไปที่คันนี้ →
+          ไปที่คันนี้
+          <Icon name="arrow-right" />
         </Link>
       ) : onlyDoc ? (
         <Link href={onlyDoc.href} className="text-button">
-          ไปที่รายการนี้ →
+          ไปที่รายการนี้
+          <Icon name="arrow-right" />
         </Link>
       ) : count > 0 ? (
         <button type="button" className="text-button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          {open ? "ซ่อนรายการ ▴" : `ดู ${total} รายการ ▾`}
+          {open ? "ซ่อนรายการ" : `ดู ${total} รายการ`}
+          <Icon name={open ? "chevron-up" : "chevron-down"} />
         </button>
       ) : (
         <Link href={a.href} className="text-button">
-          ไปจัดการ →
+          ไปจัดการ
+          <Icon name="arrow-right" />
         </Link>
       )}
       {open && !only && !onlyDoc && count > 0 && <AlertItems items={items} docs={docs} total={total} queueHref={a.href} />}
@@ -197,17 +203,17 @@ export function ExecutiveOverview() {
   if (!data) {
     return (
       <div className="content">
-        <div className="heading">
-          <div>
-            <h1>ภาพรวมผู้บริหาร</h1>
-            <p>{error || "กำลังโหลดข้อมูล…"}</p>
-          </div>
-          {error && (
-            <button type="button" className="primary" onClick={refresh}>
-              ลองใหม่
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="ภาพรวมผู้บริหาร"
+          actions={
+            error ? (
+              <button type="button" className="primary" onClick={refresh}>
+                ลองใหม่
+              </button>
+            ) : undefined
+          }
+        />
+        {error ? <Notice tone="error">{error}</Notice> : <LoadingState label="กำลังโหลดข้อมูล…" />}
       </div>
     );
   }
@@ -238,16 +244,17 @@ export function ExecutiveOverview() {
 
   return (
     <div className="content exec">
-      <div className="heading">
-        <div>
-          <h1>ภาพรวมผู้บริหาร</h1>
-          <p>
+      <PageHeader
+        title="ภาพรวมผู้บริหาร"
+        subtitle={
+          <>
             สรุปการใช้เงิน กระแสเงินสด งานค้าง และประมาณการ · อัปเดต {updated} น.{loading && " · กำลังโหลด…"}
-          </p>
-        </div>
+          </>
+        }
+        actions={
         <div className="exec-date" role="group" aria-label="เลือกวันที่ของสรุปรายวัน">
           <button type="button" aria-label="วันก่อนหน้า" onClick={() => setDate(addDays(data.asOf, -1))}>
-            ‹
+            <Icon name="chevron-left" />
           </button>
           <DateInput
             key={data.asOf}
@@ -266,18 +273,19 @@ export function ExecutiveOverview() {
             onBlur={() => setDateText(null)}
           />
           <button type="button" aria-label="วันถัดไป" disabled={data.asOf >= maxAsOf} onClick={() => setDate(addDays(data.asOf, 1))}>
-            ›
+            <Icon name="chevron-right" />
           </button>
           <button type="button" className="exec-date-today" disabled={loading} onClick={() => (isToday ? refresh() : setDate(null))}>
             {isToday ? "รีเฟรช" : "วันนี้"}
           </button>
         </div>
-      </div>
-      {error && <p className="customer-message error">{error}</p>}
+        }
+      />
+      <Notice tone="error">{error}</Notice>
       {isFuture && (
-        <p className="customer-message">
+        <Notice tone="info">
           กำลังดูล่วงหน้า: ตัวเลขรายวันคือยอดของงานที่พนักงานคีย์ไว้แล้วโดยลงวันที่ {isoToDisplayDate(data.asOf)} ยังไม่ใช่เงินที่จ่ายจริง · เงินจมและประมาณการเป็นข้อมูล ณ ตอนนี้
-        </p>
+        </Notice>
       )}
 
       {/* ---------- ต้องรู้วันนี้: การ์ด 4 ใบ ---------- */}
@@ -291,7 +299,7 @@ export function ExecutiveOverview() {
           lines={[
             `${wc.receivable.count} ใบ · ลูกค้าจ่ายเฉลี่ย ${wc.avgDaysToPay ?? "-"} วันหลังวางบิล`,
             overdue.count > 0
-              ? `⚠ เลยวันคาดรับเงิน ${overdue.count} ใบ ${baht(overdue.amount)} บาท - เช็กว่าได้รับแล้วแต่ยังไม่ลง`
+              ? <><Icon name="alert-triangle" size={14} /> เลยวันคาดรับเงิน {overdue.count} ใบ {baht(overdue.amount)} บาท - เช็กว่าได้รับแล้วแต่ยังไม่ลง</>
               : "ยังไม่มีใบไหนเลยวันคาดรับเงิน",
             topOverdue && `${topOverdue.customerName} ${topOverdue.count} ใบ (เลยมา ${topOverdue.maxDaysOver} วัน)`,
           ]}
@@ -304,7 +312,7 @@ export function ExecutiveOverview() {
           lines={[
             `30 วันล่าสุดใช้ไป ${baht(spend.last30.total)} บาท (เงินเดือน/ค่าจ้าง ${baht(spend.last30.overhead)})`,
             week && `สัปดาห์นี้คาดเงินเข้า ${baht(week.inflow)} → ${weekNet! >= 0 ? "ถ้าเข้าครบ พอ" : `ขาด ${baht(-weekNet!)}`}`,
-            week && week.overdueInflow > 0 && `⚠ ในนั้น ${baht(week.overdueInflow)} บาท ลูกค้าช้ากว่ารอบปกติแล้ว ต้องตาม`,
+            week && week.overdueInflow > 0 && <><Icon name="alert-triangle" size={14} /> ในนั้น {baht(week.overdueInflow)} บาท ลูกค้าช้ากว่ารอบปกติแล้ว ต้องตาม</>,
           ]}
         />
         <FocusTile
@@ -316,7 +324,7 @@ export function ExecutiveOverview() {
           lines={[
             `ส่งงานแล้ว รอวางบิล ${wc.unbilled.count} คัน ${baht(wc.unbilled.amount)} บาท`,
             `ยื่นแล้ว ยังไม่ส่งงาน ${wc.inProcess.count} คัน ${baht(wc.inProcess.amount)} บาท`,
-            deliveryPending && `⚠ ${deliveryPending.detail}`,
+            deliveryPending && <><Icon name="alert-triangle" size={14} /> {deliveryPending.detail}</>,
           ]}
         />
         <FocusTile
@@ -339,7 +347,7 @@ export function ExecutiveOverview() {
           <span className="muted">{todo.length ? `${todo.length} เรื่อง` : "ไม่มีเรื่องค้าง"}</span>
         </div>
         {todo.length === 0 ? (
-          <div className="exec-empty">ไม่มีเรื่องเร่งด่วนตอนนี้ ✓</div>
+          <div className="exec-empty">ไม่มีเรื่องเร่งด่วนตอนนี้ <Icon name="tick" size={16} /></div>
         ) : (
           <ul className="exec-alerts">
             {todo.map((a) => (
@@ -360,7 +368,8 @@ export function ExecutiveOverview() {
       </section>
 
       <button type="button" className="exec-details-toggle" aria-expanded={showDetails} onClick={toggleDetails}>
-        {showDetails ? "ซ่อนรายละเอียด ▴" : "ดูรายละเอียด (ตัวเลขรายวัน ขั้นตอน กราฟ ประมาณการ) ▾"}
+        {showDetails ? "ซ่อนรายละเอียด" : "ดูรายละเอียด (ตัวเลขรายวัน ขั้นตอน กราฟ ประมาณการ)"}
+        <Icon name={showDetails ? "chevron-up" : "chevron-down"} />
       </button>
       {showDetails && (
       <>

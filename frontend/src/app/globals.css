@@ -590,9 +590,6 @@ tr.row-selected td{background:#f3f6ff}
 .confirm-dialog{width:min(460px,92vw);padding:24px}
 .confirm-dialog-text{white-space:pre-line;color:var(--ink);font-size:15px;line-height:1.8;margin:0}
 .confirm-dialog-input{width:100%;margin-top:14px;min-height:42px}
-.confirm-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
-.confirm-dialog-cancel{border:1px solid var(--line-2);background:white;border-radius:8px;padding:12px 20px;color:var(--ink-2)}
-.confirm-dialog-cancel:hover{background:var(--surface-2)}
 
 /* งานรถเก่า (ผู้ใช้ 2026-11-18): จอใหญ่ = ตารางช่อง (.ov-grid) / จอเล็ก = รายการ + ป้ายสถานะ (.ov-list) */
 .ov-summary{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;margin:18px 0}
@@ -619,6 +616,90 @@ tr.row-selected td{background:#f3f6ff}
 .ov-block{margin-top:16px;padding:12px 14px;border:1px solid var(--line-2);border-radius:10px;font-size:14px}
 .ov-history{list-style:none;margin:0;padding:0}
 .ov-history li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--surface-2);font-size:13px}
+
+/* ===== รูปแบบกลางของทั้งแอป (ผู้ใช้ 2026-11-19) - components/ui.tsx, lib/toast.ts, docs/claude/ui-patterns.md =====
+   ทิศทาง: ย้อนกลับ = บนซ้าย · ปุ่มหลัก = ขวาสุด · ยกเลิก = ซ้ายของปุ่มหลัก · ผิดพลาด = กล่องแดงในหน้า · สำเร็จ = ป้ายลอยขวาบน */
+:root{--danger-soft:#fdeeee;--danger-line:#f1c4c4;--ok-line:#bfe3d2;--warn-line:#f0d9a8;--info-soft:#eef3ff;--info-line:#cfdcfb}
+::selection{background:#cddafc;color:var(--ink)}
+:root{accent-color:var(--brand)}
+.icon-svg{flex-shrink:0}
+/* ลิงก์ย้อนกลับ บนซ้ายเหนือหัวข้อ */
+.back-link{display:inline-flex;align-items:center;gap:6px;margin:0 0 14px;padding:4px 8px 4px 4px;border-radius:6px;font-size:14px;color:var(--brand);text-decoration:none}
+.back-link svg{width:16px;height:16px}
+.back-link:hover{background:var(--brand-soft)}
+.back-link:focus-visible{outline:3px solid #80a2ff;outline-offset:2px}
+.heading:has(>.heading-text){flex-wrap:wrap}
+.heading-text{min-width:0;flex:1 1 320px}
+.heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto;min-width:0}
+.heading-actions>*{white-space:nowrap}
+/* ปุ่ม: primary = ทำต่อ/บันทึก, secondary = ยกเลิก/ปิด/ทางเลือกรอง, text-button = ลิงก์ในบรรทัด */
+.secondary,.confirm-dialog-cancel{border:1px solid var(--line-2);background:white;color:var(--ink-2);padding:11px 18px;border-radius:8px;display:inline-flex;align-items:center;gap:8px;text-decoration:none;font-size:inherit}
+.secondary:hover:not(:disabled),.confirm-dialog-cancel:hover{background:var(--surface-2)}
+.secondary:disabled{opacity:.6;cursor:not-allowed}
+.secondary.danger{color:var(--danger);border-color:var(--danger-line)}
+.secondary.danger:hover:not(:disabled){background:var(--danger-soft)}
+a.primary{text-decoration:none;display:inline-flex}
+.primary svg,.secondary svg{width:18px;height:18px}
+.text-button{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
+.text-button svg{width:16px;height:16px}
+.text-button:hover:not(:disabled){text-decoration:underline;text-underline-offset:3px}
+.text-button:disabled{opacity:.5;cursor:not-allowed}
+/* แถวปุ่มท้ายฟอร์ม: ชิดขวา [ยกเลิก] [บันทึก] - ใน JSX ใส่ปุ่มยกเลิกก่อน ปุ่มหลักทีหลัง; ข้อความสถานะใส่ .form-actions-note (ชิดซ้าย) */
+.form-actions{justify-content:flex-end;flex-wrap:wrap;gap:10px}
+.form-actions-note{margin-right:auto}
+.confirm-dialog-actions,.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px;flex-wrap:wrap}
+@media(max-width:600px){.form-actions{flex-direction:column-reverse;align-items:stretch}.form-actions>*{justify-content:center}.form-actions-note{margin:0}}
+/* ปุ่มปิดของ dialog (ไอคอน x) */
+dialog .close{display:inline-grid;place-items:center;padding:0;color:var(--ink-2)}
+dialog .close:hover{background:var(--line)}
+dialog .close svg{width:18px;height:18px}
+/* ช่องบังคับ */
+.req{color:var(--danger);margin-left:3px;font-weight:600}
+/* .field เป็น flex คอลัมน์ - <Req/> ที่ต่อท้ายข้อความเปล่าจะตกไปอีกบรรทัด: ช่องที่มี Req ใช้ block ให้ * อยู่ท้ายป้ายชื่อ */
+.field:has(>.req){display:block}
+.field:has(>.req)>:not(.req){margin-top:8px}
+.field:has(>.req)>:is(small,.muted,.field-error,.sub){display:block}
+.field:has(>.req)>.date-input{display:flex}
+/* กล่องแจ้งในหน้า */
+.notice{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid;border-radius:10px;font-size:14px;line-height:1.7;margin:0 0 16px;text-align:left}
+.notice>svg{width:20px;height:20px;margin-top:2px}
+.notice-body{flex:1;min-width:0;white-space:pre-line;overflow-wrap:anywhere}
+.notice-action{flex-shrink:0;align-self:center}
+.notice--error{background:var(--danger-soft);border-color:var(--danger-line);color:#8f2525}
+.notice--error>svg{color:var(--danger)}
+.notice--success{background:var(--ok-soft);border-color:var(--ok-line);color:#17604a}
+.notice--success>svg{color:var(--ok)}
+.notice--warn{background:var(--warn-soft);border-color:var(--warn-line);color:#6e4c0c}
+.notice--warn>svg{color:var(--warn)}
+.notice--info{background:var(--info-soft);border-color:var(--info-line);color:#26478f}
+.notice--info>svg{color:var(--info)}
+.panel>.notice{margin:0 23px 16px}
+/* ข้อความผิดพลาด/สำเร็จแบบเดิม (customer-message) ให้หน้าตาเดียวกับ .notice จนกว่าจะเปลี่ยนเป็น <Notice> - ในตารางยังเป็นตัวหนังสือ */
+.customer-message.error,.customer-message.success{padding:10px 14px;border:1px solid;border-radius:10px}
+.customer-message.error{background:var(--danger-soft);border-color:var(--danger-line);color:#8f2525}
+.customer-message.success{background:var(--ok-soft);border-color:var(--ok-line);color:#17604a}
+.customer-message:empty{display:none}
+td .customer-message.error,td .customer-message.success,.inspect-note .customer-message{padding:0;border:0;background:none}
+td .customer-message.error{color:var(--danger)}
+.empty-customers[role=alert]{color:#8f2525}
+.empty-action{margin-top:14px;display:flex;justify-content:center}
+/* กำลังโหลด */
+.loading-state{display:flex;align-items:center;justify-content:center;gap:10px;padding:40px 24px;color:var(--ink-muted);font-size:14px}
+.loading-state--inline{display:inline-flex;padding:0;justify-content:flex-start}
+.loading-state svg{width:18px;height:18px;color:var(--brand)}
+.spin{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* ป้ายลอย (lib/toast.ts) */
+.toast-region{position:fixed;top:16px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none}
+.toast{pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:10px;max-width:min(420px,calc(100vw - 32px));padding:12px 16px;border-radius:10px;background:white;border:1px solid var(--line);box-shadow:0 10px 30px #14203c26;font-size:14px;color:var(--ink);animation:toast-in .22s cubic-bezier(.2,.8,.2,1)}
+.toast svg{width:20px;height:20px}
+.toast--success svg{color:var(--ok)}
+.toast--info svg{color:var(--info)}
+.toast--leaving{opacity:0;transform:translateY(-6px);transition:opacity .2s,transform .2s}
+@keyframes toast-in{from{opacity:0;transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.5s}.toast{animation:none}.toast--leaving{transition:none}}
+/* ขั้นตอนหลายหน้า: แถบท้าย [← ขั้นก่อน] ซ้าย · [ขั้นถัดไป →] ขวา */
+.step-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:24px}
 /* ตารางช่องมี 8 คอลัมน์ ต้องการพื้นที่กว้าง - จอแคบกว่า 1100px (รวมแท็บเล็ต) ใช้แบบรายการแทน ไม่ให้ต้องเลื่อนข้าง */
 @media(max-width:1100px){.ov-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.ov-grid{display:none}.ov-list{display:block}}
 @media(max-width:850px){.ov-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.ov-filters select{flex:1;min-width:140px}}

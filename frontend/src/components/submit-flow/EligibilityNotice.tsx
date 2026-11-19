@@ -1,5 +1,6 @@
 "use client";
 
+import { Notice } from "@/components/ui";
 import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "./SubmitFlowContext";
 
@@ -10,18 +11,22 @@ export function EligibilityNotice() {
   return (
     <>
       {eligibilityError && (
-        <p className="customer-message error" role="alert" style={{ marginBottom: 12 }}>
-          ตรวจสิทธิ์ยื่นตามวันที่ยื่นไม่สำเร็จ: {eligibilityError} ·{" "}
-          <button type="button" className="text-button" onClick={retryEligibility}>
-            ลองใหม่
-          </button>
-        </p>
+        <Notice
+          tone="error"
+          action={
+            <button type="button" className="text-button" onClick={retryEligibility}>
+              ลองใหม่
+            </button>
+          }
+        >
+          ตรวจสิทธิ์ยื่นตามวันที่ยื่นไม่สำเร็จ: {eligibilityError}
+        </Notice>
       )}
       {checks.dateBlockedIds.length > 0 && (
-        <p className="customer-message error" role="alert" style={{ marginBottom: 12 }}>
+        <Notice tone="error">
           ยื่นไม่ได้ ณ วันที่ยื่น {isoToDisplayDate(submitDate)} จำนวน {checks.dateBlockedIds.length} คัน (แถวสีแดง) - เปลี่ยนวันที่ยื่น
           หรือเอาคันนั้นออก
-        </p>
+        </Notice>
       )}
     </>
   );

@@ -13,6 +13,9 @@ import { fetchPrintSignature } from "@/lib/print-signature";
 import { printQuotation, rateConditionText } from "@/lib/quotation-print";
 import { QUOTATION_KIND_LABEL, quotationApi, quotationFilePath, quotationGrandTotal, type Quotation, type QuotationHistoryEntry } from "@/lib/quotation-api";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { stageBadgeClass, stageText } from "@/components/QuotationsPage";
 
 // รายละเอียดใบเสนอราคา 1 ใบ (ผู้ใช้ 2026-10-01): ดูขั้นของใบ บันทึกคำตอบของลูกค้า (อนุมัติ + PO / ไม่อนุมัติ)
@@ -40,7 +43,6 @@ export function QuotationDetailPage() {
   const [action, setAction] = useState<Action>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [signature, setSignature] = useState<PayslipSignature | null>(null);
 
   // ช่องของฟอร์มย่อยแต่ละการกระทำ
@@ -101,10 +103,9 @@ export function QuotationDetailPage() {
   async function run(fn: () => Promise<string | void>) {
     setBusy(true);
     setError("");
-    setNotice("");
     try {
       const text = await fn();
-      if (text) setNotice(text);
+      if (text) toast.success(text);
       setAction(null);
     } catch (err) {
       setError(errorText(err, "ดำเนินการไม่สำเร็จ"));
@@ -128,13 +129,8 @@ export function QuotationDetailPage() {
   if (!q) {
     return (
       <section className="content">
-        <h1 tabIndex={-1}>ใบเสนอราคา</h1>
-        <div className={`customer-message${error ? " error" : ""}`} role="status">
-          {error || (id ? "กำลังโหลด..." : "ไม่ได้ระบุใบเสนอราคา")}
-        </div>
-        <Link href="/accounting/quotations" className="text-button">
-          ← กลับไปรายการใบเสนอราคา
-        </Link>
+        <PageHeader back={{ href: "/accounting/quotations", label: "รายการใบเสนอราคา" }} titleFocus title="ใบเสนอราคา" />
+        {error ? <Notice tone="error">{error}</Notice> : id ? <LoadingState /> : <Notice tone="info">ไม่ได้ระบุใบเสนอราคา</Notice>}
       </section>
     );
   }
@@ -154,40 +150,32 @@ export function QuotationDetailPage() {
 
   return (
     <section className="content">
-      <div className="heading">
-        <div>
-          <h1 tabIndex={-1}>{q.quotationNo ?? "ร่างใบเสนอราคา"}</h1>
-          <p>
+      <PageHeader
+        back={{ href: "/accounting/quotations", label: "รายการใบเสนอราคา" }}
+        titleFocus
+        title={q.quotationNo ?? "ร่างใบเสนอราคา"}
+        subtitle={
+          <>
             {q.customer.name}
             {q.title ? ` · ${q.title}` : ""} · {QUOTATION_KIND_LABEL[q.kind]}
-          </p>
-        </div>
-        <span className={stageBadgeClass(q.stage)} style={{ fontSize: 14, padding: "7px 12px" }}>
-          {stageText(q)}
-        </span>
-      </div>
-      <Link href="/accounting/quotations" className="text-button" style={{ display: "inline-block", marginBottom: 12 }}>
-        ← กลับไปรายการใบเสนอราคา
-      </Link>
+          </>
+        }
+        actions={
+          <span className={stageBadgeClass(q.stage)} style={{ fontSize: 14, padding: "7px 12px" }}>
+            {stageText(q)}
+          </span>
+        }
+      />
 
-      {notice && (
-        <div className="customer-message success" role="status" style={{ margin: "0 0 12px" }}>
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div className="customer-message error" role="alert" style={{ margin: "0 0 12px" }}>
-          {error}
-        </div>
-      )}
+      <Notice tone="error">{error}</Notice>
 
       <section className="panel" style={{ padding: "18px 23px", display: "grid", gap: 14, overflow: "visible" }}>
         {/* ขั้นของใบ */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {steps.map((s, i) => (
-            <div key={s.label} style={{ flex: "1 1 150px", borderTop: `3px solid ${s.done ? "#1d7556" : "#dce2ec"}`, paddingTop: 8, fontSize: 13 }}>
-              <b style={{ fontWeight: 600, color: s.done ? "#1d7556" : "#5f6b80" }}>
-                {i + 1}. {s.label} {s.done ? "✓" : ""}
+            <div key={s.label} style={{ flex: "1 1 150px", borderTop: `3px solid ${s.done ? "var(--ok)" : "#dce2ec"}`, paddingTop: 8, fontSize: 13 }}>
+              <b style={{ fontWeight: 600, color: s.done ? "var(--ok)" : "#5f6b80" }}>
+                {i + 1}. {s.label} {s.done && <Icon name="tick" />}
               </b>
               {s.sub && <div className="muted">{s.sub}</div>}
             </div>
@@ -195,7 +183,7 @@ export function QuotationDetailPage() {
         </div>
 
         {(q.stage === "REJECTED" || q.stage === "CANCELLED" || q.stage === "SUPERSEDED" || q.stage === "EXPIRED") && (
-          <div className="customer-message" style={{ background: "#fff6e7", color: "#8a6412", borderRadius: 10, padding: "10px 14px" }}>
+          <Notice tone="warn">
             {q.stage === "REJECTED" && <>ลูกค้าไม่อนุมัติ: {q.rejectReason} - ทำฉบับแก้ไขเพื่อเสนอใหม่ได้</>}
             {q.stage === "CANCELLED" && <>ยกเลิกแล้ว: {q.cancelReason}</>}
             {q.stage === "SUPERSEDED" && (
@@ -209,15 +197,15 @@ export function QuotationDetailPage() {
               </>
             )}
             {q.stage === "EXPIRED" && <>เลยวันยืนราคา ({isoToDisplayDate(q.validUntil)}) แล้ว ลูกค้ายังไม่ตอบ - ยังบันทึกอนุมัติได้ หรือทำฉบับแก้ไขเพื่อเสนอใหม่</>}
-          </div>
+          </Notice>
         )}
         {q.replacedBy && q.replacedBy.status === "DRAFT" && (
-          <div className="customer-message">
+          <Notice tone="info">
             มีร่างฉบับแก้ไขของใบนี้ค้างอยู่{" "}
             <Link href={`/accounting/quotations/new?edit=${encodeURIComponent(q.replacedBy.id)}`} className="text-button">
               เปิดร่าง
             </Link>
-          </div>
+          </Notice>
         )}
 
         {/* ข้อมูลหัวใบ */}
@@ -234,7 +222,8 @@ export function QuotationDetailPage() {
         </div>
         {q.hasFile && (
           <button type="button" className="text-button" style={{ justifySelf: "start" }} onClick={openFile}>
-            📎 เปิดไฟล์ PO / หลักฐานการอนุมัติ
+            <Icon name="paperclip" />
+            เปิดไฟล์ PO / หลักฐานการอนุมัติ
           </button>
         )}
 
@@ -280,11 +269,12 @@ export function QuotationDetailPage() {
 
         {/* ปุ่มตามขั้น */}
         <div className="form-actions" style={{ marginTop: 0, flexWrap: "wrap", borderTop: "1px solid #f0f2f6", paddingTop: 14 }}>
-          <button type="button" onClick={() => printQuotation(q, { signature })}>
-            🖨 พิมพ์
+          <button type="button" className="secondary" onClick={() => printQuotation(q, { signature })}>
+            <Icon name="printer" />
+            พิมพ์
           </button>
           {q.status === "DRAFT" && (
-            <Link href={`/accounting/quotations/new?edit=${encodeURIComponent(q.id)}`} className="primary" style={{ textDecoration: "none" }}>
+            <Link href={`/accounting/quotations/new?edit=${encodeURIComponent(q.id)}`} className="primary">
               แก้ร่าง / ออกเลข
             </Link>
           )}
@@ -300,12 +290,14 @@ export function QuotationDetailPage() {
           )}
           {approved && q.kind === "JOB" && !q.invoice && q.customerId && (
             <button type="button" className="primary" onClick={() => open("invoice")}>
-              ออกใบวางบิลจากใบนี้ →
+              ออกใบวางบิลจากใบนี้
+              <Icon name="arrow-right" />
             </button>
           )}
           {approved && q.kind === "RATE" && !q.ratesAppliedAt && q.customerId && (
             <button type="button" className="primary" onClick={() => open("rates")}>
-              ตั้งเป็นราคาลูกค้า →
+              ตั้งเป็นราคาลูกค้า
+              <Icon name="arrow-right" />
             </button>
           )}
           {q.invoice && (
@@ -358,7 +350,7 @@ export function QuotationDetailPage() {
                 <b style={{ fontWeight: 600 }}>บันทึกว่าลูกค้าอนุมัติ {q.quotationNo}</b>
                 <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
                   <label className="field">
-                    วันที่อนุมัติ *
+                    วันที่อนุมัติ <Req />
                     <DateInput value={dateText} onChange={(v) => setDateText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
                   </label>
                   <label className="field">
@@ -382,7 +374,7 @@ export function QuotationDetailPage() {
                 </b>
                 <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
                   <label className="field">
-                    {q.account === "PERSONAL" ? "เลขที่บิล (บัญชีบุคคล) *" : "เลขที่ IV *"}
+                    {q.account === "PERSONAL" ? "เลขที่บิล (บัญชีบุคคล)" : "เลขที่ IV"} <Req />
                     <input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
                     {numbers && (
                       <span className="muted" style={{ fontSize: 12 }}>
@@ -391,7 +383,7 @@ export function QuotationDetailPage() {
                     )}
                   </label>
                   <label className="field">
-                    วันที่ออกบิล *
+                    วันที่ออกบิล <Req />
                     <DateInput value={dateText} onChange={(v) => setDateText(formatDateDigitsCe(v.replace(/\D/g, "").slice(0, 8)))} />
                   </label>
                 </div>
@@ -413,7 +405,7 @@ export function QuotationDetailPage() {
               <>
                 <b style={{ fontWeight: 600 }}>ผูก {q.customer.name} กับลูกค้าในระบบ</b>
                 <label className="field" style={{ maxWidth: 420 }}>
-                  ลูกค้า *
+                  ลูกค้า <Req />
                   <select value={linkId} onChange={(e) => setLinkId(e.target.value)}>
                     <option value="">— เลือกลูกค้า —</option>
                     {customers.map((c) => (
@@ -430,7 +422,7 @@ export function QuotationDetailPage() {
             )}
             {(action === "reject" || action === "cancel" || action === "unapprove") && (
               <label className="field">
-                {action === "reject" ? "เหตุผลที่ลูกค้าไม่อนุมัติ *" : action === "cancel" ? `เหตุผลที่ยกเลิก ${q.quotationNo} *` : "เหตุผลที่ถอนการอนุมัติ *"}
+                {action === "reject" ? "เหตุผลที่ลูกค้าไม่อนุมัติ" : action === "cancel" ? `เหตุผลที่ยกเลิก ${q.quotationNo}` : "เหตุผลที่ถอนการอนุมัติ"} <Req />
                 <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} maxLength={500} />
                 {action === "unapprove" && (
                   <span className="muted" style={{ fontSize: 12 }}>
@@ -440,7 +432,7 @@ export function QuotationDetailPage() {
               </label>
             )}
             <div className="form-actions" style={{ marginTop: 0 }}>
-              <button type="button" onClick={() => setAction(null)} disabled={busy}>
+              <button type="button" className="secondary" onClick={() => setAction(null)} disabled={busy}>
                 ปิด
               </button>
               <button

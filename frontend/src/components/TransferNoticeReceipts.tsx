@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, Req } from "@/components/ui";
 import { ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { splitEvenly, transferReceiptsApi, type TransferReceiptDetail } from "@/lib/transfer-receipts-api";
 
@@ -66,9 +68,7 @@ export function TransferReceiptCell({
         </>
       )}
       {error && (
-        <div className="customer-message error" role="alert">
-          {error}
-        </div>
+        <Notice tone="error">{error}</Notice>
       )}
     </div>
   );
@@ -122,8 +122,8 @@ export function TransferReceiptAttachButton({ picked, onDone }: { picked: Transf
           if (event.target === event.currentTarget && !saving) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>แนบใบเสร็จแจ้งย้าย</h2>
         <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
@@ -132,11 +132,11 @@ export function TransferReceiptAttachButton({ picked, onDone }: { picked: Transf
         </p>
         <div style={{ display: "grid", gap: 12 }}>
           <label className="field">
-            ไฟล์ใบเสร็จ (รูปหรือ PDF) *
+            ไฟล์ใบเสร็จ (รูปหรือ PDF) <Req />
             <input key={inputKey} type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           </label>
           <label className="field">
-            ยอดรวมของใบเสร็จ (บาท) *
+            ยอดรวมของใบเสร็จ (บาท) <Req />
             <input
               type="text"
               inputMode="decimal"
@@ -169,9 +169,7 @@ export function TransferReceiptAttachButton({ picked, onDone }: { picked: Transf
           </div>
         </div>
         {error && (
-          <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-            {error}
-          </p>
+          <Notice tone="error">{error}</Notice>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <button type="button" className="primary" disabled={saving} onClick={save}>
@@ -241,12 +239,12 @@ function TransferReceiptManageButton({ receiptId, vehicle, onChanged }: { receip
           if (event.target === event.currentTarget && !saving) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>ใบเสร็จแจ้งย้าย</h2>
         {!detail ? (
-          !error && <div className="empty-customers">กำลังโหลด…</div>
+          !error && <LoadingState />
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
             <div className="table-wrap" style={{ maxHeight: 220 }}>
@@ -282,7 +280,7 @@ function TransferReceiptManageButton({ receiptId, vehicle, onChanged }: { receip
               />
             </label>
             <label className="field">
-              เหตุผล *
+              เหตุผล <Req />
               <input type="text" maxLength={200} value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ยอดผิด / ติ๊กผิดคัน" />
             </label>
             <p className="muted" style={{ fontSize: 12 }}>
@@ -292,24 +290,22 @@ function TransferReceiptManageButton({ receiptId, vehicle, onChanged }: { receip
           </div>
         )}
         {error && (
-          <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-            {error}
-          </p>
+          <Notice tone="error">{error}</Notice>
         )}
-        <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-          <button type="button" className="primary" disabled={saving || !detail} onClick={saveTotal}>
-            บันทึกยอดรวม
+        <div className="dialog-actions">
+          <button type="button" className="secondary" disabled={saving} onClick={() => dialogRef.current?.close()}>
+            ปิด
           </button>
           <button
             type="button"
-            className="text-button"
+            className="secondary danger"
             disabled={saving || !detail}
             onClick={() => void run(() => transferReceiptsApi.detach(receiptId, { vehicleId: vehicle.id, remark: remark.trim() }))}
           >
             ถอดคันนี้ออกจากใบ
           </button>
-          <button type="button" className="text-button" disabled={saving} onClick={() => dialogRef.current?.close()}>
-            ปิด
+          <button type="button" className="primary" disabled={saving || !detail} onClick={saveTotal}>
+            บันทึกยอดรวม
           </button>
         </div>
       </dialog>

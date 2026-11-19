@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { errorText, HistoryDialog, HrDialog, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
 import { hrApi, maskId, WHT_INCOME_LABEL, WHT_OTHER_INCOME_TYPES, type Supplier, type SupplierInput, type WhtIncomeType } from "@/lib/hr-api";
 
@@ -54,11 +56,11 @@ function SupplierDialog({ supplier, onClose, onSaved }: { supplier: Supplier | n
     <HrDialog title={supplier ? `แก้ไข ${supplier.name}` : "เพิ่ม Supplier"} onClose={onClose} width={640} closeRef={closeRef}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
         <label className="field">
-          ชื่อ-สกุล (พร้อมคำนำหน้า) *
+          ชื่อ-สกุล (พร้อมคำนำหน้า) <Req />
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={150} />
         </label>
         <label className="field">
-          เลขประจำตัวประชาชน / ผู้เสียภาษี 13 หลัก *
+          เลขประจำตัวประชาชน / ผู้เสียภาษี 13 หลัก <Req />
           <input value={taxId} onChange={(e) => setTaxId(e.target.value.replace(/[^\d-]/g, "").slice(0, 17))} inputMode="numeric" />
         </label>
       </div>
@@ -95,16 +97,12 @@ function SupplierDialog({ supplier, onClose, onSaved }: { supplier: Supplier | n
       </label>
       {supplier && (
         <label className="field" style={{ marginTop: 12 }}>
-          เหตุผลที่แก้ไข *
+          เหตุผลที่แก้ไข <Req />
           <input value={remark} onChange={(e) => setRemark(e.target.value)} maxLength={500} />
         </label>
       )}
       {supplier && supplier.certificateCount > 0 && <p className="muted" style={{ fontSize: 13 }}>แก้ที่นี่ไม่ทำให้ 50 ทวิ ที่ออกไปแล้ว ({supplier.certificateCount} ใบ) เปลี่ยน - ใบเก่าเก็บข้อมูลตอนที่ออกไว้</p>}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 14 }}>
         <button type="button" className="primary" disabled={busy} onClick={submit}>
           {busy ? "กำลังบันทึก…" : "บันทึก"}
@@ -137,10 +135,15 @@ export function SuppliersPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>Suppliers</h1>
-      <p>
-        Supplier = ซับ/ผู้รับจ้างที่เป็นบุคคลธรรมดา ไว้เลือกตอนออก <Link href="/hr/wht">50 ทวิ</Link> ไม่ต้องพิมพ์ชื่อ เลขประจำตัว และที่อยู่ใหม่ทุกครั้ง · พนักงานอยู่ในทะเบียนพนักงานแยกต่างหาก
-      </p>
+      <PageHeader
+        titleFocus
+        title="Suppliers"
+        subtitle={
+          <>
+            Supplier = ซับ/ผู้รับจ้างที่เป็นบุคคลธรรมดา ไว้เลือกตอนออก <Link href="/hr/wht">50 ทวิ</Link> ไม่ต้องพิมพ์ชื่อ เลขประจำตัว และที่อยู่ใหม่ทุกครั้ง · พนักงานอยู่ในทะเบียนพนักงานแยกต่างหาก
+          </>
+        }
+      />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "end", marginTop: 14 }}>
         <label className="field" style={{ minWidth: 150 }}>
@@ -156,14 +159,11 @@ export function SuppliersPage() {
           <input value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <button type="button" className="primary" onClick={() => setDialog({ type: "edit", supplier: null })}>
-          + เพิ่ม Supplier
+          <Icon name="plus" />
+          เพิ่ม Supplier
         </button>
       </div>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="table-wrap">
@@ -182,7 +182,7 @@ export function SuppliersPage() {
               {suppliers === null && (
                 <tr>
                   <td colSpan={6} className="muted">
-                    กำลังโหลด…
+                    <LoadingState inline />
                   </td>
                 </tr>
               )}

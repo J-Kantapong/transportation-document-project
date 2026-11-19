@@ -1,8 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { PageTabs } from "@/components/PageTabs";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   api,
@@ -86,7 +88,7 @@ function VehicleFieldsFieldset({
   return (
     <div className="vehicle-fields">
       <label className="field">
-        วันที่ *
+        วันที่ <Req />
         <DateInput
           required
           value={dateText}
@@ -94,7 +96,7 @@ function VehicleFieldsFieldset({
         />
       </label>
       <label className="field">
-        ชื่อลูกค้า *
+        ชื่อลูกค้า <Req />
         <select required value={row.customerId} onChange={(e) => onFieldChange("customerId", e.target.value)}>
           <option value="">เลือกลูกค้า</option>
           {customerOptions.map((c) => (
@@ -106,7 +108,7 @@ function VehicleFieldsFieldset({
       </label>
       <label className="field">
         <span>
-          เลขตัวถัง * <ChassisCounter chassis={row.chassis} />
+          เลขตัวถัง <Req /> <ChassisCounter chassis={row.chassis} />
         </span>
         {/* บันทึกเป็นตัวพิมพ์ใหญ่ไม่มีช่องว่างเสมอ (normalizeVehicleRow) - แสดงตัวใหญ่ให้เห็นตั้งแต่ตอนพิมพ์ */}
         <input
@@ -118,7 +120,7 @@ function VehicleFieldsFieldset({
         />
       </label>
       <label className="field">
-        เลขเครื่อง *
+        เลขเครื่อง <Req />
         <input maxLength={250} required value={row.engine} onChange={(e) => onFieldChange("engine", e.target.value)} />
       </label>
       {/* รุ่นที่รู้จัก (ผู้ใช้ 2026-10-13): รถในระบบที่เลขตัวถังขึ้นต้นเหมือนกันเคยคีย์เป็นยี่ห้อ / CC / ประเภทรถ อะไร - กดเติมค่าได้ */}
@@ -135,7 +137,7 @@ function VehicleFieldsFieldset({
         }}
       />
       <label className="field">
-        ยี่ห้อ *
+        ยี่ห้อ <Req />
         <select required value={row.brandId} onChange={(e) => onFieldChange("brandId", e.target.value)}>
           <option value="">เลือกยี่ห้อ</option>
           {brands.map((b) => (
@@ -146,7 +148,7 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        ประเภทเชื้อเพลิง *
+        ประเภทเชื้อเพลิง <Req />
         <select required value={row.fuel} onChange={(e) => onFieldChange("fuel", e.target.value)}>
           <option value="">เลือกประเภทเชื้อเพลิง</option>
           {FUEL_TYPES.map((f) => (
@@ -157,7 +159,7 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        ขนาด CC{sizeField === "cc" ? " *" : ""}
+        ขนาด CC{sizeField === "cc" && <Req />}
         {/* ช่องที่ใช้คิดภาษีต้องมากกว่า 0 (ดู getVehicleRowErrors) */}
         <input
           type="number"
@@ -169,7 +171,7 @@ function VehicleFieldsFieldset({
         />
       </label>
       <label className="field">
-        น้ำหนักรถ (กก.){sizeField === "weight" ? " *" : ""}
+        น้ำหนักรถ (กก.){sizeField === "weight" && <Req />}
         <input
           type="number"
           min={sizeField === "weight" ? 0.01 : 0}
@@ -184,7 +186,7 @@ function VehicleFieldsFieldset({
         <input maxLength={250} value={row.color} onChange={(e) => onFieldChange("color", e.target.value)} />
       </label>
       <label className="field">
-        ประเภทรถ *
+        ประเภทรถ <Req />
         <select required value={row.body} onChange={(e) => onFieldChange("body", e.target.value)}>
           <option value="">เลือกประเภทรถ</option>
           {VEHICLE_TYPES.map((t) => (
@@ -195,7 +197,7 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        จังหวัดที่จดทะเบียน *
+        จังหวัดที่จดทะเบียน <Req />
         <select required value={row.registrationProvince} onChange={(e) => onFieldChange("registrationProvince", e.target.value)}>
           <option value="">เลือกจังหวัด</option>
           {PROVINCES.map((p) => (
@@ -204,7 +206,7 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        จังหวัดเจ้าของรถ *
+        จังหวัดเจ้าของรถ <Req />
         <select required value={row.ownerProvince} onChange={(e) => onFieldChange("ownerProvince", e.target.value)}>
           <option value="">เลือกจังหวัด</option>
           {PROVINCES.map((p) => (
@@ -213,7 +215,7 @@ function VehicleFieldsFieldset({
         </select>
       </label>
       <label className="field">
-        ประเภทเจ้าของรถ *
+        ประเภทเจ้าของรถ <Req />
         <select required value={row.ownerType} onChange={(e) => onFieldChange("ownerType", e.target.value)}>
           <option value="">เลือกบุคคลธรรมดา / นิติบุคคล</option>
           {OWNER_TYPES.map(([code, label]) => (
@@ -251,7 +253,7 @@ function VehicleFieldsFieldset({
             <input value={financeLabel} readOnly placeholder="ชื่อไฟแนนซ์ที่เลือก" aria-label="ผู้ถือกรรมสิทธิ์ (ไฟแนนซ์)" />
           </div>
           <label className="field">
-            ชื่อผู้ครอบครอง *
+            ชื่อผู้ครอบครอง <Req />
             <input
               required
               maxLength={250}
@@ -263,7 +265,7 @@ function VehicleFieldsFieldset({
         </>
       ) : (
         <label className="field">
-          ชื่อผู้ถือกรรมสิทธิ์ *
+          ชื่อผู้ถือกรรมสิทธิ์ <Req />
           <input
             required
             maxLength={250}
@@ -656,7 +658,8 @@ export default function VehicleEntryPage() {
       setSingle({ ...EMPTY_SINGLE, date: todayIso() });
       setSingleFinanceOn(false);
       setDateText(isoToDisplayDate(todayIso()));
-      setSingleMessage({ text: "บันทึกข้อมูลรถเรียบร้อยแล้ว" });
+      setSingleMessage({ text: "" });
+      toast.success("บันทึกข้อมูลรถเรียบร้อยแล้ว");
       await loadVehicles();
     } catch (error) {
       const warnings = rowWarningsOf(error);
@@ -787,7 +790,8 @@ export default function VehicleEntryPage() {
         Object.fromEntries(VEHICLE_COLUMNS.map(([key]) => [key, row[key]])),
       );
       const result = await api.createVehicles(payload, confirmed ? warningKeys(confirmed) : undefined);
-      setBatchMessage({ text: `บันทึกแล้ว ${result.count} รายการ` });
+      setBatchMessage({ text: "" });
+      toast.success(`บันทึกแล้ว ${result.count} รายการ`);
       setBatchWarnings(null);
       setBatchRows([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -913,7 +917,8 @@ export default function VehicleEntryPage() {
           : undefined,
       );
       setEditWarning(null);
-      setEditMessage({ text: "บันทึกการแก้ไขเรียบร้อยแล้ว" });
+      setEditMessage({ text: "" });
+      toast.success("บันทึกการแก้ไขเรียบร้อยแล้ว");
       // มาจากปุ่ม "แก้ข้อมูลรถ" ในหน้าวางบิล (ผู้ใช้ 2026-09-28) หรือปุ่ม "แก้ไข" ในหน้าค้นหารถ (2026-10-05): บันทึกเสร็จกลับไปหน้านั้นทันที
       const back = returnToAfterEdit();
       if (back) {
@@ -996,10 +1001,7 @@ export default function VehicleEntryPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
-      </Link>
-      <h1 tabIndex={-1}>เพิ่มข้อมูลรถจดใหม่</h1>
+      <PageHeader back={{ href: "/registration/new-vehicle", label: "จดทะเบียนรถใหม่" }} title="เพิ่มข้อมูลรถจดใหม่" titleFocus />
 
       {/* เพิ่มรถ/ยี่ห้อ/ไฟแนนซ์: ADMIN/STAFF_ENTRY เท่านั้น (backend กัน POST อยู่แล้ว) - กลุ่มอื่นเห็นแค่รายการรถ */}
       {canEdit && (
@@ -1029,7 +1031,7 @@ export default function VehicleEntryPage() {
             <div className="panel" style={{ marginBottom: 20 }}>
               <form className="brand-form" onSubmit={handleAddBrand}>
                 <label className="field">
-                  ชื่อยี่ห้อ
+                  ชื่อยี่ห้อ <Req />
                   <input
                     maxLength={100}
                     required
@@ -1040,7 +1042,7 @@ export default function VehicleEntryPage() {
                 <button className="primary" disabled={brandSaving}>
                   บันทึกยี่ห้อ
                 </button>
-                <span role="status">{brandMessage}</span>
+                <Notice tone="error">{brandMessage}</Notice>
               </form>
             </div>
           )}
@@ -1049,7 +1051,7 @@ export default function VehicleEntryPage() {
             <div className="panel" style={{ marginBottom: 20 }}>
               <form className="brand-form" onSubmit={handleAddFinance}>
                 <label className="field">
-                  ชื่อไฟแนนซ์
+                  ชื่อไฟแนนซ์ <Req />
                   <input
                     maxLength={100}
                     required
@@ -1060,7 +1062,7 @@ export default function VehicleEntryPage() {
                 <button className="primary" disabled={financeSaving}>
                   บันทึกไฟแนนซ์
                 </button>
-                <span role="status">{financeMessage}</span>
+                <Notice tone="error">{financeMessage}</Notice>
               </form>
             </div>
           )}
@@ -1102,6 +1104,7 @@ export default function VehicleEntryPage() {
                     }}
                   />
                 )}
+                <Notice tone={singleMessage.error ? "error" : "info"}>{singleMessage.text}</Notice>
                 <div className="form-actions">
                   {/* มีคำเตือนอยู่ = ใช้ปุ่มยืนยันในคำเตือนแทน */}
                   {!singleWarnings && (
@@ -1109,12 +1112,6 @@ export default function VehicleEntryPage() {
                       บันทึกข้อมูลรถ
                     </button>
                   )}
-                  <span
-                    className={`customer-message${singleMessage.error ? " error" : singleMessage.text ? " success" : ""}`}
-                    role="status"
-                  >
-                    {singleMessage.text}
-                  </span>
                 </div>
               </form>
             </section>
@@ -1156,9 +1153,7 @@ export default function VehicleEntryPage() {
                     onChange={handleFileChange}
                   />
                 </label>
-                <div className="customer-message" style={{ margin: "18px 0" }} role="status">
-                  {batchMessage.text && <span className={batchMessage.error ? "error" : "success"}>{batchMessage.text}</span>}
-                </div>
+                <Notice tone={batchMessage.error ? "error" : "info"}>{batchMessage.text}</Notice>
                 {batchRows.length > 0 && (
                   <div className="table-wrap">
                     <table>
@@ -1185,8 +1180,8 @@ export default function VehicleEntryPage() {
                             <td className={row.issues.length ? "import-error" : "import-ok"}>
                               {row.issues.length ? row.issues.join(" · ") : "พร้อมนำเข้า"}
                               {(batchWarningsByChassis.get(row.chassis) ?? []).map((w) => (
-                                <div key={w.key} style={{ color: "#9a4f12" }}>
-                                  ⚠ {w.short}
+                                <div key={w.key} style={{ color: "var(--warn)" }}>
+                                  <Icon name="alert-triangle" /> {w.short}
                                 </div>
                               ))}
                             </td>
@@ -1276,21 +1271,15 @@ export default function VehicleEntryPage() {
             )}
           </div>
         </form>
-        {filterError && (
-          <p className="customer-message error" style={{ padding: "0 24px 12px" }} role="alert">
-            {filterError}
-          </p>
-        )}
+        <Notice tone="error">{filterError}</Notice>
         <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
           {filter.q || filter.from || filter.to ? "ผลค้นหาจากฐานข้อมูลทั้งหมด" : "เรียงจากที่บันทึกล่าสุด"} · แสดง{" "}
           {vehicles.length.toLocaleString()} คัน{hasMoreVehicles ? " (ยังมีอีก กดโหลดเพิ่มด้านล่าง)" : ""}
         </p>
         {vehiclesLoading ? (
-          <div className="empty-customers">กำลังโหลดรายการรถ…</div>
+          <LoadingState label="กำลังโหลดรายการรถ…" />
         ) : vehiclesError && !vehicles.length ? (
-          <div className="empty-customers" role="alert">
-            {vehiclesError}
-          </div>
+          <Notice tone="error">{vehiclesError}</Notice>
         ) : !vehicles.length ? (
           <div className="empty-customers">
             {filter.q || filter.from || filter.to ? "ไม่พบรถที่ตรงกับเงื่อนไข" : "ยังไม่มีข้อมูลรถจดใหม่"}
@@ -1347,11 +1336,7 @@ export default function VehicleEntryPage() {
         )}
         {!vehiclesLoading && vehicles.length > 0 && (vehiclesError || hasMoreVehicles) && (
           <div className="vehicle-list-more">
-            {vehiclesError && (
-              <p className="customer-message error" role="alert">
-                {vehiclesError}
-              </p>
-            )}
+            <Notice tone="error">{vehiclesError}</Notice>
             {hasMoreVehicles && (
               <button className="primary" type="button" onClick={loadMoreVehicles} disabled={loadingMore}>
                 {loadingMore ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 คัน"}
@@ -1372,13 +1357,9 @@ export default function VehicleEntryPage() {
           <p style={{ padding: "0 24px 12px", fontSize: 12 }}>
             แสดง 100 รายการล่าสุด - ข้อมูลยังอยู่ในระบบ กดกู้คืนเพื่อนำกลับเข้ารายการได้
           </p>
-          {deletedMessage.text && (
-            <p className={`customer-message${deletedMessage.error ? " error" : ""}`} style={{ padding: "0 24px 12px" }} role="alert">
-              {deletedMessage.text}
-            </p>
-          )}
+          <Notice tone={deletedMessage.error ? "error" : "info"}>{deletedMessage.text}</Notice>
           {deletedLoading ? (
-            <div className="empty-customers">กำลังโหลดรายการรถที่ลบแล้ว…</div>
+            <LoadingState label="กำลังโหลดรายการรถที่ลบแล้ว…" />
           ) : !deletedVehicles.length ? (
             <div className="empty-customers">ยังไม่มีรถที่ถูกลบ</div>
           ) : (
@@ -1424,8 +1405,8 @@ export default function VehicleEntryPage() {
           if (event.target === event.currentTarget) deleteDialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => deleteDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => deleteDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>ลบข้อมูลรถจดใหม่</h2>
         {deleting && (
@@ -1438,7 +1419,7 @@ export default function VehicleEntryPage() {
             </p>
             <form onSubmit={handleDeleteSubmit}>
               <label className="field" style={{ marginTop: 16 }}>
-                เหตุผลที่ลบ (Remark) *
+                เหตุผลที่ลบ (Remark) <Req />
                 <textarea
                   required
                   maxLength={500}
@@ -1447,16 +1428,11 @@ export default function VehicleEntryPage() {
                   placeholder="ระบุเหตุผลที่ลบรถคันนี้ - จำเป็นต้องกรอกทุกครั้ง"
                 />
               </label>
+              <Notice tone={deleteMessage.error ? "error" : "info"}>{deleteMessage.text}</Notice>
               <div className="form-actions" style={{ marginTop: 16 }}>
                 <button type="submit" className="primary danger" disabled={deleteSaving || !deleteRemark.trim()}>
                   ลบข้อมูลรถ
                 </button>
-                <span
-                  className={`customer-message${deleteMessage.error ? " error" : deleteMessage.text ? " success" : ""}`}
-                  role="status"
-                >
-                  {deleteMessage.text}
-                </span>
               </div>
             </form>
           </>
@@ -1469,8 +1445,8 @@ export default function VehicleEntryPage() {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {detail && (
           <>
@@ -1494,8 +1470,8 @@ export default function VehicleEntryPage() {
         }}
         style={{ width: "min(760px, 92vw)" }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>แก้ไขข้อมูลรถจดใหม่</h2>
         <form onSubmit={handleEditSubmit}>
@@ -1512,7 +1488,7 @@ export default function VehicleEntryPage() {
             excludeId={editingId ?? undefined}
           />
           <label className="field" style={{ marginTop: 20 }}>
-            เหตุผลที่แก้ไข (Remark) *
+            เหตุผลที่แก้ไข (Remark) <Req />
             <textarea
               required
               maxLength={500}
@@ -1536,6 +1512,7 @@ export default function VehicleEntryPage() {
               }}
             />
           )}
+          <Notice tone={editMessage.error ? "error" : "info"}>{editMessage.text}</Notice>
           <div className="form-actions" style={{ marginTop: 16 }}>
             {/* มีคำเตือนอยู่ = ใช้ปุ่มยืนยันในคำเตือนแทน ไม่ให้กดบันทึกซ้ำแล้วได้คำเตือนเดิม */}
             {!editWarning && (
@@ -1543,12 +1520,6 @@ export default function VehicleEntryPage() {
                 บันทึกการแก้ไข
               </button>
             )}
-            <span
-              className={`customer-message${editMessage.error ? " error" : editMessage.text ? " success" : ""}`}
-              role="status"
-            >
-              {editMessage.text}
-            </span>
           </div>
         </form>
       </dialog>

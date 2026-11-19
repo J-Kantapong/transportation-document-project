@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
 import { YAMAHA_RELOCATION_SUBTASKS } from "@/lib/categories";
 
 export default function YamahaRelocationPage() {
@@ -11,7 +12,7 @@ export default function YamahaRelocationPage() {
             <span className="task-number">{index + 1}</span>
             <strong>{task.title}</strong>
             <span className="task-arrow" aria-hidden="true">
-              →
+              <Icon name="chevron-right" />
             </span>
           </Link>
         ))}

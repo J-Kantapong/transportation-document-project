@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Notice } from "@/components/ui";
 
 // อัตราหัก ณ ที่จ่ายของบิลนี้ (ผู้ใช้ 2026-09-29: 1% / 3% / ตามงาน สำคัญมาก ต้องปรับได้และมีการตรวจ)
 // value = null ใช้ตามเงื่อนไขลูกค้า · เลือกอัตราที่ไม่ตรงกับลูกค้า = ต้องติ๊กยืนยันก่อนออกบิล (whtNeedsCheck)
@@ -125,9 +126,7 @@ export function WhtRatePicker({
         )}
       </div>
       {otherInvalid && (
-        <div className="customer-message error" style={{ margin: 0 }}>
-          ใส่อัตราหัก ณ ที่จ่าย 0-100
-        </div>
+        <Notice tone="error">ใส่อัตราหัก ณ ที่จ่าย 0-100</Notice>
       )}
       {differs && !otherInvalid && (
         <label

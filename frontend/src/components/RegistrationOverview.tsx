@@ -59,7 +59,7 @@ export function RegistrationOverview() {
             <strong>{category.title}</strong>
             <span className="type-bottom">
               <span />
-              <span aria-hidden="true">↗</span>
+              <Icon name="chevron-right" />
             </span>
           </Link>
         ))}

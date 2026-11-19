@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice, PageHeader } from "@/components/ui";
 import {
   downloadPhotoSheet,
   fitInCell,
@@ -91,12 +93,7 @@ export default function PhotoSheetPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>จัดรูปลง A4</h1>
-          <p>เลือกรูปที่ลูกค้าส่งมาทั้งหมด ระบบจัดลงกระดาษ A4 ให้ แล้วบันทึกเป็น PDF พร้อมพิมพ์ (รูปไม่ถูกเก็บในระบบ)</p>
-        </div>
-      </div>
+      <PageHeader title="จัดรูปลง A4" subtitle="เลือกรูปที่ลูกค้าส่งมาทั้งหมด ระบบจัดลงกระดาษ A4 ให้ แล้วบันทึกเป็น PDF พร้อมพิมพ์ (รูปไม่ถูกเก็บในระบบ)" />
 
       <section
         className="panel"
@@ -124,8 +121,9 @@ export default function PhotoSheetPage() {
               e.target.value = "";
             }}
           />
-          <button className="primary" type="button" onClick={() => input.current?.click()} disabled={busy}>
-            + เลือกรูป
+          <button className="secondary" type="button" onClick={() => input.current?.click()} disabled={busy}>
+            <Icon name="upload" />
+            เลือกรูป
           </button>
           <button className="primary" type="button" onClick={save} disabled={busy || !photos.length}>
             {busy ? "กำลังทำ…" : "บันทึก PDF"}
@@ -141,11 +139,7 @@ export default function PhotoSheetPage() {
             ? `${photos.length} รูป · ${pages.length} หน้า (หน้าละไม่เกิน ${PHOTOS_PER_PAGE} รูป) · ลากรูปมาวางเพิ่มได้`
             : "กด + เลือกรูป หรือลากรูปมาวางตรงนี้ เลือกได้หลายรูปพร้อมกัน"}
         </p>
-        {error && (
-          <p className="customer-message error" role="alert">
-            {error}
-          </p>
-        )}
+        <Notice tone="error">{error}</Notice>
 
         {photos.length > 0 && (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
@@ -158,13 +152,13 @@ export default function PhotoSheetPage() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <button className="text-button" type="button" aria-label={`เลื่อนรูปที่ ${index + 1} ไปก่อนหน้า`} onClick={() => move(index, -1)} disabled={index === 0}>
-                    ←
+                    <Icon name="arrow-left" />
                   </button>
                   <button className="text-button" type="button" aria-label={`หมุนรูปที่ ${index + 1}`} onClick={() => void rotate(photo.id)}>
-                    ↻
+                    <Icon name="refresh" />
                   </button>
                   <button className="text-button" type="button" aria-label={`ลบรูปที่ ${index + 1}`} onClick={() => setPhotos((prev) => prev.filter((p) => p.id !== photo.id))}>
-                    ✕
+                    <Icon name="x" />
                   </button>
                   <button
                     className="text-button"
@@ -173,7 +167,7 @@ export default function PhotoSheetPage() {
                     onClick={() => move(index, 1)}
                     disabled={index === photos.length - 1}
                   >
-                    →
+                    <Icon name="arrow-right" />
                   </button>
                 </div>
               </div>

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getCachedUser, submitWriteScopeFor } from "@/lib/auth";
@@ -26,6 +25,9 @@ import {
 } from "@/lib/vehicle-use-cancel-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
 import { confirmDialog } from "@/lib/confirm-dialog";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice, Req } from "@/components/ui";
 
 // ยกเลิกการใช้รถ (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // หน้ายื่น (VehicleUseCancelSubmitPage): เจ้าของงาน + ข้อมูลรถ + วันที่ยื่น (ค่าใช้จ่ายตายตัว Bill 25 / No Bill 100 ไม่ต้องกรอก)
@@ -80,7 +82,8 @@ function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCanc
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
       <button type="button" className="text-button" onClick={onEdit}>
-        ✎ แก้
+        <Icon name="pencil" />
+            แก้
       </button>
       {children}
       <button type="button" className="text-button" style={dangerButton} onClick={onCancel}>
@@ -165,7 +168,7 @@ function VehicleFormFields({
     <>
       {/* เจ้าของงาน = ลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ - ไม่ใช่เจ้าของรถตามทะเบียน (ช่อง "ชื่อเจ้าของรถ" ข้างล่าง) */}
       <label className="field" style={{ maxWidth: 420 }}>
-        เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+        เจ้าของงาน <Req /> (ลูกค้าที่ส่งงานมา)
         <select value={form.customerId} onChange={(e) => onChange({ customerId: e.target.value })}>
           <option value="">{customerPlaceholder}</option>
           {customerOptions.map((c) => (
@@ -180,29 +183,29 @@ function VehicleFormFields({
       {/* ลำดับช่องเหมือนงานสลับเลข: วันที่ยื่น -> ชื่อเจ้าของรถ -> เลขตัวถัง -> เลขเครื่อง -> ยี่ห้อ -> ทะเบียน */}
       <div className="customer-grid">
         <label className="field">
-          วันที่ยื่น *
+          วันที่ยื่น <Req />
           <DateTextInput value={submitDateText} onChange={onSubmitDateChange} label="วันที่ยื่น" />
         </label>
         {returnedDateText !== undefined && onReturnedDateChange && (
           <label className="field">
-            วันที่รับเอกสารกลับ *
+            วันที่รับเอกสารกลับ <Req />
             <DateTextInput value={returnedDateText} onChange={onReturnedDateChange} label="วันที่รับเอกสารกลับ" />
           </label>
         )}
         <label className="field">
-          ชื่อเจ้าของรถ *
+          ชื่อเจ้าของรถ <Req />
           <input value={form.ownerName} onChange={text("ownerName")} />
         </label>
         <label className="field">
-          เลขตัวถัง *
+          เลขตัวถัง <Req />
           <input value={form.chassis} onChange={text("chassis")} />
         </label>
         <label className="field">
-          เลขเครื่อง *
+          เลขเครื่อง <Req />
           <input value={form.engine} onChange={text("engine")} />
         </label>
         <label className="field">
-          ยี่ห้อ *
+          ยี่ห้อ <Req />
           <select value={form.brand} onChange={(e) => onChange({ brand: e.target.value })}>
             <option value="">เลือกยี่ห้อ</option>
             {brandNames.map((name) => (
@@ -213,7 +216,7 @@ function VehicleFormFields({
           </select>
         </label>
         <div className="field">
-          ทะเบียน *
+          ทะเบียน <Req />
           <div style={{ display: "flex", gap: 8 }}>
             <input value={form.plateCategory} onChange={text("plateCategory")} maxLength={3} placeholder="หมวด เช่น 4กข" aria-label="หมวดทะเบียน" />
             <input
@@ -348,8 +351,8 @@ function EditDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(720px, 96vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แก้งานยกเลิกการใช้รถ</h2>
       <Summary item={item} />
@@ -368,20 +371,16 @@ function EditDialog({
         />
       </div>
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อเจ้าของรถผิด" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
         </button>
       </div>
     </dialog>
@@ -415,6 +414,20 @@ function CancelDialog({ item, onClose, onCancelled }: { item: VehicleUseCancella
 
 type RowDialog = { kind: "edit" | "cancel"; item: VehicleUseCancellation } | null;
 
+// ข้อความหลังกดปุ่ม: สำเร็จ = toast (หายเอง) / ผิดพลาดหรือกำลังบันทึก = เก็บไว้แสดงในหน้า
+function useMessage() {
+  const [message, setState] = useState<{ text: string; error?: boolean }>({ text: "" });
+  function setMessage(next: { text: string; error?: boolean }) {
+    if (next.text && !next.error && next.text !== "กำลังบันทึก…") {
+      toast.success(next.text);
+      setState({ text: "" });
+    } else {
+      setState(next);
+    }
+  }
+  return [message, setMessage] as const;
+}
+
 export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?: CancellationVehicleClass }) {
   const canWrite = useCanWrite(vehicleClass);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -424,7 +437,7 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
   const [submitDateText, setSubmitDateText] = useState(() => isoToDisplayDate(todayIso()));
   const submitDate = useMemo(() => textToIso(submitDateText), [submitDateText]);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const { brandNames, customerOptions } = useChoices();
 
   const [month, setMonth] = useState(() => todayIso().slice(0, 7));
@@ -492,9 +505,7 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
 
   return (
     <section className="content">
-      <Link href={cancelUseHome(vehicleClass)} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← ยกเลิกการใช้รถ · {CLASS_LABEL[vehicleClass]}
-      </Link>
+      <BackLink href={cancelUseHome(vehicleClass)} label={`ยกเลิกการใช้รถ · ${CLASS_LABEL[vehicleClass]}`} />
       <h1>ยื่นงานยกเลิกการใช้รถ ({CLASS_LABEL[vehicleClass]})</h1>
       <IntakeNotice state={intakePrefill} />
 
@@ -511,13 +522,14 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
               customerOptions={customerOptions}
             />
             <div className="form-actions">
+              <span className="form-actions-note" role="status">
+                {message.error ? "" : message.text}
+              </span>
               <button className="primary" type="submit" disabled={saving}>
                 บันทึกการยื่น
               </button>
-              <span className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`} role="status">
-                {message.text}
-              </span>
             </div>
+            <Notice tone="error">{message.error ? message.text : ""}</Notice>
           </form>
         </div>
       )}
@@ -531,11 +543,9 @@ export function VehicleUseCancelSubmitPage({ vehicleClass = "CAR" }: { vehicleCl
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
@@ -676,7 +686,8 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleUseCance
         </div>
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
-            ✎ แก้
+            <Icon name="pencil" />
+            แก้
           </button>
         )}
       </div>
@@ -698,11 +709,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: VehicleUseCance
       {needsRemark && (
         <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เหตุผลที่แก้ *" aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ" className="inspect-input" />
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" className="text-button" disabled={busy} onClick={save}>
           บันทึก
@@ -733,7 +740,7 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
   const [listError, setListError] = useState("");
   const [returnDateText, setReturnDateText] = useState(() => isoToDisplayDate(todayIso()));
   const returnDate = useMemo(() => textToIso(returnDateText), [returnDateText]);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const [dialog, setDialog] = useState<ReturnDialog>(null);
 
   async function load(forStatus: typeof status) {
@@ -778,9 +785,7 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
 
   return (
     <section className="content">
-      <Link href={cancelUseHome(vehicleClass)} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← ยกเลิกการใช้รถ · {CLASS_LABEL[vehicleClass]}
-      </Link>
+      <BackLink href={cancelUseHome(vehicleClass)} label={`ยกเลิกการใช้รถ · ${CLASS_LABEL[vehicleClass]}`} />
       <h1>รับใบเสร็จ ({CLASS_LABEL[vehicleClass]})</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
@@ -803,17 +808,11 @@ export function VehicleUseCancelReturnPage({ vehicleClass = "CAR" }: { vehicleCl
             </label>
           )}
         </div>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
-          </div>
-        )}
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
@@ -955,7 +954,7 @@ function ReturnRow({
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
-                🧾 รูป {i + 1}
+                <Icon name="receipt" /> รูป {i + 1}
               </button>
               {receiptWritable && (
                 <button
@@ -967,7 +966,7 @@ function ReturnRow({
                   title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
-                  ×
+                  <Icon name="x" />
                 </button>
               )}
             </span>
@@ -1000,7 +999,7 @@ function ReturnRow({
                 title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                 onClick={() => inputRef.current?.click()}
               >
-                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+                {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> ถ่าย/แนบใบเสร็จ</>}
               </button>
               {returned && (
                 <button
@@ -1034,7 +1033,7 @@ function ReturnRow({
               ยืนยันรับกลับ
             </button>
             {missing.length > 0 && (
-              <div id={`use-cancel-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+              <div id={`use-cancel-missing-${item.id}`} className="sub" style={{ color: "var(--warn)" }}>
                 ยังขาด: {missing.join(" · ")}
               </div>
             )}

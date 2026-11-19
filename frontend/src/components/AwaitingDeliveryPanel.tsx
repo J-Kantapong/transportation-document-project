@@ -7,6 +7,8 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { AGING_COLOR, agingText, agingTone, daysSince } from "@/lib/delivery-aging";
 import { deliveryCustomerLabels, deliveryRowCustomer, printDeliverySlips } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 import { confirmDialog } from "@/lib/confirm-dialog";
 
 // "รอลงส่งงาน" บนหน้าวางบิล (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2): ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่พนักงานยังไม่ลง
@@ -140,7 +142,7 @@ export function AwaitingDeliveryPanel({ only, onRecorded }: { only: "all" | "job
           </span>
         </div>
         <button type="button" className="text-button" onClick={() => setOpen((v) => !v)} style={{ color: "inherit", fontWeight: 600 }}>
-          {open ? "▾ ซ่อน" : "▸ ดูและลงส่งงานให้"}
+          <Icon name={open ? "chevron-down" : "chevron-right"} /> {open ? "ซ่อน" : "ดูและลงส่งงานให้"}
         </button>
       </div>
       {open && (
@@ -206,16 +208,12 @@ export function AwaitingDeliveryPanel({ only, onRecorded }: { only: "all" | "job
               {saving ? "กำลังบันทึก…" : `ลงส่งงาน ${picked.length} รายการ`}
             </button>
             {lastSlip && (
-              <button type="button" onClick={printLast}>
+              <button type="button" className="secondary" onClick={printLast}>
                 พิมพ์ใบส่งงาน {slipNoText(lastSlip.slipNo)}
               </button>
             )}
           </div>
-          {message.text && (
-            <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
-              {message.text}
-            </div>
-          )}
+          <Notice tone={message.error ? "error" : "success"}>{message.text}</Notice>
         </div>
       )}
     </section>

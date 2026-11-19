@@ -44,6 +44,7 @@ The detailed product state, API contracts and user decisions live in `docs/claud
 | `auth-roles.md` | Roles, vehicle-kind scope (read vs write), register / approve flow, JWT, access policy, login hardening, customer portal |
 | `overview-activity-mywork.md` | Executive overview (`/`), alerts and their links, duty handling, work activity page, my-work page |
 | `line-bots.md` | Personal secretary on LINE (cards, commands, reminders, finance card, provincial rate lookup), customer LINE bot (menu, ตรอ. and tax checks), statement -> tax invoice, Yamaha payment mail |
+| `ui-patterns.md` | One look for every page: back link, header, button order, the single icon set, required marker, error / toast / loading / empty messages, semantic colours (`components/ui.tsx`) |
 | `ui-conventions.md` | `DateInput`, tabs as URLs, weekend / multi-vehicle date guards and bulk date correction, photo sheet tool |
 | `production-audit-2026-09-27.md` | Cross-cutting rules from the 57-fix audit: stale-save 409s, date order, corrections with a reason, list paging, `AuditLog`, soft cancel, edit-impact confirm |
 

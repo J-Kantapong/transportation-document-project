@@ -22,6 +22,9 @@ import {
   type DeliveryReportInput,
 } from "@/lib/delivery-print";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { DeliveryReportTabs } from "@/components/DeliverySheetPage";
 import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialog } from "@/components/DeliverySlipDialogs";
 
@@ -31,7 +34,7 @@ import { DeliveryAddPlateDialog, DeliverySlipCancelDialog, DeliverySlipEditDialo
 const firstOfMonthIso = () => `${todayIso().slice(0, 8)}01`;
 const DELIVERY_PAGE = "/delivery";
 const BILLING_PAGE = "/accounting/billing";
-const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done">✓</span> : <span className="muted">—</span>);
+const Tick = ({ sent }: { sent: boolean }) => (sent ? <span className="badge done"><Icon name="tick" /></span> : <span className="muted">—</span>);
 const CANCELLED_ROW = { color: "#9aa3b5", textDecoration: "line-through" } as const;
 
 // แก้ / ยกเลิกใบส่งงาน (ผู้ใช้ 2026-09-26): ADMIN ทุกใบ, STAFF_CAR ใบรถยนต์, STAFF_MOTO ใบจักรยานยนต์ - DELIVERY ดูอย่างเดียว
@@ -84,7 +87,7 @@ export function DeliveryReportPage() {
   const [dialog, setDialog] = useState<{ kind: "edit" | "cancel"; slip: DeliverySlip } | null>(null);
   const [plateDialog, setPlateDialog] = useState<DeliveryRow | null>(null);
   const [showCancelled, setShowCancelled] = useState(true);
-  const [notice, setNotice] = useState("");
+
   const loadSeq = useRef(0);
   const lastRefresh = useRef(0);
 
@@ -141,9 +144,9 @@ export function DeliveryReportPage() {
     setDeliverScope(!canDeliver ? "NONE" : roles.includes("DELIVERY") ? "ALL" : writeScopeFor(roles));
     setBackLink(
       canDeliver
-        ? { href: DELIVERY_PAGE, label: "← Delivery" }
+        ? { href: DELIVERY_PAGE, label: "Delivery" }
         : canAccessPage(BILLING_PAGE, roles)
-          ? { href: BILLING_PAGE, label: "← วางบิล" }
+          ? { href: BILLING_PAGE, label: "วางบิล" }
           : null,
     );
   }, []);
@@ -155,7 +158,7 @@ export function DeliveryReportPage() {
 
   function replaceSlip(updated: DeliverySlip, message: string) {
     setSlips((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-    setNotice(message);
+    toast.success(message);
     // ยกเลิก/แก้ใบส่งป้าย -> ใบส่งเล่มอีกใบที่บอก "ป้ายส่งตามใน ..." ต้องเปลี่ยนตาม, รถที่ยกเลิกกลับเข้ารายการป้ายค้างส่ง
     // (พบ 2026-09-27: เดิมเปลี่ยนแค่ใบที่แก้ ใบส่งเล่มยังอ้างใบส่งป้ายที่ยกเลิกแล้วขณะที่รถขึ้นป้ายค้างส่ง)
     reloadQuietly();
@@ -224,13 +227,7 @@ export function DeliveryReportPage() {
 
   return (
     <section className="content">
-      {backLink && (
-        <Link href={backLink.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-          {backLink.label}
-        </Link>
-      )}
-      <h1 tabIndex={-1}>รายงานส่งงาน</h1>
-      <p>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกเล่ม / ป้าย (ใบเสร็จส่งพร้อมใบวางบิล) พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</p>
+      <PageHeader back={backLink ?? undefined} title="รายงานส่งงาน" titleFocus subtitle={<>ดูว่าส่งอะไรให้ลูกค้าไปแล้วบ้าง แยกเล่ม / ป้าย (ใบเสร็จส่งพร้อมใบวางบิล) พิมพ์ใบส่งงานซ้ำได้ และดูคันที่ป้ายยังค้างส่ง</>} />
       <DeliveryReportTabs current="slips" />
 
       <section className="panel" style={{ marginTop: 20, padding: "18px 23px", overflow: "visible" }}>
@@ -272,25 +269,20 @@ export function DeliveryReportPage() {
           </button>
         </div>
         {error && (
-          <div className="customer-message error" role="status" style={{ marginTop: 14 }}>
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="customer-message" role="status" style={{ marginTop: 14 }}>
-            {notice}
+          <div style={{ marginTop: 14 }}>
+            <Notice tone="error">{error}</Notice>
           </div>
         )}
         {truncated && !loading && (
-          <div className="customer-message" role="status" style={{ marginTop: 14, color: "#bb6a00" }}>
-            ⚠ ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ แสดงเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงหรือเลือกลูกค้า เพื่อให้เห็นครบ
+          <div style={{ marginTop: 14 }}>
+            <Notice tone="warn">ใบส่งงานในช่วงนี้มีมากกว่า 500 ใบ แสดงเฉพาะ 500 ใบล่าสุด - เลือกช่วงวันที่ให้สั้นลงหรือเลือกลูกค้า เพื่อให้เห็นครบ</Notice>
           </div>
         )}
       </section>
 
       {loading ? (
-        <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-          กำลังโหลด...
+        <div style={{ marginTop: 20 }}>
+          <LoadingState />
         </div>
       ) : (
         <>
@@ -350,7 +342,7 @@ export function DeliveryReportPage() {
                                   {s.note ? ` · ${s.note}` : ""}
                                   {s.createdBy ? <span className="muted"> · บันทึกโดย {s.createdBy}</span> : null}
                                   {gone && (
-                                    <span className="badge" style={{ marginLeft: 8, background: "#fdecec", color: "#c0392b" }}>
+                                    <span className="badge" style={{ marginLeft: 8, background: "var(--danger-soft)", color: "var(--danger)" }}>
                                       {s.cancelledAt ? "ยกเลิกแล้ว" : "ยกเลิกครบทุกคันที่ดูแลแล้ว"}
                                     </span>
                                   )}
@@ -365,11 +357,11 @@ export function DeliveryReportPage() {
                                     </button>
                                     {editable && (
                                       <button className="text-button" onClick={() => setDialog({ kind: "edit", slip: s })}>
-                                        ✎ แก้
+                                        <Icon name="pencil" /> แก้
                                       </button>
                                     )}
                                     {cancellable && (
-                                      <button className="text-button" style={{ color: "#c0392b" }} onClick={() => setDialog({ kind: "cancel", slip: s })}>
+                                      <button className="text-button" style={{ color: "var(--danger)" }} onClick={() => setDialog({ kind: "cancel", slip: s })}>
                                         ยกเลิก
                                       </button>
                                     )}
@@ -378,7 +370,7 @@ export function DeliveryReportPage() {
                               </div>
                               {/* ใบเก่าที่รวมรถยนต์ + จักรยานยนต์: บัญชีที่ไม่เห็นบางคัน (hidden) หรือเห็นแต่แก้ได้บางคัน (ยกเลิกได้ แก้ทั้งใบไม่ได้) */}
                               {!gone && (hidden > 0 || (cancellable && !editable)) && (
-                                <div className="muted" style={{ marginTop: 4, fontSize: 13, color: "#bb6a00" }}>
+                                <div className="muted" style={{ marginTop: 4, fontSize: 13, color: "var(--warn)" }}>
                                   ใบนี้ส่งรถยนต์กับจักรยานยนต์รวมกัน (ก่อนแยกใบ)
                                   {hidden > 0 ? ` มีรถอีก ${hidden} คันที่บัญชีนี้ไม่ได้ดูแล - แสดง/พิมพ์เฉพาะคันในขอบเขต` : ""}
                                   {cancellable && !editable ? " - ยกเลิกได้เฉพาะคันประเภทที่บัญชีนี้ดูแล แก้ผู้รับ/วันที่ทั้งใบให้ ADMIN ทำ" : ""}
@@ -485,7 +477,7 @@ export function DeliveryReportPage() {
                             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                               {inScope(r, deliverScope) && (
                                 <Link href={focusHref(DELIVERY_PAGE, r.chassis)} className="text-button">
-                                  บันทึกส่งป้าย →
+                                  บันทึกส่งป้าย <Icon name="arrow-right" />
                                 </Link>
                               )}
                               {canAddPlate(r) && (

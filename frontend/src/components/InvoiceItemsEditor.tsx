@@ -7,6 +7,7 @@ import {
   type InvoiceItemKind,
 } from "@/lib/billing-api";
 import { formatMoney, round2 } from "@/lib/invoice";
+import { Icon } from "@/components/Icon";
 
 // บรรทัดกำหนดเองของบิล (ผู้ใช้ 2026-09-29) ใช้ร่วม 3 ที่: หน้าบิลกำหนดเอง · หน้ายืนยันออกบิลรถ · หน้าแก้ไขบิลรถ
 // ค่าธรรมเนียมราชการ = ไม่มี VAT ไม่หัก · ค่าบริการ = VAT + หัก ณ ที่จ่าย · ขายสินค้า = VAT ไม่หัก
@@ -302,9 +303,9 @@ export function InvoiceItemsEditor({
                         ...READONLY,
                         color:
                           p === null
-                            ? "#946712"
+                            ? "var(--warn)"
                             : p < 0
-                              ? "#c0392b"
+                              ? "var(--danger)"
                               : undefined,
                       }}
                     >
@@ -327,7 +328,7 @@ export function InvoiceItemsEditor({
         style={{ justifySelf: "start" }}
         onClick={() => onChange([...rows, emptyItemRow()])}
       >
-        {addLabel}
+        <Icon name="plus" /> {addLabel.replace(/^\+\s*/, "")}
       </button>
       {rows.length > 0 && (
         <p className="muted" style={{ fontSize: 12, margin: 0 }}>

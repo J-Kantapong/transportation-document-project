@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type TaxRenewal } from "@/lib/api";
 import { canEditSubmitSteps, getCachedUser, writeScopeFor, type UserRole } from "@/lib/auth";
@@ -13,6 +12,9 @@ import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog,
 import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
 import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { confirmDialog, promptDialog } from "@/lib/confirm-dialog";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice } from "@/components/ui";
 
 // หน้ารับใบเสร็จของงานต่อภาษี (ผู้ใช้ 2026-10-08, แบบเดียวกับหน้ารับใบเสร็จรถจดใหม่/ย้ายออก)
 // แนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วยืนยันวันที่รับใบเสร็จ (receivedDate)
@@ -23,6 +25,20 @@ const plateText = (r: TaxRenewal) => `${r.plateCategory} ${r.plateNumber}`;
 const day = (iso: string | null | undefined) => (iso ? isoToDisplayDate(iso.slice(0, 10)) : "");
 
 type Tab = "pending" | "received";
+
+// ข้อความหลังกดปุ่ม: สำเร็จ = toast (หายเอง) / ผิดพลาด = เก็บไว้แสดงในหน้า
+function useMessage() {
+  const [message, setState] = useState<{ text: string; error?: boolean }>({ text: "" });
+  function setMessage(next: { text: string; error?: boolean }) {
+    if (next.text && !next.error) {
+      toast.success(next.text);
+      setState({ text: "" });
+    } else {
+      setState(next);
+    }
+  }
+  return [message, setMessage] as const;
+}
 
 export function TaxRenewalReceiptPage() {
   const [roles, setRoles] = useState<UserRole[] | null>(null);
@@ -40,7 +56,7 @@ export function TaxRenewalReceiptPage() {
   const [listError, setListError] = useState("");
   const [dateText, setDateText] = useState(() => isoToDisplayDate(todayIso()));
   const receivedDate = useMemo(() => textToIso(dateText), [dateText]);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
   const [undoRow, setUndoRow] = useState<TaxRenewal | null>(null);
 
   const load = useCallback(async () => {
@@ -85,9 +101,7 @@ export function TaxRenewalReceiptPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/tax-renewal" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← ต่อภาษี
-      </Link>
+      <BackLink href="/registration/tax-renewal" label="ต่อภาษี" />
       <h1>รับใบเสร็จ (ต่อภาษี)</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับใบเสร็จตามวันที่ที่ระบุ
@@ -111,17 +125,11 @@ export function TaxRenewalReceiptPage() {
             </label>
           )}
         </div>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
-          </div>
-        )}
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : shown.length === 0 ? (
           <div className="empty-customers">{tab === "pending" ? "ไม่มีงานที่รอรับใบเสร็จ" : "ยังไม่มีงานที่รับใบเสร็จแล้ว"}</div>
         ) : (
@@ -227,7 +235,8 @@ function ReceiptFieldsCell({ row, canWrite, onChange }: { row: TaxRenewal; canWr
         </div>
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
-            ✎ แก้
+            <Icon name="pencil" />
+            แก้
           </button>
         )}
       </div>
@@ -249,11 +258,7 @@ function ReceiptFieldsCell({ row, canWrite, onChange }: { row: TaxRenewal; canWr
       {needsRemark && (
         <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เหตุผลที่แก้ *" aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ" className="inspect-input" />
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" className="text-button" disabled={busy} onClick={save}>
           บันทึก
@@ -392,7 +397,7 @@ function ReceiptRow({
           {receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
-                🧾 รูป {i + 1}
+                <Icon name="receipt" /> รูป {i + 1}
               </button>
               {receiptWritable && (
                 <button
@@ -404,7 +409,7 @@ function ReceiptRow({
                   title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
-                  ×
+                  <Icon name="x" />
                 </button>
               )}
             </span>
@@ -437,7 +442,7 @@ function ReceiptRow({
                 title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                 onClick={() => inputRef.current?.click()}
               >
-                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+                {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> ถ่าย/แนบใบเสร็จ</>}
               </button>
               {received && (
                 <button
@@ -480,7 +485,7 @@ function ReceiptRow({
               ยืนยันรับใบเสร็จ
             </button>
             {missing.length > 0 && (
-              <div id={missingId} className="sub" style={{ color: "#a86200" }}>
+              <div id={missingId} className="sub" style={{ color: "var(--warn)" }}>
                 ยังขาด: {missing.join(" · ")}
               </div>
             )}
