@@ -1,27 +1,23 @@
-import Link from "next/link";
+"use client";
+
+import { ChoiceMenu, type Choice } from "@/components/ChoiceMenu";
+import { plateSwapSubtasks } from "@/lib/categories";
 
 // ผู้ใช้ 2026-09-28: แยกรถยนต์/รถจักรยานยนต์ก่อน แล้วค่อยแตกเป็น รถเก่า กับ รถใหม่ / รถเก่า กับ รถเก่า ในแต่ละประเภท
-// (เดิมหน้านี้เป็นเมนู 2 ช่องของรถยนต์ตรงๆ - ย้ายไปที่ /registration/plate-swap/car)
+// แสดงเฉพาะประเภทที่บทบาทเข้างานย่อยได้ - เหลือประเภทเดียว (เช่น STAFF_CAR) ข้ามไปหน้าประเภทนั้นเลย
+const CHOICES: Choice[] = [
+  {
+    title: "รถยนต์",
+    href: "/registration/plate-swap/car",
+    accessHrefs: plateSwapSubtasks("car").map((t) => t.href),
+  },
+  {
+    title: "รถจักรยานยนต์",
+    href: "/registration/plate-swap/moto",
+    accessHrefs: plateSwapSubtasks("moto").map((t) => t.href),
+  },
+];
+
 export default function PlateSwapPage() {
-  return (
-    <div className="content">
-      <h1>การสลับเลข</h1>
-      <div className="registration-tasks">
-        <Link href="/registration/plate-swap/car" className="registration-task">
-          <span className="task-number">1</span>
-          <strong>รถยนต์</strong>
-          <span className="task-arrow" aria-hidden="true">
-            →
-          </span>
-        </Link>
-        <Link href="/registration/plate-swap/moto" className="registration-task">
-          <span className="task-number">2</span>
-          <strong>รถจักรยานยนต์</strong>
-          <span className="task-arrow" aria-hidden="true">
-            →
-          </span>
-        </Link>
-      </div>
-    </div>
-  );
+  return <ChoiceMenu title="การสลับเลข" choices={CHOICES} />;
 }

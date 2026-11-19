@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSkipSingleChoice } from "@/components/ChoiceMenu";
 import { getCachedUser, submitWriteScopeFor, type UserRole, vehicleScopeFor, type VehicleScope } from "@/lib/auth";
 
 // หน้าเลือกประเภทรถก่อนเข้างาน (ผู้ใช้ 2026-09-25/26: รับใบเสร็จ / รับป้าย / รับเล่ม - รถยนต์กับมอเตอร์ไซค์เป็นงานแยกกัน)
@@ -38,6 +39,12 @@ export function VehicleKindChooser({
   const scope = roles === null ? null : vehicleScopeFor(roles);
   const writeScope = roles === null ? null : submitWriteScopeFor(roles);
   const kinds = KINDS.filter((k) => scope === null || kindInScope(scope, k));
+  // เหลือประเภทเดียว (STAFF_CAR / STAFF_MOTO) ข้ามไปคิวของประเภทนั้นเลย - แต่ไม่ข้ามถ้ามีปุ่มถ่ายใบเสร็จมือถือในหน้านี้
+  const skipping = useSkipSingleChoice(
+    capture ? [] : kinds.map((k) => ({ title: VEHICLE_KIND_LABEL[k], href: `${basePath}/${k}` })),
+    roles,
+  );
+  if (skipping) return null;
 
   return (
     <div className="content">

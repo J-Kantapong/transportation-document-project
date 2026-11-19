@@ -179,8 +179,10 @@ interface Img {
 async function runLive(client: Anthropic, v: Variant, images: Img[]): Promise<Row[]> {
   const rows: Row[] = new Array<Row>(images.length);
   let next = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
+  const worker = async (once?: boolean | number): Promise<void> => {
+    once = once === true; // Array.from ส่ง index มาเป็น argument - นับเฉพาะ true
+    for (let done = 0; ; done++) {
+      if (once && done > 0) return;
       const i = next++;
       if (i >= images.length) return;
       const img = images[i];
@@ -198,9 +200,9 @@ async function runLive(client: Anthropic, v: Variant, images: Img[]): Promise<Ro
       process.stdout.write('.');
     }
   };
-  // แบบที่ใช้ cache ต้องยิงทีละใบ ไม่งั้นใบแรกๆ วิ่งพร้อมกันแล้วต่างคนต่างเขียน cache แทนที่จะอ่านของกัน
-  const lanes = v.cachePrompt ? 1 : Math.min(CONCURRENCY, images.length);
-  await Promise.all(Array.from({ length: lanes }, worker));
+  // แบบที่ใช้ cache: ยิงใบแรกใบเดียวก่อนให้ cache ถูกเขียน แล้วที่เหลือค่อยวิ่งพร้อมกัน (ไม่งั้นต่างคนต่างเขียน cache)
+  if (v.cachePrompt) await worker(true);
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, images.length) }, worker));
   return rows;
 }
 
