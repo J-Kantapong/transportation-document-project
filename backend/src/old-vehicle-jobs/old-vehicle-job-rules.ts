@@ -145,14 +145,6 @@ function registrationCodeOf(vehicleType: string): string | null {
   return ['รย.1', 'รย.2', 'รย.3'].includes(code) ? code : null;
 }
 
-function fullYearsBetween(from: Date, to: Date): number {
-  let years = to.getUTCFullYear() - from.getUTCFullYear();
-  const before =
-    to.getUTCMonth() < from.getUTCMonth() || (to.getUTCMonth() === from.getUTCMonth() && to.getUTCDate() < from.getUTCDate());
-  if (before) years -= 1;
-  return Math.max(years, 0);
-}
-
 export interface InspectionRuleInput {
   jobType: OldJobType;
   vehicleType: string | null;
@@ -162,8 +154,10 @@ export interface InspectionRuleInput {
 }
 
 // ระบบตัดสินเองว่างานนี้ต้องตรวจรถก่อนยื่นไหม (ผู้ใช้ 2026-11-18):
-// โอนตรวจรถ + โอนย้ายเข้า = ทุกคัน / ต่อภาษี = รถ ขส. ทุกครั้ง, รถยนต์ครบ 7 ปี, มอเตอร์ไซค์ครบ 5 ปี, ค้างภาษีเกิน 1 ปี / งานอื่นไม่ตรวจ
-// อายุรถนับถึงวันครบภาษีของรอบที่ต่อ ถ้าเลยมาแล้วนับถึงวันนี้ (วันที่จะชำระ) เหมือน calculateVehicleTax ที่นับถึงวันชำระ
+// โอนตรวจรถ + โอนย้ายเข้า = ทุกคัน / ต่อภาษี = รถ ขส. ทุกครั้ง และรถที่ค้างภาษีเกิน 1 ปี / งานอื่นไม่ตรวจ
+// ต่อภาษีตามอายุรถ (รถยนต์ครบ 7 ปี / มอเตอร์ไซค์ครบ 5 ปี) ไม่ผ่านคิวนี้ (ผู้ใช้ 2026-11-20: "ตรอ. ไม่เกี่ยวกับตรวจรถในระบบ"):
+// ใบตรวจ ตรอ. และ พ.ร.บ. เป็นเอกสารที่ต้องมีเพื่อต่อภาษี และติ๊ก "ตรวจ ตรอ." ในใบต่อภาษีเอง
+// แต่ขาดภาษีนานเกิน 1 ปีต้องพารถไปตรวจจริง จึงยังเข้าคิวตรวจรถ (ผู้ใช้ 2026-11-20)
 export function inspectionRequiredFor(input: InspectionRuleInput): boolean {
   if (input.jobType === 'TRANSFER_INSPECTION' || input.jobType === 'TRANSFER_MOVE_IN') return true;
   if (input.jobType !== 'TAX_RENEWAL') return false;
@@ -171,11 +165,9 @@ export function inspectionRequiredFor(input: InspectionRuleInput): boolean {
   const code = registrationCodeOf(input.vehicleType);
   if (!code) return false;
   if (code === 'ขส.') return true;
-  if (!input.firstRegistrationDate || !input.taxExpiryDate) return false;
-  const asOf = input.today > input.taxExpiryDate ? input.today : input.taxExpiryDate;
-  const age = fullYearsBetween(input.firstRegistrationDate, asOf);
+  if (!input.taxExpiryDate) return false;
   const overdueDays = Math.max(0, (input.today.getTime() - input.taxExpiryDate.getTime()) / 86_400_000);
-  return requiresInspection(code, age, overdueDays / 365);
+  return requiresInspection(code, 0, overdueDays / 365); // อายุรถส่ง 0 = ไม่ใช้เกณฑ์อายุ
 }
 
 // ค่าตรวจตั้งต้นตอนส่งตรวจนอก: รถ ขส. 1,000 แก้ได้ / รถอื่นพนักงานกรอกเอง (ผู้ใช้ 2026-11-18)
