@@ -16,7 +16,10 @@ import {
   type HubJob,
   type HubVehicle,
 } from "@/lib/old-vehicle-jobs-api";
+import { Icon } from "@/components/Icon";
 import { PageTabs } from "@/components/PageTabs";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { DateTextInput, ReasonDialog, errorText, textToIso } from "@/components/PlateSwapPages";
 
 // ตรวจรถของงานรถเก่า (ผู้ใช้ 2026-11-18): ตรวจก่อนยื่น คิวแยกจากตรวจรถของงานจดใหม่ ใบส่งตรวจแบบเดียวกัน
@@ -123,7 +126,8 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
       setSelected(new Set());
       // ล้างค่าตรวจที่พิมพ์ไว้ของคันที่ส่งแล้ว - ถ้าตรวจไม่ผ่านและส่งใหม่ ต้องกรอกค่าตรวจของรอบใหม่เอง
       setCosts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !picked.some((r) => r.job.id === id))));
-      setMessage({ text: `บันทึกส่งตรวจ ${picked.length} คันแล้ว - ดูต่อที่แท็บรอผลตรวจ` });
+      setMessage({ text: "" });
+      toast.success(`บันทึกส่งตรวจ ${picked.length} คันแล้ว - ดูต่อที่แท็บรอผลตรวจ`);
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
       if ((err as { status?: number }).status === 409) load(true);
@@ -139,7 +143,8 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
     try {
       replace([(await oldVehicleJobsApi.recordInspectionResult(row.job.id, result, resultDate)).vehicle]);
       setResultTexts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== row.job.id)));
-      setMessage({ text: `${plateOf(row.vehicle)}: บันทึกผล${result === "PASS" ? "ผ่าน - ไปยื่นงานได้" : "ไม่ผ่าน - กลับไปรอส่งตรวจ"}` });
+      setMessage({ text: "" });
+      toast.success(`${plateOf(row.vehicle)}: บันทึกผล${result === "PASS" ? "ผ่าน - ไปยื่นงานได้" : "ไม่ผ่าน - กลับไปรอส่งตรวจ"}`);
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
       if ((err as { status?: number }).status === 409) load(true);
@@ -153,10 +158,7 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
 
   return (
     <section className="content">
-      <Link href={OLD_VEHICLE_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← งานรถเก่า
-      </Link>
-      <h1>ตรวจรถ (งานรถเก่า)</h1>
+      <PageHeader back={{ href: OLD_VEHICLE_HOME, label: "งานรถเก่า" }} title="ตรวจรถ (งานรถเก่า)" />
       <PageTabs
         label="ขั้นตรวจรถ"
         tabs={[
@@ -192,7 +194,8 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
               </label>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button type="button" onClick={() => print(picked, sentText)} disabled={saving}>
+              <button type="button" className="secondary" onClick={() => print(picked, sentText)} disabled={saving}>
+                <Icon name="printer" />
                 ปริ้นใบส่งตรวจ
               </button>
               <button type="button" className="primary" onClick={send} disabled={saving}>
@@ -201,23 +204,13 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
             </div>
           </div>
         )}
-        {message.text && (
-          <p className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "10px 22px 0" }}>
-            {message.text}
-          </p>
-        )}
+        <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
 
-        {truncated && (
-          <p className="customer-message error" role="alert" style={{ padding: "10px 22px 0" }}>
-            รถในคิวตรวจมีมากกว่า 500 คัน - แสดงไม่ครบ
-          </p>
-        )}
+        {truncated && <Notice tone="warn">รถในคิวตรวจมีมากกว่า 500 คัน - แสดงไม่ครบ</Notice>}
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : error ? (
-          <div className="empty-customers" role="alert">
-            {error}
-          </div>
+          <Notice tone="error">{error}</Notice>
         ) : rows.length === 0 ? (
           <div className="empty-customers">ไม่มีรถในขั้นนี้</div>
         ) : (
@@ -326,7 +319,8 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
                           {submitHref && (
                             <div style={{ marginTop: 6 }}>
                               <Link href={submitHref} className="text-button">
-                                ไปหน้ายื่นงาน →
+                                ไปหน้ายื่นงาน
+                                <Icon name="arrow-right" />
                               </Link>
                             </div>
                           )}
@@ -363,7 +357,8 @@ export function OldVehicleInspectionPage({ tab }: { tab: InspectionTab }) {
           onClose={() => setUndo(null)}
           onConfirm={async (remark) => {
             replace([(await oldVehicleJobsApi.undoInspection(undo.job.id, remark)).vehicle]);
-            setMessage({ text: `${plateOf(undo.vehicle)}: ยกเลิกแล้ว` });
+            setMessage({ text: "" });
+            toast.success(`${plateOf(undo.vehicle)}: ยกเลิกแล้ว`);
           }}
         >
           <p className="muted">

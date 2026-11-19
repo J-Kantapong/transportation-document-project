@@ -35,6 +35,9 @@ import { ReceiptRecheckBox } from "@/components/ReceiptRecheckBox";
 import { useRecheckConfirm } from "@/lib/receipt-recheck";
 import { DateInput } from "@/components/DateInput";
 import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { toast } from "@/lib/toast";
 
 // การสลับเลข รถเก่า <-> รถใหม่ (รถยนต์) - ผู้ใช้ 2026-09-22
 // หน้ายื่น (PlateSwapSubmitPage): กรอกรถเก่า + ลิงก์รถใหม่จากฐานข้อมูลรถจดใหม่ (บังคับ) + เลือกค่าใช้จ่าย แล้วบันทึกวันที่ยื่น
@@ -136,16 +139,7 @@ function CustomerCell({ swap }: { swap: PlateSwap }) {
   );
 }
 
-export const dangerButton: React.CSSProperties = { color: "#b43434" };
-const warnBox: React.CSSProperties = {
-  margin: "0 23px 14px",
-  padding: "12px 14px",
-  border: "1px solid #f0c36d",
-  background: "#fff8e6",
-  borderRadius: 8,
-  fontSize: 13,
-  color: "#6b4a00",
-};
+export const dangerButton: React.CSSProperties = { color: "var(--danger)" };
 
 // ป๊อปอัปถามเหตุผล (บังคับ) ก่อนแก้/ยกเลิก - ใช้ซ้ำทั้งยกเลิกงาน ยกเลิกรับกลับ และเปลี่ยนคันหลังรับกลับ
 // onConfirm โยน error ได้ ข้อความขึ้นในป๊อปอัปและยังไม่ปิด
@@ -189,26 +183,24 @@ export function ReasonDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{title}</h2>
       {children}
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผล *
+        เหตุผล <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={placeholder} />
       </label>
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : confirmLabel}
+          {saving ? "กำลังบันทึก…" : confirmLabel}
         </button>
       </div>
     </dialog>
@@ -237,18 +229,18 @@ function WrongPlateNote({ swap }: { swap: PlateSwap }) {
   const vehicle = swap.newVehicle;
   if (!swap.linkedPlateIsNewPlate || !vehicle) return null;
   return (
-    <div className="sub" style={{ color: "#a86200", whiteSpace: "normal" }}>
-      ⚠ รถใหม่ถูกบันทึกทะเบียน {plateText(vehicle)} ซึ่งเป็นทะเบียนใหม่ของรถเก่า - รถใหม่ต้องได้ทะเบียนเก่า {oldPlateText(swap)}{" "}
+    <div className="sub" style={{ color: "var(--warn)", whiteSpace: "normal" }}>
+      <Icon name="alert-triangle" /> รถใหม่ถูกบันทึกทะเบียน {plateText(vehicle)} ซึ่งเป็นทะเบียนใหม่ของรถเก่า - รถใหม่ต้องได้ทะเบียนเก่า {oldPlateText(swap)}{" "}
       กรุณาตรวจกับใบเสร็จจริง{" - "}
       {vehicle.activeSubmissionStatus === "PENDING" ? (
         <>
           รถคันนี้รอใบเสร็จอยู่: กรอกทะเบียนตามใบเสร็จตอนบันทึกใบเสร็จ{" "}
-          <Link href={focusHref(RECEIPT_CAR_PAGE, vehicle.chassis)}>ไปหน้ารับใบเสร็จ →</Link>
+          <Link href={focusHref(RECEIPT_CAR_PAGE, vehicle.chassis)}>ไปหน้ารับใบเสร็จ <Icon name="arrow-right" /></Link>
         </>
       ) : vehicle.activeSubmissionStatus === "RECEIPT_RECEIVED" ? (
         <>
-          รถคันนี้ได้ใบเสร็จแล้ว: แก้ที่ปุ่ม ✎ แก้ ในตาราง &quot;ได้ใบเสร็จแล้ว&quot; (ค้นเลขตัวถัง {vehicle.chassis}) พร้อมเหตุผล{" "}
-          <Link href={RECEIPT_CAR_PAGE}>ไปหน้ารับใบเสร็จ →</Link>
+          รถคันนี้ได้ใบเสร็จแล้ว: แก้ที่ปุ่ม <Icon name="pencil" /> แก้ ในตาราง &quot;ได้ใบเสร็จแล้ว&quot; (ค้นเลขตัวถัง {vehicle.chassis}) พร้อมเหตุผล{" "}
+          <Link href={RECEIPT_CAR_PAGE}>ไปหน้ารับใบเสร็จ <Icon name="arrow-right" /></Link>
         </>
       ) : (
         <>รถคันนี้ยังไม่มีรายการยื่นที่รอใบเสร็จ: ตอนยื่นเอกสารใหม่ ระบบเติมทะเบียนเก่าให้แล้ว ตรวจอีกครั้งก่อนยื่น</>
@@ -261,9 +253,11 @@ function WrongPlateBanner({ swaps }: { swaps: PlateSwap[] }) {
   const count = swaps.filter((s) => s.linkedPlateIsNewPlate).length;
   if (count === 0) return null;
   return (
-    <div style={warnBox} role="alert">
-      ⚠ มี {count} งานที่รถใหม่ถูกบันทึกทะเบียนเป็น &quot;ทะเบียนใหม่ของรถเก่า&quot; (ขั้นยื่นเอกสารเคยเติมเลขผิดฝั่งก่อน 27/09/2026)
-      รถใหม่ต้องได้ทะเบียนเก่าของรถเก่า - ดูแถวที่มี ⚠ ตรวจกับใบเสร็จจริง แล้วแก้ตามที่บอกในแถวนั้น (ที่แก้ขึ้นกับว่ารถคันนั้นยื่นเอกสารถึงขั้นไหนแล้ว)
+    <div style={{ margin: "0 23px 14px" }}>
+      <Notice tone="warn">
+        มี {count} งานที่รถใหม่ถูกบันทึกทะเบียนเป็น &quot;ทะเบียนใหม่ของรถเก่า&quot; (ขั้นยื่นเอกสารเคยเติมเลขผิดฝั่งก่อน 27/09/2026)
+        รถใหม่ต้องได้ทะเบียนเก่าของรถเก่า - ดูแถวที่มี <Icon name="alert-triangle" /> ตรวจกับใบเสร็จจริง แล้วแก้ตามที่บอกในแถวนั้น (ที่แก้ขึ้นกับว่ารถคันนั้นยื่นเอกสารถึงขั้นไหนแล้ว)
+      </Notice>
     </div>
   );
 }
@@ -353,7 +347,7 @@ function NewPlateCell({ swap, canWrite, onChange }: { swap: PlateSwap; canWrite:
   const text = newPlateText(swap);
   return (
     <div className="sub">
-      {text ? `ใหม่: ${text}` : <span style={{ color: "#946712" }}>ยังไม่ได้เลขใหม่</span>}
+      {text ? `ใหม่: ${text}` : <span style={{ color: "var(--warn)" }}>ยังไม่ได้เลขใหม่</span>}
       {canWrite && (
         <button type="button" className="text-button" style={{ paddingLeft: 6 }} onClick={() => setEditing(true)}>
           {text ? "แก้ไข" : "กรอกเลข"}
@@ -407,7 +401,7 @@ function ReceiptFieldsCell({ swap, canWrite, onChange }: { swap: PlateSwap; canW
         </div>
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
-            ✎ แก้
+            <Icon name="pencil" /> แก้
           </button>
         )}
       </div>
@@ -442,9 +436,7 @@ function ReceiptFieldsCell({ swap, canWrite, onChange }: { swap: PlateSwap; canW
         />
       )}
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" className="text-button" disabled={busy} onClick={save}>
@@ -562,14 +554,14 @@ function NewVehiclePicker({
           </button>
         )}
       </div>
-      {error && <div className="customer-message error">{error}</div>}
+      <Notice tone="error">{error}</Notice>
       {!error && query.trim().length > 0 && query.trim().length < MIN_VEHICLE_QUERY && (
         <div className="muted" style={{ fontSize: 13 }}>
           พิมพ์เลขตัวถังอย่างน้อย {MIN_VEHICLE_QUERY} ตัว แล้วรายการจะขึ้นเอง (ไม่ต้องพิมพ์ครบ)
         </div>
       )}
       {results && results.length === 0 && (
-        <div className="customer-message">ไม่พบ{CLASS_LABEL[vehicleClass]}ที่เลขตัวถังตรงกันในฐานข้อมูลรถจดใหม่</div>
+        <Notice tone="info">ไม่พบ{CLASS_LABEL[vehicleClass]}ที่เลขตัวถังตรงกันในฐานข้อมูลรถจดใหม่</Notice>
       )}
       {results && results.length > 0 && (
         <div className="choices" style={{ marginTop: 0 }}>
@@ -590,7 +582,8 @@ function NewVehiclePicker({
                 {plateText(v) ? ` · ทะเบียน ${plateText(v)}` : ""}
               </div>
               {v.linkBlockedReason && (
-                <div style={{ color: "#b43434", fontSize: 12, marginTop: 4, whiteSpace: "normal" }}>🔒 {v.linkBlockedReason}</div>
+                <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4, whiteSpace: "normal" }}>
+                  <Icon name="alert-circle" /> {v.linkBlockedReason}</div>
               )}
             </button>
           ))}
@@ -700,8 +693,8 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(720px, 96vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{isChange ? "แก้งานเปลี่ยนเลขทะเบียน" : "แก้งานสลับเลข"}</h2>
       <SwapSummary swap={swap} />
@@ -719,29 +712,29 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
           </select>
         </label>
         <label className="field">
-          วันที่ยื่น *
+          วันที่ยื่น <Req />
           <DateTextInput value={submitDateText} onChange={setSubmitDateText} label="วันที่ยื่น" />
         </label>
         {swap.returnedDate && (
           <label className="field">
-            วันที่รับเอกสารกลับ *
+            วันที่รับเอกสารกลับ <Req />
             <DateTextInput value={returnedDateText} onChange={setReturnedDateText} label="วันที่รับเอกสารกลับ" />
           </label>
         )}
         <label className="field">
-          ชื่อเจ้าของรถ *
+          ชื่อเจ้าของรถ <Req />
           <input value={form.oldOwnerName} onChange={set("oldOwnerName")} />
         </label>
         <label className="field">
-          เลขตัวถัง *
+          เลขตัวถัง <Req />
           <input value={form.oldChassis} onChange={set("oldChassis")} />
         </label>
         <label className="field">
-          เลขเครื่อง *
+          เลขเครื่อง <Req />
           <input value={form.oldEngine} onChange={set("oldEngine")} />
         </label>
         <label className="field">
-          ยี่ห้อ *
+          ยี่ห้อ <Req />
           <select value={form.oldBrand} onChange={set("oldBrand")}>
             {brandNames.map((name) => (
               <option key={name} value={name}>
@@ -751,7 +744,7 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
           </select>
         </label>
         <div className="field">
-          ทะเบียนเก่า *
+          ทะเบียนเก่า <Req />
           <div style={{ display: "flex", gap: 8 }}>
             <input value={form.oldPlateCategory} onChange={set("oldPlateCategory")} maxLength={3} aria-label="หมวดทะเบียนเก่า" />
             <input
@@ -800,27 +793,25 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
         )}
       </div>
       {feesChanged && (
-        <p className="customer-message" style={{ marginTop: 8 }}>
+        <Notice tone="info">
           ค่าใช้จ่ายจะคิดใหม่: Bill {formatBaht(Number(swap.billTotal))} → {formatBaht(fees.billTotal)} · No Bill{" "}
           {formatBaht(Number(swap.noBillTotal))} → {formatBaht(fees.noBillTotal)} บาท
-        </p>
+        </Notice>
       )}
 
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อเจ้าของรถผิด" />
       </label>
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
         </button>
       </div>
     </dialog>
@@ -855,7 +846,7 @@ function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCanc
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
       <button type="button" className="text-button" onClick={onEdit}>
-        ✎ แก้
+        <Icon name="pencil" /> แก้
       </button>
       {children}
       <button type="button" className="text-button" style={dangerButton} onClick={onCancel}>
@@ -985,7 +976,8 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
         buyNormalPlate,
         buyAuctionPlate,
       });
-      setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
+      setMessage({ text: "" });
+      toast.success("บันทึกงานที่ยื่นแล้ว");
       setForm(EMPTY_FORM);
       setNewVehicle(null);
       setPicking(false);
@@ -1017,10 +1009,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
 
   return (
     <section className="content">
-      <Link href={OLD_NEW_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← รถเก่า กับ รถใหม่
-      </Link>
-      <h1>ยื่นงานสลับเลข ({CLASS_LABEL[vehicleClass]})</h1>
+      <PageHeader back={{ href: OLD_NEW_HOME, label: "รถเก่า กับ รถใหม่" }} title={`ยื่นงานสลับเลข (${CLASS_LABEL[vehicleClass]})`} />
       <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
@@ -1029,7 +1018,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
             {/* เจ้าของงานอยู่นอกหัวข้อ "รถเก่า" ตั้งใจ (ผู้ใช้ 2026-09-28): เป็นลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ
                 ไม่ใช่เจ้าของรถตามทะเบียน (ช่อง "ชื่อเจ้าของรถ" ข้างล่าง) - กฎเดียวกับรถจดใหม่ที่แยกสองอย่างนี้ออกจากกัน */}
             <label className="field" style={{ maxWidth: 420 }}>
-              เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+              เจ้าของงาน (ลูกค้าที่ส่งงานมา) <Req />
               <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
                 <option value="">เลือกลูกค้า</option>
                 {customerOptions.map((c) => (
@@ -1045,23 +1034,23 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
                 (เดิม 2026-09-23 เลขเครื่องมาก่อน ผู้ใช้สลับเป็นเลขตัวถังก่อนเมื่อ 2026-09-28) */}
             <div className="customer-grid">
               <label className="field">
-                วันที่ยื่น *
+                วันที่ยื่น <Req />
                 <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
               </label>
               <label className="field">
-                ชื่อเจ้าของรถ *
+                ชื่อเจ้าของรถ <Req />
                 <input value={form.oldOwnerName} onChange={setField("oldOwnerName")} required />
               </label>
               <label className="field">
-                เลขตัวถัง *
+                เลขตัวถัง <Req />
                 <input value={form.oldChassis} onChange={setField("oldChassis")} required />
               </label>
               <label className="field">
-                เลขเครื่อง *
+                เลขเครื่อง <Req />
                 <input value={form.oldEngine} onChange={setField("oldEngine")} required />
               </label>
               <label className="field">
-                ยี่ห้อ *
+                ยี่ห้อ <Req />
                 <select value={form.oldBrand} onChange={(e) => setForm((prev) => ({ ...prev, oldBrand: e.target.value }))} required>
                   <option value="">เลือกยี่ห้อ</option>
                   {brandNames.map((name) => (
@@ -1072,7 +1061,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
                 </select>
               </label>
               <div className="field">
-                ทะเบียนเก่า * (รถใหม่จะได้เลขนี้)
+                ทะเบียนเก่า (รถใหม่จะได้เลขนี้) <Req />
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     value={form.oldPlateCategory}
@@ -1116,7 +1105,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               </div>
             </div>
 
-            <h2 style={{ marginTop: 28 }}>รถใหม่ (จากฐานข้อมูลรถจดใหม่) *</h2>
+            <h2 style={{ marginTop: 28 }}>รถใหม่ (จากฐานข้อมูลรถจดใหม่) <Req /></h2>
             {newVehicle ? (
               <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                 <LinkedVehicle vehicle={newVehicle} />
@@ -1142,7 +1131,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               />
             ) : (
               <button type="button" className="filter-chip" onClick={() => setPicking(true)}>
-                🔗 ลิงก์ข้อมูลรถใหม่ด้วยเลขตัวถัง
+                <Icon name="link" /> ลิงก์ข้อมูลรถใหม่ด้วยเลขตัวถัง
               </button>
             )}
 
@@ -1225,13 +1214,11 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               </div>
             </div>
 
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
             <div className="form-actions">
               <button className="primary" type="submit" disabled={saving}>
                 บันทึกการยื่น
               </button>
-              <span className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`} role="status">
-                {message.text}
-              </span>
             </div>
           </form>
         </div>
@@ -1246,11 +1233,9 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : swaps.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
@@ -1376,7 +1361,7 @@ function SubmittedRow({
             {canWrite && (
               <div>
                 <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setPicking(true)}>
-                  {swap.newVehicle ? "เปลี่ยนคัน" : "🔗 ลิงก์รถใหม่"}
+                  {swap.newVehicle ? "เปลี่ยนคัน" : <><Icon name="link" /> ลิงก์รถใหม่</>}
                 </button>
               </div>
             )}
@@ -1492,7 +1477,8 @@ export function PlateSwapReturnPage({
     try {
       if (!(await recheckConfirm((reason) => plateSwapApi.markReturned(swap.id, returnDate, newPlateCategory, newPlateNumber, reason)))) return;
       drop(swap.id);
-      setMessage({ text: `รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${oldPlateText(swap)})` });
+      setMessage({ text: "" });
+      toast.success(`รับเอกสารกลับแล้ว: ${swap.oldOwnerName} (${oldPlateText(swap)})`);
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
     }
@@ -1500,13 +1486,11 @@ export function PlateSwapReturnPage({
 
   return (
     <section className="content">
-      <Link href={home.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← {home.label}
-      </Link>
-      <h1>รับใบเสร็จ ({CLASS_LABEL[vehicleClass]})</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ
-      </p>
+      <PageHeader
+        back={{ href: home.href, label: home.label }}
+        title={`รับใบเสร็จ (${CLASS_LABEL[vehicleClass]})`}
+        subtitle="ถ่ายหรือแนบรูปใบเสร็จอย่างน้อย 1 รูป (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) แล้วกดยืนยันรับเอกสารกลับตามวันที่ที่ระบุ"
+      />
 
       <div className="panel">
         <div className="panel-head">
@@ -1526,16 +1510,14 @@ export function PlateSwapReturnPage({
           )}
         </div>
         {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
+          <div style={{ padding: "0 23px 14px" }}>
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
           </div>
         )}
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : swaps.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
@@ -1578,7 +1560,8 @@ export function PlateSwapReturnPage({
           onClose={() => setDialog(null)}
           onCancelled={(id) => {
             drop(id);
-            setMessage({ text: `ยกเลิกงานแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})` });
+            setMessage({ text: "" });
+            toast.success(`ยกเลิกงานแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})`);
           }}
         />
       )}
@@ -1591,14 +1574,15 @@ export function PlateSwapReturnPage({
           onConfirm={async (remark) => {
             await plateSwapApi.undoReturn(dialog.swap.id, remark);
             drop(dialog.swap.id);
-            setMessage({ text: `ย้ายกลับไปรอรับเอกสารแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})` });
+            setMessage({ text: "" });
+            toast.success(`ย้ายกลับไปรอรับเอกสารแล้ว: ${dialog.swap.oldOwnerName} (${oldPlateText(dialog.swap)})`);
           }}
         >
           <SwapSummary swap={dialog.swap} />
           <p style={{ marginTop: 12 }}>
             งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot;
             {dialog.swap.newVehicle ? ` และรถใหม่ ${dialog.swap.newVehicle.chassis} จะยื่นเอกสารไม่ได้จนกว่าจะยืนยันรับกลับอีกครั้ง` : ""}
-            {" "}- ถ้าแค่วันที่รับกลับผิด ใช้ ✎ แก้ แทน
+            {" "}- ถ้าแค่วันที่รับกลับผิด ใช้ <Icon name="pencil" /> แก้ แทน
           </p>
         </ReasonDialog>
       )}
@@ -1720,7 +1704,7 @@ function ReturnRow({
           {swap.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
-                🧾 รูป {i + 1}
+                <Icon name="receipt" /> รูป {i + 1}
               </button>
               {receiptWritable && (
                 <button
@@ -1732,7 +1716,7 @@ function ReturnRow({
                   title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
-                  ×
+                  <Icon name="x" />
                 </button>
               )}
             </span>
@@ -1765,7 +1749,7 @@ function ReturnRow({
                 title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                 onClick={() => inputRef.current?.click()}
               >
-                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+                {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> ถ่าย/แนบใบเสร็จ</>}
               </button>
               {returned && (
                 <button
@@ -1800,7 +1784,7 @@ function ReturnRow({
               ยืนยันรับกลับ
             </button>
             {missing.length > 0 && (
-              <div id={`swap-missing-${swap.id}`} className="sub" style={{ color: "#a86200" }}>
+              <div id={`swap-missing-${swap.id}`} className="sub" style={{ color: "var(--warn)" }}>
                 ยังขาด: {missing.join(" · ")}
               </div>
             )}
@@ -1934,13 +1918,13 @@ function ReceivePlateOrBookRow({
             <div>{isoToDisplayDate(receivedDate)}</div>
             {photoId && (
               <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => openPlateSwapPhoto(kind, swap.id)}>
-                📷 ดูรูป
+                <Icon name="camera" /> ดูรูป
               </button>
             )}
             {canWrite && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={openDateDialog}>
-                  ✎ แก้วันที่
+                  <Icon name="pencil" /> แก้วันที่
                 </button>
                 <button type="button" className="text-button" style={dangerButton} onClick={() => setDialog("detach")}>
                   ถอดรูป
@@ -1953,7 +1937,7 @@ function ReceivePlateOrBookRow({
             <DateTextInput value={dateText} onChange={setDateText} label={`วันที่รับ${label}`} />
             <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => attach(e.target.files)} />
             <button type="button" className="text-button" style={{ paddingLeft: 0 }} disabled={busy} onClick={() => inputRef.current?.click()}>
-              {busy ? "กำลังอัปโหลด…" : `📷 แนบรูป${label}`}
+              {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> แนบรูป{label}</>}
             </button>
           </div>
         ) : (
@@ -1977,7 +1961,7 @@ function ReceivePlateOrBookRow({
         >
           <SwapSummary swap={swap} />
           <label className="field" style={{ marginTop: 12 }}>
-            วันที่รับ{label}ใหม่ *
+            วันที่รับ{label}ใหม่ <Req />
             <DateTextInput value={editDateText} onChange={setEditDateText} label={`วันที่รับ${label}`} />
           </label>
         </ReasonDialog>
@@ -2042,15 +2026,11 @@ function PlateSwapReceivePlateOrBookPage({
 
   return (
     <section className="content">
-      <Link href={home.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← {home.label}
-      </Link>
-      <h1>
-        รับ{label} ({CLASS_LABEL[vehicleClass]})
-      </h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        แนบรูป{label}ที่ได้รับแล้วบันทึกทันที (เฉพาะฝั่งรถเก่าของงานนี้) - ไม่ต้องรอรับใบเสร็จก่อน
-      </p>
+      <PageHeader
+        back={{ href: home.href, label: home.label }}
+        title={`รับ${label} (${CLASS_LABEL[vehicleClass]})`}
+        subtitle={`แนบรูป${label}ที่ได้รับแล้วบันทึกทันที (เฉพาะฝั่งรถเก่าของงานนี้) - ไม่ต้องรอรับใบเสร็จก่อน`}
+      />
 
       <div className="panel">
         <div className="panel-head">
@@ -2064,16 +2044,14 @@ function PlateSwapReceivePlateOrBookPage({
           </div>
         </div>
         {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
+          <div style={{ padding: "0 23px 14px" }}>
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
           </div>
         )}
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : swaps.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? `ไม่มีงานที่รอรับ${label}` : `ยังไม่มีงานที่รับ${label}แล้ว`}</div>
         ) : (
@@ -2155,20 +2133,20 @@ function PairCarFields({
       <h3 style={{ marginTop: 0 }}>{label}</h3>
       <div style={{ display: "grid", gap: 12 }}>
         <label className="field">
-          ชื่อเจ้าของรถ *
+          ชื่อเจ้าของรถ <Req />
           <input value={value.oldOwnerName} onChange={set("oldOwnerName")} required />
         </label>
         {/* ผู้ใช้ 2026-09-28: เลขตัวถังมาก่อนเลขเครื่อง (สลับจากลำดับเดิมที่กำหนดไว้ 2026-09-23) */}
         <label className="field">
-          เลขตัวถัง *
+          เลขตัวถัง <Req />
           <input value={value.oldChassis} onChange={set("oldChassis")} required />
         </label>
         <label className="field">
-          เลขเครื่อง *
+          เลขเครื่อง <Req />
           <input value={value.oldEngine} onChange={set("oldEngine")} required />
         </label>
         <label className="field">
-          ยี่ห้อ *
+          ยี่ห้อ <Req />
           <select value={value.oldBrand} onChange={set("oldBrand")} required>
             <option value="">เลือกยี่ห้อ</option>
             {brandNames.map((name) => (
@@ -2179,7 +2157,7 @@ function PairCarFields({
           </select>
         </label>
         <div className="field">
-          ทะเบียนเดิม *
+          ทะเบียนเดิม <Req />
           <div style={{ display: "flex", gap: 8 }}>
             <input
               value={value.oldPlateCategory}
@@ -2388,7 +2366,8 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
     setMessage({ text: "กำลังบันทึก…" });
     try {
       await plateSwapApi.createPair({ vehicleClass, urgent, customerId, submitDate, numberSource, buyNormalPlate, buyAuctionPlate, carA, carB });
-      setMessage({ text: "บันทึกแล้ว - ระบบแยกเป็น 2 งาน (คันละงาน)" });
+      setMessage({ text: "" });
+      toast.success("บันทึกแล้ว - ระบบแยกเป็น 2 งาน (คันละงาน)");
       setCarA(EMPTY_PAIR_CAR);
       setCarB(EMPTY_PAIR_CAR);
       if (submitDate.slice(0, 7) === month) await load(month);
@@ -2413,21 +2392,19 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
 
   return (
     <section className="content">
-      <Link href={caseHome(vehicleClass, "OLD_OLD").href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← รถเก่า กับ รถเก่า
-      </Link>
-      <h1>ยื่นงานสลับเลข · รถเก่า กับ รถเก่า ({CLASS_LABEL[vehicleClass]})</h1>
+      <PageHeader
+        back={{ href: caseHome(vehicleClass, "OLD_OLD").href, label: "รถเก่า กับ รถเก่า" }}
+        title={`ยื่นงานสลับเลข · รถเก่า กับ รถเก่า (${CLASS_LABEL[vehicleClass]})`}
+        subtitle="กรอกรถทั้ง 2 คันในหน้านี้ ระบบจะบันทึกแยกเป็น 2 งาน (คันละงาน) และสลับทะเบียนให้อัตโนมัติ"
+      />
       <IntakeNotice state={intakePrefill} />
-      <p className="muted" style={{ marginBottom: 20 }}>
-        กรอกรถทั้ง 2 คันในหน้านี้ ระบบจะบันทึกแยกเป็น 2 งาน (คันละงาน) และสลับทะเบียนให้อัตโนมัติ
-      </p>
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
             <div className="customer-grid">
               <label className="field">
-                เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+                เจ้าของงาน (ลูกค้าที่ส่งงานมา) <Req />
                 <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
                   <option value="">เลือกลูกค้า</option>
                   {customerOptions.map((c) => (
@@ -2438,7 +2415,7 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
                 </select>
               </label>
               <label className="field">
-                วันที่ยื่น *
+                วันที่ยื่น <Req />
                 <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
               </label>
             </div>
@@ -2449,10 +2426,10 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
             </div>
 
             {/* บอกผลลัพธ์ก่อนบันทึก - กันกรอกสลับข้างแล้วมารู้ตัวหลังบันทึกไปแล้ว */}
-            <div className="customer-message" style={{ marginTop: 18 }}>
+            <Notice tone="info">
               หลังบันทึก: คันที่ 1 ({pairPlateText(carA)}) จะได้ทะเบียน <strong>{pairPlateText(carB)}</strong> · คันที่ 2 ({pairPlateText(carB)}) จะได้ทะเบียน{" "}
               <strong>{pairPlateText(carA)}</strong>
-            </div>
+            </Notice>
 
             <h2 style={{ marginTop: 28 }}>ค่าใช้จ่าย (คิดคันละชุด)</h2>
             <FeeOptionFields
@@ -2518,8 +2495,8 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
             </p>
 
             {message.text && (
-              <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 12 }}>
-                {message.text}
+              <div style={{ marginTop: 12 }}>
+                <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
               </div>
             )}
             <div style={{ marginTop: 16 }}>
@@ -2540,11 +2517,9 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : swaps.length === 0 ? (
           <div className="empty-customers">ยังไม่มีงานรถเก่า กับ รถเก่าในเดือนนี้</div>
         ) : (
@@ -2681,7 +2656,8 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
     setMessage({ text: "กำลังบันทึก…" });
     try {
       await plateSwapApi.createChange({ vehicleClass, urgent, customerId, submitDate, ...car, newPlateCategory: category, newPlateNumber });
-      setMessage({ text: "บันทึกแล้ว" });
+      setMessage({ text: "" });
+      toast.success("บันทึกแล้ว");
       setCar(EMPTY_PAIR_CAR);
       setNewPlateCategory("");
       setNewPlateNumber("");
@@ -2705,21 +2681,19 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
 
   return (
     <section className="content">
-      <Link href={home.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← {home.label}
-      </Link>
-      <h1>ยื่นงานเปลี่ยนเลขทะเบียน ({CLASS_LABEL[vehicleClass]})</h1>
+      <PageHeader
+        back={{ href: home.href, label: home.label }}
+        title={`ยื่นงานเปลี่ยนเลขทะเบียน (${CLASS_LABEL[vehicleClass]})`}
+        subtitle="ลูกค้าจองเลขในระบบกรมขนส่งแล้วเอามาลงกับรถ 1 คัน - ซื้อแผ่นป้ายใหม่ทุกครั้ง"
+      />
       <IntakeNotice state={intakePrefill} />
-      <p className="muted" style={{ marginBottom: 20 }}>
-        ลูกค้าจองเลขในระบบกรมขนส่งแล้วเอามาลงกับรถ 1 คัน - ซื้อแผ่นป้ายใหม่ทุกครั้ง
-      </p>
 
       {canWrite && (
         <div className="panel" style={{ marginBottom: 24 }}>
           <form className="customer-form" onSubmit={handleSubmit}>
             <div className="customer-grid">
               <label className="field">
-                เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+                เจ้าของงาน (ลูกค้าที่ส่งงานมา) <Req />
                 <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
                   <option value="">เลือกลูกค้า</option>
                   {customerOptions.map((c) => (
@@ -2730,7 +2704,7 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
                 </select>
               </label>
               <label className="field">
-                วันที่ยื่น *
+                วันที่ยื่น <Req />
                 <DateTextInput value={submitDateText} onChange={setSubmitDateText} />
               </label>
             </div>
@@ -2816,8 +2790,8 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
             </p>
 
             {message.text && (
-              <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 12 }}>
-                {message.text}
+              <div style={{ marginTop: 12 }}>
+                <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
               </div>
             )}
             <div style={{ marginTop: 16 }}>
@@ -2838,11 +2812,9 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : swaps.length === 0 ? (
           <div className="empty-customers">ยังไม่มีงานเปลี่ยนเลขทะเบียนในเดือนนี้</div>
         ) : (

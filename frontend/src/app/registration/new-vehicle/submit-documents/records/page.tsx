@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { PageHeader } from "@/components/ui";
 import { Suspense, useEffect, useState } from "react";
 import { api, ApiError, type DocumentSubmission } from "@/lib/api";
 import { SubmittedRecordsView } from "@/components/SubmittedRecordsView";
@@ -84,13 +84,12 @@ export default function SubmitDocumentsRecordsPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle/submit-documents" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← ยื่นเอกสารจดทะเบียนรถใหม่
-      </Link>
-      <h1 tabIndex={-1}>ดูข้อมูลที่ยื่นแล้ว</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        รายการที่ยื่นแล้ว แยกรถยนต์ / มอเตอร์ไซค์ ตามแบบใบส่งงาน
-      </p>
+      <PageHeader
+        back={{ href: "/registration/new-vehicle/submit-documents", label: "ยื่นเอกสารจดทะเบียนรถใหม่" }}
+        title="ดูข้อมูลที่ยื่นแล้ว"
+        subtitle="รายการที่ยื่นแล้ว แยกรถยนต์ / มอเตอร์ไซค์ ตามแบบใบส่งงาน"
+        titleFocus
+      />
       {/* แท็บรถยนต์/มอเตอร์ไซค์อยู่ใน URL (useSearchParams ต้องอยู่ใต้ Suspense) */}
       <Suspense>
         <SubmittedRecordsView

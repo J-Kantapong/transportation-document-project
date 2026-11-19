@@ -27,6 +27,9 @@ import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/inv
 import { comparePlate } from "@/lib/plate-order";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 
 // พื้นที่ทำงานบัญชี: วางบิลในนามบริษัท - รถที่พนักงานบันทึกส่งงานแล้วมารอที่นี่ บัญชีเลือกคัน ตรวจค่าดำเนินการ แล้วออกใบวางบิล
@@ -622,7 +625,8 @@ export function BillingPage() {
       setInvoiceReload((n) => n + 1);
       const jobCount = selectedJobs.length;
       const parts = [invoice.lines.length ? `${invoice.lines.length} คัน` : "", jobCount ? `งานอื่น ${jobCount} งาน` : ""].filter(Boolean).join(" + ");
-      setMessage({ text: `ออก ${invoice.invoiceNo} แล้ว ${parts} ยอด ${formatMoney(invoice.netTotal)} บาท` });
+      setMessage({ text: "" });
+      toast.success(`ออก ${invoice.invoiceNo} แล้ว ${parts} ยอด ${formatMoney(invoice.netTotal)} บาท`);
       printInvoice(invoice);
     } catch (err) {
       fail(err instanceof ApiError ? err.message : "ออกบิลไม่สำเร็จ");
@@ -635,42 +639,45 @@ export function BillingPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>วางบิล</h1>
-      <p>
-        รถจดใหม่และงานอื่นๆ (ต่อภาษี / โอน / ยกเลิกใช้รถ / คัดป้าย / ย้ายออก) ที่ส่งงานลูกค้าแล้วจะมารอที่นี่ เลือกลูกค้า ติ๊กรถและงานที่จะรวมในบิลเดียวกัน แล้วออกใบวางบิล -
-        คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด &quot;ปิดงาน&quot; พร้อมหมายเหตุ
-      </p>
+      <PageHeader
+        title="วางบิล"
+        titleFocus
+        subtitle={
+          <>
+          รถจดใหม่และงานอื่นๆ (ต่อภาษี / โอน / ยกเลิกใช้รถ / คัดป้าย / ย้ายออก) ที่ส่งงานลูกค้าแล้วจะมารอที่นี่ เลือกลูกค้า ติ๊กรถและงานที่จะรวมในบิลเดียวกัน แล้วออกใบวางบิล -
+          คันที่วางบิลที่อื่นแล้วหรือไม่ต้องวางบิล กด &quot;ปิดงาน&quot; พร้อมหมายเหตุ
+          </>
+        }
+        actions={
+          <>
+            {/* บัญชีเปิดรายงานส่งงาน/ใบส่งงานได้แบบอ่านอย่างเดียว ไว้ตรวจก่อนวางบิล (ผู้ใช้ 2026-09-27) - หน้า Delivery ไม่มีในเมนูของบัญชี */}
+            <Link href="/delivery/report" className="secondary">
+              รายงานส่งงาน / ใบส่งงาน
+            </Link>
+            {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
+            <Link href="/accounting/billing/customers" className="secondary">
+              ตั้งราคาล่วงหน้าให้ลูกค้า
+            </Link>
+            {/* งานโอน / ยกเลิกการใช้รถ / คัดป้าย / ย้ายออก / ต่อภาษี ที่รับใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-07) */}
+            <Link href="/accounting/billing/jobs" className="secondary">
+              ตั้งราคา / ปิดงาน งานอื่นๆ (โอน / ต่อภาษี ...)
+            </Link>
+            {/* บิลที่ไม่มีรถในระบบ: งานเก่าจากระบบเดิม / ขายสินค้า (ผู้ใช้ 2026-09-29) */}
+            <Link href="/accounting/billing/custom" className="primary">
+              <Icon name="plus" /> บิลกำหนดเอง (งานเก่า / ขายสินค้า)
+            </Link>
+          </>
+        }
+      />
       {/* ของครบแล้ว (ใบเสร็จ+เล่ม / ใบเสร็จของงานอื่น) แต่ยังไม่ลงส่งงาน - วางบิลไม่ได้จนกว่าจะลง บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08) */}
       <AwaitingDeliveryPanel only="all" onRecorded={() => loadQueue(false)} />
-      {/* บัญชีเปิดรายงานส่งงาน/ใบส่งงานได้แบบอ่านอย่างเดียว ไว้ตรวจก่อนวางบิล (ผู้ใช้ 2026-09-27) - หน้า Delivery ไม่มีในเมนูของบัญชี */}
-      <Link href="/delivery/report" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        รายงานส่งงาน / ใบส่งงาน →
-      </Link>
-      {/* ลูกค้าที่ยังไม่มีรถในคิวไม่โผล่ที่นี่เลย - ตั้งราคาล่วงหน้าไว้ก่อนได้ที่หน้านี้ (ผู้ใช้ 2026-09-28) */}
-      <Link href="/accounting/billing/customers" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
-        ตั้งราคาล่วงหน้าให้ลูกค้า →
-      </Link>
-      {/* งานโอน / ยกเลิกการใช้รถ / คัดป้าย / ย้ายออก / ต่อภาษี ที่รับใบเสร็จกลับแล้ว (ผู้ใช้ 2026-10-07) */}
-      <Link href="/accounting/billing/jobs" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
-        ตั้งราคา / ปิดงาน งานอื่นๆ (โอน / ต่อภาษี ...) →
-      </Link>
-      {/* บิลที่ไม่มีรถในระบบ: งานเก่าจากระบบเดิม / ขายสินค้า (ผู้ใช้ 2026-09-29) */}
-      <Link href="/accounting/billing/custom" className="text-button" style={{ marginTop: 8, marginLeft: 16, display: "inline-block" }}>
-        + บิลกำหนดเอง (งานเก่า / ขายสินค้า) →
-      </Link>
 
       {loading ? (
-        <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-          กำลังโหลด...
-        </div>
+        <LoadingState />
       ) : !customer ? (
         <section className="panel" style={{ marginTop: 20 }}>
           <div className="empty-customers">ไม่มีรถหรืองานรอวางบิล (เข้าคิวเมื่อพนักงานบันทึกส่งงานในหน้า Delivery)</div>
-          {message.text && (
-            <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 20px" }}>
-              {message.text}
-            </div>
-          )}
+          <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
         </section>
       ) : (
         <>
@@ -709,7 +716,7 @@ export function BillingPage() {
                   </button>
                 ) : (
                   <Link href="/accounting/billing/customers" className="text-button">
-                    ตารางราคารถ →
+                    ตารางราคารถ
                   </Link>
                 )}
               </div>
@@ -733,9 +740,9 @@ export function BillingPage() {
               />
             )}
             {customer.terms.requiresQuotation && (
-              <div className="customer-message error" role="alert" style={{ marginTop: 8 }}>
+              <Notice tone="error">
                 ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกใบวางบิลจากหน้าใบเสนอราคา
-              </div>
+              </Notice>
             )}
             {settingsOpen === "rates" && customer.vehiclesLoaded && (
               <BillingRatesEditor
@@ -763,8 +770,10 @@ export function BillingPage() {
               </span>
             </div>
             {problemCount > 0 && (
-              <div style={{ margin: "0 23px 12px", padding: "10px 14px", borderRadius: 10, background: "#fde0e0", color: "#8f1d1d", border: "1px solid #e59a9a", fontWeight: 600, fontSize: 13 }}>
-                ⚠ ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
+              <div style={{ margin: "0 23px 12px" }}>
+                <Notice tone="error">
+                  ต้องตรวจ {problemCount} คัน - ติ๊กไม่ได้จนกว่าจะกด &quot;แก้&quot; แล้วใส่ข้อมูลที่ขาด (ดูเหตุผลที่แต่ละคัน)
+                </Notice>
               </div>
             )}
             {/* จอแคบ: คอลัมน์รวมกว้าง ~620px ให้เลื่อนด้านข้างในกล่องนี้แทนที่ทั้งหน้าจะล้น */}
@@ -820,7 +829,7 @@ export function BillingPage() {
                             {v.chassis}
                             {fixedIds.has(v.id) && (
                               <span style={{ marginLeft: 6, fontSize: 12, background: "#e3f5e9", color: "#1e6b3a", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
-                                ✓ แก้ไขเรียบร้อย
+                                <Icon name="tick" /> แก้ไขเรียบร้อย
                               </span>
                             )}
                           </span>
@@ -867,7 +876,7 @@ export function BillingPage() {
                             )}
                             {problem ? (
                               <span className="badge alert" title={problem}>
-                                ⚠ ต้องตรวจ
+                                <Icon name="alert-triangle" /> ต้องตรวจ
                               </span>
                             ) : (
                               <b style={{ fontWeight: 600, color: changed ? "#b43434" : undefined }} title={changed ? "แก้จากที่ระบบเลือก" : undefined}>
@@ -880,8 +889,8 @@ export function BillingPage() {
                           </button>
                         </div>
                         {problem && !open && (
-                          <div className="customer-message error" style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
-                            {problem}
+                          <div style={{ padding: "0 23px 8px 53px" }}>
+                            <Notice tone="error">{problem}</Notice>
                           </div>
                         )}
                         {/* ติ๊กรถใหม่ของงานสลับเลข = โผล่รถเก่าอีกคันใต้แถว ให้เทียบข้อมูลและใบเสร็จได้ทันที (ผู้ใช้ 2026-10-14) */}
@@ -980,7 +989,7 @@ export function BillingPage() {
                                       <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                                         {/* ใช้แล้ว = ข้อความสีเขียว ไม่ใช่ปุ่มจาง (ผู้ใช้ 2026-10-30: ปุ่มจาง + เมาส์รูปรอ ดูเหมือนค้าง) */}
                                         {applied ? (
-                                          <b style={{ color: "#1e6b3a" }}>✓ ใช้ตามใบเสร็จแล้ว · ค่าบริการคันนี้ {fee === null ? "—" : formatMoney(fee)}</b>
+                                          <b style={{ color: "var(--ok)" }}><Icon name="tick" /> ใช้ตามใบเสร็จแล้ว · ค่าบริการคันนี้ {fee === null ? "—" : formatMoney(fee)}</b>
                                         ) : (
                                           <button type="button" className="primary" onClick={() => patchRow(v.id, { addOnIds: says.addOnIds, receiptChecked: true })}>
                                             {`ใช้ตามใบเสร็จ (${says.otherProvince ? "คิดค่าขอใช้" : "ไม่คิดค่าขอใช้"})`}
@@ -1132,7 +1141,7 @@ export function BillingPage() {
                                     })
                                   }
                                 >
-                                  แก้ข้อมูลรถ (จังหวัด / cc ฯลฯ) →
+                                  แก้ข้อมูลรถ (จังหวัด / cc ฯลฯ)
                                 </Link>
                               ) : (
                                 <span className="muted">ข้อมูลรถผิด (เช่น จังหวัด) ให้ผู้ลงข้อมูลรถ (ADMIN / STAFF_ENTRY) แก้ที่หน้าเพิ่มข้อมูลรถจดใหม่</span>
@@ -1190,12 +1199,14 @@ export function BillingPage() {
               <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
                 <h2>งานอื่นๆ ส่งงานแล้ว รอวางบิล ({customerJobs.length})</h2>
                 <Link href="/accounting/billing/jobs" className="text-button" style={{ fontSize: 12 }}>
-                  ตั้งราคางาน / ปิดงาน →
+                  ตั้งราคางาน / ปิดงาน
                 </Link>
               </div>
               {jobAccountMismatch && (
-                <div className="customer-message error" style={{ margin: "0 23px 8px" }}>
+                <div style={{ margin: "0 23px 8px" }}>
+                  <Notice tone="error">
                   งานอื่นอยู่{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถที่เลือกอยู่{ACCOUNT_LABEL[account]} - ออกบิลแยกใบ
+                  </Notice>
                 </div>
               )}
               <div style={{ ...JOB_GRID, padding: "6px 23px", fontSize: 12, color: "#576781", borderTop: "1px solid #f0f2f6" }}>
@@ -1255,10 +1266,10 @@ export function BillingPage() {
                     </div>
                     {(problem || j.warnings.length > 0) && (
                       <div style={{ padding: "0 23px 8px 53px", fontSize: 12 }}>
-                        {problem && <div className="customer-message error">⚠ {problem}</div>}
+                        {problem && <Notice tone="error">{problem}</Notice>}
                         {j.warnings.map((w) => (
                           <div key={w} style={{ color: "#946712" }}>
-                            ⚠ {w}
+                            <Icon name="alert-triangle" /> {w}
                           </div>
                         ))}
                       </div>
@@ -1321,17 +1332,13 @@ export function BillingPage() {
                   · ยอดบิล <b>{formatMoney(totals.netTotal)}</b> บาท
                 </>
               )}
-              {mixedAccounts && <div className="customer-message error">รถที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) - แยกเป็นบิลละบัญชี</div>}
+              <Notice tone="error">{mixedAccounts ? "รถที่เลือกอยู่คนละบัญชี (บริษัท/บุคคล) - แยกเป็นบิลละบัญชี" : ""}</Notice>
             </div>
             <button className="primary" disabled={!hasPick || saving || refreshing} onClick={() => setConfirmOpen(true)}>
               ออกบิล {[selected.length ? `${selected.length} คัน` : "", selectedJobs.length ? `${selectedJobs.length} งาน` : ""].filter(Boolean).join(" + ")}
             </button>
           </div>
-          {message.text && (
-            <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ marginTop: 10 }}>
-              {message.text}
-            </div>
-          )}
+          <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
 
           {confirmOpen && (
             <IssueDialog onClose={() => setConfirmOpen(false)}>
@@ -1381,7 +1388,7 @@ export function BillingPage() {
                 {selectedJobs.length > 0 && (
                   <div style={{ display: "grid", gap: 4, fontSize: 13, background: "#f5f7fb", borderRadius: 8, padding: "8px 12px" }}>
                     <b style={{ fontWeight: 600 }}>งานอื่นๆ ในบิลนี้ ({selectedJobs.length} งาน)</b>
-                    {jobAccountMismatch && <div className="customer-message error">งานอื่นอยู่{ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถในบิลอยู่{ACCOUNT_LABEL[account]} - ออกบิลแยกใบ</div>}
+                    <Notice tone="error">{jobAccountMismatch ? `งานอื่นอยู่${ACCOUNT_LABEL[customer.account]} ณ วันนี้ แต่รถในบิลอยู่${ACCOUNT_LABEL[account]} - ออกบิลแยกใบ` : ""}</Notice>
                     {selectedJobs.map((j) => (
                       <div key={jobKey(j)} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                         <span>
@@ -1433,13 +1440,9 @@ export function BillingPage() {
                 {showPreview && preview && (
                   <iframe title="ตัวอย่างใบวางบิล" srcDoc={buildInvoiceHtml(preview)} style={{ width: "100%", height: 560, border: "1px solid #f0f2f6", background: "white" }} />
                 )}
-                {message.text && message.error && (
-                  <div className="customer-message error" role="alert">
-                    {message.text}
-                  </div>
-                )}
+                <Notice tone="error">{message.error ? message.text : ""}</Notice>
                 <div className="form-actions" style={{ marginTop: 0 }}>
-                  <button type="button" onClick={() => setConfirmOpen(false)} disabled={saving}>
+                  <button type="button" className="secondary" onClick={() => setConfirmOpen(false)} disabled={saving}>
                     กลับไปแก้
                   </button>
                   <button type="button" className="primary" onClick={handleIssue} disabled={saving || refreshing}>
@@ -1463,7 +1466,8 @@ export function BillingPage() {
           customerName={customer ? customer.company || customer.name : ""}
           onClose={() => setClosing(null)}
           onClosed={(v) => {
-            setMessage({ text: `ปิดงาน ${v.plateText || v.chassis} แล้ว - ออกจากคิวรอวางบิล (ดูได้ที่ "ปิดงานแล้ว - วางบิลนอกระบบ" ด้านล่าง)` });
+            setMessage({ text: "" });
+            toast.success(`ปิดงาน ${v.plateText || v.chassis} แล้ว - ออกจากคิวรอวางบิล (ดูได้ที่ "ปิดงานแล้ว - วางบิลนอกระบบ" ด้านล่าง)`);
             setClosedReload((n) => n + 1);
             loadQueue(false, customer?.id);
           }}
@@ -1537,7 +1541,7 @@ function IssueDialog({ onClose, children }: { onClose: () => void; children: Rea
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(640px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       {children}
     </dialog>
@@ -1588,7 +1592,7 @@ function CloseBillingDialog({
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>ปิดงาน - วางบิลนอกระบบ</h2>
       <p className="muted">
@@ -1601,20 +1605,16 @@ function CloseBillingDialog({
         เปิดงานกลับได้เฉพาะ ADMIN
       </p>
       <label className="field" style={{ marginTop: 12 }}>
-        หมายเหตุ *
+        หมายเหตุ <Req />
         <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น วางบิลใน Google Sheet IV2026-130" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "ปิดงาน"}
+          {saving ? "กำลังบันทึก…" : "ปิดงาน"}
         </button>
       </div>
     </dialog>
@@ -1678,16 +1678,10 @@ function ClosedBillingPanel({ reloadKey, canReopen, onReopened }: { reloadKey: n
           {expanded ? "ซ่อน" : "แสดงรายการ"}
         </button>
       </div>
-      {error && (
-        <div className="customer-message error" role="alert" style={{ padding: "0 23px 12px" }}>
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="customer-message success" role="status" style={{ padding: "0 23px 12px" }}>
-          {notice}
-        </div>
-      )}
+      <div style={{ padding: "0 23px" }}>
+        <Notice tone="error">{error}</Notice>
+        <Notice tone="success">{notice}</Notice>
+      </div>
       {expanded && list.length > 0 && (
         <div className="table-wrap">
           <table>
@@ -1732,7 +1726,7 @@ function ClosedBillingPanel({ reloadKey, canReopen, onReopened }: { reloadKey: n
       {expanded && hasMore && (
         <div className="inspect-pagination">
           <button className="text-button" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? "กำลังโหลด..." : "โหลดเพิ่มอีก 100 คัน"}
+            {loadingMore ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 คัน"}
           </button>
         </div>
       )}
@@ -1787,7 +1781,7 @@ function ReopenBillingDialog({
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
       <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>เปิดงานกลับ</h2>
       <p className="muted">
@@ -1797,20 +1791,16 @@ function ReopenBillingDialog({
       </p>
       <p style={{ fontSize: 13, marginTop: 8 }}>รถจะกลับเข้าคิวรอวางบิล และนับเป็นยอดส่งงานแล้วยังไม่วางบิลอีกครั้ง</p>
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่เปิดงานกลับ *
+        เหตุผลที่เปิดงานกลับ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ปิดผิดคัน ต้องวางบิลในระบบ" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "เปิดงานกลับ"}
+          {saving ? "กำลังบันทึก…" : "เปิดงานกลับ"}
         </button>
       </div>
     </dialog>

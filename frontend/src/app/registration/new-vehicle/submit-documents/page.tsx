@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { BackLink } from "@/components/ui";
 import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
 
 const SUBMIT_HREF = "/registration/new-vehicle/submit-documents/submit";
@@ -23,9 +24,7 @@ export default function SubmitDocumentsMenuPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
-      </Link>
+      <BackLink href="/registration/new-vehicle" label="จดทะเบียนรถใหม่" />
       <h1 tabIndex={-1}>ยื่นเอกสารจดทะเบียนรถใหม่</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         เลือกรถจากคิวที่แจ้งย้าย/ตัดบัญชีและตรวจรถผ่านแล้ว (ผลตรวจมีอายุ 90 วัน) ตรวจทานตัวเลือกและค่าใช้จ่าย แล้วยืนยันยื่นเอกสาร

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { WEEKEND_WARNING, isWeekend, weekdayName } from "@/lib/date-check";
@@ -39,7 +41,8 @@ export default function SubmitReviewPage() {
       <section className="panel empty-page">
         <p style={{ margin: "0 0 12px" }}>ยังไม่ได้เลือกรถที่จะยื่น</p>
         <Link href={PICK_HREF} className="primary" style={{ display: "inline-flex" }}>
-          ← ไปเลือกรถ
+          <Icon name="arrow-left" />
+          ไปเลือกรถ
         </Link>
       </section>
     );
@@ -103,18 +106,14 @@ export default function SubmitReviewPage() {
   return (
     <>
       <p className="muted" style={{ marginBottom: 16 }}>
-        ตรวจยอดของแต่ละคัน ถ้าถูกต้องกด &quot;ยืนยันยื่น&quot; ถ้าต้องแก้กด &quot;← กลับไปแก้ตั้งค่า&quot;
+        ตรวจยอดของแต่ละคัน ถ้าถูกต้องกด &quot;ยืนยันยื่น&quot; ถ้าต้องแก้กด &quot;กลับไปแก้ตั้งค่า&quot;
       </p>
 
-      {submitError && (
-        <p className="customer-message error" role="alert" style={{ marginBottom: 12 }}>
-          ยื่นเอกสารไม่สำเร็จ: {submitError}
-        </p>
-      )}
+      {submitError && <Notice tone="error">ยื่นเอกสารไม่สำเร็จ: {submitError}</Notice>}
       {changedCount > 0 && (
-        <p className="customer-message error" role="alert" style={{ marginBottom: 12 }}>
+        <Notice tone="error">
           ยอดเปลี่ยน {changedCount} คัน เพราะข้อมูลรถถูกแก้ระหว่างนี้ (แถวสีส้ม) - ตรวจยอดใหม่แล้วกด &quot;ยืนยันยื่น&quot; อีกครั้ง
-        </p>
+        </Notice>
       )}
       <EligibilityNotice />
 
@@ -138,7 +137,7 @@ export default function SubmitReviewPage() {
                 <tr
                   key={v.id}
                   className={checks.problemIds.has(v.id) ? "row-failed" : undefined}
-                  style={changedIds.has(v.id) && !checks.problemIds.has(v.id) ? { background: "#fff4e5" } : undefined}
+                  style={changedIds.has(v.id) && !checks.problemIds.has(v.id) ? { background: "var(--warn-soft)" } : undefined}
                 >
                   <td>{index + 1}</td>
                   <td>
@@ -163,7 +162,7 @@ export default function SubmitReviewPage() {
                       <td className="amt">{formatMoney(amounts.duty)}</td>
                       <td className="amt">
                         <strong>{formatMoney(amounts.total)}</strong>
-                        {changedIds.has(v.id) && <div style={{ color: "#c2410c", fontSize: 12 }}>ยอดเปลี่ยน</div>}
+                        {changedIds.has(v.id) && <div style={{ color: "var(--warn)", fontSize: 12 }}>ยอดเปลี่ยน</div>}
                       </td>
                     </>
                   ) : error ? (
@@ -199,8 +198,9 @@ export default function SubmitReviewPage() {
       <div className="submit-footer">
         <ChecksNote checks={checks} count={selected.length} />
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Link href={SETTINGS_HREF} className="text-button">
-            ← กลับไปแก้ตั้งค่า
+          <Link href={SETTINGS_HREF} className="secondary">
+            <Icon name="arrow-left" />
+            กลับไปแก้ตั้งค่า
           </Link>
           <button type="button" className="primary" disabled={!checks.ready || !submitDate || verifying || submitting} onClick={openConfirm}>
             {submitting ? submittingLabel : verifying ? "กำลังตรวจยอดล่าสุด…" : `ยืนยันยื่น ${selected.length} คัน`}
@@ -213,8 +213,8 @@ export default function SubmitReviewPage() {
         onClick={(event) => event.target === event.currentTarget && !submitting && confirmRef.current?.close()}
         onCancel={(event) => submitting && event.preventDefault()}
       >
-        <button className="close" aria-label="ปิด" disabled={submitting} onClick={() => confirmRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" disabled={submitting} onClick={() => confirmRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>ยืนยันการยื่นเอกสาร</h2>
         <p>
@@ -223,18 +223,22 @@ export default function SubmitReviewPage() {
           {checks.taxPendingCount > 0 ? ` (${checks.taxPendingCount} คันยังไม่รวมภาษี)` : ""}
         </p>
         {/* วันที่ยื่นอยู่ในหน้าต่างยืนยันด้วย - ไม่ใช่วันนี้ขึ้นสีส้มพร้อมจำนวนวัน (พบ 2026-09-27: เปิดค้างข้ามคืนแล้วยื่นด้วยวันเมื่อวาน) */}
-        <p style={dayDiff !== 0 || submitWeekend ? { color: "#c2410c", fontWeight: 600 } : undefined}>
+        <p style={dayDiff !== 0 || submitWeekend ? { color: "var(--warn)", fontWeight: 600 } : undefined}>
           วันที่ยื่นเอกสาร {submitDate ? `${weekdayName(submitDate)}ที่ ${isoToDisplayDate(submitDate)}` : "—"}
           {dayDiff !== 0 ? ` (ไม่ใช่วันนี้ – ${dayDiff > 0 ? `อีก ${dayDiff} วัน` : `ย้อนหลัง ${-dayDiff} วัน`})` : " (วันนี้)"}
         </p>
-        {submitWeekend && <p style={{ color: "#c2410c", fontWeight: 600 }}>⚠ {WEEKEND_WARNING}</p>}
+        {submitWeekend && (
+          <p style={{ color: "var(--warn)", fontWeight: 600 }}>
+            <Icon name="alert-triangle" /> {WEEKEND_WARNING}
+          </p>
+        )}
         {submitProgress && (
           <p className="muted" role="status">
             ส่งไปยื่นแล้ว {submitProgress.done} จาก {submitProgress.total} คัน - อย่ารีเฟรชหรือปิดหน้านี้จนกว่าจะเสร็จ
           </p>
         )}
         <div className="form-actions">
-          <button type="button" className="text-button" disabled={submitting} onClick={() => confirmRef.current?.close()}>
+          <button type="button" className="secondary" disabled={submitting} onClick={() => confirmRef.current?.close()}>
             ยกเลิก
           </button>
           <button type="button" className="primary" disabled={submitting || !checks.ready} onClick={handleSubmit}>

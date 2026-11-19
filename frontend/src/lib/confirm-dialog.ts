@@ -17,7 +17,7 @@ function build(message: string, options: ConfirmOptions) {
   actions.className = "confirm-dialog-actions";
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "confirm-dialog-cancel";
+  cancel.className = "secondary";
   cancel.textContent = options.cancelLabel ?? "ยกเลิก";
   const ok = document.createElement("button");
   ok.type = "button";

@@ -8,6 +8,8 @@ import { isoToDisplayDate } from "@/lib/date";
 import { receiptDuplicateText } from "@/lib/receipt-duplicate";
 import { uploadReceiptsInBackground, usePendingReceipts } from "@/lib/receipt-upload";
 import { useCanEditReceipts } from "@/components/ReceiptPhotos";
+import { Icon, type IconName } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 
 // หน้าถ่ายใบเสร็จบนมือถือ: คนที่ถือใบเสร็จอยู่ถ่ายแล้วส่งเข้าระบบตรงๆ (ไม่ผ่าน LINE)
 // รูปไม่ระบุรถ -> backend ให้ AI อ่านแล้วจับคู่ด้วยเลขตัวถังเอง; ที่จับคู่ไม่ได้ไปรอในถาด "รอจับคู่" ของหน้ารับใบเสร็จ
@@ -38,12 +40,12 @@ function toShot(receipt: ReceiptImage): Shot {
   return { receipt, status: "unmatched", text: "อ่านได้ แต่ยังไม่พบรถที่รอใบเสร็จคันนี้ - รอออฟฟิศจับคู่" };
 }
 
-const STATUS_STYLE: Record<ShotStatus, { icon: string; color: string; background: string }> = {
-  reading: { icon: "⏳", color: "#4a5a78", background: "#f4f6fa" },
-  matched: { icon: "✅", color: "#1d7556", background: "#edf8f3" },
-  unmatched: { icon: "⚠️", color: "#946712", background: "#fff8e6" },
-  unreadable: { icon: "❌", color: "#b43434", background: "#fdeeee" },
-  duplicate: { icon: "⚠️", color: "#b45309", background: "#fff1e0" },
+const STATUS_STYLE: Record<ShotStatus, { icon: IconName; color: string; background: string }> = {
+  reading: { icon: "loader", color: "#4a5a78", background: "#f4f6fa" },
+  matched: { icon: "check-circle", color: "var(--ok)", background: "#edf8f3" },
+  unmatched: { icon: "alert-triangle", color: "var(--warn)", background: "var(--warn-soft)" },
+  unreadable: { icon: "alert-circle", color: "var(--danger)", background: "var(--danger-soft)" },
+  duplicate: { icon: "alert-triangle", color: "var(--warn)", background: "#fff1e0" },
 };
 
 const errorText = (err: unknown) => (err instanceof ApiError || err instanceof Error ? err.message : "ส่งรูปไม่สำเร็จ");
@@ -133,9 +135,7 @@ export function ReceiptCapturePage() {
             </p>
 
             {canEdit === false && (
-              <div className="customer-message error" role="status">
-                บัญชีนี้ดูได้อย่างเดียว - ส่งรูปใบเสร็จได้เฉพาะพนักงานยื่นเอกสาร (ADMIN / รถยนต์ / มอเตอร์ไซค์)
-              </div>
+              <Notice tone="error">บัญชีนี้ดูได้อย่างเดียว - ส่งรูปใบเสร็จได้เฉพาะพนักงานยื่นเอกสาร (ADMIN / รถยนต์ / มอเตอร์ไซค์)</Notice>
             )}
             {/* capture="environment" = เปิดกล้องหลังทันที ไม่ต้องผ่านหน้าเลือกไฟล์ */}
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleCamera(e.target.files)} />
@@ -148,18 +148,21 @@ export function ReceiptCapturePage() {
                 onClick={() => cameraRef.current?.click()}
                 style={{ width: "100%", justifyContent: "center", minHeight: 60, fontSize: 18 }}
               >
-                {busy ? progress : shots.length === 0 ? "📷 ถ่ายรูปใบเสร็จ" : "📷 ถ่ายใบต่อไป"}
+                {busy ? (
+                  progress
+                ) : (
+                  <>
+                    <Icon name="camera" />
+                    {shots.length === 0 ? "ถ่ายรูปใบเสร็จ" : "ถ่ายใบต่อไป"}
+                  </>
+                )}
               </button>
               <button type="button" className="text-button" disabled={busy} onClick={() => galleryRef.current?.click()}>
                 เลือกรูปจากเครื่อง (หลายรูปได้)
               </button>
             </div>
 
-            {error && (
-              <div className="customer-message error" role="alert">
-                {error}
-              </div>
-            )}
+            <Notice tone="error">{error}</Notice>
 
             {shots.length > 0 && (
               <div className="customer-message" role="status" style={{ fontWeight: 600 }}>
@@ -192,7 +195,7 @@ export function ReceiptCapturePage() {
                       </div>
                       <div style={{ minWidth: 0, flex: 1, fontSize: 14, lineHeight: 1.6 }}>
                         <div style={{ color: style.color, fontWeight: 600 }}>
-                          {style.icon} {shot.text}
+                          <Icon name={style.icon} /> {shot.text}
                         </div>
                         {reading && (
                           <div style={{ color: "#3c4a63", wordBreak: "break-all" }}>

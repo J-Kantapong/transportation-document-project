@@ -320,7 +320,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header>
           <div className="screen-title">
             <button className="mobile-menu" aria-label="เปิดเมนู" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-              ☰
+              <Icon name="menu" />
             </button>
             <Breadcrumb pathname={pathname} roles={roles} home={home} />
           </div>

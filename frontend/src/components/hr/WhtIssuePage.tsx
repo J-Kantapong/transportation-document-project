@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { digits, errorText, HistoryDialog, HrDialog, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import {
@@ -159,15 +161,15 @@ function OtherDialog({ year, replaces, suppliers, onClose, onDone }: { year: num
       </label>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         <label className="field">
-          ชื่อ-สกุลผู้รับเงิน *
+          ชื่อ-สกุลผู้รับเงิน <Req />
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={150} />
         </label>
         <label className="field">
-          เลขประจำตัวผู้เสียภาษี / บัตรประชาชน 13 หลัก *
+          เลขประจำตัวผู้เสียภาษี / บัตรประชาชน 13 หลัก <Req />
           <input value={taxId} onChange={(e) => setTaxId(e.target.value.replace(/[^\d-]/g, "").slice(0, 17))} inputMode="numeric" />
         </label>
         <label className="field">
-          วันที่ออก 50 ทวิ *
+          วันที่ออก 50 ทวิ <Req />
           <DateInput value={issueText} onChange={(v) => setIssueText(formatDateDigitsCe(digits(v)))} />
         </label>
         <label className="field">
@@ -235,7 +237,7 @@ function OtherDialog({ year, replaces, suppliers, onClose, onDone }: { year: num
                 <td>
                   {lines.length > 1 && (
                     <button type="button" aria-label="ลบบรรทัด" onClick={() => setLines((all) => all.filter((_, x) => x !== i))}>
-                      ×
+                      <Icon name="x" />
                     </button>
                   )}
                 </td>
@@ -246,7 +248,8 @@ function OtherDialog({ year, replaces, suppliers, onClose, onDone }: { year: num
             <tr>
               <td colSpan={3}>
                 <button type="button" onClick={() => setLines((all) => [...all, emptyLine()])} disabled={lines.length >= 12}>
-                  + เพิ่มบรรทัด
+                  <Icon name="plus" />
+                  เพิ่มบรรทัด
                 </button>
               </td>
               <td style={{ textAlign: "right" }}>
@@ -265,11 +268,7 @@ function OtherDialog({ year, replaces, suppliers, onClose, onDone }: { year: num
         หมายเหตุ (พิมพ์ในฟอร์ม)
         <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 14 }}>
         <button type="button" className="primary" disabled={busy} onClick={submit}>
           {busy ? "กำลังออก…" : "ออก 50 ทวิ"}
@@ -316,21 +315,17 @@ function SeriesPanel({ year, series, onSaved }: { year: number; series: WhtSerie
             <input value={last} onChange={(e) => setLast(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" />
           </label>
           <label className="field" style={{ minWidth: 260, flex: 1 }}>
-            ที่มา *
+            ที่มา <Req />
             <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ออกจากไฟล์เดิม 2026-001 ถึง 2026-008" maxLength={200} />
           </label>
-          <button type="button" disabled={busy || !last} onClick={save}>
+          <button type="button" className="secondary" disabled={busy || !last} onClick={save}>
             {busy ? "กำลังบันทึก…" : "ตั้งเลขเริ่ม"}
           </button>
         </div>
       ) : (
         <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>ปีนี้ออกในระบบแล้ว {series.systemCount} ใบ - แก้เลขเริ่มไม่ได้</p>
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
     </section>
   );
 }
@@ -411,8 +406,11 @@ export function WhtIssuePage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>Withholding Tax (50 ทวิ)</h1>
-      <p>ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย ให้พนักงาน (ประจำปี จากเงินเดือนที่จ่ายแล้ว) และผู้รับเงินอื่นๆ ที่เป็นบุคคลธรรมดา (ซับ) พิมพ์ได้ 2 ฉบับต่อใบ หรือบันทึกเป็น PDF</p>
+      <PageHeader
+        titleFocus
+        title="Withholding Tax (50 ทวิ)"
+        subtitle="ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย ให้พนักงาน (ประจำปี จากเงินเดือนที่จ่ายแล้ว) และผู้รับเงินอื่นๆ ที่เป็นบุคคลธรรมดา (ซับ) พิมพ์ได้ 2 ฉบับต่อใบ หรือบันทึกเป็น PDF"
+      />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "end", marginTop: 14 }}>
         <label className="field" style={{ width: 150 }}>
@@ -420,18 +418,15 @@ export function WhtIssuePage() {
           <input type="number" value={year + 543} onChange={(e) => setYear(Number(e.target.value) - 543)} min={2563} max={2700} />
         </label>
         <button type="button" className="primary" onClick={() => setDialog({ type: "other", replaces: null })}>
-          + ออก 50 ทวิ ให้ผู้รับเงินอื่น (ซับ)
+          <Icon name="plus" />
+          ออก 50 ทวิ ให้ผู้รับเงินอื่น (ซับ)
         </button>
         <Link href="/hr/suppliers">จัดการ Suppliers ({suppliers.length} คน)</Link>
       </div>
 
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       {message && (
-        <div className="customer-message" role="status">
+        <Notice tone="success">
           <b>{message.text}</b>
           {message.skipped.length > 0 && (
             <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
@@ -440,7 +435,7 @@ export function WhtIssuePage() {
               ))}
             </ul>
           )}
-        </div>
+        </Notice>
       )}
 
       <SeriesPanel year={year} series={series} onSaved={() => void load()} />
@@ -453,9 +448,9 @@ export function WhtIssuePage() {
           ยอดมาจากรอบเงินเดือนที่ &quot;จ่ายแล้ว&quot; ที่มีวันที่จ่ายในปีนี้เท่านั้น · แบบ ภ.ง.ด.1ก · ภาษีที่หักตามที่หักจริงในเงินเดือน (บริษัทไม่หัก = 0)
         </p>
         {unpaidRuns > 0 && (
-          <p className="customer-message error" style={{ margin: "0 23px 10px" }}>
+          <Notice tone="warn">
             ปี {year + 543} ยังมี {unpaidRuns} รอบเงินเดือนที่ยังไม่บันทึกว่าจ่ายแล้ว ยอดของรอบเหล่านั้นจะยังไม่ถูกรวม - ถ้าออกตอนนี้ต้องยกเลิกแล้วออกใหม่ภายหลัง
-          </p>
+          </Notice>
         )}
         <div className="table-wrap">
           <table>
@@ -483,7 +478,7 @@ export function WhtIssuePage() {
               {rows === null && (
                 <tr>
                   <td colSpan={9} className="muted">
-                    กำลังโหลด…
+                    <LoadingState inline />
                   </td>
                 </tr>
               )}
@@ -548,8 +543,9 @@ export function WhtIssuePage() {
             ค้นหา (ชื่อ / เลขประจำตัว / เลขที่)
             <input value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
-          <button type="button" disabled={printable.length === 0} onClick={() => printWhtCertificates(printable, { signature })}>
-            🖨 พิมพ์ที่เลือก ({printable.length})
+          <button type="button" className="secondary" disabled={printable.length === 0} onClick={() => printWhtCertificates(printable, { signature })}>
+            <Icon name="printer" />
+            พิมพ์ที่เลือก ({printable.length})
           </button>
         </div>
         <div className="table-wrap">
@@ -579,7 +575,7 @@ export function WhtIssuePage() {
               {certs === null && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    กำลังโหลด…
+                    <LoadingState inline />
                   </td>
                 </tr>
               )}

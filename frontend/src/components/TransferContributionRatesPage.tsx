@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { getCachedUser } from "@/lib/auth";
 import { timestampToDisplayDate } from "@/lib/date";
 import { transferContributionRatesApi, type TransferContributionRate } from "@/lib/transfer-contribution-rates-api";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice } from "@/components/ui";
 
 // ลงขันงานโอนรายจังหวัด (ผู้ใช้ 2026-11-18: "โหลดจังหวัดทั่วประเทศ ... ค่าลงขันทำช่องไว้กรอกทีหลัง")
 // ครบ 77 จังหวัด 3 ช่อง: โอน (มอเตอร์ไซค์) / โอน (รถยนต์) / โอนย้ายเข้า (มอเตอร์ไซค์) - ช่องว่าง = ยังไม่ได้ตั้งอัตรา
@@ -33,6 +35,20 @@ interface Draft {
   remark: string;
 }
 
+// ข้อความหลังกดปุ่ม: สำเร็จ = toast (หายเอง) / ผิดพลาด = เก็บไว้แสดงในหน้า
+function useMessage() {
+  const [message, setState] = useState<{ text: string; error?: boolean }>({ text: "" });
+  function setMessage(next: { text: string; error?: boolean }) {
+    if (next.text && !next.error) {
+      toast.success(next.text);
+      setState({ text: "" });
+    } else {
+      setState(next);
+    }
+  }
+  return [message, setMessage] as const;
+}
+
 export function TransferContributionRatesPage() {
   const [rates, setRates] = useState<TransferContributionRate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,7 +59,7 @@ export function TransferContributionRatesPage() {
   const [editing, setEditing] = useState<string | null>(null); // จังหวัดที่กำลังแก้
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const [message, setMessage] = useMessage();
 
   async function load() {
     try {
@@ -111,9 +127,7 @@ export function TransferContributionRatesPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/transfer" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← งานโอน
-      </Link>
+      <BackLink href="/registration/transfer" label="งานโอน" />
       <h1>ลงขันงานโอนรายจังหวัด</h1>
       <p className="muted" style={{ marginBottom: 20 }}>
         อัตราลงขันตั้งต้นที่ระบบเติมให้ในฟอร์มงานโอนตามจังหวัดที่ยื่น (พนักงานแก้รายงานได้) ใส่ 0 = จังหวัดนั้นไม่เสียลงขัน เว้นว่าง = ยังไม่ได้ตั้งอัตรา
@@ -133,17 +147,11 @@ export function TransferContributionRatesPage() {
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาจังหวัด" aria-label="ค้นหาจังหวัด" className="inspect-input" />
           </div>
         </div>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
-          </div>
-        )}
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลด…</div>
+          <LoadingState />
         ) : loadError ? (
-          <div className="empty-customers" role="alert">
-            {loadError}
-          </div>
+          <Notice tone="error">{loadError}</Notice>
         ) : shown.length === 0 ? (
           <div className="empty-customers">ไม่พบจังหวัดที่ค้นหา</div>
         ) : (
@@ -235,7 +243,7 @@ export function TransferContributionRatesPage() {
                       {isAdmin && (
                         <td>
                           <button type="button" className="text-button" onClick={() => openEdit(rate)}>
-                            ✎ {isEmpty(rate) ? "กรอก" : "แก้"}
+                            <Icon name="pencil" /> {isEmpty(rate) ? "กรอก" : "แก้"}
                           </button>
                         </td>
                       )}

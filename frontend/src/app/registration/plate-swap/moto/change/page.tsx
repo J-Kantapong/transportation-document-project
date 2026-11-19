@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageHeader } from "@/components/ui";
 
 const BASE = "/registration/plate-swap/moto/change";
 
@@ -7,13 +8,11 @@ const BASE = "/registration/plate-swap/moto/change";
 export default function PlateChangeMenuPage() {
   return (
     <section className="content">
-      <Link href="/registration/plate-swap/moto" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← การสลับเลข · รถจักรยานยนต์
-      </Link>
-      <h1>เปลี่ยนเลขทะเบียน (รถจักรยานยนต์)</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        รถคันเดียวรับเลขที่ลูกค้าจองไว้ ซื้อแผ่นป้ายใหม่ทุกครั้ง
-      </p>
+      <PageHeader
+        back={{ href: "/registration/plate-swap/moto", label: "การสลับเลข · รถจักรยานยนต์" }}
+        title="เปลี่ยนเลขทะเบียน (รถจักรยานยนต์)"
+        subtitle="รถคันเดียวรับเลขที่ลูกค้าจองไว้ ซื้อแผ่นป้ายใหม่ทุกครั้ง"
+      />
       <section className="panel">
         <div className="choices" style={{ padding: 22 }}>
           <Link href={`${BASE}/submit`}>

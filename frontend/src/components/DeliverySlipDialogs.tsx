@@ -5,6 +5,8 @@ import { api, ApiError } from "@/lib/api";
 import { billingApi, slipNoText, type DeliverySlip, type DeliverySlipItem, type DeliverySource } from "@/lib/billing-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 
 // แก้ / ยกเลิกใบส่งงานที่คีย์ผิด (ผู้ใช้ 2026-09-26) - ต้องมีเหตุผลเสมอ (เก็บในประวัติการแก้ไขของรถ)
 // ยกเลิกแล้วรถกลับเข้าคิว Delivery ให้บันทึกใหม่ได้ ส่วนใบ/รายการที่ยกเลิกยังอยู่ในรายงานพร้อมเหตุผล (ไม่ลบ)
@@ -64,19 +66,19 @@ export function DeliverySlipEditDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แก้ใบส่งงาน {slipNoText(slip.slipNo)}</h2>
       <p className="muted">
         {slip.customer.displayName} · {slip.items.filter((i) => !i.cancelledAt).length} คัน
       </p>
       <label className="field" style={{ marginTop: 12 }}>
-        ผู้รับงาน *
+        ผู้รับงาน <Req />
         <input type="text" value={recipient} onChange={(e) => setRecipient(e.target.value)} />
       </label>
       <label className="field" style={{ marginTop: 12 }}>
-        วันที่ส่ง *
+        วันที่ส่ง <Req />
         <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} />
       </label>
       {billed.length > 0 && (
@@ -91,20 +93,16 @@ export function DeliverySlipEditDialog({
         </p>
       )}
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อผู้รับผิด" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleSave} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้"}
         </button>
       </div>
     </dialog>
@@ -169,22 +167,26 @@ export function DeliverySlipCancelDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(560px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ยกเลิกการส่งงาน {slipNoText(slip.slipNo)}</h2>
       <p className="muted">
         {isoToDisplayDate(slip.date)} · {slip.customer.displayName} · ผู้รับ {slip.recipient}
       </p>
       {noneMine ? (
-        <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12 }}>
+          <Notice tone="error">
           ไม่มีรถในใบนี้ที่บัญชีของคุณยกเลิกได้ - ให้ ADMIN หรือพนักงานประเภทรถนั้นยกเลิก
-        </p>
+        </Notice>
+        </div>
       ) : allBilled ? (
-        <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12 }}>
+          <Notice tone="error">
           {mine.length < items.length ? "รถประเภทที่บัญชีนี้ดูแลในใบนี้" : "รถในใบนี้"}วางบิลแล้ว (หรือปิดงาน - วางบิลนอกระบบ) ทุกคัน ต้องให้ฝ่ายบัญชีเอารถออกจากบิล
           (&quot;แก้ไขบิล&quot; ติ๊ก &quot;เอาออกจากบิล&quot;) / ให้ ADMIN เปิดงานกลับก่อนจึงจะยกเลิกการส่งได้
-        </p>
+        </Notice>
+        </div>
       ) : (
         <>
           <p style={{ marginTop: 12 }}>เลือกคันที่จะยกเลิก รถจะกลับเข้าคิว Delivery เพื่อบันทึกส่งใหม่ ใบนี้ยังเก็บไว้พร้อมเหตุผล</p>
@@ -212,23 +214,19 @@ export function DeliverySlipCancelDialog({
             })}
           </div>
           <label className="field" style={{ marginTop: 12 }}>
-            เหตุผลที่ยกเลิก *
+            เหตุผลที่ยกเลิก <Req />
             <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ติ๊กผิดคัน" />
           </label>
         </>
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ไม่ยกเลิก
         </button>
         {!blocked && (
-          <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-            {saving ? "กำลังยกเลิก..." : `ยืนยันยกเลิก ${picked.size} คัน`}
+          <button type="button" className="primary danger" onClick={handleConfirm} disabled={saving}>
+            {saving ? "กำลังยกเลิก…" : `ยืนยันยกเลิก ${picked.size} คัน`}
           </button>
         )}
       </div>
@@ -276,8 +274,8 @@ export function DeliveryAddPlateDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ป้ายไปพร้อมเล่มแล้ว</h2>
       <p className="muted">
@@ -295,17 +293,13 @@ export function DeliveryAddPlateDialog({
         หมายเหตุ (ไม่บังคับ)
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น แนบรูปป้ายช้า" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ไม่ใช่
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "ยืนยัน ป้ายไปพร้อมเล่มแล้ว"}
+          {saving ? "กำลังบันทึก…" : "ยืนยัน ป้ายไปพร้อมเล่มแล้ว"}
         </button>
       </div>
     </dialog>

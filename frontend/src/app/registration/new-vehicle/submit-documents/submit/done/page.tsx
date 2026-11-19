@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice } from "@/components/ui";
 import { api, ApiError, type DocumentSubmission } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { defaultTitleFor, JobSheetPrintDialog } from "@/components/JobSheetPrintDialog";
@@ -85,7 +87,8 @@ export default function SubmitDonePage() {
       <section className="panel empty-page">
         <p style={{ margin: "0 0 12px" }}>ยังไม่มีผลการยื่นในรอบนี้</p>
         <Link href={PICK_HREF} className="primary" style={{ display: "inline-flex" }}>
-          ← ไปเลือกรถ
+          <Icon name="arrow-left" />
+          ไปเลือกรถ
         </Link>
       </section>
     );
@@ -128,7 +131,7 @@ export default function SubmitDonePage() {
       <section className="panel" style={{ padding: 22, marginBottom: 16 }}>
         <p style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 600 }}>
           {result.succeeded.length > 0 ? `ยื่นแล้ว ${result.succeeded.length} คัน` : "ยังไม่ได้ยื่นคันไหนเลย"}
-          {result.failed.length > 0 && <span style={{ color: "#b43434", fontWeight: 500 }}> · ไม่สำเร็จ {result.failed.length} คัน</span>}
+          {result.failed.length > 0 && <span style={{ color: "var(--danger)", fontWeight: 500 }}> · ไม่สำเร็จ {result.failed.length} คัน</span>}
         </p>
         <p className="muted" style={{ margin: 0 }}>
           วันที่ยื่นเอกสาร {isoToDisplayDate(result.submitDate)} · กด &quot;ปริ้นใบส่งงาน&quot; ของแต่ละกลุ่มเพื่อพิมพ์ตามแบบรถยนต์ / มอเตอร์ไซค์
@@ -143,7 +146,8 @@ export default function SubmitDonePage() {
             </h2>
             {selected.length > 0 && (
               <Link href={SETTINGS_HREF} className="text-button">
-                ← กลับไปแก้แล้วยื่นใหม่ ({selected.length} คัน)
+                <Icon name="arrow-left" />
+                กลับไปแก้แล้วยื่นใหม่ ({selected.length} คัน)
               </Link>
             )}
           </div>
@@ -172,16 +176,20 @@ export default function SubmitDonePage() {
 
       {result.succeeded.length > 0 &&
         (loadError ? (
-          <section className="panel empty-page" role="alert">
-            <p className="customer-message error" style={{ marginBottom: 12 }}>
-              ยื่นสำเร็จแล้ว แต่โหลดรายการสำหรับพิมพ์ไม่สำเร็จ: {loadError}
-            </p>
-            <button type="button" className="primary" onClick={() => setReload((n) => n + 1)}>
-              ลองใหม่
-            </button>
-          </section>
+          <Notice
+            tone="error"
+            action={
+              <button type="button" className="secondary" onClick={() => setReload((n) => n + 1)}>
+                ลองใหม่
+              </button>
+            }
+          >
+            ยื่นสำเร็จแล้ว แต่โหลดรายการสำหรับพิมพ์ไม่สำเร็จ: {loadError}
+          </Notice>
         ) : records === null ? (
-          <section className="panel empty-page">กำลังโหลดรายการที่เพิ่งยื่น…</section>
+          <section className="panel empty-page">
+            <LoadingState label="กำลังโหลดรายการที่เพิ่งยื่น…" />
+          </section>
         ) : (
           groups.map((g) => (
             <GroupTable
@@ -200,7 +208,8 @@ export default function SubmitDonePage() {
           href={result.succeeded.length > 0 && result.succeeded.every((v) => isMotoBody(v.body)) ? `${RECORDS_HREF}?tab=moto` : RECORDS_HREF}
           className="text-button"
         >
-          ดูข้อมูลที่ยื่นแล้วทั้งหมด →
+          ดูข้อมูลที่ยื่นแล้วทั้งหมด
+          <Icon name="arrow-right" />
         </Link>
         <button type="button" className="primary" onClick={startNext}>
           ยื่นชุดต่อไป
@@ -213,8 +222,8 @@ export default function SubmitDonePage() {
         onClick={(event) => event.target === event.currentTarget && printAllRef.current?.close()}
         style={{ width: "min(720px, 94vw)" }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => printAllRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => printAllRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>ปริ้นใบส่งงาน</h2>
         <p>
@@ -254,12 +263,12 @@ export default function SubmitDonePage() {
             </tbody>
           </table>
         </div>
-        {unprintableCount > 0 && <p className="customer-message error">{unprintableCount} คันไม่ระบุประเภทรถ ปริ้นใบส่งงานไม่ได้</p>}
+        {unprintableCount > 0 && <Notice tone="error">{unprintableCount} คันไม่ระบุประเภทรถ ปริ้นใบส่งงานไม่ได้</Notice>}
         <p className="muted" style={{ fontSize: 13 }}>
           อยากแก้ชื่อหัวใบหรือหมายเหตุก่อนปริ้น กดยกเลิก แล้วกด &quot;ปริ้นใบส่งงาน&quot; ของแต่ละกลุ่ม
         </p>
         <div className="form-actions">
-          <button type="button" className="text-button" onClick={() => printAllRef.current?.close()}>
+          <button type="button" className="secondary" onClick={() => printAllRef.current?.close()}>
             ยกเลิก
           </button>
           <button type="button" className="primary" disabled={chosenCount === 0} onClick={printAll}>

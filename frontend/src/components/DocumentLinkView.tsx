@@ -5,6 +5,7 @@
 // จึงสร้างไฟล์ PDF ไว้ตั้งแต่เปิดหน้า แล้วให้ปุ่ม "ส่ง / บันทึกไฟล์ PDF" เปิดแผ่นแชร์ของเครื่อง (ส่งเข้า LINE เป็นไฟล์ หรือบันทึกลงเครื่อง)
 // แผ่นแชร์ต้องเกิดจากการแตะของผู้ใช้ จึงทำเองตอนเปิดหน้าไม่ได้ · คอมพิวเตอร์: ลิงก์ที่มี download=1 ดาวน์โหลดไฟล์เองเหมือนเดิม
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Notice } from "@/components/ui";
 import { downloadBlob, htmlToPdfBlob } from "@/lib/pdf-export";
 
 interface Props {
@@ -107,23 +108,23 @@ export function DocumentLinkView({ title, html, pdfHtml, fileName, frameTitle, o
         <h1 style={{ fontSize: 18, flex: "1 1 200px", margin: 0 }}>{title}</h1>
         {share ? (
           <>
-            <button type="button" className="button" onClick={sharePdf} disabled={!ready}>
+            <button type="button" className="primary" onClick={sharePdf} disabled={!ready}>
               {ready ? "ส่ง / บันทึกไฟล์ PDF" : busy ? "กำลังสร้าง PDF…" : "ส่ง / บันทึกไฟล์ PDF"}
             </button>
-            <button type="button" className="button" onClick={openPdf} disabled={!ready}>
+            <button type="button" className="secondary" onClick={openPdf} disabled={!ready}>
               เปิดไฟล์ PDF
             </button>
           </>
         ) : (
-          <button type="button" className="button" onClick={savePdf} disabled={busy}>
+          <button type="button" className="primary" onClick={savePdf} disabled={busy}>
             {busy ? "กำลังสร้าง PDF…" : "บันทึกเป็น PDF"}
           </button>
         )}
-        <button type="button" className="button" onClick={onPrint}>
+        <button type="button" className="secondary" onClick={onPrint}>
           ปริ้น
         </button>
       </header>
-      {error ? <p role="alert">{error}</p> : null}
+      <Notice tone="error">{error}</Notice>
       <iframe title={frameTitle} srcDoc={html} style={{ width: "100%", height: "80vh", border: "1px solid #ddd", background: "#fff" }} />
     </main>
   );

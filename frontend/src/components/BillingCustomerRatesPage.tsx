@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
 import { billingApi, type BillingTerms, type ServiceFeeRate } from "@/lib/billing-api";
 import { BillingAccountEditor, BillingRatesEditor, BillingTermsEditor } from "@/components/BillingCustomerSettings";
 import { termsSummary } from "@/lib/invoice";
 import { todayIso } from "@/lib/date";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
 
 // ตั้งเงื่อนไขวางบิล/บัญชีรับเงิน/ตารางค่าดำเนินการล่วงหน้าให้ลูกค้ารายใดก็ได้ (ผู้ใช้ 2026-09-28: ลูกค้าเก่าที่ยังไม่มีรถ
 // ในคิววางบิลไม่โผล่ในหน้าวางบิลเลย เพราะคิวกรองเฉพาะลูกค้าที่มีรถรอวางบิลจริง - หน้านี้ไม่เปลี่ยนกติกานั้น แค่ให้ตั้งราคาล่วงหน้าได้)
@@ -55,24 +55,17 @@ export function BillingCustomerRatesPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>ตั้งราคาล่วงหน้า</h1>
-      <p>
-        ตั้งเงื่อนไขวางบิล บัญชีรับเงิน และตารางค่าดำเนินการให้ลูกค้ารายใดก็ได้ล่วงหน้า แม้ยังไม่มีรถส่งงานเข้าคิววางบิล - รายชื่อลูกค้าในหน้าวางบิลยังแสดงเฉพาะรายที่มีรถรอวางบิลจริงเหมือนเดิม
-      </p>
-      <Link href="/accounting/billing" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        ← กลับไปหน้าวางบิล
-      </Link>
+      <PageHeader
+        back={{ href: "/accounting/billing", label: "วางบิล" }}
+        title="ตั้งราคาล่วงหน้า"
+        titleFocus
+        subtitle="ตั้งเงื่อนไขวางบิล บัญชีรับเงิน และตารางค่าดำเนินการให้ลูกค้ารายใดก็ได้ล่วงหน้า แม้ยังไม่มีรถส่งงานเข้าคิววางบิล - รายชื่อลูกค้าในหน้าวางบิลยังแสดงเฉพาะรายที่มีรถรอวางบิลจริงเหมือนเดิม"
+      />
 
-      {error && (
-        <div className="customer-message error" role="status" style={{ marginTop: 16 }}>
-          {error}
-        </div>
-      )}
+      <Notice tone="error">{error}</Notice>
 
       {loading ? (
-        <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-          กำลังโหลด...
-        </div>
+        <LoadingState />
       ) : (
         <>
           <label className="field" style={{ marginTop: 20, maxWidth: 360 }}>
@@ -91,9 +84,7 @@ export function BillingCustomerRatesPage() {
 
           {customer &&
             (loadingDetail || !terms || !rates ? (
-              <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-                กำลังโหลด...
-              </div>
+              <LoadingState />
             ) : (
               <section className="panel" style={{ marginTop: 16, padding: "16px 23px", overflow: "visible" }}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", alignItems: "center", justifyContent: "space-between", fontSize: 14 }}>

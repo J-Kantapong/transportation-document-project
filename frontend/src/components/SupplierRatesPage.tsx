@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { timestampToDisplayDate } from "@/lib/date";
 import { supplierRatesApi, type SupplierRate, type SupplierRateHistory } from "@/lib/supplier-rates-api";
 
@@ -46,7 +49,6 @@ export function SupplierRatesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
-  const [notice, setNotice] = useState("");
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState<SupplierRate | null>(null);
@@ -130,7 +132,7 @@ export function SupplierRatesPage() {
         expectedUpdatedAt: editing.updatedAt,
       });
       dialogRef.current?.close();
-      setNotice(`บันทึกราคาซับของ${editing.province}แล้ว - ใช้กับรถที่ส่งซับตั้งแต่นี้ไป`);
+      toast.success(`บันทึกราคาซับของ${editing.province}แล้ว - ใช้กับรถที่ส่งซับตั้งแต่นี้ไป`);
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
@@ -157,23 +159,18 @@ export function SupplierRatesPage() {
 
   return (
     <div className="content">
-      <h1>ราคาซับจดต่างจังหวัด</h1>
-      <p className="muted" style={{ marginBottom: 16, maxWidth: 820 }}>
-        รถที่จดทะเบียนจังหวัดอื่นนอกจาก{selfProvinces.join(" และ ") || "กรุงเทพมหานคร และ สมุทรปราการ"} ออฟฟิศแจ้งย้ายแล้วส่งซับจดให้
-        ค่าจ้างซับต่อคัน = ค่าดำเนินการ + ค่าช่อง + นำรถเข้าตรวจสภาพ ระบบใส่ให้ตอนส่งงานที่หน้ายื่นเอกสาร
-        การแก้ราคาที่นี่ใช้กับรถที่ส่งซับตั้งแต่นี้ไป ไม่เปลี่ยนรถที่ส่งไปแล้ว
-      </p>
+      <PageHeader
+        title="ราคาซับจดต่างจังหวัด"
+        subtitle={
+          <>
+            รถที่จดทะเบียนจังหวัดอื่นนอกจาก{selfProvinces.join(" และ ") || "กรุงเทพมหานคร และ สมุทรปราการ"} ออฟฟิศแจ้งย้ายแล้วส่งซับจดให้
+            ค่าจ้างซับต่อคัน = ค่าดำเนินการ + ค่าช่อง + นำรถเข้าตรวจสภาพ ระบบใส่ให้ตอนส่งงานที่หน้ายื่นเอกสาร
+            การแก้ราคาที่นี่ใช้กับรถที่ส่งซับตั้งแต่นี้ไป ไม่เปลี่ยนรถที่ส่งไปแล้ว
+          </>
+        }
+      />
 
-      {notice && (
-        <p className="customer-message success" role="status" style={{ marginBottom: 12 }}>
-          {notice}
-        </p>
-      )}
-      {loadError && (
-        <p className="customer-message error" role="alert" style={{ marginBottom: 12 }}>
-          {loadError}
-        </p>
-      )}
+      <Notice tone="error">{loadError}</Notice>
 
       <section className="panel" style={{ padding: 22 }}>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
@@ -187,7 +184,7 @@ export function SupplierRatesPage() {
         </div>
 
         {loading ? (
-          <div className="empty-customers">กำลังโหลด…</div>
+          <LoadingState />
         ) : shown.length === 0 ? (
           <div className="empty-customers">ไม่พบจังหวัดที่ค้นหา</div>
         ) : (
@@ -227,7 +224,8 @@ export function SupplierRatesPage() {
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button type="button" className="text-button" onClick={() => openEdit(r)}>
-                        ✎ แก้
+                        <Icon name="pencil" />
+                        แก้
                       </button>{" "}
                       {r.configured && (
                         <button type="button" className="text-button" onClick={() => openHistory(r.province)}>
@@ -251,7 +249,7 @@ export function SupplierRatesPage() {
         }}
       >
         <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+          <Icon name="x" />
         </button>
         <h2>ราคาซับ - {editing?.province}</h2>
         {draft && (
@@ -261,9 +259,7 @@ export function SupplierRatesPage() {
               ซับรับจดทะเบียนจังหวัดนี้
             </label>
             {!draft.accepts && (
-              <p className="customer-message error" role="alert">
-                รถที่จดจังหวัดนี้จะส่งซับไม่ได้ ระบบจะแจ้งเหตุผลที่หน้ายื่นเอกสาร
-              </p>
+              <Notice tone="warn">รถที่จดจังหวัดนี้จะส่งซับไม่ได้ ระบบจะแจ้งเหตุผลที่หน้ายื่นเอกสาร</Notice>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
               <label className="field">
@@ -294,22 +290,18 @@ export function SupplierRatesPage() {
               <input type="text" maxLength={200} value={draft.note} onChange={(e) => set({ note: e.target.value })} />
             </label>
             <label className="field">
-              เหตุผลที่แก้ *
+              เหตุผลที่แก้ <Req />
               <input type="text" maxLength={200} value={draft.remark} onChange={(e) => set({ remark: e.target.value })} placeholder="เช่น ซับแจ้งขึ้นราคา 01/11/2026" />
             </label>
           </div>
         )}
-        {error && (
-          <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-            {error}
-          </p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Notice tone="error">{error}</Notice>
+        <div className="dialog-actions">
+          <button type="button" className="secondary" disabled={saving} onClick={() => dialogRef.current?.close()}>
+            ยกเลิก
+          </button>
           <button type="button" className="primary" disabled={saving} onClick={save}>
             {saving ? "กำลังบันทึก…" : "บันทึก"}
-          </button>
-          <button type="button" className="text-button" disabled={saving} onClick={() => dialogRef.current?.close()}>
-            ยกเลิก
           </button>
         </div>
       </dialog>
@@ -322,15 +314,13 @@ export function SupplierRatesPage() {
         }}
       >
         <button className="close" aria-label="ปิด" onClick={() => historyRef.current?.close()}>
-          ×
+          <Icon name="x" />
         </button>
         <h2>ประวัติราคาซับ - {historyOf}</h2>
         {historyError ? (
-          <p className="customer-message error" role="alert">
-            {historyError}
-          </p>
+          <Notice tone="error">{historyError}</Notice>
         ) : history === null ? (
-          <div className="empty-customers">กำลังโหลด…</div>
+          <LoadingState />
         ) : history.length === 0 ? (
           <div className="empty-customers">ยังไม่มีการแก้ไข (ราคาตั้งต้นจากตารางของซับ)</div>
         ) : (

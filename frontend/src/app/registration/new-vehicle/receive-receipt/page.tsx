@@ -10,7 +10,7 @@ export default function ReceiveReceiptChooserPage() {
     <VehicleKindChooser
       title="รับใบเสร็จ"
       basePath="/registration/new-vehicle/receive-receipt"
-      capture={canEdit ? { href: "/registration/new-vehicle/receive-receipt/capture", label: "📷 ถ่ายใบเสร็จจากมือถือ" } : undefined}
+      capture={canEdit ? { href: "/registration/new-vehicle/receive-receipt/capture", label: "ถ่ายใบเสร็จจากมือถือ" } : undefined}
     />
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 import { PageTabs } from "@/components/PageTabs";
 import { ApiError } from "@/lib/api";
 import { ROLE_LABELS, STAFF_REQUESTABLE_ROLES, type UserRole } from "@/lib/auth";
@@ -88,7 +89,7 @@ export default function RegisterPage() {
 
         <div className="auth-fields auth-fields--grid">
           <label className="field">
-            {kind === "STAFF" ? "ชื่อ-นามสกุล" : "ชื่อผู้ติดต่อ"}
+            {kind === "STAFF" ? "ชื่อ-นามสกุล" : "ชื่อผู้ติดต่อ"} <Req />
             <input value={form.name} onChange={set("name")} required maxLength={250} autoComplete="name" />
           </label>
           {kind === "STAFF" ? (
@@ -98,20 +99,20 @@ export default function RegisterPage() {
             </label>
           ) : (
             <label className="field">
-              บริษัท / ร้าน
+              บริษัท / ร้าน <Req />
               <input value={form.company} onChange={set("company")} required maxLength={250} autoComplete="organization" />
             </label>
           )}
           <label className="field">
-            อีเมล
+            อีเมล <Req />
             <input type="email" value={form.email} onChange={set("email")} required maxLength={250} autoComplete="username" />
           </label>
           <label className="field">
-            เบอร์โทรศัพท์
+            เบอร์โทรศัพท์ <Req />
             <input type="tel" value={form.phone} onChange={set("phone")} required maxLength={50} autoComplete="tel" />
           </label>
           <label className="field">
-            รหัสผ่าน (อย่างน้อย 8 ตัวอักษร)
+            รหัสผ่าน (อย่างน้อย 8 ตัวอักษร) <Req />
             <input
               type="password"
               value={form.password}
@@ -122,7 +123,7 @@ export default function RegisterPage() {
             />
           </label>
           <label className="field">
-            ยืนยันรหัสผ่าน
+            ยืนยันรหัสผ่าน <Req />
             <input type="password" value={form.confirmPassword} onChange={set("confirmPassword")} required autoComplete="new-password" />
           </label>
           {kind === "STAFF" && (
@@ -141,7 +142,7 @@ export default function RegisterPage() {
         {kind === "CUSTOMER" && (
           <div className="auth-notice">ผู้ดูแลระบบจะผูกบัญชีของคุณกับบริษัทในฐานข้อมูล จากนั้นคุณจะเห็นสถานะรถของบริษัทได้</div>
         )}
-        {error && <div className="customer-message error">{error}</div>}
+        <Notice tone="error">{error}</Notice>
         <button type="submit" className="primary auth-submit" disabled={busy}>
           {busy ? "กำลังสมัคร…" : "สมัครใช้งาน"}
         </button>

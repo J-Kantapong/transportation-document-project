@@ -18,6 +18,8 @@ import { canAccessPage, canEditEntrySteps, getCachedUser, type UserRole } from "
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { focusHref, workPageFor } from "@/lib/vehicle-focus";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
 import { VehiclePhotoGallery } from "@/components/VehiclePhotosPage";
 import { type VehiclePhotos, vehiclePhotosApi } from "@/lib/vehicle-photos-api";
 
@@ -227,12 +229,10 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>ค้นหารถ</h1>
-          <p>พิมพ์แล้วกรองให้ทันที เช่น พิมพ์ MLHKF5 จะเห็นทุกคันที่เลขตัวถังมี MLHKF5 พร้อมสถานะของแต่ละคัน (ค้นงานสลับเลข ยกเลิกการใช้รถ ย้ายออก คัดป้าย งานโอน ต่อภาษี ให้ด้วย)</p>
-        </div>
-      </div>
+      <PageHeader
+        title="ค้นหารถ"
+        subtitle="พิมพ์แล้วกรองให้ทันที เช่น พิมพ์ MLHKF5 จะเห็นทุกคันที่เลขตัวถังมี MLHKF5 พร้อมสถานะของแต่ละคัน (ค้นงานสลับเลข ยกเลิกการใช้รถ ย้ายออก คัดป้าย งานโอน ต่อภาษี ให้ด้วย)"
+      />
 
       <section className="panel">
         <form className="vehicle-search-filter" onSubmit={handleSubmit}>
@@ -277,9 +277,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
           </div>
         </form>
         {(dateError || (incompleteDate && (fromText.length === 10 || toText.length === 10))) && (
-          <p className="customer-message error" style={{ padding: "0 24px 12px" }} role="alert">
-            {dateError || "วันที่ไม่ถูกต้อง กรุณาตรวจ วว/ดด/ปปปป"}
-          </p>
+          <Notice tone="error">{dateError || "วันที่ไม่ถูกต้อง กรุณาตรวจ วว/ดด/ปปปป"}</Notice>
         )}
 
         <div className="status-chips" role="group" aria-label="กรองตามสถานะ">
@@ -315,11 +313,9 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
           )}
         </div>
         {!result && searching ? (
-          <div className="empty-customers">กำลังค้นหา…</div>
+          <LoadingState label="กำลังค้นหา…" />
         ) : error && !rows.length ? (
-          <div className="empty-customers" role="alert">
-            {error}
-          </div>
+          <Notice tone="error">{error}</Notice>
         ) : !rows.length ? (
           <div className="empty-customers">
             ไม่พบรถจดใหม่ที่ตรงกับเงื่อนไข
@@ -369,7 +365,8 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           {canSeePhotos && (
                             <button className="text-button" type="button" onClick={() => setPhotoRow(v)}>
-                              🖼 รูป
+                              <Icon name="image" />
+                              รูป
                             </button>
                           )}
                           {canEdit && (
@@ -380,7 +377,8 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                                 returnTo: `/vehicles${appliedKey}`,
                               })}
                             >
-                              ✎ แก้ไข
+                              <Icon name="pencil" />
+                              แก้ไข
                             </Link>
                           )}
                         </div>
@@ -395,9 +393,7 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
         {result && rows.length > 0 && (error || result.hasMore) && (
           <div className="vehicle-list-more">
             {error && (
-              <p className="customer-message error" role="alert">
-                {error}
-              </p>
+              <Notice tone="error">{error}</Notice>
             )}
             {result.hasMore && (
               <button className="primary" type="button" onClick={loadMore} disabled={loadingMore || searching}>
@@ -456,11 +452,14 @@ function VehicleSearch({ initial, onWrite }: { initial: VehicleSearchParams; onW
                       ) : j.done ? (
                         <span className="badge done">{j.status}</span>
                       ) : (
-                        <span className="badge">→ {j.status}</span>
+                        <span className="badge">
+                          <Icon name="arrow-right" size={12} /> {j.status}
+                        </span>
                       )}
                       {canAccessPage(j.href, roles) && (
                         <Link className="text-button" href={focusHref(j.href, j.chassis)}>
-                          ไปที่งาน →
+                          ไปที่งาน
+                          <Icon name="arrow-right" />
                         </Link>
                       )}
                     </td>
@@ -514,7 +513,7 @@ function PhotoDialog({ row, onClose }: { row: VehicleSearchRow | null; onClose: 
       style={{ width: "min(760px, 92vw)" }}
     >
       <button className="close" aria-label="ปิด" onClick={() => ref.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>รูปของรถ</h2>
       {row && (
@@ -524,11 +523,9 @@ function PhotoDialog({ row, onClose }: { row: VehicleSearchRow | null; onClose: 
         </p>
       )}
       {error ? (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       ) : !photos ? (
-        <p className="muted">กำลังโหลดรูป…</p>
+        <LoadingState label="กำลังโหลดรูป…" />
       ) : (
         <VehiclePhotoGallery v={photos} />
       )}
@@ -600,11 +597,12 @@ function VehicleStatusCell({ row, roles }: { row: VehicleSearchRow; roles: UserR
           <div key={s.stage}>
             {!sameAsPrevious && <div className="status-done">{done}</div>}
             <span className={`badge${warn ? " warn" : ""}`}>
-              → {label} · {s.days} วัน
+              <Icon name="arrow-right" size={12} /> {label} · {s.days} วัน
             </span>
             {canAccessPage(page, roles) && (
               <Link className="text-button" href={href}>
-                ไปที่งาน →
+                ไปที่งาน
+                <Icon name="arrow-right" />
               </Link>
             )}
             {(s.reason || s.late) && (

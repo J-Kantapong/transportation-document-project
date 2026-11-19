@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PageTabs } from "@/components/PageTabs";
@@ -10,6 +9,9 @@ import { canEditEntrySteps, getCachedUser } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DEFAULT_INSPECTION_PRINT_HEADER, printInspectionSheet } from "@/lib/inspection-print";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { confirmDates } from "@/lib/date-check";
 
 // หัวกระดาษที่แก้ไขล่าสุดจำไว้ในเบราว์เซอร์นี้ - ถ้าอ่านไม่ได้ใช้ค่าเริ่มต้น
@@ -161,7 +163,12 @@ function bulkResultMessage(results: PromiseSettledResult<unknown>[], chassisList
     error: true,
   };
 }
-
+// บันทึกสำเร็จทั้งหมด = ป้ายลอย (toast) ไม่ค้างในหน้า · มีแถวที่ไม่สำเร็จ = ข้อความผิดพลาดค้างไว้
+function showBulkResult(set: (message: { text: string; error?: boolean }) => void, message: { text: string; error?: boolean }) {
+  if (message.error) return set(message);
+  set({ text: "" });
+  toast.success(message.text);
+}
 
 // หมายเหตุตามระบบในคิวส่งตรวจ: ถึงกำหนดตรวจรอบ 2 หรือตรวจไม่ผ่านต้องส่งตรวจใหม่ - ว่าง = ส่งตรวจครั้งแรก
 function sendQueueNote(v: InspectionVehicle): string {
@@ -228,13 +235,15 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
   return (
     <div className="inspect-pagination">
       <button className="text-button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
-        ← ก่อนหน้า
+        <Icon name="arrow-left" />
+        ก่อนหน้า
       </button>
       <span className="muted">
         หน้า {page + 1} จาก {totalPages}
       </span>
       <button className="text-button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>
-        ถัดไป →
+        ถัดไป
+        <Icon name="arrow-right" />
       </button>
     </div>
   );
@@ -342,11 +351,7 @@ function SendPanel({
       <div className="panel-head">
         <h2>รถที่ยังไม่ได้ตรวจ</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {bulkMessage.text && (
-            <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
-              {bulkMessage.text}
-            </span>
-          )}
+          <Notice tone={bulkMessage.error ? "error" : "info"}>{bulkMessage.text}</Notice>
           {/* บันทึกขั้น 1-3 ได้เฉพาะ ADMIN / STAFF_ENTRY - บทบาทอื่นดูอย่างเดียว (backend กันอีกชั้น) */}
           {canEdit ? (
             <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
@@ -443,10 +448,10 @@ function SendPanel({
                       <td>{v.body || "—"}</td>
                       <td>{v.registrationProvince || "—"}</td>
                       <td className="inspect-note">
-                        {note ? <span className="customer-message error">{note}</span> : "—"}
+                        {note ? <span className="field-error">{note}</span> : "—"}
                         {resubmit && (
                           <div>
-                            <span className="customer-message error">{resubmit}</span>
+                            <span className="field-error">{resubmit}</span>
                           </div>
                         )}
                         {/* วันที่ตรวจผ่านพิมพ์ผิดจนรถถึงกำหนดตรวจรอบ 2 - แก้วันที่ตรวจผ่านได้ที่นี่แทนการส่งตรวจรอบ 2 โดยไม่จำเป็น
@@ -504,7 +509,7 @@ function SendPanel({
                               บันทึก
                             </button>
                             {row.message.text && (
-                              <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 12 }} role="status">
+                              <div className={row.message.error ? "field-error" : "muted"} style={{ fontSize: 12 }} role="status">
                                 {row.message.text}
                               </div>
                             )}
@@ -561,11 +566,7 @@ function ResultPanel({
       <div className="panel-head">
         <h2>รถที่รอผลตรวจ</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {bulkMessage.text && (
-            <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
-              {bulkMessage.text}
-            </span>
-          )}
+          <Notice tone={bulkMessage.error ? "error" : "info"}>{bulkMessage.text}</Notice>
           {canEdit ? (
             <button className="primary" disabled={bulkSaving || !selectedCount} onClick={onSaveAll}>
               บันทึกทั้งหมด
@@ -688,7 +689,7 @@ function ResultPanel({
                               บันทึก
                             </button>
                             {row.message.text && (
-                              <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 12 }} role="status">
+                              <div className={row.message.error ? "field-error" : "muted"} style={{ fontSize: 12 }} role="status">
                                 {row.message.text}
                               </div>
                             )}
@@ -742,11 +743,9 @@ function ReferencePanel<T extends { id: string }>({
         {action}
       </div>
       {loading ? (
-        <div className="empty-customers">กำลังโหลดรายการ…</div>
+        <LoadingState />
       ) : error ? (
-        <div className="empty-customers" role="alert">
-          {error}
-        </div>
+        <Notice tone="error">{error}</Notice>
       ) : !vehicles.length ? (
         <div className="empty-customers">ไม่มีรายการ</div>
       ) : (
@@ -859,11 +858,9 @@ function CompletedInspectionPanel({
         </p>
       )}
       {loading ? (
-        <div className="empty-customers">กำลังโหลดรายการ…</div>
+        <LoadingState />
       ) : error ? (
-        <div className="empty-customers" role="alert">
-          {error}
-        </div>
+        <Notice tone="error">{error}</Notice>
       ) : !vehicles.length ? (
         <div className="empty-customers">ยังไม่มีรายการที่ตรวจเสร็จ</div>
       ) : !shown.length ? (
@@ -1166,7 +1163,7 @@ export default function InspectionPage() {
           }),
         ),
       );
-      setSendBulkMessage(bulkResultMessage(results, parsed.map((p) => p.chassis)));
+      showBulkResult(setSendBulkMessage, bulkResultMessage(results, parsed.map((p) => p.chassis)));
       await reloadAll();
     } finally {
       setSendBulkSaving(false);
@@ -1286,7 +1283,7 @@ export default function InspectionPage() {
           }),
         ),
       );
-      setResultBulkMessage(bulkResultMessage(results, parsed.map((p) => p.chassis)));
+      showBulkResult(setResultBulkMessage, bulkResultMessage(results, parsed.map((p) => p.chassis)));
       // ตรวจไม่ผ่านกลับเข้าคิวส่งตรวจ จึงโหลดรายการรอส่งตรวจใหม่ด้วย
       await reloadAll();
     } finally {
@@ -1470,7 +1467,7 @@ export default function InspectionPage() {
           api.correctInspectionSent(p.vehicle.id, { sentType: p.vehicle.inspectionSentType ?? "ส่งตรวจนอก", sentDate: p.dateIso, remark }),
         ),
       );
-      setSentListMessage(bulkResultMessage(results, changing.map((p) => p.vehicle.chassis)));
+      showBulkResult(setSentListMessage, bulkResultMessage(results, changing.map((p) => p.vehicle.chassis)));
       bulkSentDialogRef.current?.close();
       setBulkSent(null);
       // คันที่ไม่สำเร็จยังติ๊กค้างไว้ให้ลองใหม่ได้
@@ -1503,10 +1500,7 @@ export default function InspectionPage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
-      </Link>
-      <h1 tabIndex={-1}>ตรวจรถ</h1>
+      <PageHeader back={{ href: "/registration/new-vehicle", label: "จดทะเบียนรถใหม่" }} title="ตรวจรถ" titleFocus />
 
       <PageTabs
         label="ขั้นตอนตรวจรถ"
@@ -1520,13 +1514,11 @@ export default function InspectionPage() {
         <>
           {sendLoading ? (
             <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers">กำลังโหลดรายการ…</div>
+              <LoadingState />
             </div>
           ) : sendError ? (
             <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers" role="alert">
-                {sendError}
-              </div>
+              <Notice tone="error">{sendError}</Notice>
             </div>
           ) : (
             <SendPanel
@@ -1597,11 +1589,9 @@ export default function InspectionPage() {
                       ล้างที่เลือก
                     </button>
                   )}
-                  {sentListMessage.text && (
-                    <span className={`customer-message${sentListMessage.error ? " error" : " success"}`} role="status" style={{ flexBasis: "100%" }}>
-                      {sentListMessage.text}
-                    </span>
-                  )}
+                  <div style={{ flexBasis: "100%" }}>
+                    <Notice tone={sentListMessage.error ? "error" : "info"}>{sentListMessage.text}</Notice>
+                  </div>
                 </div>
               ) : undefined
             }
@@ -1626,13 +1616,11 @@ export default function InspectionPage() {
         <>
           {resultLoading ? (
             <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers">กำลังโหลดรายการ…</div>
+              <LoadingState />
             </div>
           ) : resultError ? (
             <div className="panel" style={{ marginBottom: 24 }}>
-              <div className="empty-customers" role="alert">
-                {resultError}
-              </div>
+              <Notice tone="error">{resultError}</Notice>
             </div>
           ) : (
             <ResultPanel
@@ -1666,8 +1654,8 @@ export default function InspectionPage() {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {detail && (
           <>
@@ -1691,8 +1679,8 @@ export default function InspectionPage() {
           if (event.target === event.currentTarget) editDialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => editDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {editResult && (
           <>
@@ -1752,11 +1740,7 @@ export default function InspectionPage() {
                 {bahtText(resultDefaultBillCost(editResult.vehicle, editResult.result))}
                 {editResult.result === "ไม่ผ่าน" && " — รถจะกลับเข้าคิวส่งตรวจใหม่"}
               </p>
-              {editMessage.text && (
-                <div className={`customer-message${editMessage.error ? " error" : " success"}`} role="status">
-                  {editMessage.text}
-                </div>
-              )}
+              <Notice tone={editMessage.error ? "error" : "info"}>{editMessage.text}</Notice>
               <button className="primary" style={{ justifySelf: "end" }} disabled={editSaving} onClick={handleSaveEditResult}>
                 บันทึกการแก้ไข
               </button>
@@ -1772,8 +1756,8 @@ export default function InspectionPage() {
           if (event.target === event.currentTarget) sentDialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => sentDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => sentDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {editSent && (
           <>
@@ -1831,11 +1815,7 @@ export default function InspectionPage() {
                   onChange={(e) => patchEditSent({ remarkText: e.target.value })}
                 />
               </label>
-              {sentMessage.text && (
-                <div className={`customer-message${sentMessage.error ? " error" : " success"}`} role="status">
-                  {sentMessage.text}
-                </div>
-              )}
+              <Notice tone={sentMessage.error ? "error" : "info"}>{sentMessage.text}</Notice>
               <button
                 className={editSent.mode === "edit" ? "primary" : "primary danger"}
                 style={{ justifySelf: "end" }}
@@ -1856,8 +1836,8 @@ export default function InspectionPage() {
           if (event.target === event.currentTarget && !bulkSentSaving) bulkSentDialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" disabled={bulkSentSaving} onClick={() => bulkSentDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" disabled={bulkSentSaving} onClick={() => bulkSentDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {bulkSent && (
           <>
@@ -1894,11 +1874,7 @@ export default function InspectionPage() {
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
                 ประเภทการส่งตรวจและราคาของแต่ละคันคงเดิม เปลี่ยนเฉพาะวันที่
               </p>
-              {bulkSentMessage.text && (
-                <div className={`customer-message${bulkSentMessage.error ? " error" : " success"}`} role="status">
-                  {bulkSentMessage.text}
-                </div>
-              )}
+              <Notice tone={bulkSentMessage.error ? "error" : "info"}>{bulkSentMessage.text}</Notice>
               <button
                 className="primary"
                 style={{ justifySelf: "end" }}
@@ -1918,8 +1894,8 @@ export default function InspectionPage() {
           if (event.target === event.currentTarget) printDialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => printDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => printDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>พิมพ์รายการส่งตรวจรถ</h2>
         <div style={{ display: "grid", gap: 16 }}>

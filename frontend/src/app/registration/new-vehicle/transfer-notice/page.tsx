@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, type TransferNoticeVehicle } from "@/lib/api";
 import { canEditTransferNotice, getCachedUser, type UserRole } from "@/lib/auth";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { confirmDates } from "@/lib/date-check";
 import { SupplierRouteHint } from "@/components/SupplierRouteHint";
 import { TransferReceiptAttachButton, TransferReceiptCell } from "@/components/TransferNoticeReceipts";
@@ -246,7 +248,7 @@ function PendingVehicleTable({
                     </button>
                   )}
                   {row.message.text && (
-                    <div className={`customer-message${row.message.error ? " error" : " success"}`} style={{ fontSize: 12 }} role="status">
+                    <div className={row.message.error ? "field-error" : "muted"} style={{ fontSize: 12 }} role="status">
                       {row.message.text}
                     </div>
                   )}
@@ -477,7 +479,7 @@ export default function TransferNoticePage() {
       }
     }
     if (!parsed.length) {
-      setBulkMessage({ text: "ไม่มีรายการที่เปลี่ยนแปลง" });
+      toast.info("ไม่มีรายการที่เปลี่ยนแปลง");
       return;
     }
 
@@ -511,8 +513,9 @@ export default function TransferNoticePage() {
               text: `บันทึกสำเร็จ ${parsed.length - failures.length} จาก ${parsed.length} รายการ · ล้มเหลว ${failures.length} รายการ (${failures.slice(0, 3).join(" / ")}${failures.length > 3 ? " …" : ""})`,
               error: true,
             }
-          : { text: `บันทึกแล้ว ${parsed.length} รายการ` },
+          : { text: "" },
       );
+      if (!failures.length) toast.success(`บันทึกแล้ว ${parsed.length} รายการ`);
       await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
     } finally {
       setBulkSaving(false);
@@ -578,21 +581,21 @@ export default function TransferNoticePage() {
       await api.correctTransferNotice(vehicle.id, { ...body, ...expected });
       correctionDialogRef.current?.close();
       setCorrection(null);
-      setCompletedMessage({
-        text:
-          mode === "undo"
-            ? `ยกเลิกสถานะเลขตัวถัง ${vehicle.chassis} แล้ว - รถกลับไปอยู่ในรายการที่ต้องดำเนินการ`
-            : `แก้ข้อมูลเลขตัวถัง ${vehicle.chassis} แล้ว`,
-      });
+      setCompletedMessage({ text: "" });
+      toast.success(
+        mode === "undo"
+          ? `ยกเลิกสถานะเลขตัวถัง ${vehicle.chassis} แล้ว - รถกลับไปอยู่ในรายการที่ต้องดำเนินการ`
+          : `แก้ข้อมูลเลขตัวถัง ${vehicle.chassis} แล้ว`,
+      );
       await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ";
       if (err instanceof ApiError && err.status === 409) {
         // มีคนแก้/ส่งตรวจ/ยื่นคันนี้ไปก่อน - ปิด dialog (ค่าที่แสดงเก่าแล้ว กดบันทึกซ้ำก็ 409 อีก) แล้วโหลดรายการใหม่
-        // ให้เปิด ✎ แก้ ใหม่จากค่าล่าสุด (ผู้ใช้ 2026-09-27 รอบตรวจ)
+        // ให้เปิด "แก้" ใหม่จากค่าล่าสุด (ผู้ใช้ 2026-09-27 รอบตรวจ)
         correctionDialogRef.current?.close();
         setCorrection(null);
-        setCompletedMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message} แล้วกด ✎ แก้ อีกครั้ง`, error: true });
+        setCompletedMessage({ text: `เลขตัวถัง ${vehicle.chassis}: ${message} แล้วกด "แก้" อีกครั้ง`, error: true });
         await Promise.all([loadPending(), loadCompleted({ keepCount: true })]);
         return;
       }
@@ -604,10 +607,7 @@ export default function TransferNoticePage() {
 
   return (
     <section className="content">
-      <Link href="/registration/new-vehicle" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← จดทะเบียนรถใหม่
-      </Link>
-      <h1 tabIndex={-1}>แจ้งย้าย/ตัดบัญชี</h1>
+      <PageHeader back={{ href: "/registration/new-vehicle", label: "จดทะเบียนรถใหม่" }} title="แจ้งย้าย/ตัดบัญชี" titleFocus />
 
       <div className="panel" style={{ marginBottom: 24 }}>
         <div className="panel-head">
@@ -616,16 +616,12 @@ export default function TransferNoticePage() {
             <span className="muted">แถวสีเหลือง = งานค้างที่ไม่ใช่วันที่รับงานที่เลือกไว้ด้านล่าง</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {bulkMessage.text && (
-              <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
-                {bulkMessage.text}
-              </span>
-            )}
+            <Notice tone={bulkMessage.error ? "error" : "info"}>{bulkMessage.text}</Notice>
             <TransferReceiptAttachButton
               picked={[...pendingVehicles, ...completedVehicles].filter((v) => receiptPicked.has(v.id) && receiptMissing(v) && canEdit(v))}
               onDone={(message) => {
                 setReceiptPicked(new Set());
-                setBulkMessage({ text: message });
+                toast.success(message);
                 reloadAfterReceipt();
               }}
             />
@@ -639,11 +635,9 @@ export default function TransferNoticePage() {
         </div>
 
         {pendingLoading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : pendingError ? (
-          <div className="empty-customers" role="alert">
-            {pendingError}
-          </div>
+          <Notice tone="error">{pendingError}</Notice>
         ) : !pendingVehicles.length ? (
           <div className="empty-customers">ไม่มีรายการที่ต้องดำเนินการ</div>
         ) : (
@@ -668,11 +662,7 @@ export default function TransferNoticePage() {
         <div className="panel-head">
           <h2>รายการรถที่ต้องดำเนินการตามวันที่</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {bulkMessage.text && (
-              <span className={`customer-message${bulkMessage.error ? " error" : " success"}`} role="status">
-                {bulkMessage.text}
-              </span>
-            )}
+            <Notice tone={bulkMessage.error ? "error" : "info"}>{bulkMessage.text}</Notice>
             <button className="primary" disabled={bulkSaving || !byDateVehicles.some(canEdit)} onClick={() => handleSaveAll(byDateVehicles)}>
               บันทึกทั้งหมด
             </button>
@@ -694,11 +684,9 @@ export default function TransferNoticePage() {
         </div>
 
         {pendingLoading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : pendingError ? (
-          <div className="empty-customers" role="alert">
-            {pendingError}
-          </div>
+          <Notice tone="error">{pendingError}</Notice>
         ) : !byDateVehicles.length ? (
           <div className="empty-customers">ไม่มีรถที่ต้องดำเนินการในวันที่เลือก</div>
         ) : (
@@ -723,15 +711,11 @@ export default function TransferNoticePage() {
           <div>
             <h2>รายการที่ตัดบัญชีแล้วล่าสุด</h2>
             <span className="muted">
-              ✎ แก้ = แก้วันที่เสร็จ/ค่าใช้จ่าย (ได้จนกว่าจะยื่นเอกสาร) หรือยกเลิกสถานะ (ได้เฉพาะก่อนส่งตรวจ) - ต้องระบุเหตุผลทุกครั้ง
+              <Icon name="pencil" /> แก้ = แก้วันที่เสร็จ/ค่าใช้จ่าย (ได้จนกว่าจะยื่นเอกสาร) หรือยกเลิกสถานะ (ได้เฉพาะก่อนส่งตรวจ) - ต้องระบุเหตุผลทุกครั้ง
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-            {completedMessage.text && (
-              <span className={`customer-message${completedMessage.error ? " error" : " success"}`} role="status">
-                {completedMessage.text}
-              </span>
-            )}
+            <Notice tone={completedMessage.error ? "error" : "info"}>{completedMessage.text}</Notice>
             <input
               type="search"
               value={completedSearchText}
@@ -752,11 +736,9 @@ export default function TransferNoticePage() {
           </p>
         )}
         {completedLoading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState />
         ) : completedError ? (
-          <div className="empty-customers" role="alert">
-            {completedError}
-          </div>
+          <Notice tone="error">{completedError}</Notice>
         ) : !completedVehicles.length ? (
           <div className="empty-customers">{completedQuery ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการที่ดำเนินการเสร็จ"}</div>
         ) : (
@@ -808,7 +790,8 @@ export default function TransferNoticePage() {
                           </span>
                         ) : (
                           <button className="text-button" style={{ marginLeft: 8 }} onClick={() => openCorrection(v)}>
-                            ✎ แก้
+                            <Icon name="pencil" />
+                            แก้
                           </button>
                         ))}
                     </td>
@@ -833,8 +816,8 @@ export default function TransferNoticePage() {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {detail && (
           <>
@@ -851,7 +834,7 @@ export default function TransferNoticePage() {
         )}
       </dialog>
 
-      {/* "✎ แก้" คันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): แก้วันที่เสร็จ/ค่าใช้จ่าย หรือยกเลิกสถานะ (เฉพาะก่อนส่งตรวจ) - เหตุผลบังคับ
+      {/* "แก้" คันที่ดำเนินการแล้ว (ผู้ใช้ 2026-09-27): แก้วันที่เสร็จ/ค่าใช้จ่าย หรือยกเลิกสถานะ (เฉพาะก่อนส่งตรวจ) - เหตุผลบังคับ
           backend เก็บลงประวัติการแก้ไขของรถคันนั้น */}
       <dialog
         ref={correctionDialogRef}
@@ -860,8 +843,8 @@ export default function TransferNoticePage() {
         }}
         onClose={() => setCorrection(null)}
       >
-        <button className="close" aria-label="ปิด" onClick={() => correctionDialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => correctionDialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         {correction && (
           <>
@@ -909,7 +892,7 @@ export default function TransferNoticePage() {
               {correction.mode === "edit" ? (
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 16 }}>
                   <label className="field" style={{ margin: 0 }}>
-                    วันที่เสร็จ *
+                    วันที่เสร็จ <Req />
                     <DateInput
                       weekday
                       value={correction.dateText}
@@ -939,7 +922,7 @@ export default function TransferNoticePage() {
               )}
 
               <label className="field" style={{ marginTop: 16 }}>
-                เหตุผลที่แก้ (Remark) *
+                เหตุผลที่แก้ (Remark) <Req />
                 <textarea
                   required
                   maxLength={500}
@@ -948,6 +931,7 @@ export default function TransferNoticePage() {
                   placeholder="ระบุเหตุผล เช่น ติ๊กผิดคัน / พิมพ์วันที่ผิด - จำเป็นต้องกรอกทุกครั้ง"
                 />
               </label>
+              <Notice tone={correction.message.error ? "error" : "info"}>{correction.message.text}</Notice>
               <div className="form-actions" style={{ marginTop: 16 }}>
                 <button
                   type="submit"
@@ -956,12 +940,6 @@ export default function TransferNoticePage() {
                 >
                   {correction.mode === "undo" ? "ยืนยันยกเลิกสถานะ" : "บันทึกการแก้ไข"}
                 </button>
-                <span
-                  className={`customer-message${correction.message.error ? " error" : correction.message.text ? " success" : ""}`}
-                  role="status"
-                >
-                  {correction.message.text}
-                </span>
               </div>
             </form>
           </>

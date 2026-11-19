@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { api, ApiError, request, type Customer } from "@/lib/api";
 import { type AuthUser, ROLE_LABELS, STATUS_LABELS, type UserRole, type UserStatus, getCachedUser } from "@/lib/auth";
 import { authApi } from "@/lib/auth-api";
@@ -61,7 +63,7 @@ function SetPasswordDialog({ user, onClose }: { user: AuthUser | null; onClose: 
   return (
     <dialog ref={ref} onClose={onClose}>
       <button type="button" className="close" aria-label="ปิด" onClick={onClose}>
-        ✕
+        <Icon name="x" />
       </button>
       <h2>ตั้งรหัสผ่านใหม่</h2>
       {user && (
@@ -100,7 +102,7 @@ function SetPasswordDialog({ user, onClose }: { user: AuthUser | null; onClose: 
           แสดงรหัสผ่าน
         </label>
         <label className="field">
-          เหตุผล *
+          เหตุผล <Req />
           <textarea
             required
             maxLength={500}
@@ -114,8 +116,9 @@ function SetPasswordDialog({ user, onClose }: { user: AuthUser | null; onClose: 
           <button type="submit" className="primary" disabled={saving || !form.remark.trim()}>
             บันทึกรหัสผ่านใหม่
           </button>
-          {message.text && <span className={`customer-message${message.error ? " error" : " success"}`}>{message.text}</span>}
+          {message.text && message.text === "กำลังบันทึก…" && <span className="form-actions-note">{message.text}</span>}
         </div>
+        <Notice tone={message.error ? "error" : "success"}>{message.text === "กำลังบันทึก…" ? "" : message.text}</Notice>
       </form>
     </dialog>
   );
@@ -338,15 +341,16 @@ export default function AdminUsersPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>จัดการผู้ใช้</h1>
-          <p>อนุมัติผู้สมัครใหม่ กำหนดบทบาท และผูกบัญชีลูกค้ากับบริษัทในฐานข้อมูล</p>
-        </div>
-        <button type="button" className="text-button" onClick={load}>
-          โหลดรายการใหม่
-        </button>
-      </div>
+      <PageHeader
+        title="จัดการผู้ใช้"
+        subtitle="อนุมัติผู้สมัครใหม่ กำหนดบทบาท และผูกบัญชีลูกค้ากับบริษัทในฐานข้อมูล"
+        actions={
+          <button type="button" className="text-button" onClick={load}>
+            <Icon name="refresh" />
+            โหลดรายการใหม่
+          </button>
+        }
+      />
 
       <div className="panel">
         <div className="inspect-filter" style={{ paddingTop: 18 }}>
@@ -362,9 +366,9 @@ export default function AdminUsersPage() {
             </button>
           ))}
         </div>
-        {listError && <div className="empty-customers customer-message error">{listError}</div>}
+        <Notice tone="error">{listError}</Notice>
         {loading ? (
-          <div className="empty-customers">กำลังโหลด…</div>
+          <LoadingState />
         ) : shown.length === 0 ? (
           <div className="empty-customers">ไม่มีผู้ใช้ในสถานะนี้</div>
         ) : (

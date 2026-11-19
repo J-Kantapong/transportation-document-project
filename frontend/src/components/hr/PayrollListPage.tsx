@@ -8,6 +8,7 @@ import { SignaturePanel } from "@/components/hr/SignaturePanel";
 import { hrApi, monthLabel, STATUS_LABEL, thaiMonthName, type PayrollRunSummary, type PayrollStatus } from "@/lib/hr-api";
 import { formatMoney } from "@/lib/invoice";
 import { DateInput } from "@/components/DateInput";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { digits } from "@/components/hr/HrDialog";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 
@@ -61,8 +62,11 @@ export function PayrollListPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>เงินเดือน</h1>
-      <p>สร้างรอบเงินเดือนรายเดือนจากทะเบียนพนักงาน ตรวจและแก้รายคน อนุมัติ แล้วบันทึกว่าจ่ายแล้ว พิมพ์สลิปให้พนักงานได้</p>
+      <PageHeader
+        titleFocus
+        title="เงินเดือน"
+        subtitle="สร้างรอบเงินเดือนรายเดือนจากทะเบียนพนักงาน ตรวจและแก้รายคน อนุมัติ แล้วบันทึกว่าจ่ายแล้ว พิมพ์สลิปให้พนักงานได้"
+      />
 
       <section className="panel" style={{ marginTop: 20, padding: "20px 23px", overflow: "visible" }}>
         <h2 style={{ marginBottom: 14 }}>สร้างรอบเงินเดือนใหม่</h2>
@@ -82,7 +86,7 @@ export function PayrollListPage() {
             <input type="number" value={year + 543} onChange={(e) => setYear(Number(e.target.value) - 543)} min={2500} max={2700} />
           </label>
           <label className="field" style={{ minWidth: 190 }}>
-            วันที่จ่ายเงินเดือน *
+            วันที่จ่ายเงินเดือน <Req />
             <DateInput value={payText} onChange={(v) => setPayOverride(formatDateDigitsCe(digits(v)))} />
           </label>
           <button type="button" className="primary" disabled={busy} onClick={create}>
@@ -92,11 +96,7 @@ export function PayrollListPage() {
         <p className="muted" style={{ marginTop: 10, fontSize: 13 }}>
           ระบบดึงพนักงานที่ทำงานอยู่ (และที่ลาออกในเดือนนั้นหรือหลังจากนั้น) พร้อมคำนวณประกันสังคมและภาษีหัก ณ ที่จ่ายให้ แล้วแก้ได้ก่อนอนุมัติ วันที่จ่ายเงินเดือนพิมพ์ลงสลิปทุกใบ (ตั้งต้นเป็นวันสุดท้ายของเดือน แก้ได้ภายหลังจนกว่าจะบันทึกว่าจ่ายแล้ว)
         </p>
-        {error && (
-          <p className="customer-message error" role="alert">
-            {error}
-          </p>
-        )}
+        <Notice tone="error">{error}</Notice>
       </section>
 
       <SignaturePanel />
@@ -123,7 +123,7 @@ export function PayrollListPage() {
               {runs === null && (
                 <tr>
                   <td colSpan={8} className="muted">
-                    กำลังโหลด…
+                    <LoadingState inline />
                   </td>
                 </tr>
               )}

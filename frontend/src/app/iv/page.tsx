@@ -5,6 +5,7 @@
 // ปุ่มและไฟล์ PDF (รวมแผ่นแชร์บนมือถือ) อยู่ใน DocumentLinkView ใช้ร่วมกับ /tv
 import { useEffect, useMemo, useState } from "react";
 import { DocumentLinkView } from "@/components/DocumentLinkView";
+import { LoadingState, Notice } from "@/components/ui";
 import type { Invoice } from "@/lib/billing-api";
 import { buildInvoiceHtml, printInvoice } from "@/lib/invoice-print";
 
@@ -46,12 +47,12 @@ export default function InvoiceLinkPage() {
     return (
       <main style={{ padding: 24, maxWidth: 520, margin: "0 auto" }}>
         <h1 style={{ fontSize: 20, marginBottom: 8 }}>เปิดใบวางบิลไม่ได้</h1>
-        <p role="alert">{error}</p>
+        <Notice tone="error">{error}</Notice>
         <p style={{ color: "#666", marginTop: 8 }}>ลิงก์ใช้ได้ 7 วัน หลังจากนั้นเปิดได้จากหน้าวางบิลในระบบ</p>
       </main>
     );
   }
-  if (!invoice) return <main style={{ padding: 24 }}>กำลังโหลดใบวางบิล…</main>;
+  if (!invoice) return <main style={{ padding: 24 }}><LoadingState label="กำลังโหลดใบวางบิล…" /></main>;
 
   return (
     <DocumentLinkView

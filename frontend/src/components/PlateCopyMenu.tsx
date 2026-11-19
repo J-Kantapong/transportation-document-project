@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageHeader } from "@/components/ui";
 
 const BASE = "/registration/other/plate-copy";
 
@@ -6,14 +7,11 @@ const BASE = "/registration/other/plate-copy";
 export function PlateCopyMenu() {
   return (
     <section className="content">
-      <Link href="/registration/other" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← อื่นๆ
-      </Link>
-      <h1>คัดแผ่นป้ายทะเบียน</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        รถยนต์และมอเตอร์ไซค์ กรอกข้อมูลรถเหมือนงานยกเลิกการใช้รถ ค่าใช้จ่ายตายตัวตามประเภทรถ (รถยนต์คัดคู่ปกติ Bill 205 / No Bill 100 · มอเตอร์ไซค์ Bill 105 / No
-        Bill 60 · ค่าอากร 10 บาทแยกต่างหาก) แล้วรับป้ายกลับมาด้วย
-      </p>
+      <PageHeader
+        back={{ href: "/registration/other", label: "อื่นๆ" }}
+        title="คัดแผ่นป้ายทะเบียน"
+        subtitle="รถยนต์และมอเตอร์ไซค์ กรอกข้อมูลรถเหมือนงานยกเลิกการใช้รถ ค่าใช้จ่ายตายตัวตามประเภทรถ (รถยนต์คัดคู่ปกติ Bill 205 / No Bill 100 · มอเตอร์ไซค์ Bill 105 / No Bill 60 · ค่าอากร 10 บาทแยกต่างหาก) แล้วรับป้ายกลับมาด้วย"
+      />
       <section className="panel">
         <div className="choices" style={{ padding: 22 }}>
           <Link href={`${BASE}/submit`}>

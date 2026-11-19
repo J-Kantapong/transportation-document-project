@@ -7,6 +7,9 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { DateInput } from "@/components/DateInput";
 import { describePaySchedule, expectedPaymentIso, isPayWeekday, PAY_WEEKDAY_LABELS, PAY_WEEKS_AFTER_MAX } from "@/lib/payment-schedule";
 import { PROVINCES } from "@/lib/vehicle-reference-data";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 
 // ประเภทรถที่แถวราคาจำกัดได้ (เทียบ Vehicle.body ขึ้นต้น) - ผู้ใช้ 2026-10-09: ป้ายเหลือง รย.17 ราคาต่างจาก รย.12
 const BODY_PREFIX_OPTIONS: Array<{ value: string; label: string }> = [
@@ -186,18 +189,14 @@ export function BillingTermsEditor({ customerId, terms, onSaved }: { customerId:
         ออกใบกำกับภาษีก่อนรับเงินได้ (ลูกค้าต้องได้ใบกำกับก่อนถึงจะจ่าย - ภาษีขายเกิดตามวันที่ออกใบ)
       </label>
       <label className="field">
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ลูกค้าแจ้งเปลี่ยนอัตราหัก ณ ที่จ่าย" maxLength={500} />
       </label>
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button className="primary" disabled={saving} onClick={handleSave}>
           บันทึกเงื่อนไข
         </button>
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -260,7 +259,7 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
       const r = await billingApi.setPersonalPayee(customerId, { ...payee, remark: payeeRemark.trim() });
       setPayee({ name: r.payee.name ?? "", bank: r.payee.bank ?? "", accountNo: r.payee.accountNo ?? "" });
       setPayeeRemark("");
-      setPayeeMessage("บันทึกผู้รับเงินแล้ว (บิลที่ออกไปแล้วไม่เปลี่ยน)");
+      toast.success("บันทึกผู้รับเงินแล้ว (บิลที่ออกไปแล้วไม่เปลี่ยน)");
     } catch (err) {
       setPayeeMessage(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
@@ -313,18 +312,14 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
       </div>
       <p style={{ fontSize: 12 }}>รถที่ส่งงานก่อนวันที่นี้ยังอยู่บัญชีเดิม ตั้งวันเดียวกับแถวเดิม = แก้แถวนั้น</p>
       <label className="field">
-        เหตุผล *
+        เหตุผล <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น แยกบัญชีเพื่อกระจายฐานภาษี" maxLength={500} />
       </label>
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button className="primary" disabled={saving || !periods} onClick={handleSave}>
           บันทึกบัญชี
         </button>
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
       </div>
       <div style={{ paddingTop: 14, borderTop: "1px solid #f0f2f6", display: "grid", gap: 14 }}>
         <p style={{ fontSize: 14 }}>
@@ -346,18 +341,14 @@ export function BillingAccountEditor({ customerId, onSaved }: { customerId: stri
           </label>
         </div>
         <label className="field">
-          เหตุผล *
+          เหตุผล <Req />
           <input type="text" value={payeeRemark} onChange={(e) => setPayeeRemark(e.target.value)} placeholder="เช่น SPI โอนเข้าบัญชีนายจิรฤทธิ์" maxLength={500} />
         </label>
+        <Notice tone="error">{payeeMessage}</Notice>
         <div className="form-actions" style={{ marginTop: 0 }}>
           <button className="primary" disabled={saving || !periods} onClick={handleSavePayee}>
             บันทึกผู้รับเงิน
           </button>
-          {payeeMessage && (
-            <div className={`customer-message${payeeMessage.startsWith("บันทึกผู้รับเงินแล้ว") ? "" : " error"}`} role="alert">
-              {payeeMessage}
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -552,9 +543,10 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
           </table>
         </div>
       )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <button
-          className="text-button"
+          className="secondary"
           onClick={() =>
             setRows((prev) => [
               ...prev,
@@ -562,16 +554,11 @@ export function BillingRatesEditor({ customerId, rates, onSaved }: { customerId:
             ])
           }
         >
-          + เพิ่มแถวราคา
+          <Icon name="plus" /> เพิ่มแถวราคา
         </button>
         <button className="primary" disabled={saving} onClick={handleSave}>
           บันทึกตารางค่าดำเนินการ
         </button>
-        {error && (
-          <div className="customer-message error" role="alert">
-            {error}
-          </div>
-        )}
       </div>
     </div>
   );

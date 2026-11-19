@@ -1,8 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { BackLink, LoadingState, Notice, PageHeader } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { HistoryDialog, HrDialog, errorText, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
 import { ApiError } from "@/lib/api";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
@@ -22,7 +24,6 @@ export function PayrollRunPage() {
   const id = useSearchParams().get("id") ?? "";
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
   const [signature, setSignature] = useState<PayslipSignature | null>(null);
@@ -53,11 +54,10 @@ export function PayrollRunPage() {
   // ทำการแล้วรับรอบใหม่ที่ backend ส่งกลับ - 409 (สถานะเปลี่ยนไปแล้ว) โหลดรอบใหม่ให้เห็นสถานะจริง
   async function act(call: () => Promise<{ run: PayrollRun }>, done?: string): Promise<void> {
     setError("");
-    setNotice("");
     setBusy(true);
     try {
       setRun((await call()).run);
-      if (done) setNotice(done);
+      if (done) toast.success(done);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) await load();
       setError(errorText(err, "ทำรายการไม่สำเร็จ"));
@@ -68,12 +68,19 @@ export function PayrollRunPage() {
   }
   const quiet = (call: () => Promise<{ run: PayrollRun }>, done?: string) => act(call, done).catch(() => {});
 
-  if (!id) return <section className="content"><p>ไม่ได้ระบุรอบเงินเดือน - <Link href="/hr/payroll">กลับรายการ</Link></p></section>;
+  if (!id) {
+    return (
+      <section className="content">
+        <BackLink href="/hr/payroll" label="เงินเดือน" />
+        <p>ไม่ได้ระบุรอบเงินเดือน</p>
+      </section>
+    );
+  }
   if (!run) {
     return (
       <section className="content">
-        {error ? <p className="customer-message error">{error}</p> : <p className="muted">กำลังโหลด…</p>}
-        <Link href="/hr/payroll">← กลับรายการรอบเงินเดือน</Link>
+        <BackLink href="/hr/payroll" label="เงินเดือน" />
+        {error ? <Notice tone="error">{error}</Notice> : <LoadingState />}
       </section>
     );
   }
@@ -92,48 +99,44 @@ export function PayrollRunPage() {
 
   return (
     <section className="content">
-      <p style={{ marginBottom: 8 }}>
-        <Link href="/hr/payroll">← รอบเงินเดือนทั้งหมด</Link>
-      </p>
-      <div className="heading">
-        <div>
-          <h1 tabIndex={-1}>
+      <PageHeader
+        back={{ href: "/hr/payroll", label: "เงินเดือน" }}
+        titleFocus
+        title={
+          <>
             เงินเดือน {monthLabel(run.month)} <span className={BADGE[status]} style={{ fontSize: 13, verticalAlign: "middle" }}>{STATUS_LABEL[status]}</span>
-          </h1>
-          <p>
+          </>
+        }
+        subtitle={
+          <>
             ประกันสังคม {run.ssoRate}% เพดานฐาน {formatMoney(run.ssoWageCap)} บาท
             {run.payDate ? ` · ${status === "PAID" ? "จ่ายแล้ววันที่" : "กำหนดจ่ายวันที่"} ${isoToDisplayDate(run.payDate)}${status === "PAID" && run.paidByName ? ` โดย ${run.paidByName}` : ""}` : " · ยังไม่ระบุวันที่จ่าย"}
             {run.approvedAt && status === "APPROVED" ? ` · อนุมัติโดย ${run.approvedByName ?? "-"}` : ""}
             {status === "CANCELLED" ? ` · ยกเลิกโดย ${run.cancelledByName ?? "-"}: ${run.cancelReason ?? ""}` : ""}
-          </p>
-        </div>
-        <div className="form-actions" style={{ flexWrap: "wrap" }}>
-          {status !== "CANCELLED" && (
-            <>
-              <button type="button" onClick={() => printPayslips(run, run.items, { signature })}>
-                🖨 พิมพ์สลิปทุกคน
-              </button>
-              <button type="button" onClick={exportCsv}>
-                ดาวน์โหลด CSV
-              </button>
-            </>
-          )}
-          <button type="button" onClick={() => setDialog("history")}>
-            ประวัติ
-          </button>
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <>
+            {status !== "CANCELLED" && (
+              <>
+                <button type="button" className="secondary" onClick={() => printPayslips(run, run.items, { signature })}>
+                  <Icon name="printer" />
+                  พิมพ์สลิปทุกคน
+                </button>
+                <button type="button" className="secondary" onClick={exportCsv}>
+                  <Icon name="download" />
+                  ดาวน์โหลด CSV
+                </button>
+              </>
+            )}
+            <button type="button" className="secondary" onClick={() => setDialog("history")}>
+              ประวัติ
+            </button>
+          </>
+        }
+      />
 
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="customer-message success" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
 
       <div className="stats" style={{ marginTop: 14 }}>
         <Stat label="พนักงาน" value={`${run.items.length} คน`} />
@@ -158,6 +161,7 @@ export function PayrollRunPage() {
                 </button>
                 <button
                   type="button"
+                  className="secondary"
                   disabled={busy}
                   onClick={async () => {
                     if (await confirmDialog("คำนวณใหม่จากทะเบียนพนักงาน? รายการที่แก้ไว้ในรอบนี้ทั้งหมดจะถูกแทนที่")) void quiet(() => hrApi.recalculate(run.id), "คำนวณใหม่จากทะเบียนพนักงานแล้ว");
@@ -165,7 +169,7 @@ export function PayrollRunPage() {
                 >
                   คำนวณใหม่จากทะเบียนพนักงาน
                 </button>
-                <button type="button" disabled={busy} onClick={() => setDialog("paydate")}>
+                <button type="button" className="secondary" disabled={busy} onClick={() => setDialog("paydate")}>
                   แก้วันที่จ่าย
                 </button>
               </>
@@ -175,16 +179,16 @@ export function PayrollRunPage() {
                 <button type="button" className="primary" disabled={busy} onClick={() => setDialog("pay")}>
                   บันทึกว่าจ่ายแล้ว
                 </button>
-                <button type="button" disabled={busy} onClick={() => setDialog("paydate")}>
+                <button type="button" className="secondary" disabled={busy} onClick={() => setDialog("paydate")}>
                   แก้วันที่จ่าย
                 </button>
-                <button type="button" disabled={busy} onClick={() => setDialog("unapprove")}>
+                <button type="button" className="secondary" disabled={busy} onClick={() => setDialog("unapprove")}>
                   ยกเลิกการอนุมัติ
                 </button>
               </>
             )}
             {status === "PAID" && (
-              <button type="button" disabled={busy} onClick={() => setDialog("unpay")}>
+              <button type="button" className="secondary" disabled={busy} onClick={() => setDialog("unpay")}>
                 ยกเลิกการจ่าย
               </button>
             )}
@@ -227,11 +231,11 @@ export function PayrollRunPage() {
                   </td>
                   <td style={{ textAlign: "right" }}>
                     {i.ssoAmount ? formatMoney(i.ssoAmount) : "-"}
-                    {i.ssoManual && <span title="พิมพ์ทับยอดที่ระบบคำนวณ"> ✎</span>}
+                    {i.ssoManual && <span title="พิมพ์ทับยอดที่ระบบคำนวณ"> <Icon name="pencil" size={14} /></span>}
                   </td>
                   <td style={{ textAlign: "right" }}>
                     {i.taxAmount ? formatMoney(i.taxAmount) : "-"}
-                    {i.taxManual && <span title="พิมพ์ทับยอดที่ระบบคำนวณ"> ✎</span>}
+                    {i.taxManual && <span title="พิมพ์ทับยอดที่ระบบคำนวณ"> <Icon name="pencil" size={14} /></span>}
                   </td>
                   <td style={{ textAlign: "right" }} title={i.deductionNote ?? undefined}>
                     {i.otherDeduction ? formatMoney(i.otherDeduction) : ""}
@@ -412,11 +416,7 @@ function ItemDialog({ run, item, onClose, onSave }: { run: PayrollRun; item: Pay
         ปัจจุบันระบบหักประกันสังคม {formatMoney(item.ssoAmount)} · ภาษี {formatMoney(item.taxAmount)} บาท ภาษีคำนวณแบบประมาณการรายปีจากเงินได้เดือนนี้ x 12
         เดือนที่มีโบนัสควรตรวจยอดอีกครั้ง
       </p>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 14 }}>
         <button type="button" className="primary" disabled={busy} onClick={save}>
           {busy ? "กำลังบันทึก…" : "บันทึก"}

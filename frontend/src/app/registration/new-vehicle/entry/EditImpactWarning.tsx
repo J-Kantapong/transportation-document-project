@@ -72,11 +72,11 @@ export function EditImpactWarning({
   return (
     <div
       role="alert"
-      style={{ marginTop: 16, padding: "12px 16px", border: "1px solid #f0d9ae", background: "#fffaf0", borderRadius: 8, fontSize: 13 }}
+      style={{ marginTop: 16, padding: "12px 16px", border: "1px solid var(--warn-line)", background: "var(--warn-soft)", borderRadius: 8, fontSize: 13 }}
     >
       {hasData && (
         <>
-          <strong style={{ color: "#946712" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
+          <strong style={{ color: "var(--warn)" }}>ข้อมูลน่าจะคีย์ผิด - ยังไม่ได้บันทึก</strong>
           <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 4 }}>
             {warning.dataWarnings.map((w) => (
               <li key={w.key}>{w.message}</li>
@@ -89,7 +89,7 @@ export function EditImpactWarning({
       )}
       {hasImpact && (
         <>
-          <strong style={{ color: "#946712" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
+          <strong style={{ color: "var(--warn)" }}>รถคันนี้ผ่านขั้นตอนที่ใช้ข้อมูลเดิมไปแล้ว - ตรวจสอบก่อนยืนยัน</strong>
           <ul style={{ margin: "8px 0", paddingLeft: 20, display: "grid", gap: 6 }}>
             {warning.affected.map((a) => (
               <li key={a.step}>
@@ -120,11 +120,11 @@ export function EditImpactWarning({
       )}
       {hasImpact && <p style={{ margin: "0 0 12px", color: "#5a6885" }}>ระบบไม่คิดค่าใช้จ่าย/ค่าธรรมเนียม/ภาษีของขั้นตอนเดิมใหม่ให้อัตโนมัติ</p>}
       <div className="form-actions" style={{ marginTop: 0 }}>
+        <button type="button" className="secondary" disabled={saving} onClick={onCancel}>
+          กลับไปแก้ข้อมูล
+        </button>
         <button type="button" className="primary" disabled={saving || (hasData && !dataChecked)} onClick={onConfirm}>
           ยืนยันบันทึกการแก้ไข
-        </button>
-        <button type="button" className="text-button" disabled={saving} onClick={onCancel}>
-          กลับไปแก้ข้อมูล
         </button>
       </div>
     </div>

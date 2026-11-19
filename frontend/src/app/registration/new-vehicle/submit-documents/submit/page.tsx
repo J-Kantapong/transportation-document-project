@@ -2,6 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice } from "@/components/ui";
 import { api, ApiError, type SubmitCandidate } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { isSupplierProvince } from "@/lib/supplier-route";
@@ -32,13 +34,15 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
   return (
     <div className="inspect-pagination">
       <button className="text-button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
-        ← ก่อนหน้า
+        <Icon name="arrow-left" />
+        ก่อนหน้า
       </button>
       <span className="muted">
         หน้า {page + 1} จาก {totalPages}
       </span>
       <button className="text-button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>
-        ถัดไป →
+        ถัดไป
+        <Icon name="arrow-right" />
       </button>
     </div>
   );
@@ -344,11 +348,7 @@ function SubmitPickStep() {
         )}
       </section>
 
-      {notice && (
-        <p className={`customer-message${notice.error ? " error" : ""}`} role="status" style={{ marginBottom: 12 }}>
-          {notice.text}
-        </p>
-      )}
+      {notice && <Notice tone={notice.error ? "error" : "info"}>{notice.text}</Notice>}
 
       <section className="panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "16px 22px" }}>
@@ -364,16 +364,18 @@ function SubmitPickStep() {
         </div>
 
         {loadError ? (
-          <div className="empty-customers" role="alert">
-            <p className="customer-message error" style={{ marginBottom: 12 }}>
-              โหลดคิวรอยื่นไม่สำเร็จ: {loadError}
-            </p>
-            <button type="button" className="primary" disabled={loading} onClick={() => setReload((n) => n + 1)}>
-              {loading ? "กำลังโหลด…" : "ลองใหม่"}
-            </button>
-          </div>
+          <Notice
+            tone="error"
+            action={
+              <button type="button" className="secondary" disabled={loading} onClick={() => setReload((n) => n + 1)}>
+                {loading ? "กำลังโหลด…" : "ลองใหม่"}
+              </button>
+            }
+          >
+            โหลดคิวรอยื่นไม่สำเร็จ: {loadError}
+          </Notice>
         ) : !queueReady ? (
-          <div className="empty-customers">กำลังโหลดคิวรอยื่น…</div>
+          <LoadingState label="กำลังโหลดคิวรอยื่น…" />
         ) : filtered.length === 0 ? (
           <div className="empty-customers">
             {chassisQuery ? (
@@ -509,7 +511,8 @@ function SubmitPickStep() {
           )}
         </span>
         <button type="button" className="primary" disabled={selected.length === 0} onClick={() => router.push(SETTINGS_HREF)}>
-          ถัดไป: ตั้งค่า →
+          ถัดไป: ตั้งค่า
+          <Icon name="arrow-right" />
         </button>
       </div>
     </>

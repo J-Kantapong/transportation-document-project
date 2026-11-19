@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DateInput } from "@/components/DateInput";
 import { digits, errorText, HistoryDialog, HrDialog, moneyOf, ReasonDialog } from "@/components/hr/HrDialog";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { hrApi, maskId, parseEmployeePaste, type Employee, type EmployeeIdType, type EmployeeInput } from "@/lib/hr-api";
 import { formatMoney, round2 } from "@/lib/invoice";
@@ -52,20 +55,22 @@ export function EmployeesPage() {
 
   return (
     <section className="content">
-      <div className="heading">
-        <div>
-          <h1 tabIndex={-1}>ทะเบียนพนักงาน</h1>
-          <p>ข้อมูลพนักงานและเงินเดือนปัจจุบัน ใช้เป็นฐานของเงินเดือนแต่ละเดือน เห็นได้เฉพาะผู้ดูแลระบบ</p>
-        </div>
-        <div className="form-actions">
-          <button type="button" onClick={() => setShowImport((v) => !v)}>
-            {showImport ? "ปิดการนำเข้า" : "นำเข้าจาก Excel"}
-          </button>
-          <button type="button" className="primary" onClick={() => setEditing("new")}>
-            + เพิ่มพนักงาน
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        titleFocus
+        title="ทะเบียนพนักงาน"
+        subtitle="ข้อมูลพนักงานและเงินเดือนปัจจุบัน ใช้เป็นฐานของเงินเดือนแต่ละเดือน เห็นได้เฉพาะผู้ดูแลระบบ"
+        actions={
+          <>
+            <button type="button" className="secondary" onClick={() => setShowImport((v) => !v)}>
+              {showImport ? "ปิดการนำเข้า" : "นำเข้าจาก Excel"}
+            </button>
+            <button type="button" className="primary" onClick={() => setEditing("new")}>
+              <Icon name="plus" />
+              เพิ่มพนักงาน
+            </button>
+          </>
+        }
+      />
 
       {showImport && (
         <ImportPanel
@@ -101,11 +106,7 @@ export function EmployeesPage() {
             <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="รหัส ชื่อ หรือตำแหน่ง" />
           </label>
         </div>
-        {error && (
-          <p className="customer-message error" role="alert" style={{ padding: "0 23px 14px" }}>
-            {error}
-          </p>
-        )}
+        <Notice tone="error">{error}</Notice>
         <div className="table-wrap">
           <table>
             <thead>
@@ -125,7 +126,7 @@ export function EmployeesPage() {
               {employees === null && (
                 <tr>
                   <td colSpan={9} className="muted">
-                    กำลังโหลด…
+                    <LoadingState inline />
                   </td>
                 </tr>
               )}
@@ -282,7 +283,7 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
     <HrDialog title={employee ? `แก้ข้อมูล: ${employee.fullName}` : "เพิ่มพนักงาน"} onClose={onClose} width={680} closeRef={closeRef}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 14 }}>
         <label className="field">
-          รหัสพนักงาน *
+          รหัสพนักงาน <Req />
           <input type="text" value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} placeholder="TI013" />
         </label>
         <label className="field">
@@ -295,7 +296,7 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
           </datalist>
         </label>
         <label className="field">
-          ชื่อ *
+          ชื่อ <Req />
           <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} maxLength={100} />
         </label>
         <label className="field">
@@ -314,7 +315,7 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
           </select>
         </label>
         <label className="field">
-          เลขประจำตัว *
+          เลขประจำตัว <Req />
           <input type="text" value={idNumber} onChange={(e) => setIdNumber(e.target.value)} maxLength={30} inputMode="numeric" />
         </label>
         <label className="field">
@@ -326,7 +327,7 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
           <DateInput value={startText} onChange={(v) => setStartText(formatDateDigitsCe(digits(v)))} placeholder="วว/ดด/ปปปป" />
         </label>
         <label className="field">
-          เงินเดือน (บาท) *
+          เงินเดือน (บาท) <Req />
           <input type="text" inputMode="decimal" value={salaryText} onChange={(e) => setSalaryText(e.target.value)} placeholder="25,000" />
         </label>
         <label className="field">
@@ -350,15 +351,11 @@ function EmployeeFormDialog({ employee, onClose, onSaved }: { employee: Employee
       </label>
       {employee && (
         <label className="field" style={{ marginTop: 14 }}>
-          เหตุผลที่แก้ *
+          เหตุผลที่แก้ <Req />
           <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} maxLength={500} placeholder="เช่น ปรับเงินเดือนประจำปี" />
         </label>
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions" style={{ marginTop: 14 }}>
         <button type="button" className="primary" disabled={busy} onClick={save}>
           {busy ? "กำลังบันทึก…" : "บันทึก"}
@@ -383,7 +380,8 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     try {
       const r = await hrApi.importEmployees(valid.map((v) => v.input!));
       const skipped = r.skipped.length ? ` · ข้าม ${r.skipped.length} คน (${r.skipped.map((s) => `${s.code}: ${s.reason}`).join(", ")})` : "";
-      setMessage({ text: `นำเข้าแล้ว ${r.created} คน${skipped}` });
+      setMessage({ text: "" });
+      toast.success(`นำเข้าแล้ว ${r.created} คน${skipped}`);
       setPasted("");
       onDone();
     } catch (err) {
@@ -407,7 +405,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         <>
           <p style={{ fontSize: 13, marginTop: 10 }}>
             อ่านได้ {valid.length} คน
-            {invalid > 0 && <span className="customer-message error"> · มีปัญหา {invalid} แถว (แก้ใน Excel แล้ววางใหม่ - ระบบไม่นำเข้าถ้ายังมีแถวที่มีปัญหา)</span>}
+            {invalid > 0 && <span style={{ color: "var(--danger)" }}> · มีปัญหา {invalid} แถว (แก้ใน Excel แล้ววางใหม่ - ระบบไม่นำเข้าถ้ายังมีแถวที่มีปัญหา)</span>}
           </p>
           <div className="table-wrap" style={{ maxHeight: 340, overflow: "auto" }}>
             <table>
@@ -437,7 +435,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
                     <td>{r.input ? (r.input.socialSecurity ? "เข้า" : "ไม่เข้า") : ""}</td>
                     <td>
                       {r.errors.map((t) => (
-                        <div key={t} className="customer-message error">
+                        <div key={t} style={{ color: "var(--danger)" }}>
                           {t}
                         </div>
                       ))}
@@ -458,12 +456,9 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         <button type="button" className="primary" disabled={busy || valid.length === 0 || invalid > 0} onClick={submit}>
           นำเข้า {valid.length} คน
         </button>
-        {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
-            {message.text}
-          </div>
-        )}
+        {message.text && !message.error && <span className="form-actions-note">{message.text}</span>}
       </div>
+      <Notice tone="error">{message.error ? message.text : ""}</Notice>
     </section>
   );
 }

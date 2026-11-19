@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 import { ApiError, type DocumentSubmission, type FeeItem } from "@/lib/api";
 import { supplierRatesApi } from "@/lib/supplier-rates-api";
 import { SUPPLIER_FEE_FIELDS, type SupplierFeeKey } from "@/lib/supplier-route";
@@ -74,7 +76,8 @@ export function SupplierFeeLine({
         {money(Number(s.noBillTotal))}{" "}
         {canEdit && (
           <button type="button" className="text-button" style={{ fontSize: 12, padding: 0, whiteSpace: "nowrap" }} onClick={open}>
-            ✎ แก้
+            <Icon name="pencil" />
+            แก้
           </button>
         )}
       </div>
@@ -89,8 +92,8 @@ export function SupplierFeeLine({
           if (event.target === event.currentTarget && !saving) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>แก้ค่าจ้างซับ</h2>
         <div style={{ fontSize: 13, color: "#576781", marginBottom: 12 }}>
@@ -116,7 +119,7 @@ export function SupplierFeeLine({
             รวมค่าจ้างซับ <b>{money(total)}</b> บาท
           </div>
           <label className="field">
-            เหตุผลที่แก้ *
+            เหตุผลที่แก้ <Req />
             <input
               type="text"
               maxLength={200}
@@ -126,17 +129,13 @@ export function SupplierFeeLine({
             />
           </label>
         </div>
-        {error && (
-          <p className="customer-message error" role="alert" style={{ marginTop: 12 }}>
-            {error}
-          </p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Notice tone="error">{error}</Notice>
+        <div className="dialog-actions">
+          <button type="button" className="secondary" disabled={saving} onClick={() => dialogRef.current?.close()}>
+            ยกเลิก
+          </button>
           <button type="button" className="primary" disabled={saving} onClick={save}>
             {saving ? "กำลังบันทึก…" : "บันทึก"}
-          </button>
-          <button type="button" className="text-button" disabled={saving} onClick={() => dialogRef.current?.close()}>
-            ยกเลิก
           </button>
         </div>
       </dialog>

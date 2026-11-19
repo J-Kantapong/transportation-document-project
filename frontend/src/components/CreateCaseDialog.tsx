@@ -31,14 +31,16 @@ export function CreateCaseDialog() {
         }}
       >
         <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+          <Icon name="x" />
         </button>
         <h2>สร้างรายการใหม่</h2>
         <p>เลือกประเภทงานทะเบียน</p>
         <div className="choices">
           {categories.map((category) => (
             <Link key={category.href} href={category.href} onClick={() => dialogRef.current?.close()}>
-              {category.title} <span style={{ float: "right" }}>→</span>
+              {category.title} <span style={{ float: "right" }}>
+                <Icon name="chevron-right" />
+              </span>
             </Link>
           ))}
         </div>

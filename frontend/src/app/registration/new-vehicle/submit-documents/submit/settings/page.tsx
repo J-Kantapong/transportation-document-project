@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Icon } from "@/components/Icon";
 import type { NewPlateOption, OwnerType, PlateNumberOption, SubmitCandidate } from "@/lib/api";
 import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "@/components/submit-flow/SubmitFlowContext";
@@ -65,7 +66,8 @@ export default function SubmitSettingsPage() {
       <section className="panel empty-page">
         <p style={{ margin: "0 0 12px" }}>ยังไม่ได้เลือกรถที่จะยื่น</p>
         <Link href={PICK_HREF} className="primary" style={{ display: "inline-flex" }}>
-          ← ไปเลือกรถ
+          <Icon name="arrow-left" />
+          ไปเลือกรถ
         </Link>
       </section>
     );
@@ -148,7 +150,10 @@ export default function SubmitSettingsPage() {
                         <div className="sub" style={{ color: "#6b4fc8" }}>
                           งานสลับเลข: รับเลข {v.plateSwap.oldPlateCategory} {v.plateSwap.oldPlateNumber} จากรถของ {v.plateSwap.oldOwnerName}
                           {plateSwapPrefillMismatch(v, s) ? (
-                            <span style={{ color: "#c2410c" }}> · ⚠ ทะเบียนที่กรอกไม่ตรงกับเลขนี้</span>
+                            <span style={{ color: "var(--warn)" }}>
+                              {" · "}
+                              <Icon name="alert-triangle" /> ทะเบียนที่กรอกไม่ตรงกับเลขนี้
+                            </span>
                           ) : (
                             " (เติมทะเบียนให้แล้ว)"
                           )}
@@ -309,7 +314,7 @@ export default function SubmitSettingsPage() {
                           </label>
                         )}
                         {isMoto && !viaSupplier && s.options.stopUseRelocateOut && (
-                          <div className="sub" style={{ color: "#c07a1e" }}>
+                          <div className="sub" style={{ color: "var(--warn)" }}>
                             * ค่าธรรมเนียมอื่นของรายการนี้ยังไม่มีข้อมูล (ปรับเฉพาะลงขันเป็น 250)
                           </div>
                         )}
@@ -364,11 +369,13 @@ export default function SubmitSettingsPage() {
       <div className="submit-footer">
         <ChecksNote checks={checks} count={selected.length} />
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Link href={PICK_HREF} className="text-button">
-            ← กลับไปเลือกรถ
+          <Link href={PICK_HREF} className="secondary">
+            <Icon name="arrow-left" />
+            กลับไปเลือกรถ
           </Link>
           <button type="button" className="primary" disabled={!checks.ready} onClick={() => router.push(REVIEW_HREF)}>
-            ถัดไป: ตรวจทาน →
+            ถัดไป: ตรวจทาน
+            <Icon name="arrow-right" />
           </button>
         </div>
       </div>

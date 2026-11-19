@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchAuthedBlob, plateCopyPlatePhotoImageUrl } from "@/lib/api";
 import { getCachedUser, getToken, submitWriteScopeFor } from "@/lib/auth";
@@ -31,6 +30,9 @@ import {
 } from "@/lib/plate-copy-api";
 import { DateTextInput, dangerButton, errorText, openReceiptImage, ReasonDialog, textToIso } from "@/components/PlateSwapPages";
 import { alertDialog, confirmDialog } from "@/lib/confirm-dialog";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { toast } from "@/lib/toast";
 
 // คัดแผ่นป้ายทะเบียน (หมวด "อื่นๆ", ผู้ใช้ 2026-10-02) - กรอกข้อมูลรถเหมือนการสลับเลข (ไม่มีทะเบียนใหม่) ทั้งรถยนต์และมอเตอร์ไซค์
 // (มอเตอร์ไซค์เปิดใช้ 2026-10-09: ประเภทรถเป็นช่องในฟอร์มหน้าเดียวกันเหมือนงานโอน เปลี่ยนหลังบันทึกไม่ได้ / มอเตอร์ไซค์มีป้ายใบเดียวจึงไม่มีชนิดการคัดป้าย)
@@ -93,7 +95,7 @@ function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCanc
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
       <button type="button" className="text-button" onClick={onEdit}>
-        ✎ แก้
+        <Icon name="pencil" /> แก้
       </button>
       {children}
       <button type="button" className="text-button" style={dangerButton} onClick={onCancel}>
@@ -195,7 +197,7 @@ function VehicleFormFields({
     <>
       {/* ประเภทรถ: ฟอร์มยื่นเลือกได้เฉพาะที่ผู้ใช้บันทึกได้ (มีประเภทเดียว = ล็อกไว้) / ป๊อปอัปแก้เปลี่ยนไม่ได้ */}
       <label className="field" style={{ maxWidth: 420 }}>
-        ประเภทรถ *
+        ประเภทรถ <Req />
         {classOptions && classOptions.length > 1 ? (
           <select value={vehicleClass} onChange={(e) => onChange({ vehicleClass: e.target.value as PlateCopyVehicleClass | "" })}>
             <option value="">เลือกประเภทรถ</option>
@@ -212,7 +214,7 @@ function VehicleFormFields({
 
       {/* เจ้าของงาน = ลูกค้าที่ส่งงานมาให้เรา ไว้ส่งงาน/วางบิลให้ถูกเจ้าของ - ไม่ใช่เจ้าของรถตามทะเบียน (ช่อง "ชื่อเจ้าของรถ" ข้างล่าง) */}
       <label className="field" style={{ maxWidth: 420 }}>
-        เจ้าของงาน * (ลูกค้าที่ส่งงานมา)
+        เจ้าของงาน (ลูกค้าที่ส่งงานมา) <Req />
         <select value={form.customerId} onChange={(e) => onChange({ customerId: e.target.value })}>
           <option value="">{customerPlaceholder}</option>
           {customerOptions.map((c) => (
@@ -227,29 +229,29 @@ function VehicleFormFields({
       {/* ลำดับช่องเหมือนงานสลับเลข: วันที่ยื่น -> ชื่อเจ้าของรถ -> เลขตัวถัง -> เลขเครื่อง -> ยี่ห้อ -> ทะเบียน */}
       <div className="customer-grid">
         <label className="field">
-          วันที่ยื่น *
+          วันที่ยื่น <Req />
           <DateTextInput value={submitDateText} onChange={onSubmitDateChange} label="วันที่ยื่น" />
         </label>
         {returnedDateText !== undefined && onReturnedDateChange && (
           <label className="field">
-            วันที่รับเอกสารกลับ *
+            วันที่รับเอกสารกลับ <Req />
             <DateTextInput value={returnedDateText} onChange={onReturnedDateChange} label="วันที่รับเอกสารกลับ" />
           </label>
         )}
         <label className="field">
-          ชื่อเจ้าของรถ *
+          ชื่อเจ้าของรถ <Req />
           <input value={form.ownerName} onChange={text("ownerName")} />
         </label>
         <label className="field">
-          เลขตัวถัง *
+          เลขตัวถัง <Req />
           <input value={form.chassis} onChange={text("chassis")} />
         </label>
         <label className="field">
-          เลขเครื่อง *
+          เลขเครื่อง <Req />
           <input value={form.engine} onChange={text("engine")} />
         </label>
         <label className="field">
-          ยี่ห้อ *
+          ยี่ห้อ <Req />
           <select value={form.brand} onChange={(e) => onChange({ brand: e.target.value })}>
             <option value="">เลือกยี่ห้อ</option>
             {brandNames.map((name) => (
@@ -260,7 +262,7 @@ function VehicleFormFields({
           </select>
         </label>
         <div className="field">
-          ทะเบียน *
+          ทะเบียน <Req />
           <div style={{ display: "flex", gap: 8 }}>
             <input value={form.plateCategory} onChange={text("plateCategory")} maxLength={3} placeholder="หมวด เช่น 4กข" aria-label="หมวดทะเบียน" />
             <input
@@ -279,7 +281,7 @@ function VehicleFormFields({
       {vehicleClass !== "MOTO" && (
         <div className="customer-grid" style={{ marginTop: 14 }}>
           <label className="field">
-            ชนิดการคัดป้าย *
+            ชนิดการคัดป้าย <Req />
             <select value={form.copyType} onChange={(e) => onChange({ copyType: e.target.value as PlateCopyType })}>
               {(Object.keys(COPY_TYPE_LABELS) as PlateCopyType[]).map((t) => (
                 <option key={t} value={t}>
@@ -425,8 +427,8 @@ function EditDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(720px, 96vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แก้งานคัดแผ่นป้ายทะเบียน</h2>
       <Summary item={item} />
@@ -444,20 +446,18 @@ function EditDialog({
         />
       </div>
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่แก้ *
+        เหตุผลที่แก้ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์ชื่อเจ้าของรถผิด" />
       </label>
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
         </button>
       </div>
     </dialog>
@@ -552,7 +552,8 @@ export function PlateCopySubmitPage() {
         urgent: form.urgent,
         submitDate,
       });
-      setMessage({ text: "บันทึกงานที่ยื่นแล้ว" });
+      setMessage({ text: "" });
+      toast.success("บันทึกงานที่ยื่นแล้ว");
       // เจ้าของงานคนเดิมมักส่งมาหลายคัน (ประเภทรถเดิม) - คงไว้ให้ / งานด่วนกลับเป็นไม่ติ๊ก กันติดไปคันถัดไป
       setForm((prev) => ({ ...EMPTY_FORM, customerId: prev.customerId, vehicleClass: prev.vehicleClass }));
       if (submitDate.slice(0, 7) === month) await load(month);
@@ -573,10 +574,7 @@ export function PlateCopySubmitPage() {
 
   return (
     <section className="content">
-      <Link href={PLATE_COPY_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← คัดแผ่นป้ายทะเบียน
-      </Link>
-      <h1>ยื่นงานคัดแผ่นป้ายทะเบียน</h1>
+      <PageHeader back={{ href: PLATE_COPY_HOME, label: "คัดแผ่นป้ายทะเบียน" }} title="ยื่นงานคัดแผ่นป้ายทะเบียน" />
       <IntakeNotice state={intakePrefill} />
 
       {canWrite && (
@@ -591,13 +589,11 @@ export function PlateCopySubmitPage() {
               brandNames={brandNames}
               customerOptions={customerOptions}
             />
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
             <div className="form-actions">
               <button className="primary" type="submit" disabled={saving}>
                 บันทึกการยื่น
               </button>
-              <span className={`customer-message${message.error ? " error" : message.text ? " success" : ""}`} role="status">
-                {message.text}
-              </span>
             </div>
           </form>
         </div>
@@ -612,11 +608,9 @@ export function PlateCopySubmitPage() {
           </label>
         </div>
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">ยังไม่มีรายการในเดือนนี้</div>
         ) : (
@@ -767,7 +761,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: PlateCopy; canW
         </div>
         {canWrite && (
           <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => setEditing(true)}>
-            ✎ แก้
+            <Icon name="pencil" /> แก้
           </button>
         )}
       </div>
@@ -790,9 +784,7 @@ function ReceiptFieldsCell({ item, canWrite, onChange }: { item: PlateCopy; canW
         <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เหตุผลที่แก้ *" aria-label="เหตุผลที่แก้ข้อมูลใบเสร็จ" className="inspect-input" />
       )}
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" className="text-button" disabled={busy} onClick={save}>
@@ -862,7 +854,8 @@ export function PlateCopyReturnPage() {
     try {
       if (!(await recheckConfirm((reason) => plateCopyApi.markReturned(item.id, returnDate, reason)))) return;
       drop(item.id);
-      setMessage({ text: `รับเอกสารกลับแล้ว: ${item.ownerName} (${plateText(item)})` });
+      setMessage({ text: "" });
+      toast.success(`รับเอกสารกลับแล้ว: ${item.ownerName} (${plateText(item)})`);
     } catch (err) {
       setMessage({ text: errorText(err, "บันทึกไม่สำเร็จ"), error: true });
     }
@@ -870,13 +863,11 @@ export function PlateCopyReturnPage() {
 
   return (
     <section className="content">
-      <Link href={PLATE_COPY_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← คัดแผ่นป้ายทะเบียน
-      </Link>
-      <h1>รับใบเสร็จ (คัดแผ่นป้ายทะเบียน)</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือแนบรูปใบเสร็จ (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) ระบบจะถือว่ารับเอกสารกลับทันทีตามวันที่ที่ระบุ
-      </p>
+      <PageHeader
+        back={{ href: PLATE_COPY_HOME, label: "คัดแผ่นป้ายทะเบียน" }}
+        title="รับใบเสร็จ (คัดแผ่นป้ายทะเบียน)"
+        subtitle="ถ่ายหรือแนบรูปใบเสร็จ (อ่านเลขที่/วันที่/ยอดเงินให้อัตโนมัติ แก้เองได้) ระบบจะถือว่ารับเอกสารกลับทันทีตามวันที่ที่ระบุ"
+      />
 
       <div className="panel">
         <div className="panel-head">
@@ -896,16 +887,14 @@ export function PlateCopyReturnPage() {
           )}
         </div>
         {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
+          <div style={{ padding: "0 23px 14px" }}>
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
           </div>
         )}
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับเอกสารกลับ" : "ยังไม่มีงานที่รับกลับแล้ว"}</div>
         ) : (
@@ -946,7 +935,8 @@ export function PlateCopyReturnPage() {
           onClose={() => setDialog(null)}
           onCancelled={(id) => {
             drop(id);
-            setMessage({ text: `ยกเลิกงานแล้ว: ${dialog.item.ownerName} (${plateText(dialog.item)})` });
+            setMessage({ text: "" });
+            toast.success(`ยกเลิกงานแล้ว: ${dialog.item.ownerName} (${plateText(dialog.item)})`);
           }}
         />
       )}
@@ -959,12 +949,13 @@ export function PlateCopyReturnPage() {
           onConfirm={async (remark) => {
             await plateCopyApi.undoReturn(dialog.item.id, remark);
             drop(dialog.item.id);
-            setMessage({ text: `ย้ายกลับไปรอรับเอกสารแล้ว: ${dialog.item.ownerName} (${plateText(dialog.item)})` });
+            setMessage({ text: "" });
+            toast.success(`ย้ายกลับไปรอรับเอกสารแล้ว: ${dialog.item.ownerName} (${plateText(dialog.item)})`);
           }}
         >
           <Summary item={dialog.item} />
           <p style={{ marginTop: 12 }}>
-            งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot; - ถ้าแค่วันที่รับกลับผิด ใช้ ✎ แก้ แทน
+            งานนี้จะกลับไปอยู่แท็บ &quot;รอรับเอกสารกลับ&quot; - ถ้าแค่วันที่รับกลับผิด ใช้ <Icon name="pencil" /> แก้ แทน
           </p>
         </ReasonDialog>
       )}
@@ -1056,7 +1047,7 @@ function ReturnRow({
           {item.receipts.map((r, i) => (
             <span key={r.id} style={{ display: "inline-flex", alignItems: "center" }}>
               <button type="button" className="text-button" onClick={() => openReceiptImage(r.id)}>
-                🧾 รูป {i + 1}
+                <Icon name="receipt" /> รูป {i + 1}
               </button>
               {receiptWritable && (
                 <button
@@ -1068,7 +1059,7 @@ function ReturnRow({
                   title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                   onClick={() => removeReceipt(r.id)}
                 >
-                  ×
+                  <Icon name="x" />
                 </button>
               )}
             </span>
@@ -1101,7 +1092,7 @@ function ReturnRow({
                 title={remarkMissing ? "ใส่เหตุผลก่อน" : undefined}
                 onClick={() => inputRef.current?.click()}
               >
-                {busy ? "กำลังอัปโหลด…" : "📷 ถ่าย/แนบใบเสร็จ"}
+                {busy ? "กำลังอัปโหลด…" : <><Icon name="camera" /> ถ่าย/แนบใบเสร็จ</>}
               </button>
               {returned && (
                 <button
@@ -1135,7 +1126,7 @@ function ReturnRow({
               ยืนยันรับกลับ
             </button>
             {missing.length > 0 && (
-              <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "#a86200" }}>
+              <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "var(--warn)" }}>
                 ยังขาด: {missing.join(" · ")}
               </div>
             )}
@@ -1282,7 +1273,7 @@ function ReceivePlateRow({
             </div>
             {overdueDays > 0 && (
               <span className="badge alert">
-                ⚠ เกินกำหนด {overdueDays} วัน
+                <Icon name="alert-triangle" /> เกินกำหนด {overdueDays} วัน
               </span>
             )}
           </>
@@ -1294,7 +1285,7 @@ function ReceivePlateRow({
           <>
             {item.platePhotoId && (
               <button type="button" className="text-button" style={{ paddingLeft: 0 }} onClick={() => openPlatePhoto(item.id)}>
-                📷 ดูรูปป้าย
+                <Icon name="camera" /> ดูรูปป้าย
               </button>
             )}
             {canWrite && (
@@ -1308,7 +1299,7 @@ function ReceivePlateRow({
                     setDialog("date");
                   }}
                 >
-                  ✎ แก้วันที่
+                  <Icon name="pencil" /> แก้วันที่
                 </button>
                 <button type="button" className="text-button" style={dangerButton} onClick={() => setDialog("detach")}>
                   ถอดรูป
@@ -1333,10 +1324,10 @@ function ReceivePlateRow({
               <input ref={galleryRef} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files)} />
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
                 <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()}>
-                  📷 ถ่ายรูปป้าย
+                  <Icon name="camera" /> ถ่ายรูปป้าย
                 </button>
                 <button type="button" disabled={busy} onClick={() => galleryRef.current?.click()}>
-                  🖼 เลือกรูป
+                  <Icon name="image" /> เลือกรูป
                 </button>
               </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
@@ -1353,7 +1344,7 @@ function ReceivePlateRow({
                 {busy ? "กำลังบันทึก…" : "ยืนยันรับป้าย"}
               </button>
               {!file && (
-                <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "#a86200", marginTop: 0 }}>
+                <div id={`plate-copy-missing-${item.id}`} className="sub" style={{ color: "var(--warn)", marginTop: 0 }}>
                   ยังขาด: รูปป้าย
                 </div>
               )}
@@ -1378,7 +1369,7 @@ function ReceivePlateRow({
           >
             <Summary item={item} />
             <label className="field" style={{ marginTop: 12 }}>
-              วันที่รับป้ายใหม่ *
+              วันที่รับป้ายใหม่ <Req />
               <DateTextInput value={editDateText} onChange={setEditDateText} label="วันที่รับป้าย" />
             </label>
           </ReasonDialog>
@@ -1432,13 +1423,11 @@ export function PlateCopyReceivePlatePage() {
 
   return (
     <section className="content">
-      <Link href={PLATE_COPY_HOME} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← คัดแผ่นป้ายทะเบียน
-      </Link>
-      <h1>รับป้าย (คัดแผ่นป้ายทะเบียน)</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        ถ่ายหรือเลือกรูปป้ายที่ได้รับ ใส่วันที่รับ แล้วกดยืนยันรับป้ายในแถวของงานนั้น (ไม่ต้องรอรับใบเสร็จก่อน) ปกติป้ายออกภายใน {PLATE_COPY_EXPECTED_DAYS} วัน
-      </p>
+      <PageHeader
+        back={{ href: PLATE_COPY_HOME, label: "คัดแผ่นป้ายทะเบียน" }}
+        title="รับป้าย (คัดแผ่นป้ายทะเบียน)"
+        subtitle={`ถ่ายหรือเลือกรูปป้ายที่ได้รับ ใส่วันที่รับ แล้วกดยืนยันรับป้ายในแถวของงานนั้น (ไม่ต้องรอรับใบเสร็จก่อน) ปกติป้ายออกภายใน ${PLATE_COPY_EXPECTED_DAYS} วัน`}
+      />
 
       <div className="panel">
         <div className="panel-head">
@@ -1452,16 +1441,14 @@ export function PlateCopyReceivePlatePage() {
           </div>
         </div>
         {message.text && (
-          <div className={`customer-message${message.error ? " error" : " success"}`} role="status" style={{ padding: "0 23px 14px" }}>
-            {message.text}
+          <div style={{ padding: "0 23px 14px" }}>
+            <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
           </div>
         )}
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : listError ? (
-          <div className="empty-customers" role="alert">
-            {listError}
-          </div>
+          <Notice tone="error">{listError}</Notice>
         ) : items.length === 0 ? (
           <div className="empty-customers">{status === "pending" ? "ไม่มีงานที่รอรับป้าย" : "ยังไม่มีงานที่รับป้ายแล้ว"}</div>
         ) : (

@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { billingApi, type ClosedBillingJob, type OtherJob } from "@/lib/billing-api";
 import { isoToDisplayDate, timestampToDisplayDate } from "@/lib/date";
+import { Notice, Req } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { toast } from "@/lib/toast";
 
 // ปิดงาน - วางบิลนอกระบบ ของงานอื่นๆ (ผู้ใช้ 2026-10-13, เหมือนของรถในหน้า /accounting/billing)
 // งานที่ส่งงานลูกค้าแล้วแต่วางบิลที่อื่น (บัญชีส่วนตัว / Google Sheet / เหมาจ่าย): ADMIN / ACCOUNTANT ปิดพร้อมหมายเหตุ -> ออกจากคิวรอวางบิล
@@ -45,8 +48,8 @@ export function CloseJobDialog({ job, customerName, onClose, onClosed, onRefused
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ปิดงาน - วางบิลนอกระบบ</h2>
       <p className="muted">
@@ -56,20 +59,18 @@ export function CloseJobDialog({ job, customerName, onClose, onClosed, onRefused
       </p>
       <p style={{ fontSize: 13, marginTop: 8 }}>ใช้กับงานที่วางบิลที่อื่นแล้ว (บัญชีส่วนตัว / Google Sheet / เหมาจ่าย) หรือไม่ต้องวางบิล - งานจะออกจากคิวรอวางบิล เปิดงานกลับได้เฉพาะ ADMIN</p>
       <label className="field" style={{ marginTop: 12 }}>
-        หมายเหตุ *
+        หมายเหตุ <Req />
         <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น วางบิลใน Google Sheet IV2026-130" />
       </label>
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "ปิดงาน"}
+          {saving ? "กำลังบันทึก…" : "ปิดงาน"}
         </button>
       </div>
     </dialog>
@@ -100,8 +101,8 @@ function ReopenJobDialog({ job, onClose, onReopened, onRefused }: { job: ClosedB
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>เปิดงานกลับ</h2>
       <p className="muted">
@@ -111,20 +112,18 @@ function ReopenJobDialog({ job, onClose, onReopened, onRefused }: { job: ClosedB
       </p>
       <p style={{ fontSize: 13, marginTop: 8 }}>งานจะกลับเข้าคิวรอวางบิลงานอื่นๆ (ถ้ายังส่งงานลูกค้าแล้วและไม่ถูกยกเลิก)</p>
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่เปิดงานกลับ *
+        เหตุผลที่เปิดงานกลับ <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ปิดผิดงาน ต้องวางบิลในระบบ" />
       </label>
       {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "เปิดงานกลับ"}
+          {saving ? "กำลังบันทึก…" : "เปิดงานกลับ"}
         </button>
       </div>
     </dialog>
@@ -139,7 +138,6 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [reopening, setReopening] = useState<ClosedBillingJob | null>(null);
-  const [notice, setNotice] = useState("");
 
   async function reload() {
     try {
@@ -174,7 +172,7 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
     }
   }
 
-  if (!error && (!jobs || jobs.length === 0) && !notice) return null;
+  if (!error && (!jobs || jobs.length === 0)) return null;
   const list = jobs ?? [];
 
   return (
@@ -189,13 +187,8 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
         </button>
       </div>
       {error && (
-        <div className="customer-message error" role="alert" style={{ padding: "0 23px 12px" }}>
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="customer-message success" role="status" style={{ padding: "0 23px 12px" }}>
-          {notice}
+        <div style={{ padding: "0 23px 12px" }}>
+          <Notice tone="error">{error}</Notice>
         </div>
       )}
       {expanded && list.length > 0 && (
@@ -242,7 +235,7 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
       {expanded && hasMore && (
         <div className="inspect-pagination">
           <button className="text-button" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? "กำลังโหลด..." : "โหลดเพิ่มอีก 100 งาน"}
+            {loadingMore ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 งาน"}
           </button>
         </div>
       )}
@@ -251,7 +244,7 @@ export function ClosedJobsPanel({ reloadKey, canReopen, onReopened }: { reloadKe
           job={reopening}
           onClose={() => setReopening(null)}
           onReopened={() => {
-            setNotice(`เปิดงาน ${reopening.typeLabel} ${reopening.plateText || reopening.chassis || ""} กลับแล้ว - งานกลับเข้าคิวรอวางบิล`);
+            toast.success(`เปิดงาน ${reopening.typeLabel} ${reopening.plateText || reopening.chassis || ""} กลับแล้ว - งานกลับเข้าคิวรอวางบิล`);
             void reload();
             onReopened();
           }}

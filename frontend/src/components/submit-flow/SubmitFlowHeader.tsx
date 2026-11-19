@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Icon } from "@/components/Icon";
+import { BackLink } from "@/components/ui";
 import { isoToDisplayDate } from "@/lib/date";
 import { useSubmitFlow } from "./SubmitFlowContext";
 import { DONE_HREF, MENU_HREF, PICK_HREF, REVIEW_HREF, SETTINGS_HREF } from "./shared";
@@ -22,9 +24,7 @@ export function SubmitFlowHeader() {
 
   return (
     <>
-      <Link href={MENU_HREF} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← ยื่นเอกสารจดทะเบียนรถใหม่
-      </Link>
+      <BackLink href={MENU_HREF} label="ยื่นเอกสารจดทะเบียนรถใหม่" />
       <h1 tabIndex={-1}>ยื่นเอกสารจดทะเบียนรถใหม่</h1>
 
       <nav className="submit-steps" aria-label="ขั้นตอนยื่นเอกสาร">
@@ -32,7 +32,7 @@ export function SubmitFlowHeader() {
           <span key={s.n} style={{ display: "contents" }}>
             {i > 0 && (
               <span className="submit-steps-sep" aria-hidden="true">
-                ›
+                <Icon name="chevron-right" />
               </span>
             )}
             {s.n === step || !s.enabled ? (

@@ -17,6 +17,9 @@ import { FUEL_TYPES, TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES, isTransportType } f
 import { DateInput } from "@/components/DateInput";
 import { IntakeNotice } from "@/components/IntakeNotice";
 import { useIntakePrefill } from "@/lib/use-intake-prefill";
+import { toast } from "@/lib/toast";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 
 type Source = "VEHICLE" | "MANUAL";
 
@@ -246,7 +249,6 @@ export function TaxRenewalPage() {
   const [rows, setRows] = useState<TaxRenewal[]>([]);
   const [preview, setPreview] = useState<TaxRenewalPreview | null>(null);
   const [previewError, setPreviewError] = useState("");
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   // ✎ แก้ / ยกเลิกงานที่บันทึกผิด (ผู้ใช้ 2026-09-27) - ต้องมีเหตุผลเสมอ
@@ -327,7 +329,6 @@ export function TaxRenewalPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    setMessage("");
     const dateError = invalidDateMessage(form, missing);
     if (dateError) {
       setError(dateError);
@@ -343,7 +344,7 @@ export function TaxRenewalPage() {
       setForm(freshForm());
       setSelectedVehicle(null);
       setPreview(null);
-      setMessage("บันทึกงานต่อภาษีแล้ว");
+      toast.success("บันทึกงานต่อภาษีแล้ว");
       await reload();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "บันทึกไม่สำเร็จ");
@@ -376,7 +377,7 @@ export function TaxRenewalPage() {
             {/* วันที่ยื่นงาน - ข้อมูลของงาน ไม่ใช่ของรถ จึงอยู่เหนือแท็บเลือกรถ */}
             <div className="vehicle-fields" style={{ marginBottom: 18 }}>
               <label className="field">
-                <span>วันที่ยื่นงาน *</span>
+                <span>วันที่ยื่นงาน <Req /></span>
                 <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
               </label>
             </div>
@@ -427,7 +428,7 @@ export function TaxRenewalPage() {
               ) : (
                 <>
                   <label className="field wide">
-                    <span>เจ้าของงาน * (ลูกค้าที่ส่งงานมา)</span>
+                    <span>เจ้าของงาน <Req /> (ลูกค้าที่ส่งงานมา)</span>
                     <select value={form.customerId} onChange={(e) => set("customerId", e.target.value)} required>
                       <option value="">เลือกลูกค้า</option>
                       {customerOptions.map((c) => (
@@ -438,7 +439,7 @@ export function TaxRenewalPage() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>เลขตัวถัง *</span>
+                    <span>เลขตัวถัง <Req /></span>
                     <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} required />
                   </label>
                   <label className="field">
@@ -446,7 +447,7 @@ export function TaxRenewalPage() {
                     <input value={form.engine} onChange={(e) => set("engine", e.target.value)} />
                   </label>
                   <label className="field">
-                    <span>หมวดทะเบียน *</span>
+                    <span>หมวดทะเบียน <Req /></span>
                     <input
                       value={form.plateCategory}
                       onChange={(e) => set("plateCategory", e.target.value)}
@@ -455,7 +456,7 @@ export function TaxRenewalPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>เลขทะเบียน *</span>
+                    <span>เลขทะเบียน <Req /></span>
                     <input
                       value={form.plateNumber}
                       onChange={(e) => set("plateNumber", e.target.value)}
@@ -494,7 +495,7 @@ export function TaxRenewalPage() {
                     </>
                   )}
                   <label className="field">
-                    <span>{transportForm ? "น้ำหนักรถ (กก.) * - ตามเล่มทะเบียน ไม่ใช่น้ำหนักรวม" : "น้ำหนักรถ (กก.)"}</span>
+                    <span>{transportForm ? <>น้ำหนักรถ (กก.) <Req /> - ตามเล่มทะเบียน ไม่ใช่น้ำหนักรวม</> : "น้ำหนักรถ (กก.)"}</span>
                     <input
                       value={form.weight}
                       onChange={(e) => set("weight", e.target.value)}
@@ -528,7 +529,7 @@ export function TaxRenewalPage() {
 
               {missing.includes("plateCategory") && (
                 <label className="field">
-                  <span>หมวดทะเบียน *</span>
+                  <span>หมวดทะเบียน <Req /></span>
                   <input
                     value={form.plateCategory}
                     onChange={(e) => set("plateCategory", e.target.value)}
@@ -539,7 +540,7 @@ export function TaxRenewalPage() {
               )}
               {missing.includes("plateNumber") && (
                 <label className="field">
-                  <span>เลขทะเบียน *</span>
+                  <span>เลขทะเบียน <Req /></span>
                   <input
                     value={form.plateNumber}
                     onChange={(e) => set("plateNumber", e.target.value)}
@@ -637,16 +638,15 @@ export function TaxRenewalPage() {
               </label>
             </div>
 
-            {ready && previewError && <p className="customer-message error">{previewError}</p>}
+            {ready && <Notice tone="error">{previewError}</Notice>}
             {ready && preview && <PreviewSummary preview={preview} />}
 
             <div className="form-actions">
               <button type="submit" className="primary" disabled={saving}>
-                {saving ? "กำลังบันทึก..." : "บันทึกงานต่อภาษี"}
+                {saving ? "กำลังบันทึก…" : "บันทึกงานต่อภาษี"}
               </button>
-              {message && <span className="customer-message success">{message}</span>}
-              {error && <span className="customer-message error">{error}</span>}
             </div>
+            <Notice tone="error">{error}</Notice>
           </form>
         </div>
       )}
@@ -655,16 +655,13 @@ export function TaxRenewalPage() {
         <div className="panel-head">
           <h2>รายการงานต่อภาษี</h2>
           <Link href="/registration/tax-renewal/receipt" className="text-button">
-            รับใบเสร็จ →
+            รับใบเสร็จ
+            <Icon name="arrow-right" />
           </Link>
           {readOnly && <span className="muted">ดูอย่างเดียว</span>}
         </div>
         {/* error โหลดรายการ - ปกติแสดงใต้ฟอร์มด้านบน แต่ผู้ใช้ที่ดูอย่างเดียวไม่มีฟอร์ม */}
-        {!canWrite && error && (
-          <p className="customer-message error" style={{ padding: "0 23px" }}>
-            {error}
-          </p>
-        )}
+        {!canWrite && <Notice tone="error">{error}</Notice>}
         {rows.length === 0 ? (
           <p className="empty-customers">ยังไม่มีงานต่อภาษี</p>
         ) : (
@@ -781,12 +778,13 @@ export function TaxRenewalPage() {
                           {editable && (
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
                               <button type="button" className="text-button" onClick={() => setDialog({ kind: "edit", row })}>
-                                ✎ แก้
+                                <Icon name="pencil" />
+                                แก้
                               </button>
                               <button
                                 type="button"
                                 className="text-button"
-                                style={{ color: "#b43434" }}
+                                style={{ color: "var(--danger)" }}
                                 onClick={() => setDialog({ kind: "cancel", row })}
                               >
                                 ยกเลิก
@@ -810,7 +808,7 @@ export function TaxRenewalPage() {
           writeScope={writeScope}
           onClose={() => setDialog(null)}
           onSaved={() => {
-            setMessage("แก้งานต่อภาษีแล้ว");
+            toast.success("แก้งานต่อภาษีแล้ว");
             void reload();
           }}
         />
@@ -820,7 +818,7 @@ export function TaxRenewalPage() {
           row={dialog.row}
           onClose={() => setDialog(null)}
           onCancelled={() => {
-            setMessage("ยกเลิกงานต่อภาษีแล้ว");
+            toast.success("ยกเลิกงานต่อภาษีแล้ว");
             void reload();
           }}
         />
@@ -945,8 +943,8 @@ function EditRenewalDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(760px, 96vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แก้งานต่อภาษี</h2>
       <p className="muted">
@@ -967,11 +965,11 @@ function EditRenewalDialog({
           </select>
         </label>
         <label className="field">
-          <span>วันที่ยื่นงาน *</span>
+          <span>วันที่ยื่นงาน <Req /></span>
           <DateTextInput value={form.submitDate} onChange={(v) => set("submitDate", v)} required />
         </label>
         <label className="field">
-          <span>วันครบกำหนดภาษี *</span>
+          <span>วันครบกำหนดภาษี <Req /></span>
           <DateTextInput value={form.taxExpiryDate} onChange={(v) => set("taxExpiryDate", v)} required />
         </label>
         <label className="field">
@@ -995,7 +993,7 @@ function EditRenewalDialog({
         {manual && (
           <>
             <label className="field">
-              <span>เลขตัวถัง *</span>
+              <span>เลขตัวถัง <Req /></span>
               <input value={form.chassis} onChange={(e) => set("chassis", e.target.value)} />
             </label>
             <label className="field">
@@ -1005,11 +1003,11 @@ function EditRenewalDialog({
           </>
         )}
         <label className="field">
-          <span>หมวดทะเบียน *</span>
+          <span>หมวดทะเบียน <Req /></span>
           <input value={form.plateCategory} onChange={(e) => set("plateCategory", e.target.value)} />
         </label>
         <label className="field">
-          <span>เลขทะเบียน *</span>
+          <span>เลขทะเบียน <Req /></span>
           <input value={form.plateNumber} onChange={(e) => set("plateNumber", e.target.value)} />
         </label>
         <label className="field">
@@ -1042,11 +1040,11 @@ function EditRenewalDialog({
           </>
         )}
         <label className="field">
-          <span>{transport ? "น้ำหนักรถ (กก.) * - ตามเล่มทะเบียน" : "น้ำหนักรถ (กก.)"}</span>
+          <span>{transport ? <>น้ำหนักรถ (กก.) <Req /> - ตามเล่มทะเบียน</> : "น้ำหนักรถ (กก.)"}</span>
           <input value={form.weight} onChange={(e) => set("weight", e.target.value)} inputMode="decimal" />
         </label>
         <label className="field">
-          <span>วันจดทะเบียนครั้งแรก *</span>
+          <span>วันจดทะเบียนครั้งแรก <Req /></span>
           <DateTextInput value={form.firstRegistrationDate} onChange={(v) => set("firstRegistrationDate", v)} required />
         </label>
         {row.ownerFromVehicle ? (
@@ -1076,20 +1074,16 @@ function EditRenewalDialog({
         งานที่ชำระแล้ว: ยอดภาษี/เงินเพิ่ม/ลงขันคิดใหม่ตามข้อมูลที่แก้ (ยอดเดิม Bill {baht(row.billTotal)} · ลงขัน {baht(row.noBillTotal)})
       </p>
       <label className="field" style={{ marginTop: 12 }}>
-        <span>เหตุผลที่แก้ *</span>
+        <span>เหตุผลที่แก้ <Req /></span>
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น พิมพ์วันครบกำหนดภาษีผิด" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
         </button>
       </div>
     </dialog>
@@ -1124,8 +1118,8 @@ function CancelRenewalDialog({ row, onClose, onCancelled }: { row: TaxRenewal; o
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ยกเลิกงานต่อภาษี</h2>
       <p className="muted">
@@ -1136,20 +1130,16 @@ function CancelRenewalDialog({ row, onClose, onCancelled }: { row: TaxRenewal; o
         {row.paymentDate ? ` - งานนี้บันทึกวันที่ชำระแล้ว (${isoToDisplayDate(row.paymentDate.slice(0, 10))}) ยอดเงินจะไม่ถูกนับอีก` : ""}
       </p>
       <label className="field" style={{ marginTop: 12 }}>
-        <span>เหตุผลที่ยกเลิก *</span>
+        <span>เหตุผลที่ยกเลิก <Req /></span>
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น บันทึกซ้ำ / เลือกรถผิดคัน" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ไม่ยกเลิก
         </button>
         <button type="button" className="primary" onClick={confirm} disabled={saving}>
-          {saving ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}
+          {saving ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}
         </button>
       </div>
     </dialog>
@@ -1260,7 +1250,7 @@ function VehicleSearch({
       />
       {q.length >= 2 && (
         <div style={{ marginTop: 8, border: "1px solid #e3e8f1", borderRadius: 8, overflow: "hidden" }}>
-          {searching && <div className="sub" style={{ padding: "12px 14px" }}>กำลังค้นหา...</div>}
+          {searching && <div className="sub" style={{ padding: "12px 14px" }}>กำลังค้นหา…</div>}
           {!searching && searched && hits.length === 0 && (
             <div className="sub" style={{ padding: "12px 14px" }}>ไม่พบรถที่ตรงกับคำค้น</div>
           )}
@@ -1405,7 +1395,7 @@ function OwnerTypeFields({
   return (
     <>
       <label className="field">
-        <span>{financed ? "ประเภทผู้ครอบครอง (ผู้เช่าซื้อ) *" : "ประเภทเจ้าของรถ *"}</span>
+        <span>{financed ? "ประเภทผู้ครอบครอง (ผู้เช่าซื้อ)" : "ประเภทเจ้าของรถ"} <Req /></span>
         <select value={ownerType} onChange={(e) => onOwnerTypeChange(e.target.value as FormState["ownerType"])} required>
           <option value="">{financed ? "เลือกประเภทผู้ครอบครอง" : "เลือกประเภทเจ้าของรถ"}</option>
           <option value="INDIVIDUAL">บุคคลธรรมดา</option>
@@ -1459,16 +1449,16 @@ function PreviewSummary({ preview }: { preview: TaxRenewalPreview }) {
       </div>
       {/* ถ้ายังไม่ได้ติ๊กว่ามีใบตรวจ / ยังไม่มีวันที่ตรวจ (ขส.) จะมี warning อยู่แล้ว ไม่ต้องขึ้นซ้ำสองบรรทัด */}
       {tax.inspectionRequired && !tax.warnings.some((w) => w.includes("ตรวจสภาพ")) && (
-        <p className="customer-message" style={{ marginTop: 8 }}>
+        <Notice tone="info">
           {tax.registrationCode === "ขส."
             ? "รถตาม พ.ร.บ.ขนส่งต้องตรวจสภาพรถก่อนต่อภาษี - บันทึกวันที่ตรวจแล้ว"
             : "รถคันนี้ต้องมีใบตรวจสภาพ (ตรอ.) ก่อนต่อภาษี - ติ๊กยืนยันแล้ว"}
-        </p>
+        </Notice>
       )}
       {tax.warnings.map((w) => (
-        <p key={w} className="customer-message error" style={{ marginTop: 6 }}>
+        <Notice key={w} tone="warn">
           {w}
-        </p>
+        </Notice>
       ))}
     </div>
   );

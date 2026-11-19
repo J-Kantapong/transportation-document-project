@@ -7,6 +7,9 @@ import { slipNoText } from "@/lib/billing-api";
 import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 import { focusChassis, focusHref, sameChassis } from "@/lib/vehicle-focus";
 import { printReceivingList } from "@/lib/receiving-print";
@@ -180,7 +183,7 @@ export function ReceivingQueuePage({
   loadCompleted,
   headerSlot,
   reloadSignal,
-  back = { href: "/registration/new-vehicle", label: "← จดทะเบียนรถใหม่" },
+  back = { href: "/registration/new-vehicle", label: "จดทะเบียนรถใหม่" },
   attachPhoto,
   fixReceived,
   groupBySheet,
@@ -197,8 +200,7 @@ export function ReceivingQueuePage({
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // ผลการบันทึกล่าสุด (แถวที่แนบแล้วหายไปจากคิว จึงบอกที่แถบล่างแทน) + รถที่ต้องไปบันทึกส่งป้ายที่หน้า Delivery
-  const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  // รถที่ต้องไปบันทึกส่งป้ายที่หน้า Delivery (ผลการบันทึกล่าสุดขึ้น toast เพราะแถวที่แนบแล้วหายไปจากคิว)
   const [deliveryReminders, setDeliveryReminders] = useState<DeliveryReminder[]>([]);
   const [lastSavedId, setLastSavedId] = useState("");
   const [fixing, setFixing] = useState<{ row: QueueRow; mode: "date" | "detach" } | null>(null);
@@ -266,7 +268,7 @@ export function ReceivingQueuePage({
   }
 
   // คิวรอดำเนินการ + ยอดใบยื่น
-  // background = โหลดใหม่หลังบันทึก: ไม่ขึ้น "กำลังโหลด..." ทั้งคิว และคงวันที่/สถานะที่พิมพ์ไว้ในแถวอื่น
+  // background = โหลดใหม่หลังบันทึก: ไม่ขึ้น "กำลังโหลด…" ทั้งคิว และคงวันที่/สถานะที่พิมพ์ไว้ในแถวอื่น
   // (พบ 2026-09-27: เดิมทุกแถวกลับเป็นวันนี้หลังแนบแต่ละคัน แถวถัดไปจึงถูกบันทึกเป็นวันนี้โดยไม่รู้ตัว)
   async function loadQueue(background = false) {
     const seq = ++pendingSeq.current;
@@ -340,7 +342,7 @@ export function ReceivingQueuePage({
       showPending(pendingRef.current.filter((p) => p.id !== r.id));
       setRows((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== r.id)));
       setLastSavedId(r.id);
-      setNotice({ text: `✓ บันทึก${doneLabel.replace(/แล้ว$/, "")} ${res.chassis} วันที่ ${isoToDisplayDate(res.date)} แล้ว` });
+      toast.success(`บันทึก${doneLabel.replace(/แล้ว$/, "")} ${res.chassis} วันที่ ${isoToDisplayDate(res.date)} แล้ว`);
       if (res.alreadyDelivered) {
         const reminder: DeliveryReminder = {
           id: r.id,
@@ -496,7 +498,8 @@ export function ReceivingQueuePage({
                 className="primary"
                 style={{ display: "inline-flex", padding: "8px 14px", fontSize: 13, cursor: row.saving ? "wait" : "pointer", opacity: row.saving ? 0.6 : 1 }}
               >
-                📷 {attachPhoto.label}
+                <Icon name="camera" />
+                {attachPhoto.label}
                 <input
                   type="file"
                   accept="image/*"
@@ -520,7 +523,7 @@ export function ReceivingQueuePage({
     );
   }
 
-  const noticeBar = (notice || deliveryReminders.length > 0) && (
+  const noticeBar = deliveryReminders.length > 0 && (
     // ติดขอบล่างจอ (อยู่นอก .panel เพราะ overflow:hidden ทำให้ sticky ไม่ทำงาน) - แถวที่แนบแล้วหายไปจากคิว
     // พนักงานจึงเห็นผลการบันทึกตรงนี้แม้เลื่อนอยู่กลางคิว
     <div style={{ position: "sticky", bottom: 12, zIndex: 5, display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
@@ -529,10 +532,10 @@ export function ReceivingQueuePage({
           <div
             key={d.id}
             role="alert"
-            style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "#fff6e7", border: "1px solid #f0d9ae", color: "#7a5412", fontSize: 14 }}
+            style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--warn-soft)", border: "1px solid #f0d9ae", color: "#7a5412", fontSize: 14 }}
           >
             <span style={{ flex: "1 1 260px" }}>
-              ⚠ รถ {d.chassis} ({d.customerName}) ส่งเล่มให้ลูกค้าไปแล้ว
+              <Icon name="alert-triangle" /> รถ {d.chassis} ({d.customerName}) ส่งเล่มให้ลูกค้าไปแล้ว
               {d.bookSlipNo ? ` ในใบ ${slipNoText(d.bookSlipNo)}` : ""}
               {d.bookDeliveredDate ? ` วันที่ ${isoToDisplayDate(d.bookDeliveredDate)}` : ""} แต่ยังไม่ได้บันทึกส่งป้าย
               {/* backend ปรับวันที่รับป้ายเป็นวันส่งเล่มให้เองถ้าบันทึกไว้หลังวันนั้น (ป้ายไปพร้อมเล่ม = ได้ป้ายมาก่อนแล้ว) */}
@@ -540,38 +543,24 @@ export function ReceivingQueuePage({
               <br />• ถ้ายังไม่ได้ส่งป้าย: ไปหน้า Delivery (ส่งป้ายอย่างเดียว)
             </span>
             <Link href={focusHref(DELIVERY_REPORT_PAGE, d.chassis)} className="text-button">
-              รายงานส่งงาน →
+              รายงานส่งงาน <Icon name="arrow-right" />
             </Link>
             <Link href={focusHref(DELIVERY_PAGE, d.chassis)} className="text-button">
-              ไปหน้า Delivery →
+              ไปหน้า Delivery <Icon name="arrow-right" />
             </Link>
             <button type="button" className="text-button" aria-label="ปิดข้อความ" onClick={() => setDeliveryReminders((prev) => prev.filter((x) => x.id !== d.id))}>
-              ×
+              <Icon name="x" />
             </button>
           </div>
         );
       })}
-      {notice && (
-        <div
-          role="status"
-          className={`customer-message${notice.error ? " error" : " success"}`}
-          style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 8, background: "#fff", border: "1px solid #dfe5f0", boxShadow: "0 6px 16px #18243c1a" }}
-        >
-          <span style={{ flex: 1 }}>{notice.text}</span>
-          <button type="button" className="text-button" aria-label="ปิดข้อความ" onClick={() => setNotice(null)}>
-            ×
-          </button>
-        </div>
-      )}
+
     </div>
   );
 
   return (
     <section className="content">
-      <Link href={back.href} className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        {back.label}
-      </Link>
-      <h1 tabIndex={-1}>{title}</h1>
+      <PageHeader back={back} title={title} titleFocus />
       {headerSlot}
 
       <section className="panel" style={{ marginTop: 20 }}>
@@ -672,20 +661,17 @@ export function ReceivingQueuePage({
                   title={printSheets.length === 0 ? "ติ๊ก ☐ ที่การ์ดใบยื่นที่จะปริ้น" : undefined}
                   onClick={() => printReceivingList(printTitle, orderText, printSheets)}
                 >
-                  🖨 ปริ้นชุดที่เลือก ({printSheets.length} ใบ · {printCount} คัน)
+                  <Icon name="printer" />
+                  ปริ้นชุดที่เลือก ({printSheets.length} ใบ · {printCount} คัน)
                 </button>
               </span>
             )}
           </div>
         )}
         {loading ? (
-          <div className="customer-message" role="status" style={{ padding: "0 23px 20px" }}>
-            กำลังโหลด...
-          </div>
+          <LoadingState />
         ) : error ? (
-          <div className="empty-customers" role="alert">
-            {error}
-          </div>
+          <Notice tone="error">{error}</Notice>
         ) : pending.length === 0 ? (
           <div className="empty-customers">{emptyText}</div>
         ) : groupBySheet ? (
@@ -724,7 +710,9 @@ export function ReceivingQueuePage({
                           aria-label="เลือกใบยื่นนี้เพื่อปริ้น"
                         />
                       )}
-                      <span className="queue-caret">{open ? "▾" : "▸"}</span>
+                      <span className="queue-caret">
+                        <Icon name={open ? "chevron-down" : "chevron-right"} />
+                      </span>
                       {sheet.date ? isoToDisplayDate(sheet.date) : "ไม่ทราบวันที่ยื่น"} · {sheet.label} · {sheet.owner}
                     </span>
                     <span className="queue-sheet-counts">
@@ -732,7 +720,7 @@ export function ReceivingQueuePage({
                       {done > 0 && ` · ${doneLabel} ${done}`} · {waitingLabel} {sheet.rows.length}
                       {incomplete && (
                         <span className="badge alert queue-warn">
-                          ⚠ ยื่นไม่ครบ:
+                          <Icon name="alert-triangle" /> ยื่นไม่ครบ:
                           {st.waitingReceipt > 0 && ` ยังไม่ได้ใบเสร็จ ${st.waitingReceipt}`}
                           {st.waitingReceipt > 0 && st.failed > 0 && " ·"}
                           {st.failed > 0 && ` ยื่นไม่สำเร็จ ${st.failed}`}
@@ -785,11 +773,9 @@ export function ReceivingQueuePage({
           เรียงตามเวลาที่บันทึก (ล่าสุดก่อน) {fixReceived && `· แก้วันที่รับ/ถอดรูปได้จนกว่าจะส่ง${fixReceived.itemLabel}ให้ลูกค้า`}
         </p>
         {completedError ? (
-          <div className="empty-customers" role="alert">
-            {completedError}
-          </div>
+          <Notice tone="error">{completedError}</Notice>
         ) : completed.length === 0 ? (
-          <div className="empty-customers">{completedLoading ? "กำลังโหลด..." : completedQuery.trim() ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการที่ดำเนินการแล้ว"}</div>
+          <div className="empty-customers">{completedLoading ? "กำลังโหลด…" : completedQuery.trim() ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการที่ดำเนินการแล้ว"}</div>
         ) : (
           <div className="table-wrap">
             {/* ผู้ใช้ 2026-11-19: ไม่ต้องเลื่อน - รวมคอลัมน์ (วันที่+ลูกค้า, ตัวถัง+ประเภท, ทะเบียน+เลขที่ใบเสร็จ, รูป+วันที่รับ+แก้ไข) */}
@@ -843,12 +829,12 @@ export function ReceivingQueuePage({
                         ) : (
                           <span style={{ display: "inline-flex", gap: 10 }}>
                             <button type="button" className="text-button" style={{ fontSize: 12, padding: 0 }} onClick={() => setFixing({ row: r, mode: "date" })}>
-                              ✎ แก้วันที่
+                              <Icon name="pencil" /> แก้วันที่
                             </button>
                             <button
                               type="button"
                               className="text-button"
-                              style={{ fontSize: 12, padding: 0, color: "#b43434" }}
+                              style={{ fontSize: 12, padding: 0, color: "var(--danger)" }}
                               onClick={() => setFixing({ row: r, mode: "detach" })}
                             >
                               ถอดรูป
@@ -873,7 +859,7 @@ export function ReceivingQueuePage({
               // ต่อจากรายการที่แสดงอยู่ด้วยคำค้นของรายการนั้น (คำที่เพิ่งพิมพ์ยังไม่ได้ค้น = รอ 300 ms แล้วโหลดใหม่เอง)
               onClick={() => loadCompletedPage(completed.length, shownCompleted.current.q)}
             >
-              {completedLoading ? "กำลังโหลด..." : "โหลดเพิ่มอีก 100 คัน"}
+              {completedLoading ? "กำลังโหลด…" : "โหลดเพิ่มอีก 100 คัน"}
             </button>
           </div>
         )}
@@ -889,14 +875,14 @@ export function ReceivingQueuePage({
           onClose={() => setFixing(null)}
           // แก้วันที่ = แก้แถวเดิมในตาราง ไม่โหลดตารางใหม่ (พบ 2026-09-27: เดิมกลับไปหน้าแรก แถวที่เปิดจาก "โหลดเพิ่ม" หายไป)
           onDateFixed={(id, date, text) => {
-            setNotice({ text });
+            toast.success(text);
             setLastSavedId(id);
             setCompleted((prev) => prev.map((r) => (r.id === id ? { ...r, doneDate: date } : r)));
             setDeliveryReminders((prev) => prev.map((d) => (d.id === id ? { ...d, receivedDate: date } : d)));
           }}
           // ถอดรูป = เอาแถวออกจากตาราง แล้วโหลดคิวใหม่ (รถกลับไปรอรับ)
           onDetached={(id, text) => {
-            setNotice({ text });
+            toast.success(text);
             setLastSavedId("");
             setCompleted((prev) => prev.filter((r) => r.id !== id));
             shownCompleted.current = { ...shownCompleted.current, count: Math.max(0, shownCompleted.current.count - 1) };
@@ -960,7 +946,7 @@ function ReceivedFixDialog({
     try {
       if (mode === "date") {
         const res = await fix.updateDate(row.id, date, remark.trim());
-        onDateFixed(row.id, res.date, `✓ แก้${doneDateLabel} ${row.chassis} เป็น ${isoToDisplayDate(res.date)} แล้ว`);
+        onDateFixed(row.id, res.date, `แก้${doneDateLabel} ${row.chassis} เป็น ${isoToDisplayDate(res.date)} แล้ว`);
       } else {
         const { photo } = await fix.detach(row.id, remark.trim());
         // รูปเก่าจากถาด AI ที่ยังเป็นรูปของรถคันอื่นไม่ถูกลบ - ไฟล์เดิมแนบให้คันอื่นไม่ได้ (ขึ้นว่ารูปซ้ำ) ต้องถ่ายใหม่ (พบ 2026-09-27)
@@ -970,7 +956,7 @@ function ReceivedFixDialog({
             : photo === "shared"
               ? ` · รูปนี้ยังเป็นรูป${itemLabel}ของรถคันอื่นอยู่ จึงไม่ได้ลบ - แนบให้คันที่ถูกต้องใช้รูปที่ถ่ายใหม่`
               : "";
-        onDetached(row.id, `✓ ถอดรูป${itemLabel}ของ ${row.chassis} แล้ว - รถกลับไปอยู่ในคิวรอรับ${itemLabel}${photoText}`);
+        onDetached(row.id, `ถอดรูป${itemLabel}ของ ${row.chassis} แล้ว - รถกลับไปอยู่ในคิวรอรับ${itemLabel}${photoText}`);
       }
       dialogRef.current?.close();
     } catch (err) {
@@ -985,8 +971,8 @@ function ReceivedFixDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(480px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{mode === "date" ? `แก้${doneDateLabel}` : `ถอดรูป${itemLabel}`}</h2>
       <p className="muted">
@@ -995,7 +981,7 @@ function ReceivedFixDialog({
       </p>
       {mode === "date" ? (
         <label className="field" style={{ marginTop: 12 }}>
-          {doneDateLabel} *
+          {doneDateLabel} <Req />
           <DateInput value={dateText} onChange={(value) => setDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8)))} autoFocus />
           <span className="muted">
             ใส่ได้ {earliest ? `${isoToDisplayDate(earliest)} - ` : "ไม่เกิน "}
@@ -1015,7 +1001,7 @@ function ReceivedFixDialog({
         </p>
       )}
       <label className="field" style={{ marginTop: 12 }}>
-        {mode === "date" ? "เหตุผลที่แก้ *" : "เหตุผลที่ถอดรูป *"}
+        {mode === "date" ? "เหตุผลที่แก้" : "เหตุผลที่ถอดรูป"} <Req />
         <input
           type="text"
           value={remark}
@@ -1024,17 +1010,13 @@ function ReceivedFixDialog({
           maxLength={200}
         />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleSave} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : mode === "date" ? "บันทึกการแก้" : "ถอดรูป"}
+          {saving ? "กำลังบันทึก…" : mode === "date" ? "บันทึกการแก้" : "ถอดรูป"}
         </button>
       </div>
     </dialog>

@@ -6,6 +6,8 @@ import { ApiError } from "@/lib/api";
 import { ACTIVITY_GROUPS, ACTIVITY_TYPES, activityApi, type ActivityDay, type ActivityGroup } from "@/lib/activity-api";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate } from "@/lib/date";
 import { DateInput } from "./DateInput";
+import { Icon } from "./Icon";
+import { LoadingState, Notice, PageHeader } from "./ui";
 
 // ภาพรวมการทำงาน (ผู้ใช้ 2026-10-08): วันนี้มีการเคลื่อนไหวอะไรบ้าง พร้อมราคา เพื่อกดเข้าไปตรวจ - ข้อมูลจาก GET /api/activity
 // Bill / No bill / อากร แยกกัน (อากรไม่รวมในยอดรวม เหมือนหน้าอื่น) สไตล์อยู่ท้าย app/globals.css (คลาส act-*)
@@ -64,17 +66,17 @@ export function ActivityPage() {
   if (!data) {
     return (
       <div className="content">
-        <div className="heading">
-          <div>
-            <h1>ภาพรวมการทำงาน</h1>
-            <p>{error || "กำลังโหลดข้อมูล…"}</p>
-          </div>
-          {error && (
-            <button type="button" className="primary" onClick={() => setNonce((n) => n + 1)}>
-              ลองใหม่
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="ภาพรวมการทำงาน"
+          actions={
+            error ? (
+              <button type="button" className="primary" onClick={() => setNonce((n) => n + 1)}>
+                ลองใหม่
+              </button>
+            ) : undefined
+          }
+        />
+        {error ? <Notice tone="error">{error}</Notice> : <LoadingState label="กำลังโหลดข้อมูล…" />}
       </div>
     );
   }
@@ -87,17 +89,18 @@ export function ActivityPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>ภาพรวมการทำงาน</h1>
-          <p>
+      <PageHeader
+        title="ภาพรวมการทำงาน"
+        subtitle={
+          <>
             {dayWord} ทีมทำงานไป {data.events.length} รายการ · กดชื่อรายการเพื่อเข้าไปตรวจ
             {loading && " · กำลังโหลด…"}
-          </p>
-        </div>
+          </>
+        }
+        actions={
         <div className="exec-date" role="group" aria-label="เลือกวันที่">
           <button type="button" aria-label="วันก่อนหน้า" onClick={() => setDate(data.prev)}>
-            ‹
+            <Icon name="chevron-left" />
           </button>
           <DateInput
             key={data.date}
@@ -116,14 +119,15 @@ export function ActivityPage() {
             onBlur={() => setDateText(null)}
           />
           <button type="button" aria-label="วันถัดไป" disabled={!data.next} onClick={() => data.next && setDate(data.next)}>
-            ›
+            <Icon name="chevron-right" />
           </button>
           <button type="button" className="exec-date-today" disabled={loading} onClick={() => (isToday ? setNonce((n) => n + 1) : setDate(null))}>
             {isToday ? "รีเฟรช" : "วันนี้"}
           </button>
         </div>
-      </div>
-      {error && <p className="customer-message error">{error}</p>}
+        }
+      />
+      <Notice tone="error">{error}</Notice>
 
       <div className="act-kpis">
         <div className="act-kpi main">

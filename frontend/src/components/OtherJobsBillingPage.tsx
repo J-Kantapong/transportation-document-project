@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, type Customer } from "@/lib/api";
 import {
@@ -21,6 +20,9 @@ import { computeTotals, effectiveWhtRate, formatMoney, round2 } from "@/lib/invo
 import { buildInvoiceHtml, printInvoice, type PrintableInvoice } from "@/lib/invoice-print";
 import { AwaitingDeliveryPanel } from "@/components/AwaitingDeliveryPanel";
 import { ClosedJobsPanel, CloseJobDialog } from "@/components/OtherJobClosing";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
+import { toast } from "@/lib/toast";
 import { getCachedUser } from "@/lib/auth";
 import { DateInput } from "@/components/DateInput";
 import { WhtRatePicker, whtOverrideOf, whtProblem } from "@/components/WhtRatePicker";
@@ -286,7 +288,7 @@ export function OtherJobsBillingPage() {
       setWhtValue(null);
       setWhtChecked(false);
       setConfirming(false);
-      setMessage({ text: `ออกบิล ${invoice.invoiceNo} แล้ว (${selected.length} งาน)`, error: false });
+      toast.success(`ออกบิล ${invoice.invoiceNo} แล้ว (${selected.length} งาน)`);
       await load();
     } catch (err) {
       setMessage({ text: err instanceof ApiError ? err.message : "ออกบิลไม่สำเร็จ", error: true });
@@ -319,7 +321,8 @@ export function OtherJobsBillingPage() {
       setRateRows(saved.rates.map(rateRowOf));
       setRateRemark("");
       setPrices({});
-      setMessage({ text: "บันทึกตารางราคาแล้ว - ค่าบริการของงานที่รออยู่คิดใหม่ตามตาราง", error: false });
+      setMessage({ text: "", error: false });
+      toast.success("บันทึกตารางราคาแล้ว - ค่าบริการของงานที่รออยู่คิดใหม่ตามตาราง");
       await load();
     } catch (err) {
       setMessage({ text: err instanceof ApiError ? err.message : "บันทึกตารางราคาไม่สำเร็จ", error: true });
@@ -332,25 +335,26 @@ export function OtherJobsBillingPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>วางบิลงานอื่นๆ</h1>
-      <p>
-        งานโอน ยกเลิกการใช้รถ คัดแผ่นป้ายทะเบียน ย้ายออก และต่อภาษี ที่ส่งใบเสร็จให้ลูกค้าแล้ว (มีใบส่งงาน DL) มารอที่นี่ - เลือกลูกค้า เลือกงาน ตรวจค่าบริการ แล้วออกบิล
-        ค่าธรรมเนียมราชการอ่านจากใบเสร็จของงาน ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย
-      </p>
+      <PageHeader
+        back={{ href: "/accounting/billing", label: "วางบิล" }}
+        title="วางบิลงานอื่นๆ"
+        titleFocus
+        subtitle={
+          <>
+          งานโอน ยกเลิกการใช้รถ คัดแผ่นป้ายทะเบียน ย้ายออก และต่อภาษี ที่ส่งใบเสร็จให้ลูกค้าแล้ว (มีใบส่งงาน DL) มารอที่นี่ - เลือกลูกค้า เลือกงาน ตรวจค่าบริการ แล้วออกบิล
+          ค่าธรรมเนียมราชการอ่านจากใบเสร็จของงาน ค่าบริการมาจากตารางราคาของลูกค้าแต่ละราย
+          </>
+        }
+      />
       {/* งานที่ใบเสร็จกลับแล้วแต่พนักงานยังไม่ลงส่งงาน - บัญชีลงให้ได้ตรงนี้ (ผู้ใช้ 2026-10-08 ตัวช่วยกันลืม ชั้น 2) */}
       <AwaitingDeliveryPanel only="jobs" onRecorded={() => void load()} />
-      <Link href="/accounting/billing" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        ← กลับไปหน้าวางบิล
-      </Link>
 
       {loading ? (
-        <div className="customer-message" role="status" style={{ marginTop: 20 }}>
-          กำลังโหลด...
-        </div>
+        <LoadingState />
       ) : (
         <section className="panel" style={{ marginTop: 16, padding: "18px 23px", overflow: "visible", display: "grid", gap: 14 }}>
           <label className="field" style={{ maxWidth: 420 }}>
-            ลูกค้า *
+            ลูกค้า <Req />
             <select value={customerId} onChange={(e) => chooseCustomer(e.target.value)}>
               <option value="">ทุกลูกค้า (ดูงานค้างทั้งหมด)</option>
               {customers.map((c) => (
@@ -380,8 +384,9 @@ export function OtherJobsBillingPage() {
                       <b>
                         {c.company || c.name} <span className="muted">({c.jobs.length} งานรอวางบิล)</span>
                       </b>
-                      <button type="button" className="primary-button" onClick={() => chooseCustomer(c.id)}>
-                        วางบิลลูกค้านี้ →
+                      <button type="button" className="primary" onClick={() => chooseCustomer(c.id)}>
+                        วางบิลลูกค้านี้
+                        <Icon name="arrow-right" />
                       </button>
                     </div>
                     <div className="table-wrap">
@@ -406,16 +411,12 @@ export function OtherJobsBillingPage() {
             </div>
           )}
 
-          {message.text && (
-            <div className={`customer-message${message.error ? " error" : " success"}`} role="status">
-              {message.text}
-            </div>
-          )}
+          <Notice tone="error">{message.error ? message.text : ""}</Notice>
 
           {customerId && (
             <div style={{ display: "grid", gap: 8 }}>
               <button type="button" className="text-button" style={{ justifySelf: "start" }} onClick={() => setRatesOpen((v) => !v)}>
-                {ratesOpen ? "▾" : "▸"} ตารางราคาค่าบริการของลูกค้ารายนี้ ({rateRows.length} แถว)
+                <Icon name={ratesOpen ? "chevron-down" : "chevron-right"} /> ตารางราคาค่าบริการของลูกค้ารายนี้ ({rateRows.length} แถว)
               </button>
               {ratesOpen && (
                 <div style={{ display: "grid", gap: 8 }}>
@@ -477,7 +478,7 @@ export function OtherJobsBillingPage() {
                       className="text-button"
                       onClick={() => setRateRows((prev) => [...prev, { jobType: "TRANSFER", vehicleClass: "ANY", variant: null, label: "", amountText: "", includesReceipt: false }])}
                     >
-                      + เพิ่มแถวราคา
+                      <Icon name="plus" /> เพิ่มแถวราคา
                     </button>
                     <input
                       type="text"
@@ -558,11 +559,11 @@ export function OtherJobsBillingPage() {
                               aria-label={`ค่าบริการ ${j.plateText || j.chassis}`}
                             />
                             {j.warnings.map((w) => (
-                              <div key={w} style={{ fontSize: 12, color: "#946712", textAlign: "right" }}>
-                                ⚠ {w}
+                              <div key={w} style={{ fontSize: 12, color: "var(--warn)", textAlign: "right" }}>
+                                <Icon name="alert-triangle" /> {w}
                               </div>
                             ))}
-                            {blocked && <div style={{ fontSize: 12, color: "#c0392b", textAlign: "right" }}>{blocked}</div>}
+                            {blocked && <div style={{ fontSize: 12, color: "var(--danger)", textAlign: "right" }}>{blocked}</div>}
                           </td>
                           <td>
                             <button type="button" className="text-button" onClick={() => setClosing(j)} title="งานนี้วางบิลที่อื่นแล้ว - เอาออกจากคิวนี้">
@@ -578,14 +579,14 @@ export function OtherJobsBillingPage() {
 
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
                 <label className="field">
-                  {account === "PERSONAL" ? "เลขที่บิล (บัญชีบุคคล) *" : "เลขที่ IV *"}
+                  {account === "PERSONAL" ? "เลขที่บิล (บัญชีบุคคล)" : "เลขที่ IV"} <Req />
                   <input type="text" value={invoiceNo} onChange={(e) => (setInvoiceNoEdit(e.target.value), setConfirming(false))} />
                   <span className="muted" style={{ fontSize: 12 }}>
                     {lastNo ? `เลขล่าสุดในระบบ: ${lastNo} · ระบบใส่เลขถัดไปให้แล้ว แก้ได้` : "ยังไม่เคยออกบิลบัญชีนี้ในระบบ - ใส่เลขเอง"}
                   </span>
                 </label>
                 <label className="field">
-                  วันที่ออกบิล *
+                  วันที่ออกบิล <Req />
                   <DateInput
                     value={issueDateText}
                     onChange={(value) => (setIssueDateText(formatDateDigitsCe(value.replace(/\D/g, "").slice(0, 8))), setConfirming(false))}
@@ -594,9 +595,9 @@ export function OtherJobsBillingPage() {
               </div>
 
               {queueCustomer?.terms.requiresQuotation && (
-                <div className="customer-message error" role="alert">
+                <Notice tone="error">
                   ลูกค้ารายนี้ต้องมีใบเสนอราคาที่อนุมัติแล้วก่อนวางบิล - ออกบิลจากหน้าใบเสนอราคา
-                </div>
+                </Notice>
               )}
 
               {terms && (
@@ -638,13 +639,13 @@ export function OtherJobsBillingPage() {
                   </div>
                   <div style={{ fontSize: 14 }}>
                     {selected.length} งาน · VAT {totals.vatRate ? `${totals.vatRate}%` : "ไม่มี"} ·{" "}
-                    <b style={{ fontWeight: 600, color: totals.whtRate !== defaultWht ? "#c0392b" : undefined }}>
+                    <b style={{ fontWeight: 600, color: totals.whtRate !== defaultWht ? "var(--danger)" : undefined }}>
                       หัก ณ ที่จ่าย {totals.whtRate ? `${totals.whtRate}% = ${formatMoney(totals.whtAmount)}` : "ไม่หัก"}
                     </b>{" "}
                     · ยอดสุทธิ <b style={{ fontWeight: 600 }}>{formatMoney(totals.netTotal)}</b> บาท
                   </div>
                   <div className="form-actions" style={{ marginTop: 0 }}>
-                    <button type="button" onClick={() => setConfirming(false)} disabled={saving}>
+                    <button type="button" className="secondary" onClick={() => setConfirming(false)} disabled={saving}>
                       กลับไปแก้
                     </button>
                     <button type="button" className="primary" onClick={handleIssue} disabled={saving}>
@@ -668,7 +669,8 @@ export function OtherJobsBillingPage() {
           onClose={() => setClosing(null)}
           onClosed={() => {
             setPicked((prev) => new Set([...prev].filter((k) => k !== keyOf(closing))));
-            setMessage({ text: `ปิดงาน ${closing.typeLabel} ${closing.plateText || closing.chassis} แล้ว - งานออกจากคิวรอวางบิล`, error: false });
+            setMessage({ text: "", error: false });
+            toast.success(`ปิดงาน ${closing.typeLabel} ${closing.plateText || closing.chassis} แล้ว - งานออกจากคิวรอวางบิล`);
             setClosedReload((n) => n + 1);
             void load();
           }}

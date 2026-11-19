@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import { authApi } from "@/lib/auth-api";
+import { toast } from "@/lib/toast";
+import { Icon } from "./Icon";
+import { Notice, Req } from "./ui";
 
 const EMPTY = { currentPassword: "", password: "", confirmPassword: "" };
 
@@ -30,7 +33,8 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
     setMessage({ text: "กำลังบันทึก…" });
     try {
       await authApi.changePassword(form);
-      setMessage({ text: "เปลี่ยนรหัสผ่านเรียบร้อยแล้ว" });
+      setMessage({ text: "" });
+      toast.success("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว");
       setForm(EMPTY);
     } catch (error) {
       setMessage({ text: error instanceof ApiError ? error.message : "บันทึกไม่สำเร็จ", error: true });
@@ -42,7 +46,7 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
   return (
     <dialog ref={ref} onClose={onClose}>
       <button type="button" className="close" aria-label="ปิด" onClick={onClose}>
-        ✕
+        <Icon name="x" />
       </button>
       <h2>เปลี่ยนรหัสผ่าน</h2>
       {/* ผู้ดูแลระบบตั้งรหัสผ่านชั่วคราวให้ได้ (ผู้ใช้ 2026-09-27) - ผู้ใช้เปลี่ยนเป็นรหัสของตัวเองที่นี่ */}
@@ -51,7 +55,7 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
       </p>
       <form onSubmit={submit} className="auth-fields">
         <label className="field">
-          รหัสผ่านเดิม
+          รหัสผ่านเดิม <Req />
           <input
             type="password"
             autoComplete="current-password"
@@ -61,7 +65,7 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
           />
         </label>
         <label className="field">
-          รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)
+          รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร) <Req />
           <input
             type="password"
             autoComplete="new-password"
@@ -72,7 +76,7 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
           />
         </label>
         <label className="field">
-          ยืนยันรหัสผ่านใหม่
+          ยืนยันรหัสผ่านใหม่ <Req />
           <input
             type="password"
             autoComplete="new-password"
@@ -85,8 +89,9 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
           <button type="submit" className="primary" disabled={saving}>
             บันทึก
           </button>
-          {message.text && <span className={`customer-message${message.error ? " error" : " success"}`}>{message.text}</span>}
+          {message.text && !message.error && <span className="form-actions-note">{message.text}</span>}
         </div>
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
       </form>
     </dialog>
   );

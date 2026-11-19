@@ -25,7 +25,7 @@ export function ChecksNote({ checks, count }: { checks: Checks; count: number })
         <span className="muted">กำลังตรวจสิทธิ์ยื่นตามวันที่ยื่น {checks.eligibilityPendingCount} คัน…</span>
       ) : (
         checks.taxPendingCount > 0 && (
-          <span style={{ color: "#946712", fontSize: 13 }}>
+          <span style={{ color: "var(--warn)", fontSize: 13 }}>
             {checks.taxPendingCount} คันยังคำนวณภาษีไม่ได้ - ยอดรวมยังไม่รวมภาษีของคันเหล่านี้
           </span>
         )

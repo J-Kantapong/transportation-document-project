@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { Icon } from "./Icon";
+import { LoadingState, Notice, PageHeader } from "./ui";
 import { ROLE_LABELS, type UserRole } from "@/lib/auth";
 import { isoToDisplayDate } from "@/lib/date";
 import { myWorkApi, type MyWork, type Severity, type VehicleKind, type WorkCheck, type WorkRow } from "@/lib/my-work-api";
@@ -73,6 +75,7 @@ function WorkTable({ rows, linkLabel }: { rows: WorkRow[]; linkLabel: string }) 
               <td>
                 <Link href={r.href} className="text-button">
                   {linkLabel}
+                  <Icon name="arrow-right" />
                 </Link>
               </td>
             </tr>
@@ -92,14 +95,17 @@ function CheckBlock({ check }: { check: WorkCheck }) {
         <span className="mw-check-title">
           {check.title} <b>{check.total}</b>
         </span>
-        <span className="mw-check-toggle">{open ? "ซ่อน ▴" : "ดูรายการ ▾"}</span>
+        <span className="mw-check-toggle">
+          {open ? "ซ่อน" : "ดูรายการ"}
+          <Icon name={open ? "chevron-up" : "chevron-down"} size={14} />
+        </span>
       </button>
       <p className="mw-lesson">
         <span>บทเรียน:</span> {check.lesson}
       </p>
       {open && (
         <>
-          <WorkTable rows={check.items} linkLabel="ไปตรวจ →" />
+          <WorkTable rows={check.items} linkLabel="ไปตรวจ" />
           {check.total > check.items.length && <p className="exec-note mw-more">แสดง {check.items.length} รายการแรก จากทั้งหมด {check.total} รายการ</p>}
         </>
       )}
@@ -156,17 +162,17 @@ export function MyWorkPage() {
   if (!data) {
     return (
       <div className="content">
-        <div className="heading">
-          <div>
-            <h1>งานของฉัน</h1>
-            <p>{error || "กำลังโหลดข้อมูล…"}</p>
-          </div>
-          {error && (
-            <button type="button" className="primary" onClick={load}>
-              ลองใหม่
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="งานของฉัน"
+          actions={
+            error ? (
+              <button type="button" className="primary" onClick={load}>
+                ลองใหม่
+              </button>
+            ) : undefined
+          }
+        />
+        {error ? <Notice tone="error">{error}</Notice> : <LoadingState label="กำลังโหลดข้อมูล…" />}
       </div>
     );
   }
@@ -176,19 +182,21 @@ export function MyWorkPage() {
 
   return (
     <div className="content">
-      <div className="heading">
-        <div>
-          <h1>งานของฉัน</h1>
-          <p>
+      <PageHeader
+        title="งานของฉัน"
+        subtitle={
+          <>
             {roleText} · ข้อมูล ณ วันที่ {isoToDisplayDate(data.today)}
             {loading && " · กำลังโหลด…"}
             {error && <span className="exec-neg"> · {error}</span>}
-          </p>
-        </div>
-        <button type="button" className="secondary" onClick={load} disabled={loading}>
-          โหลดใหม่
-        </button>
-      </div>
+          </>
+        }
+        actions={
+          <button type="button" className="secondary" onClick={load} disabled={loading}>
+            โหลดใหม่
+          </button>
+        }
+      />
 
       <div className="mw-kpis">
         <a href="#mw-problems" className={`mw-kpi${data.summary.high ? " mw-kpi--high" : ""}`}>
@@ -236,9 +244,9 @@ export function MyWorkPage() {
           </div>
         )}
         {shown.length === 0 ? (
-          <div className="exec-empty">✓ ไม่มีรายการที่ต้องจัดการ{data.problems.length ? "ตามตัวกรองนี้" : ""}</div>
+          <div className="exec-empty"><Icon name="tick" size={16} /> ไม่มีรายการที่ต้องจัดการ{data.problems.length ? "ตามตัวกรองนี้" : ""}</div>
         ) : (
-          <WorkTable rows={shown} linkLabel="ไปจัดการ →" />
+          <WorkTable rows={shown} linkLabel="ไปจัดการ" />
         )}
         {data.problemTotal > data.problems.length && <p className="exec-note stuck-more">แสดง {data.problems.length} รายการที่เร่งด่วนที่สุด จากทั้งหมด {data.problemTotal} รายการ</p>}
       </section>
@@ -250,7 +258,7 @@ export function MyWorkPage() {
             <p className="exec-sub">ตัวช่วยที่สร้างจากข้อผิดพลาดที่เคยเกิดซ้ำ (วันที่ผิด ข้อมูลรถผิด ใบเสร็จไม่ตรง) - ยังไม่ใช่ความผิดพลาดแน่นอน แต่ควรเทียบกับเอกสารก่อนไปขั้นต่อไป</p>
           </div>
         </div>
-        {data.checks.length === 0 ? <div className="exec-empty">✓ ไม่มีเรื่องให้ตรวจ</div> : <div className="mw-checks">{data.checks.map((c) => <CheckBlock key={c.key} check={c} />)}</div>}
+        {data.checks.length === 0 ? <div className="exec-empty"><Icon name="tick" size={16} /> ไม่มีเรื่องให้ตรวจ</div> : <div className="mw-checks">{data.checks.map((c) => <CheckBlock key={c.key} check={c} />)}</div>}
       </section>
 
       <section className="panel exec-panel" id="mw-stages">
@@ -286,7 +294,8 @@ export function MyWorkPage() {
                     <td className={`num-col${s.lateCount ? " exec-neg" : ""}`}>{s.lateCount ? `${s.lateCount} (เกิน ${s.sla} วัน)` : "–"}</td>
                     <td>
                       <Link href={s.href} className="text-button">
-                        เปิดหน้าคิว →
+                        เปิดหน้าคิว
+                        <Icon name="arrow-right" />
                       </Link>
                     </td>
                   </tr>

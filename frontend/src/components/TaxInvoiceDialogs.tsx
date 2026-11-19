@@ -6,6 +6,8 @@ import { billingApi, type Invoice, type TaxInvoice, type TaxInvoicePreview, type
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { checkBackdate } from "@/lib/tax-invoice-date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, Req } from "@/components/ui";
 import { formatMoney, round2 } from "@/lib/invoice";
 import { buildTaxInvoiceHtml, draftTaxInvoice, printTaxInvoice } from "@/lib/tax-invoice-print";
 import { confirmDialog } from "@/lib/confirm-dialog";
@@ -164,24 +166,18 @@ export function TaxInvoiceIssueDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: showPreview ? "min(880px, 96vw)" : "min(560px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{beforePayment ? "ออกใบกำกับภาษีก่อนรับเงิน" : "รับเงิน + ออกใบกำกับภาษี"}</h2>
       <p className="muted">
         บิล {invoice.invoiceNo} · ออกวันที่ {isoToDisplayDate(invoice.issueDate)}
       </p>
-      {loadError && (
-        <p className="customer-message error" role="alert">
-          {loadError}
-        </p>
-      )}
+      <Notice tone="error">{loadError}</Notice>
       {!preview ? (
-        !loadError && <p className="muted">กำลังโหลด...</p>
+        !loadError && <LoadingState />
       ) : !preview.enabled ? (
-        <p className="customer-message error" role="alert">
-          ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มที่หน้า &quot;ใบกำกับภาษี&quot; ก่อน
-        </p>
+        <Notice tone="error">ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ADMIN ต้องตั้งเลขเริ่มที่หน้า &quot;ใบกำกับภาษี&quot; ก่อน</Notice>
       ) : (
         <>
           {preview.beforePaymentAllowed && (
@@ -195,16 +191,16 @@ export function TaxInvoiceIssueDialog({
             </div>
           )}
           {beforePayment && (
-            <p className="customer-message" style={{ fontSize: 13 }}>
+            <Notice tone="info">
               บิลยังเป็น &quot;รอรับเงิน&quot; จนกว่าจะกด &quot;บันทึกรับเงิน&quot; ที่รายการบิล · ภาษีขายเกิดตามวันที่บนใบนี้ (นับเข้าเดือนนั้นแม้ยังไม่ได้เงิน) · ลงวันที่ล่วงหน้าได้ไม่เกิน {ADVANCE_DAYS} วัน · ออกแล้วแก้/ยกเลิกบิลไม่ได้จนกว่าจะยกเลิกใบกำกับ
-            </p>
+            </Notice>
           )}
           <div className="field-grid" style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 12px", alignItems: "center", margin: "12px 0" }}>
             <span>เลขที่ใบกำกับ</span>
             <span>
               <b>{preview.nextNo}</b> <span className="muted">(ระบบให้เลขถัดไป)</span>
             </span>
-            <span>{dateLabel} *</span>
+            <span>{dateLabel} <Req /></span>
             <DateInput
               value={paidDateText}
               onChange={(value) => setPaidDateText(formatDateDigitsCe(digits(value)))}
@@ -222,15 +218,15 @@ export function TaxInvoiceIssueDialog({
               {!preview.buyer.email && (
                 <>
                   <br />
-                  <span style={{ fontSize: 12, color: "#b45309" }}>ลูกค้ายังไม่มีอีเมลในฐานข้อมูล - เก็บไว้ใช้ส่งใบกำกับอิเล็กทรอนิกส์ปีหน้า</span>
+                  <span style={{ fontSize: 12, color: "var(--warn)" }}>ลูกค้ายังไม่มีอีเมลในฐานข้อมูล - เก็บไว้ใช้ส่งใบกำกับอิเล็กทรอนิกส์ปีหน้า</span>
                 </>
               )}
             </span>
           </div>
           {futureDate && (
-            <p className="customer-message error" style={{ fontSize: 13 }}>
+            <Notice tone="error">
               ลงวันที่ล่วงหน้า {isoToDisplayDate(draftDate)} - หลังออกใบนี้ ใบกำกับของลูกค้ารายอื่นต้องลงวันที่ {isoToDisplayDate(draftDate)} ขึ้นไป (เลขต้องเรียงตามวันที่) ถ้ามีใบอื่นต้องออกก่อนวันนั้นให้ออกใบอื่นก่อน
-            </p>
+            </Notice>
           )}
           {preview.lastIssued && (
             <p className="muted" style={{ fontSize: 12 }}>
@@ -238,15 +234,13 @@ export function TaxInvoiceIssueDialog({
             </p>
           )}
           {preview.replaces && (
-            <p className="customer-message" style={{ fontSize: 13 }}>
+            <Notice tone="info">
               ใบนี้จะออกแทน {preview.replaces.taxInvoiceNo} ที่ยกเลิกไป{preview.replaces.cancelReason ? ` (${preview.replaces.cancelReason})` : ""}
               {preview.replaces.whtCertificateId ? " · 50 ทวิ ที่แนบไว้ย้ายมาใบนี้" : ""}
-            </p>
+            </Notice>
           )}
           {missing.length > 0 && (
-            <div className="customer-message error" role="alert" style={{ margin: "8px 0" }}>
-              ออกใบกำกับไม่ได้: ข้อมูลลูกค้ายังขาด {missing.join(", ")} - แก้ที่หน้าฐานข้อมูลลูกค้าก่อน (ADMIN)
-            </div>
+            <Notice tone="error">ออกใบกำกับไม่ได้: ข้อมูลลูกค้ายังขาด {missing.join(", ")} - แก้ที่หน้าฐานข้อมูลลูกค้าก่อน (ADMIN)</Notice>
           )}
           {onlyTaxIdMissing && (
             <label style={{ display: "flex", gap: 8, fontSize: 13, margin: "6px 0" }}>
@@ -310,17 +304,13 @@ export function TaxInvoiceIssueDialog({
           </p>
         </>
       )}
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving || !preview?.enabled || missing.length > 0}>
-          {saving ? "กำลังออกใบ..." : `ยืนยัน · ออก ${preview?.nextNo ?? ""}`}
+          {saving ? "กำลังออกใบ…" : `ยืนยัน · ออก ${preview?.nextNo ?? ""}`}
         </button>
       </div>
     </dialog>
@@ -372,23 +362,23 @@ export function TaxInvoiceRemarkDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>{kind === "cancel" ? `ยกเลิกใบกำกับ ${taxInvoice.taxInvoiceNo}` : `ออกใบแทน ${taxInvoice.taxInvoiceNo}`}</h2>
       {kind === "cancel" ? (
-        <p className="customer-message" style={{ fontSize: 13 }}>
+        <Notice tone="warn">
           {taxInvoice.taxInvoiceNo} จะเป็น &quot;ยกเลิก&quot; ถาวร (ยังอยู่ในรายงานภาษีขาย เลขนี้ไม่ใช้ซ้ำ) {taxInvoice.invoiceNo ? ` และบิล ${taxInvoice.invoiceNo} กลับเป็นรอรับเงิน` : " (ใบกำกับกำหนดเองไม่มีบิลให้ย้อนสถานะ)"}
           <br />
           ถ้าลูกค้าได้ต้นฉบับไปแล้ว ให้ขอคืนมาเก็บคู่กับสำเนา
-        </p>
+        </Notice>
       ) : (
         <p className="muted" style={{ fontSize: 13 }}>
           ใช้เมื่อลูกค้าทำต้นฉบับหาย - พิมพ์เลขเดิม เขียนว่า &quot;ใบแทน&quot; พร้อมวันที่และเหตุผล (ไม่ใช่ใบใหม่)
         </p>
       )}
       <label className="field" style={{ marginTop: 10 }}>
-        เหตุผล *
+        เหตุผล <Req />
         <input
           type="text"
           value={remark}
@@ -396,17 +386,13 @@ export function TaxInvoiceRemarkDialog({
           placeholder={kind === "cancel" ? "เช่น ชื่อลูกค้าผิด ต้องออกใหม่" : "เช่น ลูกค้าทำต้นฉบับหาย"}
         />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className={kind === "cancel" ? "primary danger" : "primary"} onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : kind === "cancel" ? "ยกเลิกใบกำกับ" : "ออกใบแทน + พิมพ์"}
+          {saving ? "กำลังบันทึก…" : kind === "cancel" ? "ยกเลิกใบกำกับ" : "ออกใบแทน + พิมพ์"}
         </button>
       </div>
     </dialog>
@@ -466,8 +452,8 @@ export function WhtCertificateDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(560px, 94vw)", maxHeight: "92vh", overflowY: "auto" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>แนบ 50 ทวิ</h2>
       <p className="muted">
@@ -485,11 +471,11 @@ export function WhtCertificateDialog({
         </label>
       </div>
       <label className="field">
-        {method === "PAPER" ? "ไฟล์รูป/PDF *" : "ไฟล์จากเว็บกรมสรรพากร (ไม่บังคับ)"}
+        {method === "PAPER" ? <>ไฟล์รูป/PDF <Req /></> : "ไฟล์จากเว็บกรมสรรพากร (ไม่บังคับ)"}
         <input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </label>
       <label className="field">
-        {method === "PAPER" ? "เลขที่หนังสือรับรอง (ถ้ามี)" : "เลขอ้างอิง e-WHT *"}
+        {method === "PAPER" ? "เลขที่หนังสือรับรอง (ถ้ามี)" : <>เลขอ้างอิง e-WHT <Req /></>}
         <input type="text" value={certNo} onChange={(e) => setCertNo(e.target.value)} />
       </label>
       <label className="field">
@@ -497,7 +483,7 @@ export function WhtCertificateDialog({
         <DateInput value={dateText} onChange={(v) => setDateText(formatDateDigitsCe(digits(v)))} style={{ width: 140 }} aria-label="วันที่ในหนังสือรับรอง" />
       </label>
       <label className="field">
-        ยอดภาษีที่หักตามหนังสือรับรอง *
+        ยอดภาษีที่หักตามหนังสือรับรอง <Req />
         <input type="text" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} style={{ width: 140 }} />
       </label>
       {mismatch && (
@@ -510,17 +496,13 @@ export function WhtCertificateDialog({
         หมายเหตุ
         <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ปิด
         </button>
         <button type="button" className="primary" onClick={handleSave} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึก"}
+          {saving ? "กำลังบันทึก…" : "บันทึก"}
         </button>
       </div>
     </dialog>

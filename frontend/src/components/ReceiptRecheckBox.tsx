@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/Icon";
 import { fetchRechecks, type ReceiptRecheck, type RecheckJobType } from "@/lib/receipt-recheck";
 
 // กล่องผลตรวจใบเสร็จซ้ำในแถวหน้ารับใบเสร็จ (ผู้ใช้ 2026-11-19) - ยอดใบเสร็จเทียบ Bill + ตัวถัง / ทะเบียนที่ AI อ่าน
@@ -29,13 +30,17 @@ export function ReceiptRecheckBox({ type, id, refreshKey }: { type: RecheckJobTy
     <div
       className="sub"
       role="status"
-      style={{ marginTop: 6, padding: "6px 8px", borderRadius: 8, minWidth: 220, background: ok ? "#eaf7f0" : "#fdecec", color: ok ? "#1f6b45" : "#a12a2a", whiteSpace: "normal" }}
+      style={{ marginTop: 6, padding: "6px 8px", borderRadius: 8, minWidth: 220, background: ok ? "var(--ok-soft)" : "var(--danger-soft)", color: ok ? "var(--ok)" : "var(--danger)", whiteSpace: "normal" }}
     >
       {ok ? (
-        <>✓ ตรวจใบเสร็จผ่าน{check.amount.receipt !== null ? ` · ยอด ${baht(check.amount.receipt)} ตรงกับ Bill` : ""}</>
+        <>
+          <Icon name="tick" /> ตรวจใบเสร็จผ่าน{check.amount.receipt !== null ? ` · ยอด ${baht(check.amount.receipt)} ตรงกับ Bill` : ""}
+        </>
       ) : (
         <>
-          <strong>⚠ ตรวจใบเสร็จไม่ผ่าน</strong>
+          <strong>
+            <Icon name="alert-triangle" /> ตรวจใบเสร็จไม่ผ่าน
+          </strong>
           {check.problems.map((p) => (
             <div key={p}>• {p}</div>
           ))}
@@ -43,7 +48,7 @@ export function ReceiptRecheckBox({ type, id, refreshKey }: { type: RecheckJobTy
       )}
     </div>
     {warnings.length > 0 && (
-      <div className="sub" style={{ marginTop: 4, padding: "6px 8px", borderRadius: 8, minWidth: 220, background: "#fff6e0", color: "#7a5300", whiteSpace: "normal" }}>
+      <div className="sub" style={{ marginTop: 4, padding: "6px 8px", borderRadius: 8, minWidth: 220, background: "var(--warn-soft)", color: "var(--warn)", whiteSpace: "normal" }}>
         <strong>ควรดูรูปใบเสร็จซ้ำ</strong>
         {warnings.map((w) => (
           <div key={w}>• {w}</div>

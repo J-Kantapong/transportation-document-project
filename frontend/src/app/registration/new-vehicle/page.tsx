@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NEW_VEHICLE_SUBTASKS } from "@/lib/categories";
+import { Icon } from "@/components/Icon";
 import { type UserRole, canAccessPage, getCachedUser } from "@/lib/auth";
 
 // แสดงเฉพาะขั้นตอนที่บทบาทเข้าได้ (ผู้ใช้ 2026-09-22: STAFF_ENTRY ขั้น 1-3 / STAFF_CAR, STAFF_MOTO ขั้น 4-8) - กฎอยู่ใน lib/auth.ts
@@ -26,8 +27,8 @@ export default function NewVehicleRegistrationPage() {
           <Link key={task.href} href={task.href} className="registration-task">
             <span className="task-number">{task.number}</span>
             <strong>{task.title}</strong>
-            <span className="task-arrow" aria-hidden="true">
-              →
+            <span className="task-arrow">
+              <Icon name="chevron-right" />
             </span>
           </Link>
         ))}
@@ -36,7 +37,7 @@ export default function NewVehicleRegistrationPage() {
       {(roles === null || canAccessPage("/registration/new-vehicle/receive-receipt", roles)) && (
         <p style={{ marginTop: 18 }}>
           <Link href="/registration/new-vehicle/photos" className="text-button">
-            ค้นหารูปตามเลขตัวถัง →
+            ค้นหารูปตามเลขตัวถัง <Icon name="arrow-right" />
           </Link>
         </p>
       )}

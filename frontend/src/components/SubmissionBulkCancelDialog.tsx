@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 import { api, type DocumentSubmission } from "@/lib/api";
 
 // ยกเลิกหลายรายการที่ยื่นแล้วในครั้งเดียว (ผู้ใช้ 2026-10-01): เหตุผลเดียวใช้กับทุกคัน เรียก cancel ของ backend ทีละรายการ
@@ -52,8 +54,8 @@ export function SubmissionBulkCancelDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(560px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ยกเลิกการยื่นเอกสาร {records.length} คัน</h2>
       <p className="muted">{title}</p>
@@ -64,21 +66,17 @@ export function SubmissionBulkCancelDialog({
         {records.map((r) => r.vehicle.chassis).join(", ")}
       </p>
       {receiptCount > 0 && (
-        <p className="customer-message error" role="alert">
+        <Notice tone="error">
           มีรูปใบเสร็จแนบอยู่ {receiptCount} รูป - จะถูกถอดไปอยู่ในรายการรอจับคู่ในหน้ารับใบเสร็จ ถ้ายื่นกับขนส่งไปแล้วจริง ระวังการยื่นซ้ำ
-        </p>
+        </Notice>
       )}
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่ยกเลิก *
+        เหตุผลที่ยกเลิก <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น ตั้งวันที่ยื่นผิด ต้องยื่นใหม่" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       {failed.length > 0 && (
-        <div className="customer-message error" role="alert">
+        <Notice tone="error">
           ยกเลิกไม่สำเร็จ {failed.length} คัน (คันอื่นยกเลิกแล้ว):
           <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
             {failed.map((f) => (
@@ -87,15 +85,15 @@ export function SubmissionBulkCancelDialog({
               </li>
             ))}
           </ul>
-        </div>
+        </Notice>
       )}
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           {failed.length > 0 ? "ปิด" : "ไม่ยกเลิก"}
         </button>
         {failed.length === 0 && (
           <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-            {saving ? "กำลังยกเลิก..." : `ยืนยันยกเลิก ${records.length} คัน`}
+            {saving ? "กำลังยกเลิก…" : `ยืนยันยกเลิก ${records.length} คัน`}
           </button>
         )}
       </div>

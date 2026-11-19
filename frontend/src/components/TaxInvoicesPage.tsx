@@ -12,6 +12,8 @@ import { buildAccountingPackage, buildSalesTaxExcel } from "@/lib/accounting-bun
 import { downloadBlob } from "@/lib/pdf-export";
 import { TaxInvoiceIssueDialog, TaxInvoiceRemarkDialog } from "@/components/TaxInvoiceDialogs";
 import { TaxInvoiceTabs } from "@/components/TaxInvoiceTabs";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, PageHeader, Req } from "@/components/ui";
 import { InvoiceDueBadge, invoiceDueDays } from "@/components/InvoiceDueBadge";
 
 // หน้า "ใบกำกับภาษี" (ผู้ใช้ 2026-09-28): รายการใบกำกับรายเดือน (รวมใบที่ยกเลิก) + Excel รายงานภาษีขาย + พิมพ์/ใบแทน/ยกเลิก
@@ -83,7 +85,7 @@ export function TaxInvoicesPage() {
   // ชุดส่งบัญชีรายเดือน (ผู้ใช้ 2026-10-06): ZIP = Excel + PDF สำเนาทุกใบ + ไฟล์ 50 ทวิ + สรุป - ดาวน์โหลดแล้วแนบอีเมลส่งบัญชีเอง
   async function exportPackage() {
     if (!rows?.length || packing) return;
-    setPacking("เริ่มสร้างชุดส่งบัญชี...");
+    setPacking("เริ่มสร้างชุดส่งบัญชี…");
     setError("");
     setNotice("");
     try {
@@ -104,32 +106,26 @@ export function TaxInvoicesPage() {
 
   return (
     <section className="content">
-      <h1 tabIndex={-1}>ใบกำกับภาษี</h1>
-      <p>ใบกำกับภาษี/ใบเสร็จรับเงินที่ออกตอนรับเงิน (บัญชีบริษัท) รายเดือน รวมใบที่ยกเลิก - พิมพ์ซ้ำ ออกใบแทน ยกเลิก และโหลดรายงานภาษีขาย</p>
+      <PageHeader
+        titleFocus
+        title="ใบกำกับภาษี"
+        subtitle="ใบกำกับภาษี/ใบเสร็จรับเงินที่ออกตอนรับเงิน (บัญชีบริษัท) รายเดือน รวมใบที่ยกเลิก - พิมพ์ซ้ำ ออกใบแทน ยกเลิก และโหลดรายงานภาษีขาย"
+        actions={
+          <Link href="/accounting/tax-invoices/new" className="primary">
+            <Icon name="plus" />
+            ออกใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล)
+          </Link>
+        }
+      />
       <TaxInvoiceTabs />
-      <Link href="/accounting/tax-invoices/new" className="text-button" style={{ marginTop: 8, display: "inline-block" }}>
-        + ออกใบกำกับกำหนดเอง (งานนอกระบบ ไม่มีใบวางบิล)
-      </Link>
       {series && !series.enabled && (
-        <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
+        <Notice tone="error">
           ยังไม่ได้เปิดใช้ใบกำกับในระบบ - ตอนนี้บิลยังบันทึกรับเงินแบบเดิม (พิมพ์เลข TV จาก Google Sheet) {isAdmin ? "ตั้งเลขล่าสุดด้านล่างเพื่อเริ่มใช้" : "ให้ ADMIN ตั้งเลขเริ่ม"}
-        </div>
+        </Notice>
       )}
-      {packing && (
-        <div className="customer-message" role="status" style={{ margin: "12px 0" }}>
-          {packing}
-        </div>
-      )}
-      {notice && (
-        <div className="customer-message success" role="status" style={{ margin: "12px 0" }}>
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div className="customer-message error" role="alert" style={{ margin: "12px 0" }}>
-          {error}
-        </div>
-      )}
+      <Notice tone="info">{packing}</Notice>
+      <Notice tone="success">{notice}</Notice>
+      <Notice tone="error">{error}</Notice>
 
       {series?.enabled && waiting && waiting.length > 0 && (
         <section className="panel" style={{ marginTop: 12 }}>
@@ -166,11 +162,19 @@ export function TaxInvoicesPage() {
           <h2>ใบกำกับภาษี</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="เดือน" />
-            <button type="button" onClick={exportExcel} disabled={!rows?.length || !!packing}>
-              ⬇ Excel รายงานภาษีขาย
+            <button type="button" className="secondary" onClick={exportExcel} disabled={!rows?.length || !!packing}>
+              <Icon name="download" />
+              Excel รายงานภาษีขาย
             </button>
             <button type="button" className="primary" onClick={exportPackage} disabled={!rows?.length || !!packing}>
-              {packing ? "กำลังสร้าง..." : "📦 ชุดส่งบัญชี (ZIP)"}
+              {packing ? (
+                "กำลังสร้าง…"
+              ) : (
+                <>
+                  <Icon name="download" />
+                  ชุดส่งบัญชี (ZIP)
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -181,7 +185,7 @@ export function TaxInvoicesPage() {
           </p>
         )}
         {!rows ? (
-          !error && <div className="empty-customers">กำลังโหลด...</div>
+          !error && <LoadingState />
         ) : rows.length === 0 ? (
           <div className="empty-customers">ไม่มีใบกำกับในเดือนนี้</div>
         ) : (
@@ -202,7 +206,7 @@ export function TaxInvoicesPage() {
                     {r.whtAmount > 0 && <> · หัก ณ ที่จ่าย {formatMoney(r.whtAmount)} </>}
                     {r.whtAmount > 0 &&
                       (r.whtCertificate ? (
-                        <span className="badge done">{WHT_METHOD_LABEL[r.whtCertificate.method]} ✓</span>
+                        <span className="badge done">{WHT_METHOD_LABEL[r.whtCertificate.method]} <Icon name="tick" size={14} /></span>
                       ) : cancelled ? null : (
                         <span className="badge warn">รอ 50 ทวิ</span>
                       ))}
@@ -328,19 +332,15 @@ function SeriesPanel({ series, onSaved }: { series: TaxInvoiceSeries; onSaved: (
             <input type="text" inputMode="numeric" value={lastNumber} onChange={(e) => setLastNumber(e.target.value.replace(/\D/g, "").slice(0, 5))} style={{ width: 110 }} />
           </label>
           <label className="field" style={{ flex: "1 1 220px" }}>
-            ที่มา / เหตุผล *
+            ที่มา / เหตุผล <Req />
             <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น เลขล่าสุดใน Google Sheet ณ 30/09/2026" />
           </label>
           <button type="button" className="primary" onClick={save} disabled={saving || !!locked}>
-            {saving ? "กำลังบันทึก..." : "บันทึก"}
+            {saving ? "กำลังบันทึก…" : "บันทึก"}
           </button>
         </div>
         {locked && <p className="muted" style={{ fontSize: 12 }}>ปี {y} ออกใบในระบบแล้ว แก้เลขไม่ได้</p>}
-        {error && (
-          <p className="customer-message error" role="alert">
-            {error}
-          </p>
-        )}
+        <Notice tone="error">{error}</Notice>
       </div>
     </section>
   );

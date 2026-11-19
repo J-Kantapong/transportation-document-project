@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageHeader } from "@/components/ui";
 import { TRANSFER_TYPE_LABEL, transferHasInspection, transferHome, type TransferType } from "@/lib/vehicle-transfer-api";
 
 // เมนูงานโอนของแบบงานหนึ่ง - แยก URL ให้กด back ของเบราว์เซอร์ได้ (เหมือนเมนูยกเลิกการใช้รถ)
@@ -7,15 +8,15 @@ export function VehicleTransferMenu({ transferType }: { transferType: TransferTy
   const base = transferHome(transferType);
   return (
     <section className="content">
-      <Link href="/registration/transfer" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
-        ← งานโอน
-      </Link>
-      <h1>{TRANSFER_TYPE_LABEL[transferType]}</h1>
-      <p className="muted" style={{ marginBottom: 20 }}>
-        {transferType === "MOVE_IN"
-          ? "รถที่ย้ายออกจากจังหวัดเดิมแล้ว มาย้ายเข้าพร้อมโอนและตรวจรถ ป้ายเปลี่ยนเป็นของจังหวัดใหม่ - ตอนนี้มีอัตราเฉพาะรถจักรยานยนต์"
-          : "รถยนต์และรถจักรยานยนต์ใช้หน้าเดียวกัน (เลือกประเภทรถในฟอร์ม) ระบุผู้ถือกรรมสิทธิ์ผู้โอนและผู้รับโอนทุกงาน"}
-      </p>
+      <PageHeader
+        back={{ href: "/registration/transfer", label: "งานโอน" }}
+        title={TRANSFER_TYPE_LABEL[transferType]}
+        subtitle={
+          transferType === "MOVE_IN"
+            ? "รถที่ย้ายออกจากจังหวัดเดิมแล้ว มาย้ายเข้าพร้อมโอนและตรวจรถ ป้ายเปลี่ยนเป็นของจังหวัดใหม่ - ตอนนี้มีอัตราเฉพาะรถจักรยานยนต์"
+            : "รถยนต์และรถจักรยานยนต์ใช้หน้าเดียวกัน (เลือกประเภทรถในฟอร์ม) ระบุผู้ถือกรรมสิทธิ์ผู้โอนและผู้รับโอนทุกงาน"
+        }
+      />
       <section className="panel">
         <div className="choices" style={{ padding: 22 }}>
           <Link href={`${base}/submit`}>

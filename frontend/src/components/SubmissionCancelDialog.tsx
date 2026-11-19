@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { Notice, Req } from "@/components/ui";
 import { api, ApiError, type DocumentSubmission } from "@/lib/api";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
 
@@ -67,8 +69,8 @@ export function SubmissionCancelDialog({
 
   return (
     <dialog ref={dialogRef} onClose={onClose} style={{ width: "min(520px, 94vw)" }}>
-      <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-        ×
+      <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+        <Icon name="x" />
       </button>
       <h2>ยกเลิกการยื่นเอกสาร</h2>
       <p className="muted">
@@ -76,35 +78,31 @@ export function SubmissionCancelDialog({
       </p>
       <p style={{ marginTop: 12 }}>รายการนี้จะถูกลบ และรถคันนี้จะกลับไปอยู่ในคิวรอยื่นเอกสาร เพื่อยื่นใหม่ได้</p>
       {inspectionExpired && (
-        <p className="customer-message error" role="alert">
+        <Notice tone="error">
           ผลตรวจหมดอายุแล้ว ณ วันนี้ (ยื่นได้ถึง {isoToDisplayDate(validUntil)}) - ยื่นใหม่ได้โดยตั้งวันที่ยื่นไม่เกินวันนั้น เช่น
           วันที่ยื่นเดิม {isoToDisplayDate(record.submitDate.slice(0, 10))} ที่หน้ายื่นเอกสาร ขั้นเลือกรถ ถ้ายื่นด้วยวันหลังจากนั้นต้องส่งตรวจรอบ 2
           {/* หลังยกเลิก รถคันนี้ขึ้นในคิวส่งตรวจรอบ 2 ของหน้าตรวจสภาพทันที ส่งตรวจรอบ 2 แล้วผลตรวจเดิมถูกล้าง ยื่นด้วยวันที่เดิมไม่ได้อีก (พบ 2026-09-27) */}
           {" "}· รถคันนี้จะขึ้นในคิวส่งตรวจรอบ 2 ของหน้าตรวจสภาพด้วย ถ้าจะยื่นใหม่ด้วยวันที่ยื่นเดิม ให้ยื่นก่อน หรือบอกฝ่ายตรวจสภาพอย่าเพิ่งส่งตรวจรอบ 2
           (ส่งแล้วผลตรวจเดิมถูกล้าง)
-        </p>
+        </Notice>
       )}
       {receiptCount > 0 && (
-        <p className="customer-message error" role="alert">
+        <Notice tone="error">
           รายการนี้มีรูปใบเสร็จแนบอยู่ {receiptCount} รูป - รูปจะถูกถอดออกไปอยู่ในรายการรอจับคู่ในหน้ารับใบเสร็จ
           ถ้ายื่นกับขนส่งไปแล้วจริง ระวังการยื่นซ้ำ
-        </p>
+        </Notice>
       )}
       <label className="field" style={{ marginTop: 12 }}>
-        เหตุผลที่ยกเลิก *
+        เหตุผลที่ยกเลิก <Req />
         <input type="text" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="เช่น เลือกตัวเลือกผิด ต้องยื่นใหม่" />
       </label>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
-        <button type="button" onClick={() => dialogRef.current?.close()} disabled={saving}>
+        <button type="button" className="secondary" onClick={() => dialogRef.current?.close()} disabled={saving}>
           ไม่ยกเลิก
         </button>
         <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
-          {saving ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}
+          {saving ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}
         </button>
       </div>
     </dialog>

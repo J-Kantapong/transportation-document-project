@@ -5,6 +5,8 @@ import { ApiError, api, receiptImageUrl, type DocumentSubmission, type ReceiptFi
 import { AuthedImage } from "@/components/AuthedImage";
 import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from "@/lib/date";
 import { DateInput } from "@/components/DateInput";
+import { Icon } from "@/components/Icon";
+import { Notice } from "@/components/ui";
 
 // Popup แก้ข้อมูลที่ AI กรอกให้ในหน้ารับใบเสร็จ: รูปใบเสร็จขนาดใหญ่อยู่ข้างช่องกรอก ให้พนักงานเทียบทีละช่อง
 // ช่องที่ AI ไม่แน่ใจ/อ่านไม่ออก/ตรวจอัตโนมัติไม่ผ่าน ขึ้นสีเหลืองพร้อมเหตุผล - กดยืนยันแล้วถือว่าคนตรวจแล้ว (ReceiptCheckPage เลิก highlight)
@@ -32,11 +34,15 @@ interface Props {
   onSave: (values: EditValues) => void;
 }
 
-const FLAG_STYLE = { border: "2px solid #e0a31a", background: "#fff8e6" };
+const FLAG_STYLE = { border: "2px solid #e0a31a", background: "var(--warn-soft)" };
 
 function Flag({ text }: { text: string | null }) {
   if (!text) return null;
-  return <div style={{ fontSize: 12, color: "#9a4f12", marginTop: 4 }}>⚠ {text}</div>;
+  return (
+    <div style={{ fontSize: 12, color: "var(--warn)", marginTop: 4 }}>
+      <Icon name="alert-triangle" /> {text}
+    </div>
+  );
 }
 
 export function ReceiptEditButton(props: Props) {
@@ -83,7 +89,7 @@ export function ReceiptEditButton(props: Props) {
           fontWeight: warn ? 600 : 400,
         }}
       >
-        ✎ {warn ? `แก้ไข · ต้องเช็ก ${flagCount} ช่อง` : "แก้ไข / เทียบกับรูป"}
+        <Icon name="pencil" /> {warn ? `แก้ไข · ต้องเช็ก ${flagCount} ช่อง` : "แก้ไข / เทียบกับรูป"}
       </button>
       <dialog
         ref={dialogRef}
@@ -92,8 +98,8 @@ export function ReceiptEditButton(props: Props) {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>แก้ไขข้อมูลใบเสร็จ</h2>
         <div style={{ fontSize: 13, color: "#576781", marginBottom: 12 }}>
@@ -189,7 +195,7 @@ export function ReceiptEditButton(props: Props) {
                 เลขตัวถังในใบเสร็จ: <span style={{ fontFamily: "monospace" }}>{props.aiChassis ?? "?"}</span>
                 {/* ไม่สนตัวพิมพ์ - รถที่คีย์เลขตัวถังตัวเล็กไว้ไม่ขึ้นเตือนผิดๆ (พบ 2026-09-27) */}
                 {props.aiChassis && props.aiChassis.toUpperCase() !== s.vehicle.chassis.toUpperCase() && (
-                  <div style={{ color: "#b43434" }}>ไม่ตรงกับรถคันนี้ ({s.vehicle.chassis})</div>
+                  <div style={{ color: "var(--danger)" }}>ไม่ตรงกับรถคันนี้ ({s.vehicle.chassis})</div>
                 )}
                 {props.highlight && <Flag text={props.flags.chassis} />}
               </div>
@@ -197,12 +203,12 @@ export function ReceiptEditButton(props: Props) {
                 AI อ่านวันที่ได้: {props.aiDate ? isoToDisplayDate(props.aiDate) : "?"} · วันที่ยื่น {isoToDisplayDate(s.submitDate.slice(0, 10))}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <div className="form-actions" style={{ marginTop: 6 }}>
+              <button type="button" className="secondary" onClick={() => dialogRef.current?.close()}>
+                ยกเลิก
+              </button>
               <button type="button" className="primary" onClick={save}>
                 ยืนยันว่าตรงกับรูป
-              </button>
-              <button type="button" className="text-button" onClick={() => dialogRef.current?.close()}>
-                ยกเลิก
               </button>
             </div>
             <div style={{ fontSize: 12, color: "#5f6b80" }}>ยังไม่บันทึกลงระบบ - กด &quot;บันทึกใบยื่นนี้&quot; ด้านล่างตารางอีกครั้ง</div>
@@ -330,7 +336,7 @@ export function ReceivedReceiptFixButton({
   return (
     <>
       <button type="button" className="text-button" style={{ fontSize: 12, padding: 0, whiteSpace: "nowrap" }} onClick={open}>
-        ✎ แก้
+        <Icon name="pencil" /> แก้
       </button>
       <dialog
         ref={dialogRef}
@@ -339,8 +345,8 @@ export function ReceivedReceiptFixButton({
           if (event.target === event.currentTarget && !saving) dialogRef.current?.close();
         }}
       >
-        <button className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
-          ×
+        <button type="button" className="close" aria-label="ปิด" onClick={() => dialogRef.current?.close()}>
+          <Icon name="x" />
         </button>
         <h2>แก้ข้อมูลใบเสร็จที่บันทึกแล้ว</h2>
         <div style={{ fontSize: 13, color: "#576781", marginBottom: 12 }}>
@@ -376,25 +382,23 @@ export function ReceivedReceiptFixButton({
 
           {stale ? (
             <div style={{ flex: "0 1 320px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div className="customer-message success" role="status">
-                บันทึกการแก้ไขแล้ว
-              </div>
+              <Notice tone="success">บันทึกการแก้ไขแล้ว</Notice>
               {/* บิลแก้ในที่ได้ด้วยเลขที่เดิม (ผู้ใช้ 2026-09-27 F53a) ไม่ต้องยกเลิกบิล - ใบส่งงานยังต้องยกเลิกแล้วออกใหม่ (เก็บทะเบียนไว้ในใบ) */}
               {stale.invoices.length > 0 && (
-                <div className="customer-message error" role="alert">
+                <Notice tone="error">
                   บิลที่ออกไปแล้วยังพิมพ์ทะเบียน/เลขที่ใบเสร็จ/ยอดเดิม (ระบบไม่แก้ตาม): {stale.invoices.map((no) => `บิล ${no}`).join(", ")} -
                   ให้ฝ่ายบัญชีเปิด &quot;แก้ไขบิล&quot; แล้วติ๊ก &quot;ใช้ข้อมูลรถล่าสุด&quot; ในแถวรถคันนี้ (ยอดใบเสร็จแก้ในแถวเดียวกัน) ใช้เลขที่บิลเดิม
                   ไม่ต้องยกเลิกบิล - บิลที่รับเงินแล้วให้ &quot;ยกเลิกการรับเงิน&quot; ก่อน
-                </div>
+                </Notice>
               )}
               {stale.slips.length > 0 && (
-                <div className="customer-message error" role="alert">
+                <Notice tone="error">
                   ใบส่งงานที่ออกไปแล้วยังพิมพ์ทะเบียน/เลขที่ใบเสร็จเดิม (ระบบไม่แก้ตาม): {stale.slips.map((no) => `ใบส่งงาน ${no}`).join(", ")} -
                   ถ้าต้องให้ตรง ให้ยกเลิกใบส่งงานนั้นแล้วออกใหม่
-                </div>
+                </Notice>
               )}
               <div>
-                <button type="button" className="primary" onClick={() => dialogRef.current?.close()}>
+                <button type="button" className="secondary" onClick={() => dialogRef.current?.close()}>
                   ปิด
                 </button>
               </div>
@@ -469,17 +473,13 @@ export function ReceivedReceiptFixButton({
                   style={{ width: "100%" }}
                 />
               </label>
-              {error && (
-                <div className="customer-message error" role="alert" style={{ fontSize: 12 }}>
-                  {error}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
+              <Notice tone="error">{error}</Notice>
+              <div className="form-actions">
+                <button type="button" className="secondary" disabled={saving} onClick={() => dialogRef.current?.close()}>
+                  ยกเลิก
+                </button>
                 <button type="button" className="primary" disabled={saving} onClick={save}>
                   {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
-                </button>
-                <button type="button" className="text-button" disabled={saving} onClick={() => dialogRef.current?.close()}>
-                  ยกเลิก
                 </button>
               </div>
               <div style={{ fontSize: 12, color: "#5f6b80" }}>

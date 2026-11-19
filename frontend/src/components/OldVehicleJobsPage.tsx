@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { LoadingState, Notice, Req } from "@/components/ui";
 import { api } from "@/lib/api";
 import { canEditEntrySteps, canEditSubmitSteps, canIntakeOldJobs, getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
@@ -273,7 +275,7 @@ export function OldVehicleJobsPage() {
           </Link>
           {canIntake && (
             <button type="button" className="primary" onClick={() => setShowIntake((open) => !open)}>
-              {showIntake ? "ปิดฟอร์มรับงาน" : "+ รับงาน"}
+              {showIntake ? "ปิดฟอร์มรับงาน" : <><Icon name="plus" />รับงาน</>}
             </button>
           )}
         </div>
@@ -358,17 +360,16 @@ export function OldVehicleJobsPage() {
           )}
           {scope !== "open" && (
             <button type="button" className="text-button" onClick={() => setScope("open")}>
-              ← กลับไปดูงานค้าง
+              <Icon name="arrow-left" />
+              กลับไปดูงานค้าง
             </button>
           )}
         </div>
 
         {loading ? (
-          <div className="empty-customers">กำลังโหลดรายการ…</div>
+          <LoadingState label="กำลังโหลดรายการ…" />
         ) : error ? (
-          <div className="empty-customers" role="alert">
-            {error}
-          </div>
+          <Notice tone="error">{error}</Notice>
         ) : shown.length === 0 ? (
           <div className="empty-customers">{vehicles.length === 0 ? "ยังไม่มีรถในรายการ - กด + รับงาน เพื่อเริ่ม" : "ไม่พบรถที่ตรงกับตัวกรอง"}</div>
         ) : (
@@ -617,22 +618,23 @@ function NewVehiclePicker({
           aria-label="เลขตัวถังรถใหม่"
         />
         <button type="button" onClick={search} disabled={searching}>
-          {searching ? "กำลังค้น..." : "ค้นหา"}
+          {searching ? "กำลังค้น…" : "ค้นหา"}
         </button>
       </div>
-      {error && <span className="customer-message error">{error}</span>}
+      <Notice tone="error">{error}</Notice>
       {hits && hits.length === 0 && (
-        <span className="customer-message">
+        <Notice tone="info">
           ไม่พบรถใหม่เลขตัวถังนี้ในระบบ -{" "}
           {canAddNew ? (
             <a href={NEW_VEHICLE_ENTRY} target="_blank" rel="noreferrer">
               ไปเพิ่มข้อมูลรถจดใหม่ (เปิดแท็บใหม่)
+              <Icon name="external-link" size={14} />
             </a>
           ) : (
             "แจ้งพนักงานคีย์ข้อมูลให้เพิ่มรถคันนี้ในหน้าเพิ่มข้อมูลรถจดใหม่"
           )}{" "}
           แล้วกลับมากดค้นหาอีกครั้ง
-        </span>
+        </Notice>
       )}
       {hits && hits.length > 0 && (
         <ul className="ov-history">
@@ -682,7 +684,7 @@ function JobTypeFields({
   return (
     <>
       <label className="field">
-        ประเภทงาน{allowEmpty ? "" : " *"}
+        ประเภทงาน{!allowEmpty && <Req />}
         <select value={value.jobType} disabled={locked} onChange={(e) => onChange({ ...value, jobType: e.target.value as "" | OldJobType, swapKind: "", newVehicle: null })}>
           <option value="">{allowEmpty ? "ยังไม่เลือก (รอทำ)" : "เลือกประเภทงาน"}</option>
           {jobTypeChoices(vehicleType).map((t) => (
@@ -694,7 +696,7 @@ function JobTypeFields({
       </label>
       {value.jobType === "PLATE_SWAP" && (
         <label className="field">
-          แบบ (สลับเลข / เปลี่ยนเลขทะเบียน) *
+          แบบ (สลับเลข / เปลี่ยนเลขทะเบียน) <Req />
           <select value={value.swapKind} disabled={locked} onChange={(e) => onChange({ ...value, swapKind: e.target.value as "" | SwapKind, newVehicle: null })}>
             <option value="">เลือกแบบ</option>
             <option value="OLD_NEW">สลับเลข {SWAP_KIND_LABEL.OLD_NEW} (รับคันเดียว)</option>
@@ -710,11 +712,11 @@ function JobTypeFields({
       {value.jobType === "TAX_RENEWAL" && (
         <>
           <label className="field">
-            วันจดทะเบียนครั้งแรก *
+            วันจดทะเบียนครั้งแรก <Req />
             <DateTextInput value={value.firstRegText} onChange={(firstRegText) => onChange({ ...value, firstRegText })} label="วันจดทะเบียนครั้งแรก" />
           </label>
           <label className="field">
-            วันครบกำหนดภาษี *
+            วันครบกำหนดภาษี <Req />
             <DateTextInput value={value.taxExpiryText} onChange={(taxExpiryText) => onChange({ ...value, taxExpiryText })} label="วันครบกำหนดภาษี" />
           </label>
           <p className="muted wide">
@@ -910,7 +912,7 @@ function IntakePanel({
         <h2>รับงาน</h2>
         <div className="customer-grid">
           <label className="field">
-            เจ้าของงาน (ลูกค้าที่ส่งงานมา) *
+            เจ้าของงาน (ลูกค้าที่ส่งงานมา) <Req />
             <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
               <option value="">เลือกลูกค้า</option>
               {customerOptions.map((c) => (
@@ -921,9 +923,9 @@ function IntakePanel({
             </select>
           </label>
           <label className="field">
-            วันที่รับงาน *
+            วันที่รับงาน <Req />
             <DateTextInput value={receivedText} onChange={setReceivedText} label="วันที่รับงาน" />
-            {receivedDate && isWeekend(receivedDate) && <span className="customer-message error">{WEEKEND_WARNING}</span>}
+            {receivedDate && isWeekend(receivedDate) && <Notice tone="warn">{WEEKEND_WARNING}</Notice>}
           </label>
         </div>
 
@@ -962,7 +964,7 @@ function IntakePanel({
               ) : (
                 <div className="customer-grid">
                   <label className="field">
-                    เลขตัวถัง *
+                    เลขตัวถัง <Req />
                     <input
                       value={row.chassis}
                       onChange={(e) => patch(row.key, { chassis: e.target.value.toUpperCase().replace(/\s+/g, "") })}
@@ -974,7 +976,7 @@ function IntakePanel({
                     <input value={row.engine} onChange={(e) => patch(row.key, { engine: e.target.value })} placeholder="ใส่ทีหลังได้" />
                   </label>
                   <div className="field">
-                    ทะเบียน *
+                    ทะเบียน <Req />
                     <div style={{ display: "flex", gap: 8 }}>
                       <input value={row.plateCategory} onChange={(e) => patch(row.key, { plateCategory: e.target.value })} onBlur={() => check(row)} maxLength={3} placeholder="หมวด เช่น 4กข" aria-label="หมวดทะเบียน" />
                       <input
@@ -989,7 +991,7 @@ function IntakePanel({
                     </div>
                   </div>
                   <label className="field">
-                    ประเภทรถ (รย. / ขส.) *
+                    ประเภทรถ (รย. / ขส.) <Req />
                     <select value={row.vehicleType} onChange={(e) => patch(row.key, { vehicleType: e.target.value, type: row.pairOf !== null ? row.type : EMPTY_TYPE })}>
                       <option value="">เลือกประเภทรถ</option>
                       {OLD_VEHICLE_TYPE_GROUPS.map((group) => (
@@ -1004,7 +1006,7 @@ function IntakePanel({
                     </select>
                   </label>
                   <label className="field">
-                    ยี่ห้อ *
+                    ยี่ห้อ <Req />
                     <select value={row.brand} onChange={(e) => patch(row.key, { brand: e.target.value })}>
                       <option value="">เลือกยี่ห้อ</option>
                       {brandNames.map((name) => (
@@ -1015,15 +1017,15 @@ function IntakePanel({
                     </select>
                   </label>
                   <label className="field">
-                    ชื่อเจ้าของรถ *
+                    ชื่อเจ้าของรถ <Req />
                     <input value={row.ownerName} onChange={(e) => patch(row.key, { ownerName: e.target.value })} />
                   </label>
                 </div>
               )}
               {row.warnings.map((w) => (
-                <p key={w} className="customer-message error" role="alert">
+                <Notice key={w} tone="warn">
                   {w}
-                </p>
+                </Notice>
               ))}
               <div className="customer-grid" style={{ marginTop: 16 }}>
                 <JobTypeFields value={row.type} onChange={(type) => patch(row.key, { type })} vehicleType={vehicleType} vehicleClass={vehicleClass} allowEmpty allowPair locked={row.pairOf !== null} />
@@ -1033,7 +1035,7 @@ function IntakePanel({
                 </label>
                 {row.needsReason && (
                   <label className="field">
-                    เหตุผลที่รับงานประเภทเดิมซ้ำ *
+                    เหตุผลที่รับงานประเภทเดิมซ้ำ <Req />
                     <input value={row.duplicateReason} onChange={(e) => patch(row.key, { duplicateReason: e.target.value })} />
                   </label>
                 )}
@@ -1043,16 +1045,20 @@ function IntakePanel({
         })}
 
         <div className="form-actions">
-          <button type="button" onClick={() => setRows((prev) => [...prev, newRow()])} disabled={saving || rows.length >= 50}>
-            + เพิ่มคัน
+          {message.text && !message.error && (
+            <span className="form-actions-note" role="status">
+              {message.text}
+            </span>
+          )}
+          <button type="button" className="secondary" onClick={() => setRows((prev) => [...prev, newRow()])} disabled={saving || rows.length >= 50}>
+            <Icon name="plus" />
+            เพิ่มคัน
           </button>
           <button className="primary" type="submit" disabled={saving}>
             บันทึกรับงาน {rows.length > 1 ? `(${rows.length} คัน)` : ""}
           </button>
-          <span className={`customer-message${message.error ? " error" : ""}`} role="status">
-            {message.text}
-          </span>
         </div>
+        <Notice tone="error">{message.error ? message.text : ""}</Notice>
       </form>
     </div>
   );
@@ -1070,7 +1076,7 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
   return (
     <dialog ref={ref} onClose={onClose} style={{ width: wide ? "min(680px, 94vw)" : "min(520px, 94vw)" }}>
       <button className="close" aria-label="ปิด" onClick={() => ref.current?.close()}>
-        ×
+        <Icon name="x" />
       </button>
       <h2>{title}</h2>
       {children}
@@ -1139,7 +1145,7 @@ function AddJobDialog({
       <VehicleLine vehicle={vehicle} />
       <div className="customer-grid" style={{ marginTop: 12 }}>
         <label className="field">
-          เจ้าของงาน (ลูกค้า) *
+          เจ้าของงาน (ลูกค้า) <Req />
           <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             <option value="">เลือกลูกค้า</option>
             {customerOptions.map((c) => (
@@ -1150,9 +1156,9 @@ function AddJobDialog({
           </select>
         </label>
         <label className="field">
-          วันที่รับงาน *
+          วันที่รับงาน <Req />
           <DateTextInput value={receivedText} onChange={setReceivedText} label="วันที่รับงาน" />
-          {isWeekend(textToIso(receivedText)) && <span className="customer-message error">{WEEKEND_WARNING}</span>}
+          {isWeekend(textToIso(receivedText)) && <Notice tone="warn">{WEEKEND_WARNING}</Notice>}
         </label>
         <JobTypeFields value={type} onChange={setType} vehicleType={vehicle.vehicleType} vehicleClass={vehicle.vehicleClass} allowEmpty />
         <label className="field">
@@ -1161,19 +1167,15 @@ function AddJobDialog({
         </label>
         {needsReason && (
           <label className="field wide">
-            เหตุผลที่รับงานประเภทเดิมซ้ำ *
+            เหตุผลที่รับงานประเภทเดิมซ้ำ <Req />
             <input value={duplicateReason} onChange={(e) => setDuplicateReason(e.target.value)} />
           </label>
         )}
       </div>
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       <div className="form-actions">
         <button type="button" className="primary" onClick={save} disabled={saving}>
-          {saving ? "กำลังบันทึก..." : "บันทึกรับงาน"}
+          {saving ? "กำลังบันทึก…" : "บันทึกรับงาน"}
         </button>
       </div>
     </Modal>
@@ -1349,7 +1351,7 @@ function JobDialog({
           <JobTypeFields value={type} onChange={setType} vehicleType={vehicle.vehicleType} vehicleClass={vehicle.vehicleClass} allowEmpty={false} />
           {needsReason && (
             <label className="field wide">
-              เหตุผลที่รับงานประเภทเดิมซ้ำ *
+              เหตุผลที่รับงานประเภทเดิมซ้ำ <Req />
               <input value={duplicateReason} onChange={(e) => setDuplicateReason(e.target.value)} />
             </label>
           )}
@@ -1363,8 +1365,9 @@ function JobDialog({
 
       {next && (
         <p style={{ marginTop: 14 }}>
-          <Link href={next} className="primary" style={{ display: "inline-flex", textDecoration: "none" }}>
-            {job.status === "TO_SUBMIT" ? "ไปหน้ายื่นงาน" : job.status === "TO_DELIVER" ? "ไปหน้า Delivery" : `ไปทำขั้น${OLD_JOB_STATUS_LABEL[job.status].replace("รอ", "")}`} →
+          <Link href={next} className="primary">
+            {job.status === "TO_SUBMIT" ? "ไปหน้ายื่นงาน" : job.status === "TO_DELIVER" ? "ไปหน้า Delivery" : `ไปทำขั้น${OLD_JOB_STATUS_LABEL[job.status].replace("รอ", "")}`}
+            <Icon name="arrow-right" />
           </Link>
           {job.status === "TO_SUBMIT" && (
             <span className="muted" style={{ display: "block", marginTop: 6 }}>
@@ -1403,7 +1406,7 @@ function JobDialog({
                   </select>
                 </label>
                 <label className="field">
-                  รายละเอียด{blockReason === "OTHER" ? " *" : ""}
+                  รายละเอียด{blockReason === "OTHER" && <Req />}
                   <input value={blockNote} onChange={(e) => setBlockNote(e.target.value)} />
                 </label>
               </div>
@@ -1425,11 +1428,7 @@ function JobDialog({
         </div>
       )}
 
-      {error && (
-        <p className="customer-message error" role="alert">
-          {error}
-        </p>
-      )}
+      <Notice tone="error">{error}</Notice>
       {canWrite && !submitted && (
         <div className="form-actions">
           <button type="button" className="text-button danger" onClick={() => setCancelling(true)}>
@@ -1511,11 +1510,12 @@ function VehicleDialog({
           </ul>
           {canWrite && (
             <div className="form-actions">
-              <button type="button" className="primary" onClick={onAddJob}>
-                + รับงานเพิ่มให้คันนี้
-              </button>
-              <button type="button" onClick={() => setEditing(true)}>
+              <button type="button" className="secondary" onClick={() => setEditing(true)}>
                 แก้ข้อมูลรถ
+              </button>
+              <button type="button" className="primary" onClick={onAddJob}>
+                <Icon name="plus" />
+                รับงานเพิ่มให้คันนี้
               </button>
             </div>
           )}
@@ -1524,7 +1524,7 @@ function VehicleDialog({
         <>
           <div className="customer-grid">
             <label className="field">
-              เลขตัวถัง *
+              เลขตัวถัง <Req />
               <input value={form.chassis} onChange={(e) => setForm((prev) => ({ ...prev, chassis: e.target.value.toUpperCase().replace(/\s+/g, "") }))} />
             </label>
             <label className="field">
@@ -1532,14 +1532,14 @@ function VehicleDialog({
               <input value={form.engine} onChange={set("engine")} />
             </label>
             <div className="field">
-              ทะเบียน *
+              ทะเบียน <Req />
               <div style={{ display: "flex", gap: 8 }}>
                 <input value={form.plateCategory} onChange={set("plateCategory")} maxLength={3} aria-label="หมวดทะเบียน" />
                 <input value={form.plateNumber} onChange={(e) => setForm((prev) => ({ ...prev, plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) }))} maxLength={4} inputMode="numeric" aria-label="เลขทะเบียน" />
               </div>
             </div>
             <label className="field">
-              ประเภทรถ (รย. / ขส.) *
+              ประเภทรถ (รย. / ขส.) <Req />
               <select value={form.vehicleType} onChange={set("vehicleType")}>
                 <option value="">เลือกประเภทรถ</option>
                 {OLD_VEHICLE_TYPE_GROUPS.map((group) => (
@@ -1554,7 +1554,7 @@ function VehicleDialog({
               </select>
             </label>
             <label className="field">
-              ยี่ห้อ *
+              ยี่ห้อ <Req />
               <select value={form.brand} onChange={set("brand")}>
                 <option value="">เลือกยี่ห้อ</option>
                 {brands.map((name) => (
@@ -1565,28 +1565,24 @@ function VehicleDialog({
               </select>
             </label>
             <label className="field">
-              ชื่อเจ้าของรถ *
+              ชื่อเจ้าของรถ <Req />
               <input value={form.ownerName} onChange={set("ownerName")} />
             </label>
             <label className="field wide">
-              เหตุผลที่แก้ *
+              เหตุผลที่แก้ <Req />
               <input value={form.remark} onChange={set("remark")} placeholder="เช่น พิมพ์เลขตัวถังผิด" />
             </label>
           </div>
           <p className="muted" style={{ marginTop: 10 }}>
             ข้อมูลรถในงานที่ยื่นไปแล้วไม่ถูกแก้ตาม - แก้ที่หน้าของงานนั้นถ้าต้องการ
           </p>
-          {error && (
-            <p className="customer-message error" role="alert">
-              {error}
-            </p>
-          )}
+          <Notice tone="error">{error}</Notice>
           <div className="form-actions">
-            <button type="button" onClick={() => setEditing(false)} disabled={saving}>
+            <button type="button" className="secondary" onClick={() => setEditing(false)} disabled={saving}>
               ย้อนกลับ
             </button>
             <button type="button" className="primary" onClick={save} disabled={saving}>
-              {saving ? "กำลังบันทึก..." : "บันทึกการแก้"}
+              {saving ? "กำลังบันทึก…" : "บันทึกการแก้"}
             </button>
           </div>
         </>
