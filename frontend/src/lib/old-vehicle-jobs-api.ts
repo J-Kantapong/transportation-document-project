@@ -161,7 +161,8 @@ export interface HubVehicle {
   chassis: string;
   engine: string | null;
   brand: string | null;
-  ownerName: string | null;
+  ownerName: string | null; // ผู้ถือกรรมสิทธิ์
+  possessorName: string | null; // ผู้ครอบครอง (ไม่บังคับ) - งานโอนตามผู้ถือกรรมสิทธิ์ใช้เป็นผู้รับโอน
   ownerType: "INDIVIDUAL" | "JURISTIC" | null; // null = ยังไม่ได้ระบุ (รับก่อนมีช่องนี้ / แถวย้อนหลัง)
   financed: boolean; // ติดไฟแนนซ์ - ownerType คือประเภทผู้เช่าซื้อ
   updatedAt: string;
@@ -169,6 +170,20 @@ export interface HubVehicle {
 }
 
 // ข้อมูลที่ฟอร์มยื่นของหน้างานเดิมใช้เติมให้เอง เมื่อเปิดจากหน้ารวม (?intake=<id> - รอบ 2 ผู้ใช้ 2026-11-18)
+// รถที่พบในฐานข้อมูลรถจดใหม่ (รถที่เราจดเอง) - ฟอร์มรับงานเติมช่องที่ยังว่างให้ (ผู้ใช้ 2026-11-19)
+export interface NewVehiclePrefill {
+  vehicleType: string | null;
+  chassis: string;
+  engine: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  brand: string | null;
+  ownerName: string | null;
+  possessorName: string | null;
+  ownerType: "INDIVIDUAL" | "JURISTIC" | null;
+  financed: boolean;
+}
+
 export interface IntakePrefill {
   vehicle: HubVehicle;
   job: HubJob;
@@ -183,7 +198,8 @@ export interface IntakeVehicleInput {
   chassis?: string;
   engine?: string;
   brand?: string;
-  ownerName?: string;
+  ownerName?: string; // ผู้ถือกรรมสิทธิ์
+  possessorName?: string;
   ownerType?: "INDIVIDUAL" | "JURISTIC"; // บังคับเมื่อรับรถคันใหม่
   financed?: boolean;
   jobType?: OldJobType | "";
@@ -204,6 +220,7 @@ export interface UpdateOldVehicleInput {
   engine: string;
   brand: string;
   ownerName: string;
+  possessorName: string;
   ownerType?: "INDIVIDUAL" | "JURISTIC"; // ไม่ส่ง = คงค่าเดิม
   financed?: boolean;
   remark: string;
@@ -224,8 +241,11 @@ export const oldVehicleJobsApi = {
   },
   // แถวรับงาน 1 งาน + ข้อมูลรถ - ฟอร์มยื่นของหน้างานเดิมใช้เติมข้อมูลให้เอง (?intake=<id>)
   job: (id: string) => request<IntakePrefill>(`/api/old-vehicle-jobs/jobs/${encodeURIComponent(id)}`),
+  // คำแนะนำระหว่างพิมพ์ในฟอร์มรับงาน: รถเก่าในระบบ (old) + รถจดใหม่ที่ยังไม่เคยรับงาน (fresh)
+  suggest: (q: string) => request<{ old: HubVehicle[]; fresh: NewVehiclePrefill[] }>(`/api/old-vehicle-jobs/suggest?${new URLSearchParams({ q })}`),
+  financeCompanies: () => request<{ names: string[] }>("/api/old-vehicle-jobs/finance-companies"),
   lookup: (chassis: string, plateCategory = "", plateNumber = "") =>
-    request<{ vehicle: HubVehicle | null; plateMatches: HubVehicle[]; warnings: string[] }>(
+    request<{ vehicle: HubVehicle | null; plateMatches: HubVehicle[]; warnings: string[]; newVehicle: NewVehiclePrefill | null }>(
       `/api/old-vehicle-jobs/lookup?${new URLSearchParams({ chassis, plateCategory, plateNumber })}`,
     ),
   intake: (data: { customerId: string; receivedDate: string; vehicles: IntakeVehicleInput[] }) =>

@@ -110,11 +110,50 @@ export interface HubVehicle {
   chassis: string;
   engine: string | null;
   brand: string | null;
-  ownerName: string | null;
+  ownerName: string | null; // ผู้ถือกรรมสิทธิ์
+  possessorName: string | null; // ผู้ครอบครอง (ไม่บังคับ)
   ownerType: OwnerType | null; // null = ยังไม่ได้ระบุ (แถวย้อนหลัง / รับก่อนมีช่องนี้)
   financed: boolean;
   updatedAt: string;
   jobs: HubJob[]; // ใหม่สุดก่อน
+}
+
+// ข้อมูลจากฐานข้อมูลรถจดใหม่ ให้ฟอร์มรับงานเติมให้ (lookup) - พนักงานตรวจ/แก้ได้ก่อนบันทึก
+export interface NewVehiclePrefill {
+  vehicleType: string | null;
+  chassis: string;
+  engine: string | null;
+  plateCategory: string | null;
+  plateNumber: string | null;
+  brand: string | null;
+  ownerName: string | null; // ผู้ถือกรรมสิทธิ์
+  possessorName: string | null; // ผู้ครอบครอง (มีเมื่อติดไฟแนนซ์)
+  ownerType: OwnerType | null;
+  financed: boolean;
+}
+
+const newVehicleInclude = {
+  brand: { select: { name: true } },
+  owner: { include: { financeCompany: { select: { name: true } } } },
+} satisfies Prisma.VehicleInclude;
+
+// รถจดใหม่ -> ข้อมูลเติมฟอร์มรับงาน
+// ติดไฟแนนซ์: ผู้ถือกรรมสิทธิ์ = ไฟแนนซ์ (owner.name) / ผู้ครอบครอง = hirerName / ประเภทเจ้าของ = ประเภทผู้เช่าซื้อ (hirerType)
+function toNewVehiclePrefill(row: Prisma.VehicleGetPayload<{ include: typeof newVehicleInclude }>): NewVehiclePrefill {
+  const owner = row.owner;
+  const financed = Boolean(owner?.financeCompanyId);
+  return {
+    vehicleType: row.body && isOldVehicleType(row.body) ? row.body : null,
+    chassis: row.chassis,
+    engine: row.engine,
+    plateCategory: row.plateCategory,
+    plateNumber: row.plateNumber,
+    brand: row.brand?.name ?? null,
+    ownerName: owner?.name ?? owner?.financeCompany?.name ?? null,
+    possessorName: financed ? (owner?.hirerName ?? null) : null,
+    ownerType: owner ? (financed ? (owner.hirerType ?? null) : owner.ownerType) : null,
+    financed,
+  };
 }
 
 export interface IntakeVehicleDto {
@@ -125,7 +164,8 @@ export interface IntakeVehicleDto {
   chassis?: unknown;
   engine?: unknown;
   brand?: unknown;
-  ownerName?: unknown;
+  ownerName?: unknown; // ผู้ถือกรรมสิทธิ์
+  possessorName?: unknown; // ผู้ครอบครอง (ไม่บังคับ)
   ownerType?: unknown; // INDIVIDUAL | JURISTIC - บังคับเมื่อรับรถคันใหม่ (ติดไฟแนนซ์ = ประเภทผู้เช่าซื้อ)
   financed?: unknown;
   jobType?: unknown; // เว้นว่างได้ = รอทำ
@@ -161,6 +201,7 @@ export interface UpdateOldVehicleDto {
   engine?: unknown;
   brand?: unknown;
   ownerName?: unknown;
+  possessorName?: unknown;
   ownerType?: unknown;
   financed?: unknown;
   remark?: unknown;
@@ -464,6 +505,7 @@ export class OldVehicleJobsService {
       engine: vehicle.engine,
       brand: vehicle.brand,
       ownerName: vehicle.ownerName,
+      possessorName: vehicle.possessorName,
       ownerType: vehicle.ownerType,
       financed: vehicle.financed,
       updatedAt: vehicle.updatedAt.toISOString(),
@@ -665,7 +707,11 @@ export class OldVehicleJobsService {
   }
 
   // ค้นรถที่มีอยู่แล้วตอนพิมพ์ทะเบียน/เลขตัวถังในฟอร์มรับงาน - เจอ = เติมข้อมูลเดิมและรับงานเพิ่มให้คันเดิม
-  async lookup(chassisRaw?: string, plateCategoryRaw?: string, plateNumberRaw?: string): Promise<{ vehicle: HubVehicle | null; plateMatches: HubVehicle[]; warnings: string[] }> {
+  async lookup(
+    chassisRaw?: string,
+    plateCategoryRaw?: string,
+    plateNumberRaw?: string,
+  ): Promise<{ vehicle: HubVehicle | null; plateMatches: HubVehicle[]; warnings: string[]; newVehicle: NewVehiclePrefill | null }> {
     const chassis = typeof chassisRaw === 'string' ? chassisRaw.trim() : '';
     const plateCategory = typeof plateCategoryRaw === 'string' ? plateCategoryRaw.trim() : '';
     const plateNumber = typeof plateNumberRaw === 'string' ? plateNumberRaw.trim() : '';
@@ -682,7 +728,85 @@ export class OldVehicleJobsService {
     };
     const hub = await this.hubVehicles([...(byChassis ? [byChassis] : []), ...byPlate].filter(readable));
     const vehicle = byChassis && readable(byChassis) ? hub[0] : null;
-    return { vehicle, plateMatches: vehicle ? hub.slice(1) : hub, warnings: chassis ? chassisWarnings(chassis) : [] };
+    // ยังไม่มีในรถเก่า: ลองหาในฐานข้อมูลรถจดใหม่ (รถที่เราจดเอง) ให้ฟอร์มเติมข้อมูลรถ + ผู้ถือกรรมสิทธิ์ / ผู้ครอบครอง ให้ (ผู้ใช้ 2026-11-19)
+    const newVehicle = byChassis ? null : await this.findNewVehicle(chassis, plateCategory, plateNumber);
+    return { vehicle, plateMatches: vehicle ? hub.slice(1) : hub, warnings: chassis ? chassisWarnings(chassis) : [], newVehicle };
+  }
+
+  // รถจดใหม่ที่ตรงกับเลขตัวถัง (ก่อน) หรือทะเบียน - เฉพาะรถที่ยังไม่ถูกลบ และอยู่ในขอบเขตประเภทรถที่ผู้ใช้อ่านได้
+  // ติดไฟแนนซ์: ผู้ถือกรรมสิทธิ์ = ไฟแนนซ์ (owner.name) / ผู้ครอบครอง = hirerName / ประเภทเจ้าของ = ประเภทผู้เช่าซื้อ (hirerType)
+  private async findNewVehicle(chassis: string, plateCategory: string, plateNumber: string): Promise<NewVehiclePrefill | null> {
+    const cleaned = chassis ? cleanChassis(chassis) : '';
+    const where: Prisma.VehicleWhereInput | null = cleaned
+      ? { deletedAt: null, chassis: { equals: cleaned, mode: 'insensitive' } }
+      : plateCategory && plateNumber
+        ? { deletedAt: null, plateCategory, plateNumber }
+        : null;
+    if (!where) return null;
+    const row = await this.prisma.vehicle.findFirst({ where, orderBy: { createdAt: 'desc' }, include: newVehicleInclude });
+    if (!row || !this.newVehicleReadable(row)) return null;
+    return toNewVehiclePrefill(row);
+  }
+
+  private newVehicleReadable(row: { body: string | null }): boolean {
+    const scope = this.readScope();
+    return scope === 'ALL' || scope === (isMotorcycleType(row.body) ? 'MOTO' : 'CAR');
+  }
+
+  // คำแนะนำระหว่างพิมพ์ในฟอร์มรับงาน (ผู้ใช้ 2026-11-19: "พอพิมพ์แล้วมีข้อมูลแนะนำก่อนเลยโดยไม่ต้องกด enter")
+  // ค้นบางส่วนของเลขตัวถัง / เลขทะเบียน / ชื่อผู้ถือกรรมสิทธิ์ ทั้งรถเก่าในหน้านี้ (old) และรถจดใหม่ที่ยังไม่เคยรับงาน (fresh)
+  async suggest(qRaw?: string): Promise<{ old: HubVehicle[]; fresh: NewVehiclePrefill[] }> {
+    const q = typeof qRaw === 'string' ? qRaw.trim() : '';
+    if (q.length < 2) return { old: [], fresh: [] };
+    const key = chassisKeyOf(q);
+    const take = 6;
+    const oldRows = await this.prisma.oldVehicle.findMany({
+      where: {
+        OR: [
+          ...(key ? [{ chassisKey: { contains: key } }] : []),
+          { plateNumber: { startsWith: q } },
+          { ownerName: { contains: q, mode: 'insensitive' as const } },
+          { possessorName: { contains: q, mode: 'insensitive' as const } },
+        ],
+      },
+      include: vehicleInclude,
+      orderBy: { updatedAt: 'desc' },
+      take: take * 2,
+    });
+    const scope = this.readScope();
+    const readableOld = oldRows.filter((v) => scope === 'ALL' || scope === v.vehicleClass).slice(0, take);
+    const newRows = await this.prisma.vehicle.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { chassis: { contains: cleanChassis(q), mode: 'insensitive' } },
+          { plateNumber: { startsWith: q } },
+          { owner: { is: { name: { contains: q, mode: 'insensitive' } } } },
+          { owner: { is: { hirerName: { contains: q, mode: 'insensitive' } } } },
+        ],
+      },
+      include: newVehicleInclude,
+      orderBy: { createdAt: 'desc' },
+      take: take * 2,
+    });
+    // รถจดใหม่ที่รับงานรถเก่าไปแล้ว ให้เลือกจากรถเก่าแทน (ไม่แนะนำซ้ำสองแบบ)
+    const keys = newRows.map((r) => chassisKeyOf(r.chassis)).filter(Boolean);
+    const known = new Set(
+      keys.length
+        ? (await this.prisma.oldVehicle.findMany({ where: { chassisKey: { in: keys } }, select: { chassisKey: true } })).map((r) => r.chassisKey)
+        : [],
+    );
+    const fresh = newRows
+      .filter((r) => !known.has(chassisKeyOf(r.chassis)) && this.newVehicleReadable(r))
+      .slice(0, take)
+      .map(toNewVehiclePrefill);
+    return { old: await this.hubVehicles(readableOld), fresh };
+  }
+
+  // รายชื่อไฟแนนซ์สำหรับฟอร์มรับงาน (เลือกแล้วเติมชื่อผู้ถือกรรมสิทธิ์) - อ่านผ่าน API ของหน้านี้ เพราะกลุ่มรับงานไม่มีสิทธิ์หน้าไฟแนนซ์
+  async financeCompanyNames(): Promise<{ names: string[] }> {
+    const rows = await this.prisma.financeCompany.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], select: { name: true } });
+    return { names: rows.map((r) => r.name) };
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -832,7 +956,8 @@ export class OldVehicleJobsService {
               chassisKey: key,
               engine: optionalText(item?.engine, 'เลขเครื่อง', 100),
               brand: await this.resolveBrandName(item?.brand),
-              ownerName: requiredText(item?.ownerName, 'ชื่อเจ้าของรถ'),
+              ownerName: requiredText(item?.ownerName, 'ชื่อผู้ถือกรรมสิทธิ์'),
+              possessorName: optionalText(item?.possessorName, 'ชื่อผู้ครอบครอง'),
               ...parseOwnerFields(item?.ownerType, item?.financed, vehicleType),
               createdById: currentUser()?.id ?? null,
             };
@@ -1163,7 +1288,8 @@ export class OldVehicleJobsService {
       chassisKey: chassisKeyOf(chassis),
       engine: dto.engine === undefined ? existing.engine : optionalText(dto.engine, 'เลขเครื่อง', 100),
       brand: dto.brand === undefined ? existing.brand : await this.resolveBrandName(dto.brand),
-      ownerName: dto.ownerName === undefined ? existing.ownerName : requiredText(dto.ownerName, 'ชื่อเจ้าของรถ'),
+      ownerName: dto.ownerName === undefined ? existing.ownerName : requiredText(dto.ownerName, 'ชื่อผู้ถือกรรมสิทธิ์'),
+      possessorName: dto.possessorName === undefined ? existing.possessorName : optionalText(dto.possessorName, 'ชื่อผู้ครอบครอง'),
       // ส่งมาเฉพาะเมื่อแก้ - ไม่ส่ง = คงค่าเดิม (แถวเก่าที่ยังว่างก็ว่างต่อได้) / เปลี่ยนเป็นรถ ขส. = ไม่มีไฟแนนซ์
       ...(dto.ownerType === undefined && dto.financed === undefined
         ? { ownerType: existing.ownerType, financed: isTransportType(vehicleType) ? false : existing.financed }

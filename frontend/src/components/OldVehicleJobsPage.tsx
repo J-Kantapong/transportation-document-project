@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { LoadingState, Notice, Req } from "@/components/ui";
 import { OwnerTypeFields, type OwnerTypeValue } from "@/components/OwnerTypeFields";
+import { SuggestionList } from "@/components/SuggestionList";
+import { useTypeAhead } from "@/lib/use-type-ahead";
 import { api } from "@/lib/api";
 import { canEditEntrySteps, canEditSubmitSteps, canIntakeOldJobs, getCachedUser, submitWriteScopeFor } from "@/lib/auth";
 import { isoToDisplayDate, todayIso } from "@/lib/date";
@@ -31,6 +33,7 @@ import {
   type HubJob,
   type HubVehicle,
   type IntakeVehicleInput,
+  type NewVehiclePrefill,
   type OldJobStatus,
   type OldJobType,
   type OldVehicleClass,
@@ -73,7 +76,12 @@ const canWriteClass = (scope: WriteScope | null, vehicleClass: OldVehicleClass) 
 function useChoices() {
   const [brandNames, setBrandNames] = useState<string[]>([]);
   const [customerOptions, setCustomerOptions] = useState<Option[]>([]);
+  const [financeNames, setFinanceNames] = useState<string[]>([]);
   useEffect(() => {
+    oldVehicleJobsApi
+      .financeCompanies()
+      .then((data) => setFinanceNames(data.names))
+      .catch(() => undefined);
     api
       .listBrands()
       .then((data) => setBrandNames(data.brands.map((b) => b.name)))
@@ -83,7 +91,7 @@ function useChoices() {
       .then((data) => setCustomerOptions(data.customers.map((c) => ({ id: c.id, label: [c.name, c.company, c.branch].filter(Boolean).join(" · ") }))))
       .catch(() => undefined);
   }, []);
-  return { brandNames, customerOptions };
+  return { brandNames, customerOptions, financeNames };
 }
 
 const daysSince = (iso: string) => Math.max(0, Math.round((Date.parse(todayIso()) - Date.parse(iso)) / 86_400_000));
@@ -125,7 +133,7 @@ export function OldVehicleJobsPage() {
   const router = useRouter();
   const writeScope = useWriteScope();
   const canIntake = useCanIntake();
-  const { brandNames, customerOptions } = useChoices();
+  const { brandNames, customerOptions, financeNames } = useChoices();
 
   const [scope, setScope] = useState<"open" | "done" | "all">("open");
   const [search, setSearch] = useState("");
@@ -286,6 +294,7 @@ export function OldVehicleJobsPage() {
         <IntakePanel
           writeScope={writeScope}
           brandNames={brandNames}
+          financeNames={financeNames}
           customerOptions={customerOptions}
           onSaved={(saved) => {
             goToNextAfterIntake(saved);
@@ -514,6 +523,7 @@ export function OldVehicleJobsPage() {
           vehicle={dialogVehicle}
           canWrite={canWriteClass(writeScope, dialogVehicle.vehicleClass)}
           brandNames={brandNames}
+          financeNames={financeNames}
           onClose={() => setDialog(null)}
           onSaved={(v) => {
             replace([v]);
@@ -554,9 +564,6 @@ function NewVehiclePicker({
   vehicleClass: OldVehicleClass;
 }) {
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<PlateSwapVehicleHit[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState("");
   const [canAddNew, setCanAddNew] = useState(false);
   // ค้นรถใหม่ใช้ API ของงานสลับเลข (กลุ่มยื่นเอกสาร) - คนคีย์รับงานที่ไม่ได้ถือ STAFF_CAR / STAFF_MOTO ค้นไม่ได้ ให้พนักงานยื่นเลือกทีหลัง
   const [canSearch, setCanSearch] = useState(true);
@@ -567,19 +574,10 @@ function NewVehiclePicker({
     setCanSearch(canEditSubmitSteps(roles));
   }, []);
 
-  async function search() {
-    const text = query.trim();
-    if (text.length < 2) return setError("พิมพ์เลขตัวถังอย่างน้อย 2 ตัวอักษร");
-    setError("");
-    setSearching(true);
-    try {
-      setHits((await plateSwapApi.searchNewVehicles(text, undefined, vehicleClass)).vehicles);
-    } catch (err) {
-      setError(errorText(err, "ค้นหาไม่สำเร็จ"));
-    } finally {
-      setSearching(false);
-    }
-  }
+  // ค้นระหว่างพิมพ์ (ผู้ใช้ 2026-11-19) - เดิมต้องกด Enter / ปุ่มค้นหา
+  const typeAhead = useTypeAhead(query, (q) => plateSwapApi.searchNewVehicles(q, undefined, vehicleClass), { enabled: canSearch && !value });
+  const hits: PlateSwapVehicleHit[] | null = typeAhead.data?.vehicles ?? null;
+  const searching = typeAhead.searching;
 
   if (value) {
     return (
@@ -605,24 +603,17 @@ function NewVehiclePicker({
   return (
     <div className="field wide">
       รถใหม่ที่จะรับเลข (ยังไม่รู้เว้นว่างได้ ใส่ทีหลังได้)
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value.toUpperCase())}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void search();
-            }
-          }}
-          placeholder="เลขตัวถังรถใหม่"
-          aria-label="เลขตัวถังรถใหม่"
-        />
-        <button type="button" onClick={search} disabled={searching}>
-          {searching ? "กำลังค้น…" : "ค้นหา"}
-        </button>
-      </div>
-      <Notice tone="error">{error}</Notice>
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value.toUpperCase())}
+        onKeyDown={(e) => {
+          // Enter ไม่ส่งฟอร์มรับงาน - ผลขึ้นเองระหว่างพิมพ์
+          if (e.key === "Enter") e.preventDefault();
+        }}
+        placeholder="พิมพ์เลขตัวถังรถใหม่ อย่างน้อย 2 ตัว"
+        aria-label="เลขตัวถังรถใหม่"
+      />
+      {searching && <span className="muted">กำลังค้นหา…</span>}
       {hits && hits.length === 0 && (
         <Notice tone="info">
           ไม่พบรถใหม่เลขตัวถังนี้ในระบบ -{" "}
@@ -634,7 +625,7 @@ function NewVehiclePicker({
           ) : (
             "แจ้งพนักงานคีย์ข้อมูลให้เพิ่มรถคันนี้ในหน้าเพิ่มข้อมูลรถจดใหม่"
           )}{" "}
-          แล้วกลับมากดค้นหาอีกครั้ง
+          แล้วกลับมาพิมพ์ค้นอีกครั้ง
         </Notice>
       )}
       {hits && hits.length > 0 && (
@@ -765,7 +756,8 @@ interface IntakeRow {
   plateCategory: string;
   plateNumber: string;
   brand: string;
-  ownerName: string;
+  ownerName: string; // ผู้ถือกรรมสิทธิ์
+  possessorName: string; // ผู้ครอบครอง (ไม่บังคับ) - ผู้รับโอนของงานโอนตามผู้ถือกรรมสิทธิ์
   ownerType: OwnerTypeValue; // ผู้ใช้ 2026-11-19: เลือกตั้งแต่รับงาน (ต่อภาษีใช้คิดตัวคูณนิติบุคคล)
   financed: boolean;
   engine: string;
@@ -774,6 +766,7 @@ interface IntakeRow {
   duplicateReason: string;
   needsReason: boolean;
   warnings: string[];
+  filledFromNew: string; // ข้อความแจ้งว่าเติมจากฐานข้อมูลรถจดใหม่ ("" = ไม่ได้เติม)
   pairOf: number | null; // คันคู่ของงานสลับเลข รถเก่า กับ รถเก่า - key ของคันแรก (ประเภทงานตามคันแรก)
 }
 let rowSeq = 1;
@@ -787,6 +780,7 @@ const newRow = (pairOf: number | null = null): IntakeRow => ({
   plateNumber: "",
   brand: "",
   ownerName: "",
+  possessorName: "",
   ownerType: "",
   financed: false,
   engine: "",
@@ -795,16 +789,19 @@ const newRow = (pairOf: number | null = null): IntakeRow => ({
   duplicateReason: "",
   needsReason: false,
   warnings: [],
+  filledFromNew: "",
 });
 
 function IntakePanel({
   writeScope,
   brandNames,
+  financeNames,
   customerOptions,
   onSaved,
 }: {
   writeScope: WriteScope | null;
   brandNames: string[];
+  financeNames: string[];
   customerOptions: Option[];
   onSaved: (vehicles: HubVehicle[]) => void;
 }) {
@@ -844,13 +841,58 @@ function IntakePanel({
           if (r.key !== row.key || r.existing) return r;
           if (r.chassis !== row.chassis || r.plateCategory !== row.plateCategory || r.plateNumber !== row.plateNumber) return r;
           // เจอรถเดิม: ล้างประเภทงานที่เลือกไว้ (ตัวเลือกขึ้นกับประเภทรถของคันเดิม) ยกเว้นคันคู่สลับเลขที่ประเภทงานตามคันแรก
-          return found.vehicle ? { ...r, existing: found.vehicle, warnings, type: r.pairOf !== null ? r.type : EMPTY_TYPE } : { ...r, warnings };
+          if (found.vehicle) return withExisting(r, found.vehicle, warnings);
+          return found.newVehicle ? { ...fillFromNew(r, found.newVehicle), warnings } : { ...r, warnings };
         }),
       );
     } catch {
       // ตรวจไม่ได้ไม่ขวางการกรอก - backend ตรวจซ้ำตอนบันทึก
     }
   }
+
+  // เจอรถเดิม: ล้างประเภทงานที่เลือกไว้ (ตัวเลือกขึ้นกับประเภทรถของคันเดิม) ยกเว้นคันคู่สลับเลขที่ประเภทงานตามคันแรก
+  const withExisting = (r: IntakeRow, vehicle: HubVehicle, warnings: string[] = r.warnings): IntakeRow => ({
+    ...r,
+    existing: vehicle,
+    warnings,
+    type: r.pairOf !== null ? r.type : EMPTY_TYPE,
+  });
+
+  // รถในฐานข้อมูลรถจดใหม่ (รถที่เราจดเอง): เติมเฉพาะช่องที่ยังว่าง - พนักงานตรวจ/แก้ได้ (ผู้ใช้ 2026-11-19)
+  // overwrite = เลือกจากรายการแนะนำ (ผู้ใช้เลือกคันนี้เอง) ใช้ข้อมูลรถของคันนั้นทับช่องรถที่พิมพ์ค้างไว้
+  const fillFromNew = (r: IntakeRow, nv: NewVehiclePrefill, overwrite = false): IntakeRow => {
+    const pick = (typed: string, found: string | null | undefined) => (overwrite ? found || typed : typed || found || "");
+    const foundType = nv.vehicleType && typeAllowed(nv.vehicleType) ? nv.vehicleType : "";
+    const vehicleType = pick(r.vehicleType, foundType);
+    const ownerTypeEmpty = overwrite || !r.ownerType;
+    return {
+      ...r,
+      filledFromNew: "พบรถคันนี้ในฐานข้อมูลรถจดใหม่ - เติมข้อมูลรถ ผู้ถือกรรมสิทธิ์ และผู้ครอบครองให้แล้ว ตรวจว่ายังถูกต้องก่อนบันทึก",
+      vehicleType,
+      type: vehicleType !== r.vehicleType && r.pairOf === null ? EMPTY_TYPE : r.type,
+      chassis: pick(r.chassis, nv.chassis),
+      engine: pick(r.engine, nv.engine),
+      plateCategory: pick(r.plateCategory, nv.plateCategory),
+      plateNumber: pick(r.plateNumber, nv.plateNumber),
+      brand: pick(r.brand, nv.brand && brandNames.includes(nv.brand) ? nv.brand : ""),
+      ownerName: pick(r.ownerName, nv.ownerName),
+      possessorName: pick(r.possessorName, nv.possessorName),
+      ownerType: ownerTypeEmpty ? (nv.ownerType ?? "") : r.ownerType,
+      financed: ownerTypeEmpty ? nv.financed : r.financed,
+    };
+  };
+
+  // เลือกจากรายการแนะนำระหว่างพิมพ์
+  const pickSuggestion = (rowKey: number, choice: { old?: HubVehicle; fresh?: NewVehiclePrefill }) =>
+    setRows((prev) =>
+      withPartners(
+        prev.map((r) => {
+          if (r.key !== rowKey) return r;
+          if (choice.old) return withExisting(r, choice.old, []);
+          return choice.fresh ? fillFromNew(r, choice.fresh, true) : r;
+        }),
+      ),
+    );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -878,7 +920,7 @@ function IntakePanel({
             : !row.brand
               ? "ยี่ห้อ"
               : !row.ownerName.trim()
-                ? "ชื่อเจ้าของรถ"
+                ? "ชื่อผู้ถือกรรมสิทธิ์"
                 : !row.ownerType
                   ? "ประเภทเจ้าของรถ"
                   : "";
@@ -890,6 +932,7 @@ function IntakePanel({
         plateNumber: row.plateNumber,
         brand: row.brand,
         ownerName: row.ownerName,
+        possessorName: row.possessorName.trim() || undefined,
         ownerType: row.ownerType || undefined,
         financed: isTransportType(row.vehicleType) ? false : row.financed,
         engine: row.engine,
@@ -976,7 +1019,7 @@ function IntakePanel({
                     เลขตัวถัง <Req />
                     <input
                       value={row.chassis}
-                      onChange={(e) => patch(row.key, { chassis: e.target.value.toUpperCase().replace(/\s+/g, "") })}
+                      onChange={(e) => patch(row.key, { chassis: e.target.value.toUpperCase().replace(/\s+/g, ""), filledFromNew: "" })}
                       onBlur={() => check(row)}
                     />
                   </label>
@@ -990,7 +1033,7 @@ function IntakePanel({
                       <input value={row.plateCategory} onChange={(e) => patch(row.key, { plateCategory: e.target.value })} onBlur={() => check(row)} maxLength={3} placeholder="หมวด เช่น 4กข" aria-label="หมวดทะเบียน" />
                       <input
                         value={row.plateNumber}
-                        onChange={(e) => patch(row.key, { plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                        onChange={(e) => patch(row.key, { plateNumber: e.target.value.replace(/\D/g, "").slice(0, 4), filledFromNew: "" })}
                         onBlur={() => check(row)}
                         maxLength={4}
                         inputMode="numeric"
@@ -999,6 +1042,11 @@ function IntakePanel({
                       />
                     </div>
                   </div>
+                  <IntakeSuggestions
+                    query={row.chassis || row.plateNumber}
+                    hidden={Boolean(row.filledFromNew)}
+                    onPick={(choice) => pickSuggestion(row.key, choice)}
+                  />
                   <label className="field">
                     ประเภทรถ (รย. / ขส.) <Req />
                     <select
@@ -1032,10 +1080,6 @@ function IntakePanel({
                       ))}
                     </select>
                   </label>
-                  <label className="field">
-                    ชื่อเจ้าของรถ <Req />
-                    <input value={row.ownerName} onChange={(e) => patch(row.key, { ownerName: e.target.value })} />
-                  </label>
                   <OwnerTypeFields
                     ownerType={row.ownerType}
                     financed={row.financed}
@@ -1043,8 +1087,16 @@ function IntakePanel({
                     onOwnerTypeChange={(v) => patch(row.key, { ownerType: v })}
                     onFinancedChange={(v) => patch(row.key, { financed: v })}
                   />
+                  <TitleHolderFields
+                    ownerName={row.ownerName}
+                    possessorName={row.possessorName}
+                    financed={row.financed && !isTransportType(row.vehicleType)}
+                    financeNames={financeNames}
+                    onChange={(change) => patch(row.key, change)}
+                  />
                 </div>
               )}
+              {row.filledFromNew && !row.existing && <Notice tone="info">{row.filledFromNew}</Notice>}
               {row.warnings.map((w) => (
                 <Notice key={w} tone="warn">
                   {w}
@@ -1107,6 +1159,99 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
   );
 }
 
+// รายการแนะนำใต้ช่องเลขตัวถัง/ทะเบียนของฟอร์มรับงาน - ขึ้นระหว่างพิมพ์ ไม่ต้องกด Enter หรือออกจากช่อง (ผู้ใช้ 2026-11-19)
+// พิมพ์รถคันใหม่ที่ไม่มีในระบบได้ตามปกติ: ไม่พบก็ไม่แสดงกล่อง
+function IntakeSuggestions({
+  query,
+  hidden,
+  onPick,
+}: {
+  query: string;
+  hidden: boolean;
+  onPick: (choice: { old?: HubVehicle; fresh?: NewVehiclePrefill }) => void;
+}) {
+  const { data, searching } = useTypeAhead(query, oldVehicleJobsApi.suggest, { minLength: 3, enabled: !hidden });
+  if (hidden || query.trim().length < 3) return null;
+  const old = data?.old ?? [];
+  const fresh = data?.fresh ?? [];
+  const items = [
+    ...old.map((v) => ({
+      key: `old:${v.id}`,
+      title: `${plateOf(v)} · ตัวถัง ${v.chassis}`,
+      sub: [v.brand, v.vehicleType, v.ownerName].filter(Boolean).join(" · "),
+      tag: "รถเก่าในระบบ",
+    })),
+    ...fresh.map((v, i) => ({
+      key: `new:${i}`,
+      title: `${[v.plateCategory, v.plateNumber].filter(Boolean).join(" ") || "ยังไม่มีทะเบียน"} · ตัวถัง ${v.chassis}`,
+      sub: [v.brand, v.vehicleType, v.ownerName, v.possessorName ? `ผู้ครอบครอง ${v.possessorName}` : ""].filter(Boolean).join(" · "),
+      tag: "รถจดใหม่",
+    })),
+  ];
+  return (
+    <div className="field wide">
+      <SuggestionList
+        items={items}
+        searching={searching}
+        showEmpty={false}
+        onPick={(key) => {
+          const [kind, id] = key.split(":");
+          if (kind === "old") onPick({ old: old.find((v) => v.id === id) });
+          else onPick({ fresh: fresh[Number(id)] });
+        }}
+      />
+    </div>
+  );
+}
+
+// ผู้ถือกรรมสิทธิ์ + ผู้ครอบครอง (ผู้ใช้ 2026-11-19: โอนตามผู้ถือกรรมสิทธิ์ = จากผู้ถือกรรมสิทธิ์ไปผู้ครอบครอง)
+// ติดไฟแนนซ์ = ผู้ถือกรรมสิทธิ์คือไฟแนนซ์ เลือกจากรายการ (ชื่อที่ไม่อยู่ในรายการ เช่น ข้อมูลเก่า ยังแสดงให้เลือกค้างไว้)
+function TitleHolderFields({
+  ownerName,
+  possessorName,
+  financed,
+  financeNames,
+  onChange,
+}: {
+  ownerName: string;
+  possessorName: string;
+  financed: boolean;
+  financeNames: string[];
+  onChange: (change: { ownerName?: string; possessorName?: string }) => void;
+}) {
+  const options = ownerName && !financeNames.includes(ownerName) ? [ownerName, ...financeNames] : financeNames;
+  return (
+    <>
+      {financed ? (
+        <label className="field">
+          ผู้ถือกรรมสิทธิ์ (ไฟแนนซ์) <Req />
+          <select value={ownerName} onChange={(e) => onChange({ ownerName: e.target.value })}>
+            <option value="">เลือกไฟแนนซ์</option>
+            {options.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <label className="field">
+          ผู้ถือกรรมสิทธิ์ <Req />
+          <input value={ownerName} onChange={(e) => onChange({ ownerName: e.target.value })} placeholder="ชื่อเจ้าของตามทะเบียน" />
+        </label>
+      )}
+      <label className="field">
+        ผู้ครอบครอง
+        <input
+          value={possessorName}
+          onChange={(e) => onChange({ possessorName: e.target.value })}
+          placeholder={financed ? "ชื่อผู้เช่าซื้อ" : "ถ้าไม่ใช่คนเดียวกับผู้ถือกรรมสิทธิ์"}
+        />
+      </label>
+    </>
+  );
+}
+
 // ประเภทเจ้าของรถสั้นๆ ต่อท้ายชื่อเจ้าของ (ว่าง = ยังไม่ได้ระบุ ไม่แสดง)
 function ownerTypeText(vehicle: HubVehicle): string {
   if (!vehicle.ownerType) return "";
@@ -1117,7 +1262,7 @@ function ownerTypeText(vehicle: HubVehicle): string {
 function VehicleLine({ vehicle }: { vehicle: HubVehicle }) {
   return (
     <p className="muted">
-      {plateOf(vehicle)} · {[vehicle.brand, vehicle.vehicleType, vehicle.ownerName, ownerTypeText(vehicle)].filter(Boolean).join(" · ")} · ตัวถัง {vehicle.chassis}
+      {plateOf(vehicle)} · {[vehicle.brand, vehicle.vehicleType, vehicle.ownerName, ownerTypeText(vehicle), vehicle.possessorName ? `ผู้ครอบครอง ${vehicle.possessorName}` : ""].filter(Boolean).join(" · ")} · ตัวถัง {vehicle.chassis}
     </p>
   );
 }
@@ -1475,6 +1620,7 @@ function VehicleDialog({
   vehicle,
   canWrite,
   brandNames,
+  financeNames,
   onClose,
   onSaved,
   onOpenJob,
@@ -1483,6 +1629,7 @@ function VehicleDialog({
   vehicle: HubVehicle;
   canWrite: boolean;
   brandNames: string[];
+  financeNames: string[];
   onClose: () => void;
   onSaved: (vehicle: HubVehicle) => void;
   onOpenJob: (jobId: string) => void;
@@ -1497,6 +1644,7 @@ function VehicleDialog({
     engine: vehicle.engine ?? "",
     brand: vehicle.brand ?? "",
     ownerName: vehicle.ownerName ?? "",
+    possessorName: vehicle.possessorName ?? "",
     ownerType: (vehicle.ownerType ?? "") as OwnerTypeValue,
     financed: vehicle.financed,
     remark: "",
@@ -1600,16 +1748,19 @@ function VehicleDialog({
                 ))}
               </select>
             </label>
-            <label className="field">
-              ชื่อเจ้าของรถ <Req />
-              <input value={form.ownerName} onChange={set("ownerName")} />
-            </label>
             <OwnerTypeFields
               ownerType={form.ownerType}
               financed={form.financed}
               hideFinanced={transport}
               onOwnerTypeChange={(v) => setForm((prev) => ({ ...prev, ownerType: v }))}
               onFinancedChange={(v) => setForm((prev) => ({ ...prev, financed: v }))}
+            />
+            <TitleHolderFields
+              ownerName={form.ownerName}
+              possessorName={form.possessorName}
+              financed={form.financed && !transport}
+              financeNames={financeNames}
+              onChange={(change) => setForm((prev) => ({ ...prev, ...change }))}
             />
             <label className="field wide">
               เหตุผลที่แก้ <Req />
