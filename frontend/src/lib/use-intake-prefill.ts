@@ -8,15 +8,21 @@ import { oldVehicleJobsApi, plateOf, type IntakePrefill } from "@/lib/old-vehicl
 // เพื่อไม่ต้องห่อ Suspense ทุกหน้า) โหลดครั้งเดียวแล้วเรียก apply ให้หน้านั้นใส่ค่าลงฟอร์มของตัวเอง
 // คืนข้อความแถบแจ้ง (ว่าง = ไม่ได้เปิดจากหน้ารวม) - พนักงานยังแก้ทุกช่องได้ก่อนบันทึก
 // ระหว่างโหลด (ประมาณ 1 วินาที) กันกดบันทึกฟอร์ม (พบ 2026-11-19 ตอนทดสอบ: กดเร็วเกิน = ยื่นด้วยฟอร์มที่ยังว่าง)
-export function useIntakePrefill(apply: (prefill: IntakePrefill) => void): { notice: string; error: boolean } {
-  const [state, setState] = useState<{ notice: string; error: boolean }>({ notice: "", error: false });
+export type IntakeState = { notice: string; error: boolean; missing?: boolean };
+
+export function useIntakePrefill(apply: (prefill: IntakePrefill) => void): IntakeState {
+  const [state, setState] = useState<IntakeState>({ notice: "", error: false });
   const applyRef = useRef(apply);
   useEffect(() => {
     applyRef.current = apply;
   });
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("intake");
-    if (!id) return;
+    if (!id) {
+      // เปิดหน้ายื่นตรงๆ ไม่ผ่านหน้ารวมงานรถเก่า (backend ไม่รับยื่นถ้ายังไม่ได้รับงาน) - แถบบอกทางไปรับงานก่อน
+      setState({ notice: "", error: false, missing: true });
+      return;
+    }
     let cancelled = false;
     // กันส่งฟอร์มทุกฟอร์มในหน้าจนกว่าจะเติมข้อมูลเสร็จ (จับที่ capture phase ก่อน onSubmit ของหน้า)
     const block = (event: Event) => {
