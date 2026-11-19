@@ -170,10 +170,25 @@ export function inspectionRequiredFor(input: InspectionRuleInput): boolean {
   return requiresInspection(code, 0, overdueDays / 365); // อายุรถส่ง 0 = ไม่ใช้เกณฑ์อายุ
 }
 
-// ค่าตรวจตั้งต้นตอนส่งตรวจนอก: รถ ขส. 1,000 แก้ได้ / รถอื่นพนักงานกรอกเอง (ผู้ใช้ 2026-11-18)
-export const TRANSPORT_INSPECTION_DEFAULT_COST = 1000;
+// ค่าตรวจตั้งต้นตอนส่งตรวจนอก ตามประเภทรถ (ผู้ใช้ 2026-11-20: ราคานี้ใช้กับงานตรวจรถของงานรถเก่าทุกแบบ ประเภทที่ไม่มีในตารางให้กรอกเอง)
+// มาจากชีต 'Rate โอน' คอลัมน์ "ค่าตรวจ" ใน Google Sheet "ขนส่ง" (สูตร VLOOKUP ของคอลัมน์ค่าตรวจรถ) - สำเนาฝั่งหน้าเว็บ: frontend/src/lib/old-vehicle-jobs-api.ts
+// ไม่มีในตาราง = รย.3 กระบะมีหลังคาแหนบ, รย.17, รถ ขส. (ทั้งหมดกรอกเอง; รถ ขส. เดิมตั้งต้น 1,000 ถูกเอาออกตามคำตอบนี้)
+export const INSPECTION_COST_BY_TYPE: Record<string, number> = {
+  'รย.1-เก๋ง 2 ตอน': 200,
+  'รย.1-นั่ง 2 ตอน': 300,
+  'รย.1-นั่ง 3 ตอน': 300,
+  'รย.2-นั่ง 2 แถว': 500,
+  'รย.2-นั่ง 4 ตอน': 500,
+  'รย.3-กระบะบรรทุก': 300,
+  'รย.3-กระบะบรรทุกมีหลังคา': 1000,
+  'รย.3-ตู้บรรทุก': 1000,
+  'รย.12-น้อยกว่า 300cc': 100,
+  'รย.12-300-799cc': 300,
+  'รย.12-800-999cc': 500,
+  'รย.12-1000cc ขึ้นไป': 1000,
+};
 export const defaultInspectionCost = (vehicleType: string | null | undefined): number | null =>
-  isTransportType(vehicleType) ? TRANSPORT_INSPECTION_DEFAULT_COST : null;
+  (vehicleType ? INSPECTION_COST_BY_TYPE[vehicleType] : undefined) ?? null;
 
 // สถานะของงานที่ยังไม่ยื่น (ยังไม่มีแถวในตารางงานจริง)
 export interface IntakeState {
