@@ -192,6 +192,7 @@ function transportRow(overrides: Record<string, unknown> = {}) {
     insuranceConfirmed: false,
     paymentDate: null,
     skipContribution: false,
+    bookReplacement: false,
     taxBreakdown: { owner: JURISTIC },
     receivedDate: null,
     deliveredDate: null,

@@ -1737,6 +1737,8 @@ model TaxRenewal {
   // ยื่นชำระภาษี
   paymentDate      DateTime?
   skipContribution Boolean   @default(false) // ไม่มีค่าลงขันสำหรับงานนี้
+  // ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) - รถยนต์และจักรยานยนต์ (ไม่ใช่ ขส.) เพิ่ม 100 บาทใน Bill (ผู้ใช้ 2026-11-19)
+  bookReplacement  Boolean   @default(false)
 
   billItems    Json? // [{label, amount}] - ภาษี + เงินเพิ่ม
   noBillItems  Json? // [{label, amount}] - ลงขัน
@@ -2128,6 +2130,10 @@ model OldVehicle {
   engine        String? // เลขเครื่อง - ไม่บังคับตอนรับงาน
   brand         String? // ยี่ห้อ (ชื่อตามตาราง Brand) - บังคับตอนรับงาน / null ได้เฉพาะแถวย้อนหลังจากงานต่อภาษีเดิมที่ไม่มียี่ห้อ
   ownerName     String? // ชื่อเจ้าของรถ - บังคับตอนรับงาน / null ได้เฉพาะแถวย้อนหลัง
+  // ประเภทเจ้าของรถ (ผู้ใช้ 2026-11-19: เลือกตั้งแต่รับงาน ใช้คิดตัวคูณนิติบุคคลของต่อภาษี) - บังคับตอนรับงานรถคันใหม่
+  // null = แถวย้อนหลัง / รถที่รับก่อนมีช่องนี้ / financed = ติดไฟแนนซ์ แล้ว ownerType คือประเภทผู้เช่าซื้อ (เหมือนหน้าต่อภาษี)
+  ownerType     OwnerType?
+  financed      Boolean    @default(false)
 
   createdById String? // คนรับงานคนแรก (id ของ User ไม่มี FK)
   createdAt   DateTime @default(now())

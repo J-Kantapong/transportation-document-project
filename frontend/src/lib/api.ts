@@ -821,6 +821,7 @@ export interface TaxRenewalInput {
   inspectionDate?: string | null;
   insuranceConfirmed?: boolean;
   skipContribution?: boolean;
+  bookReplacement?: boolean; // ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) Bill 100 - รถยนต์และจักรยานยนต์ (ไม่ใช่ ขส.)
   paymentDate?: string | null;
 }
 
@@ -832,6 +833,7 @@ export interface TaxRenewalUpdateInput {
   inspectionDate?: string | null; // รถ ขส. เท่านั้น - เติมจากว่างเป็นงานปกติ แก้/ล้างต้องมี remark
   insuranceConfirmed?: boolean;
   skipContribution?: boolean;
+  bookReplacement?: boolean;
   paymentDate?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
@@ -886,6 +888,7 @@ export interface TaxRenewal {
   receiptAmount?: string | null;
   receipts?: { id: string; createdAt: string }[];
   skipContribution: boolean;
+  bookReplacement: boolean;
   billTotal: string | null;
   noBillTotal: string | null;
   customer?: { id: string; name: string; company: string | null } | null;

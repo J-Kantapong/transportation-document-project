@@ -162,6 +162,8 @@ export interface HubVehicle {
   engine: string | null;
   brand: string | null;
   ownerName: string | null;
+  ownerType: "INDIVIDUAL" | "JURISTIC" | null; // null = ยังไม่ได้ระบุ (รับก่อนมีช่องนี้ / แถวย้อนหลัง)
+  financed: boolean; // ติดไฟแนนซ์ - ownerType คือประเภทผู้เช่าซื้อ
   updatedAt: string;
   jobs: HubJob[];
 }
@@ -182,6 +184,8 @@ export interface IntakeVehicleInput {
   engine?: string;
   brand?: string;
   ownerName?: string;
+  ownerType?: "INDIVIDUAL" | "JURISTIC"; // บังคับเมื่อรับรถคันใหม่
+  financed?: boolean;
   jobType?: OldJobType | "";
   swapKind?: SwapKind; // สลับเลข: บังคับ
   pairKey?: string; // สลับเลข รถเก่า กับ รถเก่า: ค่าเดียวกันในสองคันของคู่
@@ -200,6 +204,8 @@ export interface UpdateOldVehicleInput {
   engine: string;
   brand: string;
   ownerName: string;
+  ownerType?: "INDIVIDUAL" | "JURISTIC"; // ไม่ส่ง = คงค่าเดิม
+  financed?: boolean;
   remark: string;
   expectedUpdatedAt: string;
 }

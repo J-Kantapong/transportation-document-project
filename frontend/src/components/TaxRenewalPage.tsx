@@ -20,6 +20,7 @@ import { useIntakePrefill } from "@/lib/use-intake-prefill";
 import { toast } from "@/lib/toast";
 import { Icon } from "@/components/Icon";
 import { Notice, Req } from "@/components/ui";
+import { OwnerTypeFields } from "@/components/OwnerTypeFields";
 
 type Source = "VEHICLE" | "MANUAL";
 
@@ -50,6 +51,8 @@ interface FormState {
   inspectionConfirmed: boolean;
   insuranceConfirmed: boolean;
   skipContribution: boolean;
+  // ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) - Bill 100 บาท รถยนต์และจักรยานยนต์ ไม่ใช่รถ ขส. (ผู้ใช้ 2026-11-19)
+  bookReplacement: boolean;
 }
 
 const EMPTY: FormState = {
@@ -75,6 +78,7 @@ const EMPTY: FormState = {
   inspectionConfirmed: false,
   insuranceConfirmed: false,
   skipContribution: false,
+  bookReplacement: false,
 };
 
 // ฟอร์มเปล่าพร้อมใช้ - วันที่ยื่นงานตั้งต้นเป็นวันที่ทำรายการ (อ่านตอนเปิดฟอร์ม ไม่ใช่ตอน import
@@ -101,6 +105,7 @@ function toInput(form: FormState): TaxRenewalInput {
     inspectionConfirmed: form.inspectionConfirmed,
     insuranceConfirmed: form.insuranceConfirmed,
     skipContribution: form.skipContribution,
+    bookReplacement: form.bookReplacement,
   };
   // รถที่ยังไม่ถึงขั้นที่ 4 อาจยังไม่มีวันจดทะเบียน/เชื้อเพลิง/เจ้าของ - ส่งค่าที่กรอกเสริมไปด้วย
   // backend ใช้ข้อมูลของ Vehicle ก่อนเสมอ ค่าพวกนี้ถูกใช้เฉพาะช่องที่รถยังว่าง
@@ -241,6 +246,9 @@ export function TaxRenewalPage() {
       plateNumber: vehicle.plateNumber,
       vehicleType: vehicle.vehicleType ?? "",
       ownerName: vehicle.ownerName ?? "",
+      // ประเภทเจ้าของรถ + ไฟแนนซ์ที่เลือกตอนรับงาน (รถที่รับก่อนมีช่องนี้ = ว่าง ให้เลือกที่นี่)
+      ownerType: vehicle.ownerType ?? prev.ownerType,
+      financed: vehicle.ownerType ? vehicle.financed : prev.financed,
       firstRegistrationDate: job.firstRegistrationDate ? isoToDisplayDate(job.firstRegistrationDate) : prev.firstRegistrationDate,
       taxExpiryDate: job.taxExpiryDate ? isoToDisplayDate(job.taxExpiryDate) : prev.taxExpiryDate,
     })),
@@ -636,6 +644,17 @@ export function TaxRenewalPage() {
                 />
                 ไม่มีค่าลงขัน
               </label>
+              {/* ใบแทนคู่มือจดทะเบียน: รถยนต์และจักรยานยนต์ (ไม่ใช่รถ ขส.) */}
+              {allowsBookReplacement(form.source === "VEHICLE" ? (selectedVehicle?.body ?? "") : form.vehicleType) && (
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.bookReplacement}
+                    onChange={(e) => set("bookReplacement", e.target.checked)}
+                  />
+                  ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) +100 บาท
+                </label>
+              )}
             </div>
 
             {ready && <Notice tone="error">{previewError}</Notice>}
@@ -868,6 +887,7 @@ function EditRenewalDialog({
     financed: row.financed,
     ownerName: row.ownerName ?? "",
     skipContribution: row.skipContribution,
+    bookReplacement: row.bookReplacement,
   });
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
@@ -925,6 +945,7 @@ function EditRenewalDialog({
         firstRegistrationDate: toIso(form.firstRegistrationDate),
         ownerName: form.ownerName || null,
         skipContribution: form.skipContribution,
+        bookReplacement: allowsBookReplacement(form.vehicleType) ? form.bookReplacement : false,
         // รถจากระบบ: เลขตัวถัง/เลขเครื่องมาจากข้อมูลรถ / เจ้าของที่มาจากข้อมูลรถแก้ที่นี่ไม่ได้ - ไม่ส่งไป
         ...(manual ? { chassis: form.chassis, engine: form.engine || null } : {}),
         ...(!row.ownerFromVehicle && form.ownerType ? { ownerType: form.ownerType, financed: transport ? false : form.financed } : {}),
@@ -1070,8 +1091,14 @@ function EditRenewalDialog({
         <input type="checkbox" checked={form.skipContribution} onChange={(e) => set("skipContribution", e.target.checked)} />
         ไม่มีค่าลงขัน
       </label>
+      {allowsBookReplacement(form.vehicleType) && (
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginTop: 10 }}>
+          <input type="checkbox" checked={form.bookReplacement} onChange={(e) => set("bookReplacement", e.target.checked)} />
+          ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) +100 บาท
+        </label>
+      )}
       <p className="sub" style={{ marginTop: 8 }}>
-        งานที่ชำระแล้ว: ยอดภาษี/เงินเพิ่ม/ลงขันคิดใหม่ตามข้อมูลที่แก้ (ยอดเดิม Bill {baht(row.billTotal)} · ลงขัน {baht(row.noBillTotal)})
+        งานที่ชำระแล้ว: ยอดภาษี/เงินเพิ่ม/ใบแทน/ลงขันคิดใหม่ตามข้อมูลที่แก้ (ยอดเดิม Bill {baht(row.billTotal)} · ลงขัน {baht(row.noBillTotal)})
       </p>
       <label className="field" style={{ marginTop: 12 }}>
         <span>เหตุผลที่แก้ <Req /></span>
@@ -1151,6 +1178,11 @@ const plateOf = (v: { plateCategory: string | null; plateNumber: string | null }
 
 // ชื่อเจ้าของรถในช่องค้นหา - โชว์ทั้งผู้ถือกรรมสิทธิ์ (ติดไฟแนนซ์ = ชื่อไฟแนนซ์) และผู้ครอบครอง
 // รถที่ยังไม่ได้บันทึกเจ้าของ (ยังไม่ถึงขั้นที่ 4) ไม่มีทั้งคู่ จึงไม่แสดงบรรทัดนี้เลย
+// ใบแทนคู่มือจดทะเบียน: มีประเภทรถ และไม่ใช่รถ ขส. (รถยนต์และจักรยานยนต์ - กฎเดียวกับ bookReplacementOf ของ backend)
+function allowsBookReplacement(vehicleType: string): boolean {
+  return Boolean(vehicleType) && !isTransportType(vehicleType);
+}
+
 function OwnerLine({ v }: { v: TaxRenewalVehicleHit }) {
   const parts = [
     v.ownerName && `ผู้ถือกรรมสิทธิ์ ${v.ownerName}`,
@@ -1374,46 +1406,6 @@ function VehicleTypeOptions({ writeScope, transport = true }: { writeScope: Vehi
             </option>
           ))}
         </optgroup>
-      )}
-    </>
-  );
-}
-
-function OwnerTypeFields({
-  ownerType,
-  financed,
-  hideFinanced = false,
-  onOwnerTypeChange,
-  onFinancedChange,
-}: {
-  ownerType: FormState["ownerType"];
-  financed: boolean;
-  hideFinanced?: boolean; // รถ ขส.: ไม่มีเรื่องเช่าซื้อ (ไม่คูณ 2 อยู่แล้ว) - ซ่อนติ๊กไฟแนนซ์
-  onOwnerTypeChange: (v: FormState["ownerType"]) => void;
-  onFinancedChange: (v: boolean) => void;
-}) {
-  return (
-    <>
-      <label className="field">
-        <span>{financed ? "ประเภทผู้ครอบครอง (ผู้เช่าซื้อ)" : "ประเภทเจ้าของรถ"} <Req /></span>
-        <select value={ownerType} onChange={(e) => onOwnerTypeChange(e.target.value as FormState["ownerType"])} required>
-          <option value="">{financed ? "เลือกประเภทผู้ครอบครอง" : "เลือกประเภทเจ้าของรถ"}</option>
-          <option value="INDIVIDUAL">บุคคลธรรมดา</option>
-          <option value="JURISTIC">นิติบุคคล</option>
-        </select>
-      </label>
-      {hideFinanced ? null : (
-      <div className="field">
-        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            style={{ width: 18, height: 18, minHeight: 0, padding: 0, margin: 0 }}
-            checked={financed}
-            onChange={(e) => onFinancedChange(e.target.checked)}
-          />
-          ติดไฟแนนซ์ (เช่าซื้อ)
-        </label>
-      </div>
       )}
     </>
   );

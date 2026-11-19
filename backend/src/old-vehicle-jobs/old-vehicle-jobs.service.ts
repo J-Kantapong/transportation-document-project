@@ -5,6 +5,7 @@ import { type AuditChanges, diffChanges, requireRemark, writeAudit } from '../au
 import { currentUser } from '../auth/request-context.js';
 import { assertKindInScope, currentVehicleScope } from '../auth/vehicle-scope.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { OwnerType } from '../generated/prisma/enums.js';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import {
   isoDate,
@@ -110,6 +111,8 @@ export interface HubVehicle {
   engine: string | null;
   brand: string | null;
   ownerName: string | null;
+  ownerType: OwnerType | null; // null = ยังไม่ได้ระบุ (แถวย้อนหลัง / รับก่อนมีช่องนี้)
+  financed: boolean;
   updatedAt: string;
   jobs: HubJob[]; // ใหม่สุดก่อน
 }
@@ -123,6 +126,8 @@ export interface IntakeVehicleDto {
   engine?: unknown;
   brand?: unknown;
   ownerName?: unknown;
+  ownerType?: unknown; // INDIVIDUAL | JURISTIC - บังคับเมื่อรับรถคันใหม่ (ติดไฟแนนซ์ = ประเภทผู้เช่าซื้อ)
+  financed?: unknown;
   jobType?: unknown; // เว้นว่างได้ = รอทำ
   swapKind?: unknown; // สลับเลข: OLD_NEW | OLD_OLD (บังคับเมื่อ jobType = PLATE_SWAP)
   pairKey?: unknown; // สลับเลข OLD_OLD: ข้อความเดียวกันในสองคันที่เป็นคู่กัน (ต้องมาครบ 2 คันในคำขอเดียว)
@@ -156,8 +161,24 @@ export interface UpdateOldVehicleDto {
   engine?: unknown;
   brand?: unknown;
   ownerName?: unknown;
+  ownerType?: unknown;
+  financed?: unknown;
   remark?: unknown;
   expectedUpdatedAt?: unknown;
+}
+
+// ประเภทเจ้าของรถตอนรับงาน / แก้ข้อมูลรถ (ผู้ใช้ 2026-11-19) - เก็บแบบเดียวกับฟอร์มต่อภาษี: ติดไฟแนนซ์ = ประเภทผู้เช่าซื้อ
+// รถ ขส. ไม่มีเรื่องเช่าซื้อ และตั้งต้นเป็นนิติบุคคล (เหมือนฟอร์มต่อภาษี)
+export function parseOwnerFields(rawType: unknown, rawFinanced: unknown, vehicleType: string | null): { ownerType: OwnerType; financed: boolean } {
+  const transport = isTransportType(vehicleType);
+  const value = rawType === undefined || rawType === null || rawType === '' ? (transport ? OwnerType.JURISTIC : null) : rawType;
+  if (value !== OwnerType.INDIVIDUAL && value !== OwnerType.JURISTIC) {
+    throw new BadRequestException({ error: value === null ? 'กรุณาเลือกประเภทเจ้าของรถ' : 'ประเภทเจ้าของรถต้องเป็นบุคคลธรรมดาหรือนิติบุคคล' });
+  }
+  if (rawFinanced !== undefined && rawFinanced !== null && typeof rawFinanced !== 'boolean') {
+    throw new BadRequestException({ error: 'ค่าติดไฟแนนซ์ไม่ถูกต้อง' });
+  }
+  return { ownerType: value, financed: transport ? false : rawFinanced === true };
 }
 
 const customerSelect = { id: true, name: true, company: true } as const;
@@ -443,6 +464,8 @@ export class OldVehicleJobsService {
       engine: vehicle.engine,
       brand: vehicle.brand,
       ownerName: vehicle.ownerName,
+      ownerType: vehicle.ownerType,
+      financed: vehicle.financed,
       updatedAt: vehicle.updatedAt.toISOString(),
       jobs,
     };
@@ -810,6 +833,7 @@ export class OldVehicleJobsService {
               engine: optionalText(item?.engine, 'เลขเครื่อง', 100),
               brand: await this.resolveBrandName(item?.brand),
               ownerName: requiredText(item?.ownerName, 'ชื่อเจ้าของรถ'),
+              ...parseOwnerFields(item?.ownerType, item?.financed, vehicleType),
               createdById: currentUser()?.id ?? null,
             };
             vehicle = { vehicleType, vehicleClass: create.vehicleClass as string };
@@ -1140,6 +1164,10 @@ export class OldVehicleJobsService {
       engine: dto.engine === undefined ? existing.engine : optionalText(dto.engine, 'เลขเครื่อง', 100),
       brand: dto.brand === undefined ? existing.brand : await this.resolveBrandName(dto.brand),
       ownerName: dto.ownerName === undefined ? existing.ownerName : requiredText(dto.ownerName, 'ชื่อเจ้าของรถ'),
+      // ส่งมาเฉพาะเมื่อแก้ - ไม่ส่ง = คงค่าเดิม (แถวเก่าที่ยังว่างก็ว่างต่อได้) / เปลี่ยนเป็นรถ ขส. = ไม่มีไฟแนนซ์
+      ...(dto.ownerType === undefined && dto.financed === undefined
+        ? { ownerType: existing.ownerType, financed: isTransportType(vehicleType) ? false : existing.financed }
+        : parseOwnerFields(dto.ownerType === undefined ? existing.ownerType : dto.ownerType, dto.financed === undefined ? existing.financed : dto.financed, vehicleType)),
     };
     const changes: AuditChanges = diffChanges(existing, data);
     if (!Object.keys(changes).length) throw new BadRequestException({ error: 'ยังไม่ได้แก้ข้อมูลช่องใด' });

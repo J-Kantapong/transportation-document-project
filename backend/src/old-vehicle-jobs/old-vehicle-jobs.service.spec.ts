@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { OldVehicleJobsService } from './old-vehicle-jobs.service.js';
+import { OldVehicleJobsService, parseOwnerFields } from './old-vehicle-jobs.service.js';
 
 // sync(): ผูกงานจริงกับแถวรับงาน / สร้างแถวย้อนหลัง - ส่วนที่เสี่ยงที่สุดของหน้ารวมงานรถเก่า (ไม่มี UI ให้เห็นว่าผูกผิด)
 const d = (iso: string) => new Date(`${iso}T03:00:00.000Z`);
@@ -282,5 +282,21 @@ describe('OldVehicleJobsService - คนรับงานอย่างเด�
       await expect(asRole(roles, () => svc().cancel('j1', 'ลูกค้ายกเลิก'))).rejects.toMatchObject({ status: 403 });
     }
     await expect(asRole(['STAFF_ENTRY', 'STAFF_CAR'], () => svc().block('j1', { reason: 'OTHER' }))).rejects.not.toMatchObject({ status: 403 });
+  });
+});
+
+// ประเภทเจ้าของรถตอนรับงาน (ผู้ใช้ 2026-11-19)
+describe('parseOwnerFields', () => {
+  it('requires an owner type for a normal vehicle', () => {
+    expect(() => parseOwnerFields(undefined, false, 'รย.1-รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน')).toThrow();
+    expect(() => parseOwnerFields('COMPANY', false, 'รย.1-รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน')).toThrow();
+  });
+  it('keeps the hirer type and finance flag', () => {
+    expect(parseOwnerFields('INDIVIDUAL', true, 'รย.1-รถยนต์นั่งส่วนบุคคลไม่เกิน 7 คน')).toEqual({ ownerType: 'INDIVIDUAL', financed: true });
+    expect(parseOwnerFields('JURISTIC', undefined, 'รย.12-รถจักรยานยนต์ส่วนบุคคล')).toEqual({ ownerType: 'JURISTIC', financed: false });
+  });
+  it('defaults transport vehicles to juristic without finance', () => {
+    expect(parseOwnerFields(undefined, true, 'ขส.-ส่วนบุคคล')).toEqual({ ownerType: 'JURISTIC', financed: false });
+    expect(parseOwnerFields('INDIVIDUAL', true, 'ขส.-ส่วนบุคคล')).toEqual({ ownerType: 'INDIVIDUAL', financed: false });
   });
 });

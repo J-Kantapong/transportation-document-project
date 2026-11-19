@@ -237,7 +237,7 @@ export class TaxRenewalService {
     const tax = await this.computeTax(info, paymentDate, {
       inspectionConfirmed: inspectionConfirmedOf(info.vehicleType, inspectionDate, Boolean(body.inspectionConfirmed)),
     });
-    const fees = calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution) });
+    const fees = calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution), bookReplacement: bookReplacementOf(info.vehicleType, body.bookReplacement) });
     return { tax, fees };
   }
 
@@ -252,8 +252,9 @@ export class TaxRenewalService {
     assertInspectionDate(info.vehicleType, inspectionDate, paymentDate);
     const inspectionConfirmed = inspectionConfirmedOf(info.vehicleType, inspectionDate, Boolean(body.inspectionConfirmed));
     const tax = await this.computeTax(info, paymentDate ?? todayInBangkok(), { inspectionConfirmed });
+    const bookReplacement = bookReplacementOf(info.vehicleType, body.bookReplacement);
     const fees = paymentDate
-      ? calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution) })
+      ? calculateTaxRenewalFees(tax, { skipContribution: Boolean(body.skipContribution), bookReplacement })
       : null;
     // เรื่องเช่าซื้อยังไม่มีคอลัมน์ใน TaxRenewal - เก็บเจ้าของที่ใช้คิดไว้ใน taxBreakdown.owner เสมอ (งานที่ยังไม่ชำระด้วย)
     // เพื่อให้ update() คิดยอดตอนใส่วันที่ชำระทีหลังด้วยเจ้าของเดิม (พบ 2026-09-27)
@@ -271,6 +272,7 @@ export class TaxRenewalService {
         insuranceConfirmed: Boolean(body.insuranceConfirmed),
         paymentDate,
         skipContribution: Boolean(body.skipContribution),
+        bookReplacement,
         billItems: fees ? toJson(fees.billItems) : undefined,
         noBillItems: fees ? toJson(fees.noBillItems) : undefined,
         billTotal: fees?.billTotal ?? undefined,
@@ -501,6 +503,11 @@ export class TaxRenewalService {
       body.insuranceConfirmed === undefined ? existing.insuranceConfirmed : Boolean(body.insuranceConfirmed);
     const skipContribution =
       body.skipContribution === undefined ? existing.skipContribution : Boolean(body.skipContribution);
+    // ใบแทนคู่มือจดทะเบียน: เปลี่ยนเป็นรถ ขส. = ล้างให้เอง
+    const bookReplacement = bookReplacementOf(
+      vehicleType,
+      body.bookReplacement === undefined ? existing.bookReplacement : body.bookReplacement,
+    );
     const paymentDate =
       body.paymentDate === undefined ? existing.paymentDate : parseDate(body.paymentDate, 'วันที่ชำระ');
     // รถตาม พ.ร.บ.ขนส่ง (ผู้ใช้ 2026-11-09): วันที่ตรวจสภาพรถ - เปลี่ยนประเภทรถจาก ขส. เป็นรถเล็กต้องล้างวันที่นี้ด้วย (400 ถ้ายังค้าง)
@@ -541,7 +548,7 @@ export class TaxRenewalService {
     }
 
     // แยกการแก้ข้อมูล (ต้องมีเหตุผล) ออกจากงานปกติ: กรอกวันที่ที่ยังว่าง = งานปกติ / แก้หรือล้างวันที่ที่มีแล้ว = แก้ข้อมูล
-    const detailChanges = diffChanges(existing, { ...details, skipContribution });
+    const detailChanges = diffChanges(existing, { ...details, skipContribution, bookReplacement });
     const dateChanges = diffChanges(existing, { inspectionDate, paymentDate, receivedDate, deliveredDate });
     const correctedDates = WORKFLOW_DATE_FIELDS.filter((field) => field in dateChanges && existing[field] !== null);
     const isCorrection = Object.keys(detailChanges).length > 0 || ownerChanged || correctedDates.length > 0 || customerCorrected;
@@ -550,7 +557,8 @@ export class TaxRenewalService {
     // ยอดเงินคิดใหม่เมื่อวันที่ชำระ ตัวเลือกลงขัน หรือข้อมูลที่ใช้คิดภาษีเปลี่ยน (เงินเพิ่มผูกกับวันที่ชำระโดยตรง)
     const taxInputChanged = TAX_INPUT_FIELDS.some((field) => field in detailChanges) || ownerChanged;
     const paymentChanged = 'paymentDate' in dateChanges;
-    const feesChanged = paymentChanged || skipContribution !== existing.skipContribution || taxInputChanged;
+    const feesChanged =
+      paymentChanged || skipContribution !== existing.skipContribution || bookReplacement !== existing.bookReplacement || taxInputChanged;
     const info: ParsedVehicleInfo = {
       vehicleId: existing.vehicleId,
       customerId: existing.customerId,
@@ -564,7 +572,7 @@ export class TaxRenewalService {
     if (paymentDate && feesChanged) {
       const tax = await this.computeTax(info, paymentDate, { inspectionConfirmed });
       // รถ ขส. ที่ใช้ยอดตามใบเสร็จ: คิดใหม่แล้วยังใช้ยอดใบเสร็จที่มีอยู่เป็น Bill
-      const fees = calculateTaxRenewalFees(tax, { skipContribution, receiptAmount: existing.receiptAmount === null ? null : Number(existing.receiptAmount) });
+      const fees = calculateTaxRenewalFees(tax, { skipContribution, bookReplacement, receiptAmount: existing.receiptAmount === null ? null : Number(existing.receiptAmount) });
       feeData = {
         inspectionRequired: tax.inspectionRequired,
         billItems: toJson(fees.billItems),
@@ -638,6 +646,7 @@ export class TaxRenewalService {
       inspectionDate,
       insuranceConfirmed,
       skipContribution,
+      bookReplacement,
       paymentDate,
       receivedDate,
       deliveredDate,
@@ -807,6 +816,14 @@ export class TaxRenewalService {
 
 // รถ ขส. ที่ยังไม่มีตารางอัตรา (taxBreakdown.taxFromReceipt) และชำระแล้ว: Bill ของงาน = ยอดบนใบเสร็จ (ผู้ใช้ 2026-11-18)
 // คืน null เมื่องานนี้ไม่ได้ใช้ยอดตามใบเสร็จ หรือยังไม่ชำระ (ยังไม่มี snapshot ยอดเงิน)
+// ใบแทนคู่มือจดทะเบียน (กรณีเล่มเต็ม) - รถยนต์และจักรยานยนต์ / รถ ขส. เก็บเป็น false เสมอ (ผู้ใช้ 2026-11-19)
+function bookReplacementOf(vehicleType: string | null | undefined, raw: unknown): boolean {
+  if (raw !== undefined && raw !== null && typeof raw !== 'boolean') {
+    throw new BadRequestException({ error: 'ค่าใบแทนคู่มือจดทะเบียนไม่ถูกต้อง' });
+  }
+  return raw === true && vehicleClassOf(vehicleType) !== 'TRANSPORT';
+}
+
 function receiptTaxPatch(existing: { taxBreakdown: unknown; paymentDate: Date | null }, receiptAmount: number) {
   const breakdown = existing.taxBreakdown as { taxFromReceipt?: boolean } | null;
   if (!breakdown?.taxFromReceipt || !existing.paymentDate) return null;
