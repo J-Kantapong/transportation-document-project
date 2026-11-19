@@ -37,7 +37,7 @@ export function ReceiveBookQueue({ kind }: { kind: VehicleKind }) {
   return (
     <ReceivingQueuePage
       title={`รับเล่มทะเบียน · ${VEHICLE_KIND_LABEL[kind]}`}
-      back={{ href: "/registration/new-vehicle/receive-book", label: "← เลือกประเภทรถ" }}
+      back={{ href: "/registration/new-vehicle/receive-book?menu=1", label: "← เลือกประเภทรถ" }}
       headerSlot={canWrite === false ? <p className="muted">ดูได้อย่างเดียว - บันทึกรับเล่มได้เฉพาะพนักงานยื่น{VEHICLE_KIND_LABEL[kind]}</p> : undefined}
       groupBySheet
       dateColumnLabel="วันที่รับงาน"

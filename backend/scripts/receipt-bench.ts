@@ -16,7 +16,8 @@ const PRICE = { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 };
 type Price = typeof PRICE;
 // รุ่นอื่นที่เอามาเทียบ (ราคา ณ 2026-11): Sonnet 5.5 ราคาเท่า Sonnet 5 ยกเว้น cache read, Haiku 5.5 ถูกกว่า ~20 เท่า
 const SONNET_55 = { model: 'claude-sonnet-5-5', price: { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 } };
-const HAIKU_55 = { model: 'claude-haiku-5-5', price: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 } };
+const OPUS_55 = { model: 'claude-opus-5-5', price: { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 } };
+const HAIKU_55 ={ model: 'claude-haiku-5-5', price: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 } };
 const THB_PER_USD = 35;
 const CONCURRENCY = 4;
 
@@ -41,6 +42,7 @@ const VARIANTS: Variant[] = [
   // เทียบรุ่น: ตั้งค่าเหมือนที่ใช้จริงใน receipt-extractor.ts (effort medium + cache prompt) ต่างกันแค่รุ่น
   { name: 'prod', note: 'Sonnet 5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false },
   { name: 'sonnet55', note: 'Sonnet 5.5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false, ...SONNET_55 },
+  { name: 'opus55', note: 'Opus 5.5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false, ...OPUS_55 },
   { name: 'haiku55', note: 'Haiku 5.5 ตั้งค่าเหมือน production', effort: 'medium', maxEdge: null, cachePrompt: true, batch: false, ...HAIKU_55 },
   { name: 'haiku55-high', note: 'Haiku 5.5 effort high', effort: 'high', maxEdge: null, cachePrompt: true, batch: false, ...HAIKU_55 },
   { name: 'batch-low', note: 'effort low ส่งผ่าน Batch API (ถูกลงครึ่งหนึ่ง แต่ต้องรอ)', effort: 'low', maxEdge: null, cachePrompt: false, batch: true },
@@ -179,8 +181,10 @@ interface Img {
 async function runLive(client: Anthropic, v: Variant, images: Img[]): Promise<Row[]> {
   const rows: Row[] = new Array<Row>(images.length);
   let next = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
+  const worker = async (once?: boolean | number): Promise<void> => {
+    once = once === true; // Array.from ส่ง index มาเป็น argument - นับเฉพาะ true
+    for (let done = 0; ; done++) {
+      if (once && done > 0) return;
       const i = next++;
       if (i >= images.length) return;
       const img = images[i];
@@ -198,9 +202,9 @@ async function runLive(client: Anthropic, v: Variant, images: Img[]): Promise<Ro
       process.stdout.write('.');
     }
   };
-  // แบบที่ใช้ cache ต้องยิงทีละใบ ไม่งั้นใบแรกๆ วิ่งพร้อมกันแล้วต่างคนต่างเขียน cache แทนที่จะอ่านของกัน
-  const lanes = v.cachePrompt ? 1 : Math.min(CONCURRENCY, images.length);
-  await Promise.all(Array.from({ length: lanes }, worker));
+  // แบบที่ใช้ cache: ยิงใบแรกใบเดียวก่อนให้ cache ถูกเขียน แล้วที่เหลือค่อยวิ่งพร้อมกัน (ไม่งั้นต่างคนต่างเขียน cache)
+  if (v.cachePrompt) await worker(true);
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, images.length) }, worker));
   return rows;
 }
 

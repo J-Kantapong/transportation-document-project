@@ -52,7 +52,7 @@ export function ReceivePlateQueue({ kind }: { kind: PlateKind }) {
   return (
     <ReceivingQueuePage
       title={`รับป้ายทะเบียน · ${VEHICLE_KIND_LABEL[kind]}`}
-      back={{ href: "/registration/new-vehicle/receive-plate", label: "← เลือกประเภทรถ" }}
+      back={{ href: "/registration/new-vehicle/receive-plate?menu=1", label: "← เลือกประเภทรถ" }}
       headerSlot={canWrite === false ? <p className="muted">ดูได้อย่างเดียว - บันทึกรับป้ายได้เฉพาะพนักงานยื่น{VEHICLE_KIND_LABEL[kind]}</p> : undefined}
       groupBySheet
       dateColumnLabel="วันที่รับงาน"

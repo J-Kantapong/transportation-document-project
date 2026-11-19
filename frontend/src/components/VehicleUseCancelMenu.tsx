@@ -9,7 +9,7 @@ export function VehicleUseCancelMenu({ vehicleClass }: { vehicleClass: Cancellat
   const base = `/registration/other/cancel-use/${CLASS_SEGMENT[vehicleClass]}`;
   return (
     <section className="content">
-      <Link href="/registration/other/cancel-use" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+      <Link href="/registration/other/cancel-use?menu=1" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← ยกเลิกการใช้รถ
       </Link>
       <h1>ยกเลิกการใช้รถ ({CLASS_LABEL[vehicleClass]})</h1>

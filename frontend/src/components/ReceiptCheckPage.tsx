@@ -794,7 +794,7 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
           }}
         />
       )}
-      <Link href="/registration/new-vehicle/receive-receipt" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+      <Link href="/registration/new-vehicle/receive-receipt?menu=1" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← เลือกประเภทรถ
       </Link>
       <h1 tabIndex={-1}>รับใบเสร็จ · {RECEIPT_KIND_LABEL[tab]}</h1>

@@ -20,7 +20,7 @@ export default function PlateSwapCarPage() {
 
   return (
     <div className="content">
-      <Link href="/registration/plate-swap" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+      <Link href="/registration/plate-swap?menu=1" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← การสลับเลข
       </Link>
       <h1>การสลับเลข · รถยนต์</h1>

@@ -9,7 +9,7 @@ export function VehicleMoveOutMenu({ vehicleClass }: { vehicleClass: MoveOutVehi
   const base = `/registration/other/move-out/${CLASS_SEGMENT[vehicleClass]}`;
   return (
     <section className="content">
-      <Link href="/registration/other/move-out" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
+      <Link href="/registration/other/move-out?menu=1" className="text-button" style={{ marginBottom: 18, display: "inline-block" }}>
         ← ย้ายออก
       </Link>
       <h1>ย้ายออก ({CLASS_LABEL[vehicleClass]})</h1>
