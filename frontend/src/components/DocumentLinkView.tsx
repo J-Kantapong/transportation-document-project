@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Notice } from "@/components/ui";
 import { downloadBlob, htmlToPdfBlob } from "@/lib/pdf-export";
+import { withNoAutoLink } from "@/lib/no-auto-link";
 
 interface Props {
   title: string;
@@ -125,7 +126,7 @@ export function DocumentLinkView({ title, html, pdfHtml, fileName, frameTitle, o
         </button>
       </header>
       <Notice tone="error">{error}</Notice>
-      <iframe title={frameTitle} srcDoc={html} style={{ width: "100%", height: "80vh", border: "1px solid #ddd", background: "#fff" }} />
+      <iframe title={frameTitle} srcDoc={withNoAutoLink(html)} style={{ width: "100%", height: "80vh", border: "1px solid #ddd", background: "#fff" }} />
     </main>
   );
 }

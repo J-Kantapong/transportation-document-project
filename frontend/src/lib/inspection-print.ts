@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import type { InspectionVehicle } from "@/lib/api";
 
 export const DEFAULT_INSPECTION_PRINT_HEADER = "บริษัท เอส.พี.อินเตอร์เนชั่นแนล จำกัด";
@@ -49,7 +50,7 @@ export function buildInspectionSheetHtml(title: string, header: string, subtitle
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>${escapeHtml(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

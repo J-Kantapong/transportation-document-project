@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import type { RateKind } from "@/lib/billing-api";
 import { COMPANY_PROFILE, personalIssuerOf } from "@/lib/company-profile";
 import { bahtText, formatMoney, isoToThaiDate, round2 } from "@/lib/invoice";
@@ -125,7 +126,7 @@ export function buildQuotationHtml(q: PrintableQuotation, options: QuotationPrin
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>${mark ? `${mark} - ` : ""}${escapeHtml(q.quotationNo || "ใบเสนอราคา")}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

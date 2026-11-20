@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import type { PayslipSignature, WhtCertificate, WhtIncomeType, WhtItem } from "@/lib/hr-api";
 import { bahtText, formatMoney } from "@/lib/invoice";
 import { escapeHtml, printHtmlDocument, safeFileName } from "@/lib/print-html";
@@ -227,12 +228,12 @@ export function whtDocumentHtml(certs: WhtCertificate[], options: WhtPrintOption
   if (certs.every(canUseOfficialForm)) {
     const body = certs.flatMap((c) => [officialFormPageHtml(c, options), officialFormPageHtml(c, options)]).join("\n");
     const title = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo}` : `50 ทวิ ${certs.length} ใบ`;
-    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${OFFICIAL_FORM_STYLE}</style></head><body>${body}</body></html>`;
+    return `<!doctype html><html lang="th"><head><meta charset="utf-8">${NO_AUTO_LINK_HEAD}<title>${esc(title)}</title><style>${OFFICIAL_FORM_STYLE}</style></head><body>${body}</body></html>`;
   }
   // 1 ใบ = 2 หน้าเหมือนกัน (ฉบับที่ 1 + ฉบับที่ 2) เพื่อไม่ต้องถ่ายเอกสารเพิ่ม
   const body = certs.flatMap((c) => [pageHtml(c, options), pageHtml(c, options)]).join("\n");
   const title = certs.length === 1 ? `50 ทวิ ${certs[0].certificateNo}` : `50 ทวิ ${certs.length} ใบ`;
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title>${FONT_LINK}<style>${STYLE}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8">${NO_AUTO_LINK_HEAD}<title>${esc(title)}</title>${FONT_LINK}<style>${STYLE}</style></head><body>${body}</body></html>`;
 }
 
 export function printWhtCertificates(certs: WhtCertificate[], options: WhtPrintOptions = {}): void {

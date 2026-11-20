@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import type { DocumentSubmission } from "@/lib/api";
 import { escapeHtml, printHtmlDocument, safeFileName } from "@/lib/print-html";
 
@@ -200,7 +201,7 @@ export function buildJobSheetHtml(sheets: JobSheet[]): string {
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>ใบส่งงาน</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

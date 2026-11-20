@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import type { Invoice, TaxInvoice, TaxInvoicePreview, WhtMethod } from "@/lib/billing-api";
 import { COMPANY_PROFILE } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceFaceLines, isoToThaiDate, round2 } from "@/lib/invoice";
@@ -89,7 +90,7 @@ export function buildTaxInvoiceHtml(t: TaxInvoice, mode: TaxInvoicePrintMode): s
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>${t.status === "CANCELLED" ? "ยกเลิก - " : ""}${escapeHtml(t.taxInvoiceNo)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -120,7 +121,7 @@ export function buildTaxInvoiceBundleHtml(list: TaxInvoice[]): string {
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>สำเนาใบกำกับภาษี</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

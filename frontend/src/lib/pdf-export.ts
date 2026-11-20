@@ -1,3 +1,4 @@
+import { withNoAutoLink } from "./no-auto-link";
 // บันทึกเอกสาร HTML (ชุดเดียวกับที่ใช้พิมพ์) เป็นไฟล์ PDF โดยตรง (ผู้ใช้ 2026-09-25)
 // วาดหน้าเอกสารใน iframe ที่ซ่อนไว้เป็นรูป (html2canvas-pro) แล้ววางลง PDF ทีละหน้า A4 (jspdf) - ภาษาไทยจึงออกเหมือน
 // ที่เบราว์เซอร์แสดงทุกอย่าง (สระ/วรรณยุกต์ไม่เพี้ยน) แลกกับข้อความในไฟล์เป็นรูป เลือก/ค้นหาข้อความไม่ได้
@@ -25,7 +26,7 @@ function loadInIframe(html: string, widthPx: number): Promise<HTMLIFrameElement>
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${widthPx}px;height:1200px;border:0`;
     iframe.onload = () => resolve(iframe);
-    iframe.srcdoc = html;
+    iframe.srcdoc = withNoAutoLink(html);
     document.body.appendChild(iframe);
   });
 }
