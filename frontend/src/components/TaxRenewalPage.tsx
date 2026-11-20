@@ -693,8 +693,11 @@ export function TaxRenewalPage() {
                   <th scope="col">ครบกำหนด</th>
                   <th scope="col">ตรอ.</th>
                   <th scope="col">พ.ร.บ.</th>
-                  <th scope="col">ยอด Bill</th>
-                  <th scope="col">ลงขัน</th>
+                  {/* แยก Bill / No Bill / ค่าอากร / รวม แบบงานอื่น (ผู้ใช้ 2026-11-20) - ต่อภาษีไม่มีค่าอากร แสดง "-" */}
+                  <th scope="col">Bill</th>
+                  <th scope="col">No Bill</th>
+                  <th scope="col">ค่าอากร</th>
+                  <th scope="col">รวม</th>
                   <th scope="col">วันที่ชำระ</th>
                   <th scope="col">รับป้ายภาษี</th>
                   <th scope="col">คืนลูกค้า</th>
@@ -754,6 +757,12 @@ export function TaxRenewalPage() {
                       </td>
                       <td>{baht(row.billTotal)}</td>
                       <td>{baht(row.noBillTotal)}</td>
+                      <td className="muted">-</td>
+                      <td>
+                        <strong>
+                          {row.billTotal === null && row.noBillTotal === null ? "-" : baht(Number(row.billTotal ?? 0) + Number(row.noBillTotal ?? 0))}
+                        </strong>
+                      </td>
                       {/* key มีวันที่ที่บันทึกไว้ด้วย: ล้างวันที่ผ่าน ✎ แก้แล้วช่องต้องเริ่มใหม่ ไม่ค้างวันที่เดิมที่พิมพ์ไว้ในช่อง (พบ 2026-09-27) */}
                       <td>
                         {row.vehicleClass === "TRANSPORT" && !row.inspectionDate && !row.paymentDate ? (
@@ -1411,6 +1420,31 @@ function VehicleTypeOptions({ writeScope, transport = true }: { writeScope: Vehi
   );
 }
 
+const FEE_BOX = { padding: "12px 16px", background: "#fff", border: "1px solid #dfe5f0", borderRadius: 10 } as const;
+
+function PreviewFeeLines({ title, items, total }: { title: string; items: TaxRenewalPreview["fees"]["billItems"]; total: number }) {
+  return (
+    <div style={FEE_BOX}>
+      <strong>{title}</strong>
+      {items.length === 0 && (
+        <div className="muted" style={{ marginTop: 4 }}>
+          ไม่มี
+        </div>
+      )}
+      {items.map((item) => (
+        <div key={item.label} style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 4 }}>
+          <span>{item.label}</span>
+          <span>{baht(item.amount)}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 8, paddingTop: 6, borderTop: "1px solid #dfe5f0" }}>
+        <strong>รวม {title}</strong>
+        <strong>{baht(total)} บาท</strong>
+      </div>
+    </div>
+  );
+}
+
 function PreviewSummary({ preview }: { preview: TaxRenewalPreview }) {
   const { tax, fees } = preview;
   return (
@@ -1424,16 +1458,22 @@ function PreviewSummary({ preview }: { preview: TaxRenewalPreview }) {
         fontSize: 14,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-        <strong>ยอดที่ต้องชำระ</strong>
-        <strong>{baht(fees.total)} บาท</strong>
-      </div>
-      {[...fees.billItems, ...fees.noBillItems].map((item) => (
-        <div key={item.label} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
-          <span>{item.label}</span>
-          <span>{baht(item.amount)}</span>
+      {/* แยก Bill / No Bill / ค่าอากร / รวม แบบงานจดใหม่และงานรถเก่าอื่น (ผู้ใช้ 2026-11-20) */}
+      <div className="customer-grid">
+        <PreviewFeeLines title="Bill" items={fees.billItems} total={fees.billTotal} />
+        <PreviewFeeLines title="No Bill" items={fees.noBillItems} total={fees.noBillTotal} />
+        <div style={FEE_BOX}>
+          <strong>ค่าอากร</strong>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+            <span className="muted">ต่อภาษีไม่มีค่าอากร</span>
+            <span>-</span>
+          </div>
         </div>
-      ))}
+        <div style={{ ...FEE_BOX, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <strong>รวม (Bill + No Bill)</strong>
+          <strong>{baht(fees.total)} บาท</strong>
+        </div>
+      </div>
       <div className="sub" style={{ marginTop: 10 }}>
         {tax.registrationCode} · ปีที่ {tax.vehicleYear} · อายุรถ {tax.vehicleAgeYears} ปี
         {tax.taxCycleCount > 1 && ` · ค้าง ${tax.taxCycleCount} รอบปี`}

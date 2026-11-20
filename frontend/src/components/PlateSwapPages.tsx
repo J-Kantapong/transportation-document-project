@@ -18,7 +18,9 @@ import {
   calculatePlateChangeFees,
   calculatePlateSwapCarFees,
   calculatePlateSwapMotoFees,
+  DUTY_LABEL,
   dutyAmountOf,
+  type FeeItem,
   formatBaht,
   PLATE_SWAP_CAR_NUMBER_ITEMS,
   PLATE_SWAP_CAR_URGENT_ITEM,
@@ -795,7 +797,7 @@ function EditSwapDialog({ swap, onClose, onSaved }: { swap: PlateSwap; onClose: 
       {feesChanged && (
         <Notice tone="info">
           ค่าใช้จ่ายจะคิดใหม่: Bill {formatBaht(Number(swap.billTotal))} → {formatBaht(fees.billTotal)} · No Bill{" "}
-          {formatBaht(Number(swap.noBillTotal))} → {formatBaht(fees.noBillTotal)} บาท
+          {formatBaht(Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))} → {formatBaht(fees.noBillTotal - fees.dutyTotal)} บาท
         </Notice>
       )}
 
@@ -842,6 +844,72 @@ function CancelSwapDialog({ swap, onClose, onCancelled }: { swap: PlateSwap; onC
 }
 
 // ปุ่มแก้/ยกเลิกท้ายแถว (ADMIN / STAFF_CAR / STAFF_MOTO ตามประเภทรถ)
+// กล่องค่าใช้จ่ายในฟอร์มยื่น: Bill / No Bill / ค่าอากร / รวม แยกกันแบบงานอื่น (ผู้ใช้ 2026-11-20)
+// ค่าอากรของสลับเลขเก็บอยู่ใน noBillItems (snapshot เดิม) - หน้าจอดึงออกมาแสดงกล่องของตัวเอง ยอดที่บันทึกไม่เปลี่ยน
+// cars = 2 สำหรับรถเก่า กับ รถเก่า (คิดคันละชุด แสดงยอดต่อคัน + รวมทั้ง 2 คัน)
+function SwapFeeBoxes({
+  fees,
+  cars = 1,
+}: {
+  fees: { billItems: FeeItem[]; noBillItems: FeeItem[]; billTotal: number; noBillTotal: number };
+  cars?: 1 | 2;
+}) {
+  const duty = dutyAmountOf(fees.noBillItems);
+  const noBillItems = fees.noBillItems.filter((i) => i.label !== DUTY_LABEL);
+  const noBill = fees.noBillTotal - duty;
+  const total = fees.billTotal + noBill;
+  const per = cars === 2 ? " / คัน" : "";
+  const box = { padding: "12px 16px", background: "#f7f9ff", border: "1px solid #dfe5f0", borderRadius: 10 } as const;
+  const lines = (title: string, items: FeeItem[], sum: number) => (
+    <div style={box}>
+      <strong>
+        {title}
+        {cars === 2 ? " ต่อคัน" : ""}
+      </strong>
+      {items.length === 0 && (
+        <div className="muted" style={{ marginTop: 4 }}>
+          ไม่มี
+        </div>
+      )}
+      {items.map((item) => (
+        <div key={item.label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14, marginTop: 4 }}>
+          <span>{item.label}</span>
+          <span>{formatBaht(item.amount)}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 8, paddingTop: 6, borderTop: "1px solid #dfe5f0" }}>
+        <strong>
+          รวม {title.replace(" (ใบเสร็จ)", "")}
+          {per}
+        </strong>
+        <strong>{formatBaht(sum)} บาท</strong>
+      </div>
+    </div>
+  );
+  return (
+    <div className="customer-grid">
+      {lines("Bill (ใบเสร็จ)", fees.billItems, fees.billTotal)}
+      {lines("No Bill", noBillItems, noBill)}
+      <div style={box}>
+        <strong>ค่าอากร</strong>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14, marginTop: 4 }}>
+          <span className="muted">แยกต่างหาก ไม่รวมใน No Bill</span>
+          <strong>
+            {formatBaht(duty * cars)} บาท{cars === 2 ? " (2 คัน)" : ""}
+          </strong>
+        </div>
+      </div>
+      <div style={{ ...box, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <strong>{cars === 2 ? "รวมทั้ง 2 คัน (Bill + No Bill)" : "รวม (Bill + No Bill)"}</strong>
+        <span style={{ textAlign: "right" }}>
+          <strong>{formatBaht(total * cars)} บาท</strong>
+          {cars === 2 && <div className="muted">คันละ {formatBaht(total)} บาท</div>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function RowActions({ onEdit, onCancel, children }: { onEdit: () => void; onCancel: () => void; children?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
@@ -997,11 +1065,11 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
     replaceSwap((await plateSwapApi.linkNewVehicle(swap.id, vehicle.id, remark)).swap);
   }
 
-  // ยอดรวมของเดือน - ค่าอากรแยกออกจาก "รวมทั้งหมด" แต่ยังอยู่ในยอด No Bill (ผู้ใช้ 2026-09-23)
+  // ยอดรวมของเดือน - ค่าอากรแยกออกจาก No Bill และ "รวมทั้งหมด" (ผู้ใช้ 2026-11-20; เดิม 2026-09-23 อยู่ใน No Bill)
   const monthTotals = swaps.reduce(
     (acc, s) => ({
       bill: acc.bill + Number(s.billTotal),
-      noBill: acc.noBill + Number(s.noBillTotal),
+      noBill: acc.noBill + Number(s.noBillTotal) - dutyAmountOf(s.noBillItems), // No Bill ไม่รวมค่าอากร (ผู้ใช้ 2026-11-20)
       duty: acc.duty + dutyAmountOf(s.noBillItems),
     }),
     { bill: 0, noBill: 0, duty: 0 },
@@ -1148,71 +1216,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
               onUrgent={setUrgent}
             />
 
-            <div className="customer-grid">
-              <div>
-                <strong>Bill (ใบเสร็จ)</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.billItems.map((item) => (
-                      <tr key={item.label}>
-                        <td style={{ whiteSpace: "normal" }}>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม Bill</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.billTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div>
-                <strong>No Bill</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.noBillItems.map((item) => (
-                      <tr key={item.label}>
-                        <td>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม No Bill</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.noBillTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              {/* ยอดรวมสุทธิของงานนี้ (Bill + No Bill) - ผู้ใช้ขอ 2026-09-23 */}
-              <div
-                className="wide"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 16,
-                  padding: "14px 16px",
-                  marginTop: 4,
-                  background: "#f7f9ff",
-                  border: "1px solid #dfe5f0",
-                  borderRadius: 10,
-                  fontSize: 15,
-                }}
-              >
-                <strong>รวมทั้งหมด (Bill + No Bill ไม่รวมค่าอากร)</strong>
-                <span style={{ textAlign: "right" }}>
-                  <strong>{formatBaht(fees.total)} บาท</strong>
-                  <div className="muted">แยกค่าอากร {formatBaht(fees.dutyTotal)} บาท</div>
-                </span>
-              </div>
-            </div>
+            <SwapFeeBoxes fees={fees} />
 
             <Notice tone={message.error ? "error" : "info"}>{message.text}</Notice>
             <div className="form-actions">
@@ -1276,7 +1280,7 @@ setSwaps((await plateSwapApi.list("all", forMonth, "OLD_NEW", vehicleClass)).swa
             <div style={{ padding: "18px 23px", borderTop: "1px solid #edf0f6", fontSize: 13, color: "#34415a" }}>
               <strong>
                 รวม {swaps.length} คัน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} · ค่าอากร{" "}
-                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill - monthTotals.duty)} บาท
+                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill)} บาท
               </strong>
             </div>
           </>
@@ -1383,7 +1387,7 @@ function SubmittedRow({
         )}
       </td>
       <td title={swap.billItems.map((i) => `${i.label} ${formatBaht(i.amount)}`).join("\n")}>{formatBaht(Number(swap.billTotal))}</td>
-      <td>{formatBaht(Number(swap.noBillTotal))}</td>
+      <td>{formatBaht(Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))}</td>
       <td>{formatBaht(dutyAmountOf(swap.noBillItems))}</td>
       <td>
         {/* ยอดรวมไม่นับค่าอากร (ผู้ใช้ 2026-09-23) - ค่าอากรอ่านจาก snapshot รายการ No Bill ของงานนั้น */}
@@ -2269,7 +2273,7 @@ function OldOldRow({ swap, canWrite, onEdit, onCancel }: { swap: PlateSwap; canW
         <div className="sub">→ ได้ {newPlateText(swap) || "—"}</div>
       </td>
       <td title={swap.billItems.map((i) => `${i.label} ${formatBaht(i.amount)}`).join("\n")}>{formatBaht(Number(swap.billTotal))}</td>
-      <td>{formatBaht(Number(swap.noBillTotal))}</td>
+      <td>{formatBaht(Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))}</td>
       <td>{formatBaht(dutyAmountOf(swap.noBillItems))}</td>
       <td>
         <strong>{formatBaht(Number(swap.billTotal) + Number(swap.noBillTotal) - dutyAmountOf(swap.noBillItems))}</strong>
@@ -2321,7 +2325,6 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
 
   // ค่าใช้จ่ายคิดคันละชุดด้วยสูตรเดียวกับเคสรถเก่า-รถใหม่ (ผู้ใช้ 2026-09-28: "ราคาเท่ากันให้อิงตามยอดรถเก่าเลย")
   const fees = feesFor(vehicleClass, { numberSource, buyNormalPlate, buyAuctionPlate, urgent });
-  const perCarTotal = fees.billTotal + fees.noBillTotal - dutyAmountOf(fees.noBillItems);
 
   async function load(forMonth: string) {
     setLoading(true);
@@ -2384,7 +2387,7 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
   const monthTotals = swaps.reduce(
     (acc, s) => ({
       bill: acc.bill + Number(s.billTotal),
-      noBill: acc.noBill + Number(s.noBillTotal),
+      noBill: acc.noBill + Number(s.noBillTotal) - dutyAmountOf(s.noBillItems), // No Bill ไม่รวมค่าอากร (ผู้ใช้ 2026-11-20)
       duty: acc.duty + dutyAmountOf(s.noBillItems),
     }),
     { bill: 0, noBill: 0, duty: 0 },
@@ -2444,55 +2447,7 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
               onUrgent={setUrgent}
             />
 
-            <div className="customer-grid">
-              <div>
-                <strong>Bill (ใบเสร็จ) ต่อคัน</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.billItems.map((item) => (
-                      <tr key={item.label}>
-                        <td style={{ whiteSpace: "normal" }}>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม Bill / คัน</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.billTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div>
-                <strong>No Bill ต่อคัน</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.noBillItems.map((item) => (
-                      <tr key={item.label}>
-                        <td>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม No Bill / คัน</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.noBillTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <p style={{ marginTop: 14 }}>
-              <strong>รวมทั้ง 2 คัน (ไม่รวมค่าอากร): {formatBaht(perCarTotal * 2)} บาท</strong>{" "}
-              <span className="muted">· แยกค่าอากร {formatBaht(dutyAmountOf(fees.noBillItems) * 2)} บาท</span>
-            </p>
+            <SwapFeeBoxes fees={fees} cars={2} />
 
             {message.text && (
               <div style={{ marginTop: 12 }}>
@@ -2556,7 +2511,7 @@ export function PlateSwapOldOldSubmitPage({ vehicleClass = "CAR" }: { vehicleCla
             <div style={{ padding: "12px 23px" }}>
               <strong>
                 รวม {swaps.length} งาน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} · ค่าอากร{" "}
-                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill - monthTotals.duty)} บาท
+                {formatBaht(monthTotals.duty)} · รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill)} บาท
               </strong>
             </div>
           </>
@@ -2673,7 +2628,7 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
   const monthTotals = swaps.reduce(
     (acc, s) => ({
       bill: acc.bill + Number(s.billTotal),
-      noBill: acc.noBill + Number(s.noBillTotal),
+      noBill: acc.noBill + Number(s.noBillTotal) - dutyAmountOf(s.noBillItems), // No Bill ไม่รวมค่าอากร (ผู้ใช้ 2026-11-20)
       duty: acc.duty + dutyAmountOf(s.noBillItems),
     }),
     { bill: 0, noBill: 0, duty: 0 },
@@ -2741,53 +2696,7 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
               <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
               งานด่วน (+{formatBaht(urgentItem.amount)} บาท)
             </label>
-            <div className="customer-grid">
-              <div>
-                <strong>Bill (ใบเสร็จ)</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.billItems.map((item) => (
-                      <tr key={item.label}>
-                        <td style={{ whiteSpace: "normal" }}>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม Bill</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.billTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div>
-                <strong>No Bill</strong>
-                <table style={{ marginTop: 8 }}>
-                  <tbody>
-                    {fees.noBillItems.map((item) => (
-                      <tr key={item.label}>
-                        <td>{item.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatBaht(item.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <strong>รวม No Bill</strong>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong>{formatBaht(fees.noBillTotal)}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <p style={{ marginTop: 14 }}>
-              <strong>รวม (ไม่รวมค่าอากร): {formatBaht(fees.total)} บาท</strong> <span className="muted">· แยกค่าอากร {formatBaht(fees.dutyTotal)} บาท</span>
-            </p>
+            <SwapFeeBoxes fees={fees} />
 
             {message.text && (
               <div style={{ marginTop: 12 }}>
@@ -2851,7 +2760,7 @@ export function PlateChangeSubmitPage({ vehicleClass = "CAR" }: { vehicleClass?:
             <div style={{ padding: "12px 23px" }}>
               <strong>
                 รวม {swaps.length} งาน · Bill {formatBaht(monthTotals.bill)} · No Bill {formatBaht(monthTotals.noBill)} · ค่าอากร {formatBaht(monthTotals.duty)} ·
-                รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill - monthTotals.duty)} บาท
+                รวมทั้งหมดไม่รวมค่าอากร {formatBaht(monthTotals.bill + monthTotals.noBill)} บาท
               </strong>
             </div>
           </>

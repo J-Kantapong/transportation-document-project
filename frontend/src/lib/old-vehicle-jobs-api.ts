@@ -1,6 +1,6 @@
 import { request } from "@/lib/api";
 import { isMotorcycleBody } from "@/lib/vehicle-kind";
-import { TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES, isTransportType } from "@/lib/vehicle-reference-data";
+import { TRANSPORT_VEHICLE_TYPES, VEHICLE_TYPES } from "@/lib/vehicle-reference-data";
 
 // หน้ารวม "งานรถเก่า" (ผู้ใช้ 2026-11-18) - ดู backend/src/old-vehicle-jobs/
 // โฟลว: รับงาน -> เลือกประเภทงาน -> ตรวจรถ (เฉพาะที่ต้องตรวจ) -> ยื่น -> รับเอกสาร -> ส่งงาน (= เสร็จ)
@@ -103,8 +103,26 @@ export const OLD_VEHICLE_TYPE_GROUPS: { label: string; types: readonly string[] 
   { label: "รถตาม พ.ร.บ.ขนส่ง (ขส.) - เฉพาะงานต่อภาษี", types: TRANSPORT_VEHICLE_TYPES },
 ];
 export const classOfVehicleType = (vehicleType: string | null | undefined): OldVehicleClass => (isMotorcycleBody(vehicleType) ? "MOTO" : "CAR");
-// ค่าตรวจตั้งต้นตอนส่งตรวจนอก: รถ ขส. 1,000 แก้ได้ / รถอื่นกรอกเอง
-export const defaultInspectionCost = (vehicleType: string | null | undefined) => (isTransportType(vehicleType) ? "1000" : "");
+// ค่าตรวจตั้งต้นตอนส่งตรวจนอก ตามประเภทรถ (ชีต 'Rate โอน' ค่าตรวจ, ผู้ใช้ 2026-11-20) - สำเนาฝั่งหลังบ้าน: old-vehicle-job-rules.ts
+// ประเภทที่ไม่มีในตาราง (กระบะมีหลังคาแหนบ, รย.17, ขส.) ว่างไว้ให้กรอกเอง
+const INSPECTION_COST_BY_TYPE: Record<string, number> = {
+  "รย.1-เก๋ง 2 ตอน": 200,
+  "รย.1-นั่ง 2 ตอน": 300,
+  "รย.1-นั่ง 3 ตอน": 300,
+  "รย.2-นั่ง 2 แถว": 500,
+  "รย.2-นั่ง 4 ตอน": 500,
+  "รย.3-กระบะบรรทุก": 300,
+  "รย.3-กระบะบรรทุกมีหลังคา": 1000,
+  "รย.3-ตู้บรรทุก": 1000,
+  "รย.12-น้อยกว่า 300cc": 100,
+  "รย.12-300-799cc": 300,
+  "รย.12-800-999cc": 500,
+  "รย.12-1000cc ขึ้นไป": 1000,
+};
+export const defaultInspectionCost = (vehicleType: string | null | undefined) => {
+  const cost = vehicleType ? INSPECTION_COST_BY_TYPE[vehicleType] : undefined;
+  return cost === undefined ? "" : String(cost);
+};
 
 export interface HubCustomer {
   id: string;

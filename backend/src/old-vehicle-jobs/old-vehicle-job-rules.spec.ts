@@ -3,6 +3,7 @@ import {
   chassisKeyOf,
   chassisWarnings,
   cleanChassis,
+  INSPECTION_COST_BY_TYPE,
   defaultInspectionCost,
   inspectionRequiredFor,
   intakeStatus,
@@ -11,6 +12,7 @@ import {
   vinCheckDigitOk,
   workingDaysBetween,
 } from './old-vehicle-job-rules.js';
+import { VEHICLE_TYPES } from '../vehicles/vehicle-reference-data.js';
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const today = d('2026-11-18');
@@ -44,9 +46,21 @@ describe('ประเภทรถ', () => {
     expect(vehicleClassOfType(null)).toBe('CAR');
   });
 
-  it('ค่าตรวจตั้งต้น: ขส. 1,000 / รถอื่นไม่มี (กรอกเอง)', () => {
-    expect(defaultInspectionCost('ขส.-ไม่ประจำทาง')).toBe(1000);
-    expect(defaultInspectionCost('รย.1-เก๋ง 2 ตอน')).toBeNull();
+  it('ค่าตรวจตั้งต้นตามประเภทรถ (ชีต Rate โอน) / ประเภทที่ไม่มีในตารางกรอกเอง', () => {
+    expect(defaultInspectionCost('รย.1-เก๋ง 2 ตอน')).toBe(200);
+    expect(defaultInspectionCost('รย.1-นั่ง 3 ตอน')).toBe(300);
+    expect(defaultInspectionCost('รย.2-นั่ง 4 ตอน')).toBe(500);
+    expect(defaultInspectionCost('รย.3-กระบะบรรทุกมีหลังคา')).toBe(1000);
+    expect(defaultInspectionCost('รย.12-น้อยกว่า 300cc')).toBe(100);
+    expect(defaultInspectionCost('รย.12-1000cc ขึ้นไป')).toBe(1000);
+    expect(defaultInspectionCost('รย.3-กระบะบรรทุกมีหลังคาแหนบ')).toBeNull();
+    expect(defaultInspectionCost('รย.17-จักรยานยนต์สาธารณะ')).toBeNull();
+    expect(defaultInspectionCost('ขส.-ไม่ประจำทาง')).toBeNull();
+    expect(defaultInspectionCost(null)).toBeNull();
+  });
+
+  it('ตารางค่าตรวจครอบคลุมเฉพาะประเภทรถที่มีอยู่จริง', () => {
+    for (const type of Object.keys(INSPECTION_COST_BY_TYPE)) expect(VEHICLE_TYPES).toContain(type);
   });
 });
 
