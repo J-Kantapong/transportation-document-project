@@ -26,6 +26,13 @@ export class NotesService {
     }
   }
 
+  // มีข้อความที่ตรง/มีคำนี้ในชื่อไหม - "ขอ…" ที่ไม่เจอในตู้ = ประโยคขอทั่วไป (เช่น "ขอดูรถ SPI ที่ค้าง") ส่งให้ AI แทน
+  async hasMatch(query: string): Promise<boolean> {
+    const key = noteKey(query);
+    if (!key) return false;
+    return (await this.prisma.secretaryNote.count({ where: { key: { contains: key } } })) > 0;
+  }
+
   private async save(title: string, value: string): Promise<LineMessage[]> {
     const key = noteKey(title);
     if (!key || !value) return [textMessage('ต้องมีทั้งชื่อและข้อความ เช่น จำ ที่อยู่บริษัท = 123 ถ.สุขุมวิท')];
