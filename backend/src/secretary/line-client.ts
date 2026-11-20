@@ -102,6 +102,13 @@ export async function fetchLineContent(messageId: string, config: LineConfig = l
   return Buffer.from(await response.arrayBuffer());
 }
 
+// จุด "กำลังพิมพ์" ในแชตของเจ้าของระหว่างรอคำตอบที่ช้า (AI) - หายเองเมื่อบอทตอบหรือครบเวลา (LINE รับ 5-60 วินาที ทีละ 5)
+const LOADING_URL = 'https://api.line.me/v2/bot/chat/loading/start';
+export async function showLoading(seconds: number, config: LineConfig = lineConfigFromEnv(), fetchImpl: FetchLike = fetch): Promise<void> {
+  const loadingSeconds = Math.min(60, Math.max(5, Math.round(seconds / 5) * 5));
+  await postLine(LOADING_URL, { chatId: config.userId, loadingSeconds }, config.token, fetchImpl);
+}
+
 // ตอบกลับข้อความที่ผู้ใช้เพิ่งพิมพ์ (ใช้ replyToken ที่ LINE ส่งมากับ webhook - หมดอายุเร็ว ใช้ได้ครั้งเดียว)
 export async function replyLine(
   replyToken: string,

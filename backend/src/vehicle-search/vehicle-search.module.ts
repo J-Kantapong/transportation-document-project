@@ -5,5 +5,6 @@ import { VehicleSearchService } from './vehicle-search.service.js';
 @Module({
   controllers: [VehicleSearchController],
   providers: [VehicleSearchService],
+  exports: [VehicleSearchService],
 })
 export class VehicleSearchModule {}

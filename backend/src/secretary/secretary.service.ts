@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { bangkokToday } from '../overview/overview-calculator.js';
 import { OverviewService } from '../overview/overview.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { aiChatEnabled, forcedAiQuestion, looksLikeQuestion, messagesToText, splitReply } from './ai-chat.js';
+import { AiChatService } from './ai-chat.service.js';
 import { parseCommand, type Command } from './commands.js';
 import { buildEveningMessage, type EveningInput } from './evening-message.js';
 import { buildFinanceMessage } from './finance-message.js';
 import { loadFinancePending } from './finance-pending.js';
 import { parseInvoiceLinkCommand } from './invoice-link.js';
-import { lineConfigFromEnv, pushLine, replyLine, type LineMessage } from './line-client.js';
+import { lineConfigFromEnv, pushLine, replyLine, showLoading, type LineMessage } from './line-client.js';
 import type { LineEvent } from './line-webhook.js';
 import { LookupService } from './lookup.service.js';
 import { menuMessage, parseLookupCommand } from './lookup.js';
@@ -40,6 +42,7 @@ export class SecretaryService {
     private readonly notes: NotesService,
     private readonly statements: StatementService,
     private readonly lookup: LookupService,
+    private readonly ai: AiChatService,
   ) {}
 
   // ที่อยู่เว็บสำหรับลิงก์ในการ์ด (ใช้ FRONTEND_ORIGIN ถ้าตั้งไว้เป็น URL จริง - ไม่ตั้ง = การ์ดไม่มีลิงก์)
@@ -160,25 +163,7 @@ export class SecretaryService {
       try {
         if (postback) messages = await this.statements.handlePostback(postback);
         else if (isFile) messages = await this.statements.handleFile(event.message!.id!, event.message!.fileName ?? '');
-        else {
-          const typed = event.message?.text ?? '';
-          // "บิลล่าสุด" / "บิล IV…" = ลิงก์ดาวน์โหลดใบวางบิล (ผู้ใช้ 2026-11-16) - รูปแบบเฉพาะ (ทั้งข้อความต้องตรง) จึงมาก่อนตู้ข้อความ
-          // ไม่งั้น "ขอบิลล่าสุด" จะไปตกคำสั่ง "ขอ" ของตู้ข้อความ
-          const invoiceLink = parseInvoiceLinkCommand(typed);
-          // "เรทจังหวัด" / "เรท ภูเก็ต" (ผู้ใช้ 2026-11-17) - ก่อนตู้ข้อความ ไม่งั้น "ขอนแก่น" จะไปตกคำสั่ง "ขอ"
-          // มาก่อนคำสั่งค้นข้อมูลด้วย: "ราคา เชียงใหม่" = เรทจังหวัด ส่วน "ราคา SPI" (ไม่ใช่ชื่อจังหวัด) = ตารางราคาลูกค้า
-          const provinceRate = invoiceLink ? null : parseProvinceRateCommand(typed);
-          // เมนู / งานค้าง / ราคา / ต้นทุน / ใบเสนอราคา / เอกสารและยอดของลูกค้ารายเดียว (ผู้ใช้ 2026-11-18) - ข้อความต้องขึ้นต้นด้วยคำสั่ง
-          // null = ไม่ใช่ชื่อลูกค้า (เช่น "บิลเกินกำหนด") ให้คำสั่งเดิมตอบ
-          const lookup = invoiceLink || provinceRate ? null : parseLookupCommand(typed);
-          const found = lookup ? await this.lookup.run(lookup) : null;
-          const note = invoiceLink || provinceRate || found ? null : parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
-          if (invoiceLink) messages = await this.statements.invoiceLinks(invoiceLink);
-          else if (provinceRate) messages = await this.provinceRates(provinceRate);
-          else if (found) messages = found;
-          else if (note) messages = await this.notes.run(note);
-          else messages = await this.answer(parseCommand(typed));
-        }
+        else messages = await this.answerText(event.message?.text ?? '');
       } catch (error) {
         console.error('เลขาตอบคำสั่งไม่สำเร็จ:', error instanceof Error ? error.message : error);
         messages = [textMessage('ขออภัย ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง')];
@@ -190,6 +175,70 @@ export class SecretaryService {
         // replyToken หมดอายุ (เช่น เซิร์ฟเวอร์เพิ่งตื่นจากหลับ) - ส่งแบบ push แทน
         await pushLine(reply).catch((error: unknown) => console.error('เลขาส่งคำตอบไม่สำเร็จ:', error instanceof Error ? error.message : error));
       }
+    }
+  }
+
+  // ข้อความที่พิมพ์: คำสั่งเดิมก่อน (ไม่เสีย token) ไม่ตรงคำสั่งไหน = ถาม AI (ถ้ามี ANTHROPIC_API_KEY) ไม่งั้นการ์ดเมนูเหมือนเดิม
+  // "ถาม …" = ถาม AI เสมอ · "เริ่มใหม่" = ล้างบทสนทนากับ AI (ผู้ใช้ 2026-11-20 รอบ 1: อ่านอย่างเดียว)
+  async answerText(typed: string): Promise<LineMessage[]> {
+    const aiOn = aiChatEnabled();
+    if (aiOn && /^(เริ่มใหม่|ล้างแชท)$/.test(typed.replace(/\s+/g, ''))) {
+      this.ai.reset();
+      return [textMessage('เริ่มบทสนทนาใหม่แล้ว ถามได้เลย')];
+    }
+    const forced = aiOn ? forcedAiQuestion(typed) : null;
+    if (forced) return this.askAi(forced);
+    const routed = await this.routeCommand(typed, false);
+    if (routed) return routed;
+    return aiOn ? this.askAi(typed) : this.answer('menu');
+  }
+
+  // คำสั่งเดิมทั้งหมด (ลำดับเดิม) - null = ไม่ตรงคำสั่งไหน
+  // readOnly = เรียกโดย AI: ห้ามคำสั่งที่แก้ข้อมูล (จำ / ลืม ของตู้ข้อความ) และไม่ส่งต่อให้ AI ซ้อน
+  private async routeCommand(typed: string, readOnly: boolean): Promise<LineMessage[] | null> {
+    const aiOn = !readOnly && aiChatEnabled();
+    // "บิลล่าสุด" / "บิล IV…" = ลิงก์ดาวน์โหลดใบวางบิล (ผู้ใช้ 2026-11-16) - รูปแบบเฉพาะ (ทั้งข้อความต้องตรง) จึงมาก่อนตู้ข้อความ
+    // ไม่งั้น "ขอบิลล่าสุด" จะไปตกคำสั่ง "ขอ" ของตู้ข้อความ
+    const invoiceLink = parseInvoiceLinkCommand(typed);
+    if (invoiceLink) return this.statements.invoiceLinks(invoiceLink);
+    // "เรทจังหวัด" / "เรท ภูเก็ต" (ผู้ใช้ 2026-11-17) - ก่อนตู้ข้อความ ไม่งั้น "ขอนแก่น" จะไปตกคำสั่ง "ขอ"
+    // มาก่อนคำสั่งค้นข้อมูลด้วย: "ราคา เชียงใหม่" = เรทจังหวัด ส่วน "ราคา SPI" (ไม่ใช่ชื่อจังหวัด) = ตารางราคาลูกค้า
+    const provinceRate = parseProvinceRateCommand(typed);
+    if (provinceRate) return this.provinceRates(provinceRate);
+    // เมนู / งานค้าง / ราคา / ต้นทุน / ใบเสนอราคา / เอกสารและยอดของลูกค้ารายเดียว (ผู้ใช้ 2026-11-18) - ข้อความต้องขึ้นต้นด้วยคำสั่ง
+    // null = ไม่ใช่ชื่อลูกค้า (เช่น "บิลเกินกำหนด") ให้คำสั่งเดิมตอบ
+    const lookup = parseLookupCommand(typed);
+    if (lookup && !(readOnly && lookup.kind === 'menu')) {
+      const found = await this.lookup.run(lookup);
+      if (found) return found;
+    }
+    const note = parseNoteCommand(typed); // จำ/ขอ/ลืม/ตู้เอกสาร มาก่อนคำสั่งสรุป
+    if (note) {
+      if (readOnly && note.type !== 'get' && note.type !== 'list') return [textMessage('คำสั่งนี้แก้ข้อมูล ใช้ได้เฉพาะเจ้าของพิมพ์เอง')];
+      // "ขอ…" ที่ไม่มีในตู้เลย = ประโยคขอทั่วไป ("ขอดูรถ SPI ที่ค้าง") ให้ AI ตอบ
+      if (!(aiOn && note.type === 'get' && !(await this.notes.hasMatch(note.query)))) return this.notes.run(note);
+    }
+    const command = parseCommand(typed);
+    if (command === 'menu') return null;
+    // คำสั่งเดิมจับด้วยคำสำคัญ ("ค้าง" "ติด" "ใช้") - ประโยคยาวที่บังเอิญมีคำนั้น = คำถาม ให้ AI ตอบ
+    if (aiOn && looksLikeQuestion(typed)) return null;
+    return this.answer(command);
+  }
+
+  // เครื่องมือ run_command ของ AI: คำสั่งเดิมแบบอ่านอย่างเดียว คืนเป็นข้อความล้วน (การ์ดแปลงเป็นข้อความ)
+  async readOnlyCommand(command: string): Promise<string> {
+    const found = await this.routeCommand(command, true);
+    return found ? messagesToText(found) : `ไม่รู้จักคำสั่ง "${command}" ใช้ได้เฉพาะคำสั่งในรายการของเครื่องมือ`;
+  }
+
+  private async askAi(question: string): Promise<LineMessage[]> {
+    await showLoading(60).catch(() => undefined); // จุด "กำลังพิมพ์" ในไลน์ระหว่างรอ AI - ล้มก็ไม่เป็นไร
+    try {
+      const { text } = await this.ai.ask(question, (command) => this.readOnlyCommand(command));
+      return splitReply(text).map(textMessage);
+    } catch (error) {
+      console.error('AI เลขาตอบไม่สำเร็จ:', error instanceof Error ? error.message : error);
+      return [textMessage('AI ตอบไม่สำเร็จตอนนี้ ลองใหม่อีกครั้ง หรือกดปุ่มเมนูด้านล่าง')];
     }
   }
 

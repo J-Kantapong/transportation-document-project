@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module.js';
 import { OverviewModule } from '../overview/overview.module.js';
+import { VehicleSearchModule } from '../vehicle-search/vehicle-search.module.js';
+import { AiChatService } from './ai-chat.service.js';
 import { StatementService } from './statement.service.js';
 import { LookupService } from './lookup.service.js';
 import { MailService } from './mail.service.js';
@@ -9,9 +11,9 @@ import { SecretaryController } from './secretary.controller.js';
 import { SecretaryService } from './secretary.service.js';
 
 @Module({
-  imports: [OverviewModule, BillingModule],
+  imports: [OverviewModule, BillingModule, VehicleSearchModule],
   controllers: [SecretaryController],
-  providers: [SecretaryService, NotesService, StatementService, MailService, LookupService],
+  providers: [SecretaryService, AiChatService, NotesService, StatementService, MailService, LookupService],
   exports: [SecretaryService],
 })
 export class SecretaryModule {}
