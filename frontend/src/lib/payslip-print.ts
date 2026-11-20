@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import { COMPANY_PROFILE } from "@/lib/company-profile";
 import type { PayrollItem, PayrollRun } from "@/lib/hr-api";
 import { monthLabel, type PayslipSignature } from "@/lib/hr-api";
@@ -166,7 +167,7 @@ body{font-family:"Sarabun","Noto Sans Thai","Leelawadee UI","Tahoma",sans-serif;
 
 export function payslipDocumentHtml(run: PayrollRun, items: PayrollItem[], options: PayslipOptions = {}): string {
   const body = items.map((item) => slipHtml(run, item, options)).join("\n");
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>สลิปเงินเดือน ${esc(monthLabel(run.month))}</title>${FONT_LINK}<style>${STYLE}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8">${NO_AUTO_LINK_HEAD}<title>สลิปเงินเดือน ${esc(monthLabel(run.month))}</title>${FONT_LINK}<style>${STYLE}</style></head><body>${body}</body></html>`;
 }
 
 export function printPayslips(run: PayrollRun, items: PayrollItem[], options: PayslipOptions = {}): void {

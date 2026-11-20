@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import { editableItems, JOB_LABEL, sourceItems, type Invoice, type JobSnapshot, type JobType } from "@/lib/billing-api";
 import { COMPANY_PROFILE, personalIssuerOf } from "@/lib/company-profile";
 import { bahtText, formatMoney, invoiceContentSummary, invoiceFaceLines, isoToThaiDate, jobsOfItems, round2, sortLinesByPlate } from "@/lib/invoice";
@@ -342,7 +343,7 @@ export function buildInvoiceHtml(inv: PrintableInvoice, forPdf = false): string 
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>${isVoid(inv) ? "ยกเลิก - " : ""}${escapeHtml(inv.invoiceNo || "ใบวางบิล")}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

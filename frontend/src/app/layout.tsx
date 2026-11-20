@@ -12,6 +12,8 @@ const notoSansThai = Noto_Sans_Thai({
 export const metadata: Metadata = {
   title: "ทะเบียน | ภาพรวมงานขนส่ง",
   description: "ระบบจัดการงานทะเบียนขนส่ง",
+  // iPhone ไม่ต้องแปลงเลขภาษี/เบอร์/วันที่เป็นลิงก์สีน้ำเงิน (ผู้ใช้ 2026-11-20)
+  formatDetection: { telephone: false, date: false, address: false, email: false },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

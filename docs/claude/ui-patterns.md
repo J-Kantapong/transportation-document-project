@@ -83,3 +83,7 @@ Sizes come from CSS: 20px in general, 18px in `primary` / `secondary`, and 16px 
 ## Colours
 
 Semantic colour comes only from the tokens: `--danger`, `--warn`, `--ok`, `--info` and their `-soft` / `-line` variants. Do not use a raw hex such as `#c0392b`, `#c2410c`, `#b45309`, `#a86200` or `#9a4f12` for a meaning.
+
+## Document HTML (print / PDF / LINE links)
+
+Every document builder (`frontend/src/lib/*-print.ts`) puts `NO_AUTO_LINK_HEAD` (`lib/no-auto-link.ts`) right after `<meta charset>`: iPhone Safari / LINE otherwise turns tax IDs, phone and account numbers into blue underlined links, which html2canvas then bakes into the PDF (user 2026-11-20, TV2026-149). `pdf-export.ts` and `DocumentLinkView` also run `withNoAutoLink` as a safety net, and the app root sets `formatDetection` off. A new document builder must include it.

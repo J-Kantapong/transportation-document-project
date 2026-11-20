@@ -1,3 +1,4 @@
+import { NO_AUTO_LINK_HEAD } from "./no-auto-link";
 import { slipNoText, type DeliveryRow, type DeliverySlip, type DeliverySlipItem } from "@/lib/billing-api";
 import { DELIVERY_HEADER } from "@/lib/company-profile";
 import { isoToDisplayDate } from "@/lib/date";
@@ -83,7 +84,7 @@ export function htmlDocument(title: string, pageRule: string, extraStyle: string
   return `<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8">${NO_AUTO_LINK_HEAD}
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
