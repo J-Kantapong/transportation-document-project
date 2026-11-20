@@ -292,7 +292,6 @@ export function OldVehicleJobsPage() {
 
       {showIntake && canIntake && (
         <IntakePanel
-          writeScope={writeScope}
           brandNames={brandNames}
           financeNames={financeNames}
           customerOptions={customerOptions}
@@ -793,13 +792,11 @@ const newRow = (pairOf: number | null = null): IntakeRow => ({
 });
 
 function IntakePanel({
-  writeScope,
   brandNames,
   financeNames,
   customerOptions,
   onSaved,
 }: {
-  writeScope: WriteScope | null;
   brandNames: string[];
   financeNames: string[];
   customerOptions: Option[];
@@ -862,7 +859,7 @@ function IntakePanel({
   // overwrite = เลือกจากรายการแนะนำ (ผู้ใช้เลือกคันนี้เอง) ใช้ข้อมูลรถของคันนั้นทับช่องรถที่พิมพ์ค้างไว้
   const fillFromNew = (r: IntakeRow, nv: NewVehiclePrefill, overwrite = false): IntakeRow => {
     const pick = (typed: string, found: string | null | undefined) => (overwrite ? found || typed : typed || found || "");
-    const foundType = nv.vehicleType && typeAllowed(nv.vehicleType) ? nv.vehicleType : "";
+    const foundType = nv.vehicleType ?? "";
     const vehicleType = pick(r.vehicleType, foundType);
     const ownerTypeEmpty = overwrite || !r.ownerType;
     return {
@@ -956,7 +953,8 @@ function IntakePanel({
     }
   }
 
-  const typeAllowed = (vehicleType: string) => writeScope === "ALL" || writeScope === classOfVehicleType(vehicleType);
+  // คนรับงาน (ADMIN / STAFF_ENTRY / DELIVERY) รับได้ทุกประเภทรถ เหมือน backend (intake ไม่เช็คประเภทรถ)
+  // เดิมกรองด้วย submitWriteScopeFor ซึ่งเป็น NONE สำหรับ STAFF_ENTRY / DELIVERY ทำให้รายการประเภทรถว่าง (พบ 2026-11-20)
 
   return (
     <div className="panel" style={{ marginBottom: 24 }}>
@@ -1060,7 +1058,7 @@ function IntakePanel({
                       <option value="">เลือกประเภทรถ</option>
                       {OLD_VEHICLE_TYPE_GROUPS.map((group) => (
                         <optgroup key={group.label} label={group.label}>
-                          {group.types.filter(typeAllowed).map((t) => (
+                          {group.types.map((t) => (
                             <option key={t} value={t}>
                               {t}
                             </option>
