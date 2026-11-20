@@ -65,9 +65,14 @@ export function parsePlateFields(raw: unknown, field: string): string | null {
   return trimmed || null;
 }
 
-// รูปแบบเดียวกับช่องกรอกฝั่งหน้าเว็บ: หมวดทะเบียนสูงสุด 3 ตัวอักษร (เช่น "4กข"), เลขทะเบียน 1-4 หลัก (เช่น "4444")
+// หมวดทะเบียน = ตัวเลขนำ 1 หลัก + พยัญชนะไทย 1-2 ตัว (เช่น "4กข", "2ฆล") หรือพยัญชนะไทยล้วน 1-3 ตัว (เช่น "กข", "บตม")
+// พบ 2026-11-20: AI อ่านใบเสร็จได้ "2฿ล" แทน "2ฆล" แล้วบันทึกผ่าน เพราะเดิมเช็กแค่ความยาว - ฿ ไม่ใช่พยัญชนะ (ต้องตรงกับ frontend/src/lib/plate-format.ts)
+export const PLATE_CATEGORY_RE = /^(?:\d[ก-ฮ]{1,2}|[ก-ฮ]{1,3})$/;
+export const PLATE_CATEGORY_ERROR = 'หมวดทะเบียนต้องเป็นตัวเลข 1 หลัก (ถ้ามี) ตามด้วยพยัญชนะไทย เช่น 2ฆล, กข';
+
+// เลขทะเบียน 1-4 หลัก (เช่น "4444")
 export function assertPlateFormat(plateCategory: string, plateNumber: string) {
-  if (plateCategory.length > 3) throw new BadRequestException({ error: 'หมวดทะเบียนต้องไม่เกิน 3 ตัวอักษร' });
+  if (!PLATE_CATEGORY_RE.test(plateCategory)) throw new BadRequestException({ error: PLATE_CATEGORY_ERROR });
   if (!/^\d{1,4}$/.test(plateNumber)) throw new BadRequestException({ error: 'เลขทะเบียนต้องเป็นตัวเลข 1-4 หลัก' });
 }
 
