@@ -14,6 +14,7 @@ import { SupplierFeeLine } from "./SupplierFeeLine";
 import { DateInput } from "@/components/DateInput";
 import { customerDisplayNames, jobSheetGroup, jobSheetKey } from "@/lib/job-sheet";
 import { confirmDialog } from "@/lib/confirm-dialog";
+import { PLATE_CATEGORY_ERROR, PLATE_CATEGORY_RE, PLATE_NUMBER_RE } from "@/lib/plate-format";
 
 // หน้ารับใบเสร็จ (Step 5) - ตรวจทีละ "ใบยื่น" ให้ตรงกับใบส่งงานที่ปริ้นออกไป (ดู SubmittedRecordsView/JobSheetPrintDialog):
 // 1 ใบยื่น = วันที่ยื่น + กลุ่ม (รย.1 ธรรมดา/ด่วน, รย.2-3, มอเตอร์ไซค์ ธรรมดา/ด่วน) + เจ้าของงาน, เรียงตามลำดับที่บันทึกยื่น
@@ -710,6 +711,8 @@ export function ReceiptCheckPage({ kind }: { kind: ReceiptKind }) {
         const submitted = s.submitDate.slice(0, 10);
         const receiptIso = input.receiptDate.trim() ? toIso(input.receiptDate) : submitted;
         if (!input.plateCategory.trim() || !input.plateNumber.trim()) errors[s.id] = "กรอกหมวดและเลขทะเบียนตามใบเสร็จ";
+        else if (!PLATE_CATEGORY_RE.test(input.plateCategory.trim())) errors[s.id] = PLATE_CATEGORY_ERROR;
+        else if (!PLATE_NUMBER_RE.test(input.plateNumber.trim())) errors[s.id] = "เลขทะเบียนต้องเป็นตัวเลข 1-4 หลัก";
         else if (input.amountText.trim() && !AMOUNT_RE.test(input.amountText.trim())) errors[s.id] = "ยอดใบเสร็จต้องเป็นตัวเลข";
         else if (!receiptIso) errors[s.id] = "วันที่ในใบเสร็จไม่ถูกต้อง - ใส่เป็น DD/MM/YYYY เช่น 23/09/2026";
         else if (receiptIso < submitted) errors[s.id] = `วันที่ในใบเสร็จต้องไม่ก่อนวันที่ยื่นเอกสาร (${isoToDisplayDate(submitted)})`;

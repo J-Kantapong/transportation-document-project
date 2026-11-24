@@ -1,4 +1,4 @@
-import { assertPlateNumberProvided, parseDocumentSubmissionOptions } from './document-submission-validation.js';
+import { assertPlateFormat, assertPlateNumberProvided, parseDocumentSubmissionOptions } from './document-submission-validation.js';
 
 const base = { plateNumberOption: 'NONE', includePlateFee: true, newPlateOption: 'NONE' };
 
@@ -45,5 +45,15 @@ describe('assertPlateNumberProvided', () => {
   it('ตรวจรูปแบบทะเบียนเมื่อกรอกแล้ว', () => {
     expect(errorOf(() => assertPlateNumberProvided('SWAP_NORMAL', '1กขค', '1234'))).toContain('หมวดทะเบียน');
     expect(errorOf(() => assertPlateNumberProvided('NORMAL', '1กข', '12345'))).toContain('เลขทะเบียน');
+  });
+});
+
+describe('assertPlateFormat', () => {
+  it('รับหมวดที่เป็นเลขนำ + พยัญชนะ หรือพยัญชนะล้วน', () => {
+    for (const cat of ['2ฆล', '4กข', '1ก', 'กข', 'บตม']) expect(errorOf(() => assertPlateFormat(cat, '6747'))).toBeNull();
+  });
+
+  it('ไม่รับอักขระที่ไม่ใช่พยัญชนะ (AI อ่าน ฆ เป็น ฿ - พบ 2026-11-20)', () => {
+    for (const cat of ['2฿ล', '2฿ม', '2ฆ ', '22ก', 'AB', '2', 'กขคง']) expect(errorOf(() => assertPlateFormat(cat, '6747'))).toContain('หมวดทะเบียน');
   });
 });

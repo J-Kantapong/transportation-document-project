@@ -7,6 +7,7 @@ import { displayDateToIso, formatDateDigitsCe, isoToDisplayDate, todayIso } from
 import { DateInput } from "@/components/DateInput";
 import { Icon } from "@/components/Icon";
 import { Notice } from "@/components/ui";
+import { PLATE_CATEGORY_ERROR, PLATE_CATEGORY_RE } from "@/lib/plate-format";
 
 // Popup แก้ข้อมูลที่ AI กรอกให้ในหน้ารับใบเสร็จ: รูปใบเสร็จขนาดใหญ่อยู่ข้างช่องกรอก ให้พนักงานเทียบทีละช่อง
 // ช่องที่ AI ไม่แน่ใจ/อ่านไม่ออก/ตรวจอัตโนมัติไม่ผ่าน ขึ้นสีเหลืองพร้อมเหตุผล - กดยืนยันแล้วถือว่าคนตรวจแล้ว (ReceiptCheckPage เลิก highlight)
@@ -281,6 +282,7 @@ export function ReceivedReceiptFixButton({
     const plateCategory = draft.plateCategory.trim();
     const plateNumber = draft.plateNumber.trim();
     if (!plateCategory || !plateNumber) return "กรอกหมวดและเลขทะเบียนตามใบเสร็จ";
+    if (!PLATE_CATEGORY_RE.test(plateCategory)) return PLATE_CATEGORY_ERROR;
     if (!/^\d{1,4}$/.test(plateNumber)) return "เลขทะเบียนต้องเป็นตัวเลข 1-4 หลัก";
     if (plateCategory !== (s.vehicle.plateCategory ?? "") || plateNumber !== (s.vehicle.plateNumber ?? "")) {
       fix.plateCategory = plateCategory;
