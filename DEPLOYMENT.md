@@ -61,6 +61,14 @@ for the dev service, which shares them. Running around the clock would use 744 a
 nothing, and Render suspends the free services when the hours run out. Upgrading the plan removes
 the need.
 
+A "Cronjob failed: Wake backend (Render) ... 503 Service Unavailable" email from cron-job.org
+(seen 2026-11-26 at 05:20 Thai time) is expected, not an outage: the first call after the
+02:05-05:00 sleep hits the service while it is still cold-starting (about a minute, sometimes
+much longer) and Render answers 503. The next run succeeds and cron-job.org sends no further
+failure emails until then. `GET /` is already the public health check, so no new endpoint is
+needed. If the emails become a nuisance, in cron-job.org raise the job timeout to its maximum,
+turn on retry on failure, or notify only after several failures in a row.
+
 ## 3. Vercel (frontend)
 
 1. **Add New** → **Project** → import this GitHub repo.
